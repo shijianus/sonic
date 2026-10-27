@@ -1,99 +1,188 @@
-# 🎶 epocanvas sonic 多源聚合音乐云平台 & 网关 (v2.2.0 Linux 本地引擎版)
+# 🎵 Sonic (epocanvas sonic) — 分散式多源音樂串流平台與智慧邊緣閘道
 
-> 🌐 采用 **Linux VPS 本地协议解析引擎为主 + Cloudflare Pages Functions 边缘缓存与优雅降级为辅** 的控制面/数据面分离双层架构，配套现代化网页音乐播放器与 **epocanvas sonic 多源聚合网关**。具备本地原生加密协议解析（网易云 `linuxapi`/`eapi`/`ncm-api`、QQ `musicu.fcg`、酷狗 `KRC`、酷我原生检索）、三级熔断降级状态机与多语言毫秒级真逐字歌词。
-> 
-> 🟢 **当前线上主域名：[https://sonic.epocanvas.tech](https://sonic.epocanvas.tech)**（备用域：`https://sonic.epocanvas.com`；内部受保护引擎域：`https://engine-sonic.epocanvas.tech`）。
+<div align="center">
+
+[![Version](https://img.shields.io/badge/version-2.2.0-blue.svg?style=flat-square)](package.json)
+[![Node](https://img.shields.io/badge/node-%3E%3D22.0.0-brightgreen.svg?style=flat-square)](package.json)
+[![Cloudflare Pages](https://img.shields.io/badge/Cloudflare_Pages-Edge_Functions-orange.svg?style=flat-square)](https://pages.cloudflare.com/)
+[![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?style=flat-square)](docker-compose.yml)
+[![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC08D.svg?style=flat-square)](player/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6.svg?style=flat-square)](tsconfig.json)
+[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-lightgrey.svg?style=flat-square)](LICENSE)
+
+**專為高品質音質、毫秒級逐字歌詞、自主智慧推薦與極致隱私而生的新一代現代化音樂平台**
+
+[🌐 線上服務主站 (sonic.epocanvas.tech)](https://sonic.epocanvas.tech) • [備用鏡像 (sonic.epocanvas.com)](https://sonic.epocanvas.com) • [📖 API 介面規格文件](API.md)
+
+</div>
 
 ---
 
-## 🏛️ 双层同构架构与数据流 (Architecture)
+## 🌟 專案定位與核心優勢
 
-系统采用 **控制面与数据面分离** 的同构微服务架构：Cloudflare Pages 承载用户流量入口与前端托管，高延迟的协议加密与直链反算交由 Linux VPS 本地解析引擎完成；音频数据流则由 Cloudflare 边缘节点直接向音乐 CDN 发起 `Range` 代理或 `302` 重定向，**不消耗 VPS 隧道带宽**。
+**Sonic**（總品牌標識：**epocanvas sonic**）是一套獨立自研的現代化全功能音樂串流平台與分散式多源聚合閘道。專案打破傳統單體音樂播放器與中心化後端的束縛，採用 **「Cloudflare 邊緣控制面 + Linux 原生本地協議引擎數據面」** 的同構雙層架構，在提供全網多平台音源聚合與無損/高解析播放的同時，構建了業界領先的輕量級本機智慧音樂推薦引擎與嚴苛的零信任安全體系。
+
+### 🚀 六大核心實際優勢
+
+| 核心維度 | Sonic 實際技術優勢 | 傳統單體 / 開源音樂專案現狀 |
+| :--- | :--- | :--- |
+| **雙層分離同構架構** | **控制面與數據面分離**：Cloudflare 全球 Anycast 邊緣就近響應、快取與分發；Linux 專屬節點純 TS 運算原生協議；音訊流經由 Range 206 邊緣代理或 302 直取，**完全零消耗 VPS 頻寬**。 | 單體伺服器全量承受流量，高音質串流快速耗盡伺服器頻寬與 CPU，容易因單點障礙導致整站癱瘓。 |
+| **同構智慧推薦引擎** | **自主研發輕量化推薦演算法**：多因子熱度模型、指數時間衰減、貝氏平滑、會話搜尋意圖捕捉、真實播放反饋（完播/重播/跳過/拉黑）與 MMR 多樣性重排，並基於本機 SQLite WAL 儲存，**P95 延遲低於 25ms**。 | 無自主推薦能力，僅單純抓取第三方商業平台現成榜單；或依賴龐大繁重的 Python/Spark 大數據叢集，無法輕量化私有部署。 |
+| **智慧混合並行搜尋** | **全源同構檢索與容錯**：支援簡繁字形智慧歸一、拼音與縮寫檢索、歌手中英文別名對稱匹配、編輯距離拼寫容錯、版本識別，多源並行獲取並正規化合併。 | 關鍵字錯別字或繁簡轉換即查詢落空，多源搜尋串行等待，介面延遲長且重複歌曲冗餘嚴重。 |
+| **毫秒級真逐字動態歌詞** | **全平台原生解析與多語對齊**：原生逆向解析網易雲 YRC、QQ QRC、酷狗 KRC（XOR 解密 + Deflate 解壓），並融合 AMLL TTML 與 LRCLIB；多語系歌詞、羅馬音與翻譯毫秒級精確同步。 | 僅支援普通行級 LRC 滾動歌詞，缺乏字級時間軸；外鏈字級服務單點失效即退化為無歌詞。 |
+| **音質真實分級與透明揭露** | **嚴格實體探測與智慧補齊**：提供 FLAC 無損、320kbps 高品質與 128kbps 標準流；**嚴格區分試聽片段與完整曲目**（絕不拿試聽冒充全曲），針對試聽曲目自動觸發跨源平滑補齊。 | 標註 320k 實為 128k 假升頻；或在遭遇 VIP 限制時播放 30 秒片段卻標註為完整播放，體驗割裂。 |
+| **零信任架構與隱私主權** | **企業級安全與使用者隱私自主**：Epomail OAuth 2.0 PKCE 認證；HMAC-SHA256 全量簽名防偽 API Key；全鏈路 SSRF 防禦（遮罩雲端 Metadata 與內網 IP）；**一鍵切換純本機/無痕模式，支援一鍵清空個人歷史畫像**。 | 介面無金鑰簽名防護易遭盜刷；存在 SSRF 內網穿透漏洞；強制收集使用者隱私且無透明銷毀機制。 |
+
+---
+
+## 🏛️ 系統架構與數據流向 (Architecture)
+
+Sonic 採用控制面（邊緣）與數據面（本地引擎）深度解耦的混合微服務架構，兼顧低成本、超高彈性與高併發承載能力：
 
 ```mermaid
 flowchart TD
-  User["公网用户 / 外部应用<br/>(https://sonic.epocanvas.tech)"]
+  User["公網使用者 / 第三方客戶端<br/>(https://sonic.epocanvas.tech)"]
 
-  subgraph Edge["Cloudflare Pages 边缘网关 (cfsolara)"]
-    PagesRouter["Pages Functions 路由与限流<br/>(X-RateLimit: 240rpm 匿名 / 600rpm Key)"]
-    EdgeCache["统一缓存层 (sonic:*)<br/>(Fresh 8m / Stale 容灾)"]
-    CircuitBreaker["三态熔断器<br/>(CLOSED / OPEN / HALF_OPEN)"]
-    CFDirect["CF 边缘直连兜底<br/>(AMLL TTML / LRCLIB / QQ/酷狗搜索 / SVG 封面)"]
+  subgraph Edge["Cloudflare Pages 邊緣閘道層 (Edge Gateway)"]
+    PagesRouter["Pages Functions 路由與分級限流<br/>(匿名 240rpm / 認證 600rpm)"]
+    EdgeCache["多層級快取層 (sonic:*)<br/>(Fresh 8m / Stale 容災過期延長)"]
+    CircuitBreaker["電信級三態熔斷器<br/>(CLOSED 正常 / OPEN 熔斷 / HALF_OPEN 探活)"]
+    CFDirect["CF 邊緣直連兜底<br/>(AMLL TTML / LRCLIB / QQ 酷狗檢索 / SVG 占位)"]
   end
 
-  subgraph VPS["Linux VPS (instabox-sonic, Docker Compose)"]
-    Tunnel["Cloudflare Tunnel (af3cf7c1-...)<br/>(engine-sonic.epocanvas.tech)"]
-    SonicEngine["sonic-engine 容器 (Node 22 HTTP)<br/>(强制校验 X-Sonic-Engine-Key)"]
-    NCMSidecar["ncm-api 容器 (仅 127.0.0.1 内网)<br/>(NeteaseCloudMusicApiEnhanced)"]
-    NativeProtocols["纯 TS 原生加密协议<br/>(NetEase linuxapi/eapi, QQ, Kugou KRC, Kuwo)"]
+  subgraph VPS["Linux 本地協議解析與推薦引擎 (Docker Compose)"]
+    Tunnel["Cloudflare 安全通道 (Tunnel)<br/>(engine-sonic.epocanvas.tech)"]
+    SonicEngine["sonic-engine 主容器 (Node.js 22 HTTP)<br/>(強制驗證服務間 X-Sonic-Engine-Key)"]
+    RecoCore["同構智慧推薦核心 & Auto DJ<br/>(多因子熱度 / MMR 重排 / 會話特徵)"]
+    SQLiteDB["SQLite 3 (WAL 模式持久化)<br/>(使用者行為日誌 / 實體權重 / 歌手關係)"]
+    NCMSidecar["ncm-api 獨立容器 (127.0.0.1 封閉內網)<br/>(NeteaseCloudMusicApiEnhanced)"]
+    NativeProtocols["純 TypeScript 原生協定解析模組<br/>(NetEase linuxapi/eapi, QQ, Kugou KRC, Kuwo)"]
   end
 
-  CDN["第三方音乐 CDN (m701.music.126.net / kugou / qq)"]
+  CDN["各大音樂官方 CDN 節點 (126.net / kugou / qq)"]
 
-  User -->|"1. Web UI / API 请求"| PagesRouter
+  User -->|"1. 瀏覽頁面 / 發起 API 請求"| PagesRouter
   PagesRouter --> EdgeCache
-  EdgeCache -->|"Cache Miss"| CircuitBreaker
-  CircuitBreaker -->|"正常态: 仅查询直链元数据 JSON"| Tunnel
+  EdgeCache -->|"快取未命中 (Cache Miss)"| CircuitBreaker
+  CircuitBreaker -->|"正常狀態: 經由加密隧道查詢直鏈與推薦元數據 JSON"| Tunnel
   Tunnel --> SonicEngine
+  SonicEngine --> RecoCore
+  RecoCore <--> SQLiteDB
   SonicEngine --> NCMSidecar
   SonicEngine --> NativeProtocols
-  CircuitBreaker -.->|"VPS 离线 / 5xx 瞬时熔断"| CFDirect
+  CircuitBreaker -.->|"VPS 離線 / 5xx 瞬時觸發熔斷 (0ms 切換)"| CFDirect
 
-  PagesRouter -->|"2. 默认音频流 (Range 206 边缘直拉 CDN，零 VPS 带宽消耗)"| CDN
-  PagesRouter -.->|"可选 ?mode=redirect (302 直连 CDN)"| CDN
-  CDN -->|"3. 高速音频帧"| User
+  PagesRouter -->|"2. 預設音訊流 (Range 206 邊緣直拉官方 CDN，零 VPS 頻寬負擔)"| CDN
+  PagesRouter -.->|"可選模式 ?mode=redirect (302 重新導向直連 CDN)"| CDN
+  CDN -->|"3. 高速穩定音訊資料幀"| User
 ```
 
 ---
 
-## 🔍 "免费全曲 320kbps" 来源真实分布与溯源机制
+## 🧠 自主研發同構智慧推薦與探索系統
 
-本项目坚持**合规、真实溯源与零夸大**原则：
+Sonic 內建全套自主設計的輕量級同構音樂推薦演算法體系（位於 `functions/_lib/sonic/recommend/` 與 `server/recommend-sqlite.ts`），無需昂貴的外部大數據叢集即可提供精準、平滑、多樣化的專屬推薦：
 
-### 1. 真实来源与技术原理
-- **网易云音乐 (`local-netease`)**：
-  - **免费/公开曲目（`fee=0` 或 `fee=8`，如《起风了》等）**：通过内网 `ncm-api` 与纯 TS 实现的 `linuxapi`/`eapi` 协议直连官方接口，无需任何第三方上游与 VIP Cookie，直接获取官方 CDN 签发的 **320kbps 完整 MP3 直链**（单曲约 10~13 MB），支持 HTTP `Range: bytes=0-` 分段缓冲与 `206 Partial Content`；
-  - **会员专享曲目（`fee=1`）**：在未注入个人合法会员 Cookie 时，返回官方公开的 30~45 秒试听片段（标明 `isTrial: true`，绝不以试听冒充全曲）；若在服务端 `.env` 注入个人合法 `NETEASE_COOKIE`，则按该账号的合法 VIP 权益解析完整流。
-- **酷狗音乐 (`local-kugou`)**：
-  - 对公开免费曲目（`privilege=0`）通过原生 `getSongInfo` 接口提取 `sharefs.kugou.com` 完整 MP3 流；KRC 歌词通过原生 XOR 解密与 Deflate 解压缩为真逐字歌词。
-- **酷我音乐 (`local-kuwo`)**：
-  - 原生提取公开曲目流，并在网关层严格拦截 `<250KB` 的 11 秒版权语音提示音假流（`/nf/resource/`）。
-- **QQ 音乐 (`local-qq`)**：
-  - 搜索、高清封面与 QRC/LRC 歌词 100% 原生可用；因海外机房 IP 限制，无损直链需配置 `QQ_COOKIE`。
+### 1. 站內多因子熱度模型 (Trending & Popularity)
+綜合多維度指標量化熱度得分，拒絕單一播放次數造假刷榜：
+$$\text{Score} = w_1 \cdot \text{PlayCount}_{\text{valid}} + w_2 \cdot \text{UV}_{\text{distinct}} + w_3 \cdot \text{CompletionRate} + w_4 \cdot \text{FavoriteRate} + w_5 \cdot \text{Slope}_{\text{growth}}$$
+- **權重配置**：有效播放 35% + 獨立聽眾 25% + 完播表現 20% + 收藏轉化 15% + 成長斜率 5%。
+- **指數時間衰減**：$S(t) = S_0 \cdot e^{-\lambda \Delta t}$，分設 24 小時即時飆升榜（$\lambda$ 較大）與 7 天累計熱榜。
+- **貝氏與 Wilson Score 平滑**：對新發布及長尾歌曲引入平滑先驗，避免極少播放但 100% 完播的偶發事件異常置頂。
 
-### 2. 解析来源比例分布
-| 音源类别 | 实际技术链路 | 默认请求占比 | 说明 |
-| :--- | :--- | :---: | :--- |
-| **本地自行解析 (`local-engine`)** | VPS 本地 Node 22 原生加密协议 + 内网 `ncm-api` 容器 | **> 90%** | 绝大多数公开曲目的 320kbps MP3、高清封面与 YRC/QRC/KRC 逐字歌词均由此自主解析 |
-| **开源公共歌词库 (`amll` / `lrclib`)** | 直连 AMLL Timed Text XML API 与 LRCLIB 权威库 | **~ 10%** | 在本地原生歌词缺失或 VPS 降级时提供高精度逐字与全球同步歌词 |
-| **第三方免费聚合上游 (`gdstudio` / `lyriva`)** | `music-api.gdstudio.xyz` / `api.lyriva.xyz` | **0%（默认严格关闭）** | `SONIC_ENABLE_GDSTUDIO=0`、`SONIC_ENABLE_LYRIVA=0`；仅供极端场景手动开启兜底 |
-| **第三方解灰 / 绕过付费 (`unblock`)** | 任何 UnblockNeteaseMusic 变体 | **0%（默认严格关闭）** | 严格遵循版权边界，不集成解灰二进制，不开启付费越权 |
+### 2. 即時搜尋意圖理解 (Search Intent Understanding)
+- **會話級意圖追蹤**：記錄使用者在單次會話中連續搜尋的關鍵字、點擊曲目的歌手、流派與語種特徵。
+- **動態意圖向量**：為即時意圖賦予較高的短期衰減權重，並與長期偏好檔案分層解耦，搜尋後的高價值行為（完播/收藏）才會沉澱至長期偏好。
 
-所有响应的 `meta.attempts[]` 均如实标明来源（如 `local-engine`、`local-netease`、`local-kugou`、`amll`、`lrclib`、`cf-direct`），绝不伪造或隐瞒提供方。
+### 3. 多階行為反饋模型與 Auto DJ 智慧連播
+系統在 `engine.ts` 中精確量化每項使用者互動訊號：
+* `favorite`（加入最愛）：極強正向訊號，權重 **+4.0**
+* `replay`（曲目重播）：強烈喜愛訊號，權重 **+3.5**
+* `play_complete`（有效完播）：標準正向訊號，權重 **+2.5**
+* `play_progress`（進度聆聽）：按收聽比例分階動態給分，權重 **+0.2 ~ +1.8**
+* `skip`（快速跳過）：負向訊號，權重 **-0.8**（但聽過半後的切歌視為自然播放結束，計算微正向權重 **+0.25**）
+* `dislike`（明確不喜歡）：明確排斥，硬過濾並列入專屬黑名單，權重 **-5.0**
+* **雜訊與假訊號淨化**：因網路卡頓、解碼失敗或 30 秒官方試聽截斷導致的切歌，權重**恆定歸零且不入庫**，確保推薦數據池純淨。
+* **Auto DJ 智慧電台**：結合當前播放上下文與種子曲目風格，動態演算過渡自然的後續播放序列。
+
+### 4. 內容相似性與 MMR 多樣性重排 (Content-Based & Diversity)
+- **特徵相似度計算**：融合歌手關係圖譜、語言、風格標籤的 Jaccard 集合相似度與音訊特徵的 Cosine 餘弦相似度。
+- **MMR (Maximal Marginal Relevance) 邊際相關性重排**：平衡推薦曲目的「精準度」與「新穎多樣性」，避免傳統演算法陷入單一歌手或曲風的資訊繭房。
 
 ---
 
-## ⚡ epocanvas sonic 多源聚合网关 (Gateway)
+## 🔍 音質分級探測與來源透明機制
 
-对外品牌统一为 **epocanvas sonic**，其中 `epocanvas` 为总品牌、`sonic` 为分品牌。技术命名空间（`/api/sonic/*`、`brand: "Sonic"`、`SONIC_*` 环境变量、`_sonic_*` 缓存参数等）属于冻结的兼容契约，不随展示品牌改名。
+Sonic 秉持**真實誠信、合規溯源與零虛標**原則：
 
+### 1. 來源技術組成
+* **本地原生自主解析 (`local-engine`) [> 90%]**：VPS 本地 Node.js 22 純 TypeScript 加密協議 + 內網 `ncm-api` 容器，直接取得官方 CDN 簽發的完整 320kbps MP3 / FLAC 直鏈，支援標準 HTTP `Range: bytes=0-` 分段加載與 `206 Partial Content` 響應。
+* **全球開源歌詞庫 (`amll` / `lrclib`) [~ 10%]**：在本地原生歌詞缺失或節點降級時，無縫銜接 AMLL 逐字時間軸與 LRCLIB 權威校準庫。
+* **第三方免費聚合上游 (`gdstudio` / `lyriva`) [0%]**：預設**嚴格關閉**（`SONIC_ENABLE_GDSTUDIO=0`、`SONIC_ENABLE_LYRIVA=0`），僅保留作為極端環境下的手動應急備用。
+* **版權與合規邊界**：本專案不整合任何繞過付費版權的非法解灰二進位套件，合法會員曲目支援由伺服器端環境變數掛載個人授權 Cookie，公開曲目則遵循官方開放協議。
 
-### 统一响应结构
-所有 `/api/sonic/*` 接口遵循一致的顶层契约。`brand` 字段固定为 `"Sonic"`，用于兼容既有前端与第三方客户端：
+### 2. 嚴格試聽偵測與跨源自動補齊
+```mermaid
+flowchart LR
+  Start["解析目標曲目音訊直鏈"] --> Probe["實體長度與元數據探測"]
+  Probe --> Check{"是否為官方 30s 試聽截斷?<br/>(isTrial: true / Content-Length 異常)"}
+  Check -->|否: 完整音訊| DirectPlay["標註完整音質 (SQ/HQ)<br/>直接派發 CDN 直鏈"]
+  Check -->|是: 試聽截斷| Badge["前端透明呈現試聽 Badge<br/>(絕不以試聽冒充全曲)"]
+  Badge --> AutoFallback{"是否開啟跨源自動補齊?<br/>(SONIC_ENABLE_FREE_MATCH=1)"}
+  AutoFallback -->|是| CrossMatch["跨平台時長相符度檢索<br/>(QQ / 酷狗 / 酷我免費全曲匹配)"]
+  CrossMatch --> MatchFound{"是否找到對應免費全曲?"}
+  MatchFound -->|是| ReplacePlay["平滑無縫切換至全曲源<br/>標明來源替代資訊"]
+  MatchFound -->|否| PlayTrial["保留播放試聽片段<br/>結束後優雅切入下一首"]
+  AutoFallback -->|否| PlayTrial
+```
+
+---
+
+## ⚡ API 閘道統一介面規格 (Gateway Specification)
+
+Sonic 提供規範的 RESTful API 規格，對外統一承諾 `brand: "Sonic"` 相容性契約。
+
+### 1. 核心端點導航清單
+
+| 分類 | 方法 | 路由端點 | 功能說明與調度邏輯 |
+| :--- | :---: | :--- | :--- |
+| **智慧推薦** | `GET` | `/api/sonic/recommend/for-you` | **猜你喜歡 / Auto DJ**：融合完播率、收藏、即時搜尋與 MMR 多樣性重排 |
+| | `GET` | `/api/sonic/recommend/trending` | **真實趨勢熱榜**：支援 `24h`/`7d`/`surging`/`new` 週期，內建對數防刷與時間衰減 |
+| | `GET` | `/api/sonic/recommend/similar` | **相似曲目/歌手探索**：基於歌手圖譜與歌曲特徵餘弦計算 |
+| | `GET` | `/api/sonic/recommend/discover` | **風格流派雷達**：支援指定流派過濾與 `temperature` 探索廣度調節 |
+| | `POST` | `/api/sonic/events` | **回傳使用者行為事件**：採集播放、完播、跳過、收藏，自動過濾卡頓雜訊 |
+| | `DELETE`| `/api/sonic/events` | **一鍵清空個人畫像**：立即銷毀使用者在推薦引擎中的所有特徵與紀錄 |
+| **聚合搜尋** | `GET` | `/api/sonic/search/smart` | **智慧混合搜尋與補全**：簡繁歸一、拼音縮寫、別名對稱、拼寫容錯與相關性排序 |
+| | `GET` | `/api/sonic/search/nexus` | **全網多源並行檢索**：並行查詢網易、QQ、酷狗、酷我並正規化去重 |
+| **動態歌詞** | `GET` | `/api/sonic/lyrics/nexus` | **全網逐字歌詞入口**：①原生逐字 (YRC/QRC/KRC) → ②AMLL TTML → ③LRCLIB |
+| | `GET` | `/api/sonic/lyrics/sync` | **跨平台同步歌詞**：支援 `format=sonic\|lrc\|ttml\|json` 等多種格式輸出 |
+| **音訊媒體** | `GET` | `/api/music/stream` | **音訊分段代理**：支援 HTTP `Range` 與 `206 Partial Content`，支援 `?mode=redirect` 直連 |
+| | `GET` | `/api/music/cover` | **高畫質封面代理**：優先解析高畫質原圖，失敗平滑降級至品牌向量 SVG |
+| | `GET` | `/api/music/palette` | **封面色調分析**：自適應運算播放器背景毛玻璃主色調與最佳對比度漸變 |
+| **系統健康** | `GET` | `/api/sonic/engine/health` | **本地引擎診斷**：服務間專用探活與熔斷器狀態檢查（需內部金鑰驗證） |
+
+### 2. 標準回傳結構範例
 ```json
 {
   "brand": "Sonic",
-  "data": { ... },
+  "data": {
+    "id": "191254",
+    "title": "紅豆",
+    "artist": "王菲",
+    "album": "唱遊",
+    "quality": "320k",
+    "duration": 259,
+    "isTrial": false
+  },
   "meta": {
-    "cached": false,
-    "cacheLevel": "none",
-    "latencyMs": 142,
+    "cached": true,
+    "cacheLevel": "edge",
+    "latencyMs": 18,
     "provider": "nexus",
     "degraded": false,
     "circuitState": "CLOSED",
     "attempts": [
-      { "provider": "local-engine", "via": "local-engine", "source": "local-engine", "ok": true, "ms": 95 },
-      { "provider": "local-netease", "via": "local-engine", "source": "local-engine", "ok": true, "ms": 78 }
+      { "provider": "local-engine", "via": "local-engine", "source": "local-netease", "ok": true, "ms": 14 }
     ]
   }
 }
@@ -101,94 +190,117 @@ flowchart TD
 
 ---
 
-## 📡 API 路由清单 (sonic Routes)
+## 🛡️ 電信級三態容災與降級狀態機 (Fault Tolerance)
 
-### 1. 歌词网关 (`/api/sonic/lyrics/*`)
+為保障在任何極端網路波動或伺服器維護時使用者依然可流暢聽歌，Sonic 邊緣層內建**電信級三態熔斷器**：
 
-| 方法 | 路径 | 说明 | 优先级 / 行为 |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/sonic/lyrics/nexus` | **全网聚合主入口（前端默认）** | ①平台原生 (YRC/QRC/KRC) → ②AMLL TTML → ③LRCLIB |
-| `GET` | `/api/sonic/lyrics/netease` | 网易云原生歌词 | 优先原生 YRC 逐字，降级 LRC |
-| `GET` | `/api/sonic/lyrics/qq` | QQ音乐原生歌词 | 优先原生 QRC 逐字，降级 LRC |
-| `GET` | `/api/sonic/lyrics/kugou` | 酷狗音乐 KRC 歌词 | 自动 XOR 解密 + Deflate 解压真逐字 |
-| `GET` | `/api/sonic/lyrics/amll` | AMLL TTML 歌词库 | 精准 Timed Text XML 字级时间轴 |
-| `GET` | `/api/sonic/lyrics/lrclib` | LRCLIB 全球同步歌词 | 权威纯音乐预检与高质量行级同步 |
-| `GET` | `/api/sonic/lyrics/apple` | Apple Music（可选适配） | 未配置密钥返回 `501 Not Implemented` + disabled |
-| `GET` | `/api/sonic/lyrics/ytmusic` | YouTube Music（可选适配） | 未配置密钥返回 `501 Not Implemented` + disabled |
-| `GET` | `/api/sonic/lyrics/lyriva` | Lyriva 第三方兜底（默认关闭） | 默认返回 `meta.disabled: true`；需显式开启 `SONIC_ENABLE_LYRIVA=1` |
-| `GET` | `/api/sonic/lyrics/sync` | 外部组件多格式同步歌词 | 支持 `format=sonic\|lrc\|ttml\|json` |
-| `GET` | `/api/sonic/lyrics` | **向后兼容端点** | 内部透明代理至 `/api/sonic/lyrics/nexus` |
+```
+       [ CLOSED 正常態 ]
+          │          ▲
+ 連續 3 次失敗或超時    │ 探活成功 (Health Probe OK)
+ (Latency > 4.5s)    │
+          ▼          │
+       [ OPEN 熔斷態 ] ── 冷卻時間結束 (30s) ──> [ HALF_OPEN 探活態 ]
+```
 
-### 2. 搜索、流解析与引擎网关 (`/api/sonic/*`)
-
-| 方法 | 路径 | 说明 | 行为 |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/sonic/search/nexus` | **全网多源并行搜索（前端默认）** | 优先调用 Linux 本地引擎；降级时 `Promise.allSettled` 边缘直连，归一化合并 `sources[]` |
-| `GET` | `/api/sonic/search/netease` | 网易云单源搜索 | 原生 `ncm-api` / `linuxapi` 检索，返回统一 Track 结构 |
-| `GET` | `/api/sonic/search/qq` | QQ音乐单源搜索 | 原生 `u.y.qq.com` 检索，返回统一 Track 结构 |
-| `GET` | `/api/sonic/search/kugou` | 酷狗音乐单源搜索 | 原生检索，返回统一 Track 结构 |
-| `GET` | `/api/sonic/search/kuwo` | 酷我音乐单源搜索 | 原生检索（含 181KB 版权提示音假流过滤） |
-| `GET` | `/api/sonic/search/gdstudio` | GDStudio 第三方兜底（默认关闭） | 默认返回 `meta.disabled: true`；仅当 `SONIC_ENABLE_GDSTUDIO=1` 时启用 |
-| `GET` | `/api/sonic/forward` | 统一聚合与防盗链资源转发 | 支持搜索、歌词与受 SSRF 保护的媒体资源代理 |
-| `GET` | `/api/sonic/resolve/stream` | 本地引擎流直链解析（内部鉴权） | 强制校验 `X-Sonic-Engine-Key`，供边缘网关缓存直链元数据 |
-| `GET` | `/api/sonic/engine/health` | 本地引擎健康与熔断诊断（内部鉴权） | 强制校验 `X-Sonic-Engine-Key`，匿名访问返回 `401` |
-
-### 3. 媒体与商业曲库路由 (`/api/music/*` & `/api/[[path]]`)
-
-| 方法 | 路径 | 说明 | 行为 |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/music/stream` | 音频流分段代理 | 支持 `Range: bytes=...`，返回 `206 Partial Content`；支持 `?mode=redirect` 直连 |
-| `GET` | `/api/music/cover` | 专辑与歌手封面 | 优先解析高清原图，失败平滑降级为品牌 SVG 矢量占位图 |
-| `GET` | `/api/music/palette` | 封面主色调分析 | 计算前端播放器背景毛玻璃主色与对比度渐变 |
-| `GET` | `/api/music/random` | 随机曲库推荐 | 支持按风格流派随机抽取推荐曲目 |
-| `GET` | `/api/[[path]]` | 首页/歌单/榜单/歌手 | 透传本地引擎曲库数据，脱敏第三方品牌字样 |
+1. **瞬時自適應熔斷**：當 Linux VPS 發生硬體重啟、網路波動、Cloudflare Tunnel `530` / `502` 或連續 3 次調用超時（預算 4.5 秒）時，狀態機立即轉入 `OPEN` 熔斷狀態。
+2. **0ms 立即切入邊緣降級層**：
+   - 後續公網請求**不再白等超時**，耗時 0ms 立即啟用 Cloudflare Pages 邊緣直連模式；
+   - 搜尋與歌詞由 CF 邊緣節點直接連線 QQ / 酷狗公開介面及 AMLL / LRCLIB 全球庫，前端響應標頭標明 `X-Sonic-Degraded: 1`；
+   - Web 播放器頂部自動亮起優雅的琥珀色膠囊提示：**「邊緣降級模式 · 本地解析後端暫時離線」**，前端停止連環跳歌風暴，保障已有曲目穩定播放；
+3. **無感平滑復原**：冷卻時間（預設 30 秒）過後，熔斷器進入 `HALF_OPEN` 狀態並發起背景單次探針，確認 VPS 服務復原後自動閉合（`CLOSED`），前端膠囊自動平滑消失。
 
 ---
 
-## 🛡️ 容灾与降级状态机 (Fault Tolerance)
+## 🔒 零信任安全規範與 API Key 認證
 
-系统内置三态熔断器（`CLOSED` 正常 / `OPEN` 熔断 / `HALF_OPEN` 探活），提供电信级高可用；所有网关开关与外链均使用 `SONIC_` 前缀（技术命名空间，保留不变），支持单源开关：
+為防止公網介面遭到惡意爬蟲濫用或偽造，Sonic 採用嚴謹的認證與金鑰簽發規範：
 
-1. **瞬时熔断**：当 VPS 离线、出现 Tunnel `530` / `502` 或连续 3 次超时（预算 `4.5s`）时，熔断器立即进入 `OPEN` 状态；
-2. **0ms 快速跳过**：后续请求不再白等死亡隧道，耗时 `0ms` 立即切入 Cloudflare 边缘降级层：
-   - 首页与 Web SPA：秒开加载，绝不白屏或报 Cloudflare 1033；
-   - 搜索与歌词：由 CF 边缘直连 QQ/酷狗与 AMLL/LRCLIB 提供服务，响应头携带 `X-Sonic-Degraded: 1`；
-   - 前端体验：播放器顶部自动展示琥珀色胶囊 **“边缘降级模式 · 本地解析后端暂时离线”**；
-   - 未命中缓存的音频流：返回清晰的结构化 `503`（`code: "STREAM_UNAVAILABLE_DEGRADED"`），前端提示服务降级并停止自动跳歌风暴，与常规 `404` 严格区分；
-3. **自动恢复**：冷却时间（默认 30s）结束后，熔断器进入 `HALF_OPEN` 发送单次健康探测，VPS 恢复后自动闭合（`CLOSED`），前端胶囊无感消失。
+1. **HMAC-SHA256 全量簽名防偽**：
+   所有專案 API Key 均升級為基於密碼學簽名的安全格式：
+   $$\text{API\_Key} = \text{sonic\_live\_v1}.\langle \text{Payload}_{\text{base64url}} \rangle.\langle \text{Signature}_{\text{base64url}} \rangle$$
+   - 載荷包含 `{ v: 1, email, exp, kid }`，簽名由伺服器端強隨機金鑰（`SONIC_SECRET`，長度 $\ge 32$ 字元）實施 HMAC-SHA256 驗證；
+   - 伺服器端使用 Web Crypto `crypto.subtle.verify` 進行常數時間比對，徹底阻斷時序攻擊；
+   - 舊版無簽名金鑰一律拒絕（Fail-closed），全面杜絕金鑰偽造風險。
+2. **傳遞方式標準化**：
+   預設僅允許在 HTTP 請求標頭中傳遞金鑰，避免金鑰透過 URL Query 洩漏至伺服器存取日誌、瀏覽器歷史或 HTTP Referer：
+   ```http
+   X-Sonic-Key: sonic_live_v1.<payload>.<signature>
+   # 或相容標準 Authorization 標頭：
+   Authorization: Bearer sonic_live_v1.<payload>.<signature>
+   ```
+3. **SSRF 全鏈路立體攔截**：
+   針對媒體代理與音源外鏈轉發，Sonic 實施標準化 IP 規範解析，強行阻斷 `127.0.0.1`、RFC 1918 私有區域網路、Docker 內部網橋以及雲端伺服器中繼資料地址（如 `169.254.169.254`）。
 
 ---
 
-## 🛠️ 部署与运维指南 (Deployment Guide)
+## 🛠️ 快速開始與部署指南 (Deployment Guide)
 
-### 1. Cloudflare Pages 边缘网关部署
+### 方案 A：Cloudflare Pages 邊緣網關部署（推薦）
+
 ```bash
-# 1. 构建前端与服务端
+# 1. 複製專案庫並安裝相依套件
+git clone git@github.com:shijianus/sonic.git
+cd sonic
+npm install
+
+# 2. 構建前端 SPA 與雙端產物
 npm run build
 
-# 2. 部署至 Cloudflare Pages (已配置环境变量 SONIC_LOCAL_ENGINE_URL 与 SONIC_ENGINE_SECRET)
+# 3. 部署至 Cloudflare Pages (專案名稱: cfsolara)
 npx wrangler pages deploy dist --project-name cfsolara
+
+# 4. 在 Cloudflare Pages 後台設定加密環境變數
+# SONIC_SECRET: 由 openssl rand -base64 48 生成
+# SONIC_ENGINE_SECRET: 由 openssl rand -base64 48 生成 (需與 VPS 保持一致)
+# SONIC_LOCAL_ENGINE_URL: 設定為 https://engine-sonic.epocanvas.tech
 ```
 
-### 2. Linux VPS 本地解析引擎部署
-```bash
-# 1. 构建本地引擎单文件
-npm run build:server
+### 方案 B：Linux VPS 本地協議解析引擎部署 (Docker Compose)
 
-# 2. 在 VPS /data/workspace/CFSolara 启动 Docker Compose 栈
+```bash
+# 1. 在伺服器上建立目標工作目錄
+mkdir -p /opt/sonic && cd /opt/sonic
+
+# 2. 準備 .env 配置檔並賦予嚴格權限 (600)
+cp .env.example .env
+chmod 600 .env
+vim .env  # 填入強隨機 SONIC_ENGINE_SECRET 與 SONIC_SECRET
+
+# 3. 構建並啟動容器堆疊 (包含 sonic-engine 與 ncm-api)
 docker compose up -d --build
 
-# 3. 检查容器健康状态
+# 4. 驗證容器運作狀態與健康檢查
 docker compose ps
+curl -H "X-Sonic-Engine-Key: <YOUR_SECRET>" http://127.0.0.1:8080/api/sonic/engine/health
 ```
 
-### 3. 环境变量参考 (`.env.example`)
-```ini
-# 服务间通信与内部鉴权 (Pages -> VPS Engine)
-SONIC_LOCAL_ENGINE_URL="https://engine-sonic.epocanvas.tech"
-SONIC_ENGINE_SECRET="<your_strong_random_secret>"
+### ⚙️ 核心環境變數配置參考 (`.env.example`)
 
-# 本地原生协议音源开关 (1 启用, 0 禁用)
+```ini
+# ==============================================================================
+# Sonic Music Gateway — 環境變數設定範本 (.env.example)
+# ==============================================================================
+
+# 1. 服務間通訊與本機引擎安全 (Pages 與 VPS 雙側必配，長度 >= 32 字元)
+SONIC_LOCAL_ENGINE_URL="https://engine-sonic.epocanvas.tech"
+SONIC_ENGINE_SECRET="<請使用 openssl rand -base64 48 生成強隨機金鑰>"
+SONIC_ENGINE_HOST="engine-sonic.epocanvas.tech"
+
+# 2. API Key 全量簽名金鑰 (必配，長度 >= 32 字元)
+SONIC_SECRET="<請使用 openssl rand -base64 48 生成強隨機金鑰>"
+# 輪換過渡期金鑰 (選配):
+# SONIC_SECRET_PREV=""
+# 是否開放 URL Query 傳遞 api_key (預設 0 禁用，嚴防日誌與 Referer 洩露)
+SONIC_ALLOW_QUERY_KEY="0"
+
+# 3. Epomail OAuth 2.0 鑑權登入 (選配)
+EPOMAIL_BASE_URL="https://mail.epocanvas.com"
+EPOMAIL_CLIENT_ID=""
+EPOMAIL_CLIENT_SECRET=""
+SONIC_ALLOWED_ORIGINS="https://sonic.epocanvas.tech,https://sonic.epocanvas.com"
+
+# 4. 本地原生音源協定啟用開關 (1 啟用, 0 停用)
 SONIC_ENABLE_NETEASE="1"
 SONIC_ENABLE_QQ="1"
 SONIC_ENABLE_KUGOU="1"
@@ -197,48 +309,44 @@ SONIC_ENABLE_AMLL="1"
 SONIC_ENABLE_LRCLIB="1"
 SONIC_ENABLE_FREE_MATCH="1"
 
-# 第三方免费聚合与 VIP 解灰 (默认严格关闭)
+# 5. 第三方免費聚合上游與 VIP 解灰 (預設嚴格關閉，保障合規與高可用)
 SONIC_ENABLE_GDSTUDIO="0"
 SONIC_ENABLE_LYRIVA="0"
 SONIC_ENABLE_UNBLOCK="0"
 
-# 可选用户自有会员 Cookie (仅存 VPS 服务端 .env，严禁下发前端)
-NETEASE_COOKIE=""
-QQ_COOKIE=""
-KUGOU_COOKIE=""
-```
-
-### 4. 生产环境双轨回滚预案 (Rollback Guide)
-当发生极端故障需完整恢复至原始直连 VPS Tunnel 架构时，可运行内置回滚脚本：
-```bash
-# 1. 验证备份完整性并展示将要发送的 API 请求 (干跑验证，默认安全模式)
-./scripts/rollback-production.sh --dry-run
-
-# 2. 真实执行回滚 (恢复 Tunnel Ingress 路由与 DNS CNAME 记录)
-./scripts/rollback-production.sh --execute
+# 6. 超時與熔斷參數配置 (毫秒)
+SONIC_TIMEOUT_MS="8000"
+SONIC_ENGINE_TIMEOUT_MS="4500"
+SONIC_CB_FAILURE_THRESHOLD="3"
+SONIC_CB_COOLDOWN_MS="30000"
+SONIC_RATE_LIMIT_ANON_RPM="240"
+SONIC_RATE_LIMIT_AUTH_RPM="600"
 ```
 
 ---
 
-## 💖 致谢与开源协议参考 (Credits)
+## 💖 致謝與開源協議參考 (Credits)
 
-本专案的 epocanvas sonic 多源聚合网关借鉴并致谢以下优秀的开源专案与协议实现：
+Sonic 平台的研發與多源聚合實踐借鑑並致謝以下優秀的開源社群專案與研究成果：
 
 - **Meting**：https://github.com/metowolf/Meting
 - **Meting-API-Serverless**：https://github.com/Warma10032/Meting-API-Serverless
 - **ourcraft-music-api**：https://github.com/Yuncan050115/ourcraft-music-api
 - **music-lib**：https://github.com/guohuiyuan/music-lib
-- **go-music-api**：https://github.com/guohuiyuan/go-music-api
 - **NeteaseCloudMusicApi**：https://github.com/Binaryify/NeteaseCloudMusicApi
 - **QQMusicApi**：https://github.com/jsososo/QQMusicApi
 - **AMLL (Timed Text XML API)**：https://github.com/amll-dev/amll-ttml-api
 - **LRCLIB (Synced Lyrics)**：https://lrclib.net/docs
 - **GDStudio Music API**：https://music-api.gdstudio.xyz/api.php
-- **Linux.do 社区**：牛就是牛 @ufoo 大佬灵感提供
+- **Linux.do 社群**：感謝 @ufoo 大佬提供靈感與技術交流
 
 ---
 
-## 📄 许可证与版权 (Copyright & License)
-Copyright © 2026 epocanvas. All rights reserved.
+## 📄 版權與許可證 (Copyright & License)
 
-本项目采用 CC BY-NC-SA 协议，禁止商业化转售行为，任何衍生项目必须保留本项目地址并以相同协议开源。
+Copyright © 2026 **epocanvas sonic**. All rights reserved.
+
+本專案核心原始碼採用 **[CC BY-NC-SA 4.0 (知識共享 署名-非商業性使用-相同方式共享 4.0 國際版)](LICENSE)** 協議發布：
+- **非商業用途**：允許個人學習、研究、私有部署與非商業性質分享；
+- **署名保留**：任何基於本專案的衍生作品或二次開發，均必須明確保留原作者署名與本倉庫位址；
+- **相同方式共享**：衍生版本必須採用相同或相容之開放協議釋出，嚴禁進行封閉式商業轉售行為。
