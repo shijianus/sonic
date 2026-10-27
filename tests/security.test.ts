@@ -429,6 +429,7 @@ describe('SSRF and URL validation', () => {
     expect(getAllowedMusicDomains({})).toContain('music.126.net');
     expect(getAllowedMusicDomains({ SONIC_ALLOWED_MUSIC_DOMAINS: 'cdn.example.com' })).toEqual(['cdn.example.com']);
     expect(getAllowedMusicDomains({ SONIC_ALLOWED_MUSIC_DOMAINS: '***' })).toEqual([]);
+    expect(validateSafeUrl('https://evil.example/a.mp3', { allowedDomains: [] }).valid).toBe(false);
   });
 
   it('safeFetch revalidates every redirect, blocks downgrade and strips credentials', async () => {
