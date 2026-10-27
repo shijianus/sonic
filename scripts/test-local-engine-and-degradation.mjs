@@ -91,27 +91,27 @@ async function runTests() {
   }
 
   // 3. Condition 2c & Hard Problem 5: Engine Authentication & SSRF Guard
-  console.log('\n3. Testing Condition 2c (Mandatory X-Sonic-Engine-Key on engine-sonic.*)');
+  console.log('\n3. Testing Condition 2c (Mandatory X-Sonic-Engine-Key on engine paths)');
   {
     const engineEnv = { SONIC_ENGINE_SECRET: 'test_super_secret_engine_key_999', SONIC_RUNTIME: 'linux-engine' };
 
-    // Anonymous access to engine-sonic.epocanvas.tech MUST fail 401
+    // Anonymous access to an engine business path MUST fail 401
     const anonReq = new Request('https://engine-sonic.epocanvas.tech/api/sonic/engine/health');
     const anonRes = await handleEngineHealth({ request: anonReq, env: engineEnv });
-    assert(anonRes.status === 401, `Anonymous access to engine-sonic returns 401 (got ${anonRes.status})`);
+    assert(anonRes.status === 401, `Anonymous access to engine path returns 401 (got ${anonRes.status})`);
     const anonJson = await anonRes.json();
     assert(anonJson.error?.code === 'ENGINE_UNAUTHORIZED', `Error code is ENGINE_UNAUTHORIZED`);
 
-    // Wrong key MUST fail 401
-    const wrongReq = new Request('https://engine-sonic.epocanvas.tech/api/sonic/search/nexus?q=test', {
+    // Wrong key MUST fail 401 on an engine path (Host header is not an auth switch)
+    const wrongReq = new Request('https://engine-sonic.epocanvas.tech/api/sonic/engine/health', {
       headers: { 'X-Sonic-Engine-Key': 'wrong_key' },
     });
-    const wrongRes = await handleNexusSearchRequest(wrongReq, engineEnv);
+    const wrongRes = await handleEngineHealth({ request: wrongReq, env: engineEnv });
     assert(wrongRes.status === 401, `Wrong engine key returns 401 (got ${wrongRes.status})`);
 
-    // Missing secret on engine host MUST fail-closed 503 (never fail-open!)
-    const misconfigRes = checkEngineAccess(new Request('https://engine-sonic.epocanvas.tech/api'), {});
-    assert(misconfigRes && misconfigRes.status === 503, `Unconfigured secret on engine host fails closed with 503`);
+    // Missing secret on an engine path MUST fail-closed 503 (never fail-open!)
+    const misconfigRes = checkEngineAccess(new Request('https://engine-sonic.epocanvas.tech/api/sonic/engine/health'), {});
+    assert(misconfigRes && misconfigRes.status === 503, `Unconfigured secret on engine path fails closed with 503`);
 
     // Valid key succeeds 200
     const validReq = new Request('https://engine-sonic.epocanvas.tech/api/sonic/engine/health', {
@@ -129,11 +129,17 @@ async function runTests() {
     assert(isBlockedSsrfHost('engine-sonic.epocanvas.tech') === true, 'SSRF blocks engine-sonic loop');
     assert(isBlockedSsrfHost('m701.music.126.net') === false, 'SSRF allows public music CDN');
 
-    const ssrfRes = await handleSonicForward({
+    const disabledRes = await handleSonicForward({
       request: new Request('http://localhost/api/sonic/forward?url=http://127.0.0.1:8080/api'),
       env: {},
     });
-    assert(ssrfRes.status === 400, `Forwarding to 127.0.0.1 rejected with 400 (got ${ssrfRes.status})`);
+    assert(disabledRes.status === 403, `Arbitrary asset forwarding is disabled by default (got ${disabledRes.status})`);
+
+    const ssrfRes = await handleSonicForward({
+      request: new Request('http://localhost/api/sonic/forward?url=http://127.0.0.1:8080/api'),
+      env: { SONIC_ENABLE_ASSET_FORWARD: '1' },
+    });
+    assert(ssrfRes.status === 400, `Forwarding to 127.0.0.1 rejected with 400 when enabled (got ${ssrfRes.status})`);
   }
 
   // 4. Hard Problem 5: Sliding-Window Tiered Rate Limiter
@@ -162,7 +168,7 @@ async function runTests() {
     );
 
     // Same IP with valid sonic_live_ API Key gets elevated api-key bucket
-    const session = await createSession(rlEnv, { id: 'u1', email: 'tester@epocanvas.com', name: 'Tester', avatar: '' });
+    const session = await createSession(rlEnv, { sub: 'u1', email: 'tester@epocanvas.com', name: 'Tester', avatar: '' });
     const authDecision = await evaluateGatewayRateLimit(
       new Request('https://sonic.epocanvas.tech/api/sonic/search/nexus?q=a', {
         headers: {

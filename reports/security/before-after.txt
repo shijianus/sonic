@@ -1,0 +1,21 @@
+baseline: 3eb34dda7c367c804030745fc337293ae58f074e (3eb34dd, origin/main)
+fixed: cfd1c5897f8d2300874b55409401da257f89f4a6 (cfd1c58, working tree)
+
+[Sonic Auth] Cannot issue API Key: SONIC_SECRET is missing or shorter than 32 characters
+✓ missing SONIC_SECRET fails closed: baseline=accepted, fixed=rejected
+✓ legacy base64-email key rejected: baseline=true, fixed=false
+✓ OAuth login uses unpredictable state: baseline=sonic_login, fixed=43 chars, challenge=true
+✓ OAuth callback rejects missing state: baseline=200, fixed=400
+✓ public caller cannot choose X-Sonic-Client-IP: baseline=1.2.3.4, fixed=198.51.100.10
+✓ IPv4-mapped IPv6 loopback blocked: baseline=false, fixed=true
+✓ decimal IPv4 loopback blocked: baseline=false, fixed=true
+✓ arbitrary forward host rejected: baseline=200, fixed=400
+✓ upstream Set-Cookie stripped: baseline=present, fixed=absent
+✓ arbitrary image host does not reach upstream: baseline=upstream, fixed=fallback
+✓ upstream executable SVG not proxied: baseline=upstream-svg, fixed=fallback-svg
+✓ HTML stream response rejected: baseline=200, fixed=415
+✓ engine business route requires key: baseline=allowed, fixed=401
+✓ Node engine /api rejects anonymous Host=localhost: baseline=200, fixed=401
+✓ dynamic innerHTML sinks removed: baseline=2, fixed=0
+
+15/15 evidence checks matched expectations.
