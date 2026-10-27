@@ -1,5 +1,5 @@
 baseline: 3eb34dda7c367c804030745fc337293ae58f074e (3eb34dd, origin/main)
-fixed: cfd1c5897f8d2300874b55409401da257f89f4a6 (cfd1c58, working tree)
+fixed: 7cf22e020a43d64f0e22b2852a3a6f9bb3256599 (7cf22e0, candidate HEAD)
 
 [Sonic Auth] Cannot issue API Key: SONIC_SECRET is missing or shorter than 32 characters
 ✓ missing SONIC_SECRET fails closed: baseline=accepted, fixed=rejected
