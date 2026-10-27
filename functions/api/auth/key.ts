@@ -14,11 +14,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   if (request.method === 'POST') {
     try {
       const newSession = await createSession(env, {
-        id: auth.user.id,
+        sub: auth.user.id,
         email: auth.user.email,
         name: auth.user.name,
         avatar: auth.user.avatar,
-        role: auth.user.role,
       });
 
       return jsonResponse({
@@ -46,7 +45,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     apiKey: auth.user.apiKey,
     expiresAt: auth.user.expiresAt,
     usage: {
-      rateLimit: '120 requests/minute',
+      rateLimit: `${env.SONIC_RATE_LIMIT_AUTH_RPM || '600'} requests/minute`,
       allowedSources: ['netease', 'kuwo', 'qq'],
       allowedBitrates: ['128', '192', '320', 'flac'],
     },

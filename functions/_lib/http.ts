@@ -14,6 +14,23 @@ export function handleOptions(): Response {
   });
 }
 
+function mergeResponseHeaders(target: Headers, source: HeadersInit): void {
+  const incoming = new Headers(source);
+  incoming.forEach((value, key) => {
+    if (key.toLowerCase() === 'set-cookie') return;
+    target.set(key, value);
+  });
+  const getSetCookie = (incoming as any).getSetCookie;
+  if (typeof getSetCookie === 'function') {
+    for (const cookie of getSetCookie.call(incoming) as string[]) {
+      target.append('Set-Cookie', cookie);
+    }
+  } else {
+    const cookie = incoming.get('set-cookie');
+    if (cookie) target.append('Set-Cookie', cookie);
+  }
+}
+
 export function jsonResponse(
   payload: unknown,
   initOrStatus?: ResponseInit | number,
@@ -24,10 +41,10 @@ export function jsonResponse(
   const statusText = typeof initOrStatus === 'object' ? initOrStatus?.statusText : undefined;
   const rawHeaders = typeof initOrStatus === 'object' ? initOrStatus?.headers : extraHeaders;
   if (rawHeaders) {
-    new Headers(rawHeaders).forEach((value, key) => headers.set(key, value));
+    mergeResponseHeaders(headers, rawHeaders);
   }
   if (extraHeaders && typeof initOrStatus === 'object') {
-    new Headers(extraHeaders).forEach((value, key) => headers.set(key, value));
+    mergeResponseHeaders(headers, extraHeaders);
   }
   if (!headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json; charset=utf-8');
