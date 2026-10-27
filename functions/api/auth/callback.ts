@@ -8,6 +8,11 @@ import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import { timingSafeEqualStr } from '../../_lib/sonic/security';
 import type { AppEnv } from '../../_lib/types';
 
+const CLEAR_OAUTH_COOKIES = [
+  'sonic_oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+  'sonic_oauth_verifier=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
+];
+
 function parseCookies(request: Request): Record<string, string> {
   const header = request.headers.get('cookie') || '';
   const cookies: Record<string, string> = {};
@@ -15,19 +20,30 @@ function parseCookies(request: Request): Record<string, string> {
     const trimmed = part.trim();
     if (!trimmed) continue;
     const eqIdx = trimmed.indexOf('=');
-    if (eqIdx !== -1) {
-      const key = trimmed.slice(0, eqIdx).trim();
-      const val = trimmed.slice(eqIdx + 1).trim();
-      cookies[key] = decodeURIComponent(val);
+    if (eqIdx === -1) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    if (!key) continue;
+    const rawValue = trimmed.slice(eqIdx + 1).trim();
+    try {
+      cookies[key] = decodeURIComponent(rawValue);
+    } catch {
+      return {};
     }
   }
   return cookies;
 }
 
+function clearCookieHeaders(): Headers {
+  const headers = new Headers({ 'Cache-Control': 'no-store' });
+  for (const cookie of CLEAR_OAUTH_COOKIES) {
+    headers.append('Set-Cookie', cookie);
+  }
+  return headers;
+}
+
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
 
-  // Fail closed if OAuth credentials are not configured
   if (!env.EPOMAIL_CLIENT_ID || !env.EPOMAIL_CLIENT_SECRET) {
     return errorResponse(
       'OAuth 服务未正确配置 (EPOMAIL_CLIENT_ID 或 EPOMAIL_CLIENT_SECRET 缺失)',
@@ -39,74 +55,66 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   const code = url.searchParams.get('code');
   const error = url.searchParams.get('error');
   const state = url.searchParams.get('state');
-
-  // Headers to clear state & verifier cookies
-  const clearCookieHeaders = new Headers();
-  clearCookieHeaders.append(
-    'Set-Cookie',
-    'sonic_oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-  );
-  clearCookieHeaders.append(
-    'Set-Cookie',
-    'sonic_oauth_verifier=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-  );
-
-  if (error) {
-    return errorResponse(`Epomail 授权失败: ${error}`, 400, undefined);
-  }
-
-  // 1. Verify OAuth State (CSRF Protection)
   const cookies = parseCookies(request);
   const cookieState = cookies['sonic_oauth_state'];
+  const codeVerifier = cookies['sonic_oauth_verifier'];
 
-  if (!state || !cookieState || !timingSafeEqualStr(state, cookieState)) {
+  // State must be validated before acting on any callback parameter, including error.
+  if (!state || !cookieState || state.length > 256 || !timingSafeEqualStr(state, cookieState)) {
     return jsonResponse(
       { ok: false, error: '无效或已过期的登录 state 标识 (OAuth CSRF 校验失败)' },
-      { status: 400, headers: clearCookieHeaders },
+      { status: 400, headers: clearCookieHeaders() },
+    );
+  }
+
+  if (error) {
+    return jsonResponse(
+      { ok: false, error: 'Epomail 授权失败' },
+      { status: 400, headers: clearCookieHeaders() },
     );
   }
 
   if (!code) {
     return jsonResponse(
       { ok: false, error: '缺少授权码 (Missing authorization code)' },
-      { status: 400, headers: clearCookieHeaders },
+      { status: 400, headers: clearCookieHeaders() },
     );
   }
 
-  // 2. Validate redirect URI
+  if (!codeVerifier) {
+    return jsonResponse(
+      { ok: false, error: '缺少 PKCE code_verifier，拒绝降级授权' },
+      { status: 400, headers: clearCookieHeaders() },
+    );
+  }
+
   const config = getEpomailConfig(env, url.origin);
   if (!config.redirectUri) {
     return jsonResponse(
       { ok: false, error: '未配置合法重定向地址或请求来源未授权' },
-      { status: 400, headers: clearCookieHeaders },
+      { status: 400, headers: clearCookieHeaders() },
     );
   }
-
-  const codeVerifier = cookies['sonic_oauth_verifier'];
 
   try {
     const { accessToken } = await exchangeCode(env, url.origin, code, codeVerifier);
     const userInfo = await fetchUserInfo(env, accessToken);
     const session = await createSession(env, userInfo);
+    const headers = clearCookieHeaders();
 
-    // If request asks for json or has accept json
     const acceptsJson =
       request.headers.get('Accept')?.includes('application/json') ||
       url.searchParams.get('format') === 'json';
 
     if (acceptsJson) {
       return jsonResponse(
-        {
-          ok: true,
-          session,
-          message: 'Epomail OAuth 登录成功',
-        },
-        { headers: clearCookieHeaders },
+        { ok: true, session, message: 'Epomail OAuth 登录成功' },
+        { headers },
       );
     }
 
-    // Redirect to frontend with session hash
-    const targetUrl = new URL('/', url.origin);
+    const targetOrigin = new URL(config.redirectUri).origin;
+    const targetUrl = new URL('/', targetOrigin);
     targetUrl.searchParams.set('auth', 'success');
     targetUrl.hash = `session=${encodeURIComponent(
       JSON.stringify({
@@ -118,14 +126,15 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       }),
     )}`;
 
-    clearCookieHeaders.set('Location', targetUrl.toString());
-    return new Response(null, {
-      status: 302,
-      headers: clearCookieHeaders,
-    });
-  } catch (err: any) {
-    console.error('[Sonic Auth Callback Error]', err);
-    const isMisconfig = String(err?.message || '').includes('SONIC_SECRET');
+    headers.set('Location', targetUrl.toString());
+    headers.set('Referrer-Policy', 'no-referrer');
+    return new Response(null, { status: 302, headers });
+  } catch (err) {
+    console.error(
+      '[Sonic Auth Callback Error]',
+      err instanceof Error ? err.message : 'unknown error',
+    );
+    const isMisconfig = err instanceof Error && err.message.includes('SONIC_SECRET');
     return jsonResponse(
       {
         brand: 'Sonic',
@@ -136,10 +145,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
             : 'OAuth 登录授权处理失败',
         },
       },
-      {
-        status: isMisconfig ? 503 : 500,
-        headers: clearCookieHeaders,
-      },
+      { status: isMisconfig ? 503 : 500, headers: clearCookieHeaders() },
     );
   }
 }

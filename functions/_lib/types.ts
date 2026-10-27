@@ -4,15 +4,18 @@ export interface AppEnv {
   EPOMAIL_CLIENT_SECRET?: string;
   EPOMAIL_REDIRECT_URI?: string;
   MUSIC_API_BASE?: string;
-  SOLARA_SECRET?: string;
   SONIC_SECRET?: string;
+  SONIC_SECRET_PREV?: string;
+  SONIC_ALLOW_QUERY_KEY?: string;
+  SONIC_ALLOWED_ORIGINS?: string;
+  SONIC_ALLOWED_MUSIC_DOMAINS?: string;
   KV?: any;
+  RATE_LIMIT_KV?: any;
   DB?: any;
   // Linux VPS Local Engine & Inter-Service Auth
   SONIC_RUNTIME?: 'cf-pages' | 'linux-engine' | string;
   SONIC_LOCAL_ENGINE_URL?: string;
   SONIC_ENGINE_SECRET?: string;
-  SONIC_ENGINE_HOST?: string;
   SONIC_REQUIRE_ENGINE_AUTH?: string;
   SONIC_REQUIRE_AUTH?: string;
   SONIC_ENGINE_TIMEOUT_MS?: string;
@@ -47,6 +50,14 @@ export interface AppEnv {
   SONIC_TIMEOUT_MS?: string;
   SONIC_RATE_LIMIT_ANON_RPM?: string;
   SONIC_RATE_LIMIT_AUTH_RPM?: string;
+  SONIC_ENABLE_ASSET_FORWARD?: string;
+  SONIC_PROXY_TIMEOUT_MS?: string;
+  SONIC_PROXY_MAX_REDIRECTS?: string;
+  SONIC_PROXY_MAX_CONCURRENCY?: string;
+  SONIC_COVER_MAX_BYTES?: string;
+  SONIC_AUDIO_MAX_BYTES?: string;
+  SONIC_FORWARD_MAX_BYTES?: string;
+  SONIC_PALETTE_MAX_BYTES?: string;
   [key: string]: any;
 }
 
