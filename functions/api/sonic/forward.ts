@@ -14,8 +14,41 @@ import {
   buildRateLimitErrorResponse,
   validateSafeUrl,
   safeFetch,
-  SONIC_ALLOWED_MUSIC_DOMAINS,
+  getAllowedMusicDomains,
+  hostMatchesDomain,
 } from '../../_lib/sonic/security';
+import {
+  buildStreamedProxyResponse,
+  getContentType,
+  isAllowedContentType,
+  parseByteLimit,
+  parseConcurrency,
+  parseMaxRedirects,
+  parseTimeoutMs,
+  type ProxyResourceKind,
+} from '../../_lib/sonic/proxy-safety';
+import { isEnvEnabled } from '../../_lib/sonic/config';
+
+function forwardResourceKind(type: string): ProxyResourceKind {
+  if (type === 'audio' || type === 'stream') return 'audio';
+  if (type === 'cover' || type === 'image' || type === 'pic') return 'image';
+  if (type === 'lyrics' || type === 'lyric' || type === 'lrc' || type === 'ttml') return 'lyrics';
+  if (type === 'json') return 'json';
+  return 'asset';
+}
+
+function refererForHost(hostname: string): string {
+  if (hostMatchesDomain(hostname, 'qqmusic.qq.com') || hostMatchesDomain(hostname, 'y.qq.com')) {
+    return 'https://y.qq.com/';
+  }
+  if (hostMatchesDomain(hostname, 'gtimg.cn')) return 'https://y.qq.com/';
+  if (hostMatchesDomain(hostname, 'music.126.net') || hostMatchesDomain(hostname, 'vod.126.net') || hostMatchesDomain(hostname, 'music.163.com')) {
+    return 'https://music.163.com/';
+  }
+  if (hostMatchesDomain(hostname, 'kugou.com')) return 'https://www.kugou.com/';
+  if (hostMatchesDomain(hostname, 'kuwo.cn')) return 'https://www.kuwo.cn/';
+  return '';
+}
 
 export async function onRequest({ request, env, waitUntil }: any): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
@@ -35,68 +68,85 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
   const type = (url.searchParams.get('type') || '').toLowerCase();
   const targetUrl = url.searchParams.get('url') || url.searchParams.get('target');
 
-  // Case 1: External URL Proxy / Forwarding (e.g. lyrics URL, audio stream, covers)
+  // Case 1: External URL Proxy / Forwarding (opt-in, strict source allowlist)
   if (targetUrl) {
+    if (!isEnvEnabled(env?.SONIC_ENABLE_ASSET_FORWARD, false)) {
+      return sonicError(
+        'FORWARD_DISABLED',
+        'Arbitrary asset forwarding is disabled. Set SONIC_ENABLE_ASSET_FORWARD=1 to enable the allowlisted proxy.',
+        403,
+        { provider: 'forward' },
+      );
+    }
+
+    const allowedDomains = getAllowedMusicDomains(env);
+    const valResult = validateSafeUrl(targetUrl, {
+      allowHttp: false,
+      allowedDomains,
+    });
+    if (!valResult.valid || !valResult.url) {
+      return sonicError(
+        'INVALID_TARGET',
+        valResult.error || 'Only public https URLs matching the music domain allowlist are permitted',
+        400,
+        { provider: 'forward' },
+      );
+    }
+
+    const method = request.method === 'HEAD' ? 'HEAD' : 'GET';
+    const kind = forwardResourceKind(type);
+    const forwardHeaders = new Headers();
+    forwardHeaders.set('User-Agent', SONIC_UA);
+    const referer = refererForHost(valResult.url.hostname);
+    if (referer) forwardHeaders.set('Referer', referer);
+
+    const range = request.headers.get('Range');
+    if (range && range.length <= 256) forwardHeaders.set('Range', range);
+
     try {
-      const valResult = validateSafeUrl(targetUrl, {
-        allowHttp: false,
-        allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
-      });
-      if (!valResult.valid || !valResult.url) {
+      const upstreamResp = await safeFetch(
+        valResult.url,
+        { method, headers: forwardHeaders },
+        {
+          allowHttp: false,
+          allowedDomains,
+          maxRedirects: parseMaxRedirects(env?.SONIC_PROXY_MAX_REDIRECTS),
+          timeoutMs: parseTimeoutMs(env?.SONIC_PROXY_TIMEOUT_MS, 15000),
+          maxConcurrency: parseConcurrency(env?.SONIC_PROXY_MAX_CONCURRENCY),
+        },
+      );
+
+      if (!upstreamResp.ok && upstreamResp.status !== 206) {
+        upstreamResp.body?.cancel().catch(() => {});
+        return sonicError('FORWARD_UPSTREAM_ERROR', 'Upstream asset request failed', 502, {
+          provider: 'forward',
+        });
+      }
+
+      if (!isAllowedContentType(getContentType(upstreamResp), kind)) {
+        upstreamResp.body?.cancel().catch(() => {});
         return sonicError(
-          'INVALID_TARGET',
-          valResult.error || 'Only public https URLs matching allowed music domains are permitted',
-          400,
+          'FORWARD_UNSUPPORTED_TYPE',
+          'Upstream content type is not permitted for this resource class',
+          415,
           { provider: 'forward' },
         );
       }
 
-      const forwardHeaders = new Headers();
-      forwardHeaders.set('User-Agent', SONIC_UA);
-      const h = valResult.url.hostname.toLowerCase();
-      if (h === 'gtimg.cn' || h.endsWith('.gtimg.cn') || h === 'qq.com' || h.endsWith('.qq.com')) {
-        forwardHeaders.set('Referer', 'https://y.qq.com/');
-      } else if (
-        h === '126.net' ||
-        h.endsWith('.126.net') ||
-        h === '163.com' ||
-        h.endsWith('.163.com')
-      ) {
-        forwardHeaders.set('Referer', 'https://music.163.com/');
-      } else if (h === 'kugou.com' || h.endsWith('.kugou.com')) {
-        forwardHeaders.set('Referer', 'https://www.kugou.com/');
-      } else if (h === 'kuwo.cn' || h.endsWith('.kuwo.cn')) {
-        forwardHeaders.set('Referer', 'https://www.kuwo.cn/');
-      }
-
-      const range = request.headers.get('Range');
-      if (range) forwardHeaders.set('Range', range);
-
-      const upstreamResp = await safeFetch(
-        valResult.url,
-        {
-          headers: forwardHeaders,
-        },
-        {
-          allowHttp: false,
-          allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
-          maxRedirects: 3,
-          timeoutMs: 15000,
-        },
-      );
-
-      const responseHeaders = new Headers(upstreamResp.headers);
-      responseHeaders.set('Access-Control-Allow-Origin', '*');
-      responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-      responseHeaders.set('X-Sonic-Forwarded', 'true');
-
-      return new Response(upstreamResp.body, {
-        status: upstreamResp.status,
-        statusText: upstreamResp.statusText,
-        headers: responseHeaders,
+      const response = buildStreamedProxyResponse(upstreamResp, {
+        kind,
+        maxBytes: parseByteLimit(env?.SONIC_FORWARD_MAX_BYTES, 256 * 1024 * 1024),
+        isHead: method === 'HEAD',
+        cacheControl: kind === 'audio' ? 'public, max-age=600' : 'public, max-age=86400',
       });
-    } catch (err: any) {
-      return sonicError('FORWARD_ERROR', err?.message || 'Failed to forward request to target', 502, {
+      response.headers.set('X-Sonic-Forwarded', 'true');
+      return response;
+    } catch (err) {
+      console.warn(
+        '[Sonic Forward] Asset forward rejected:',
+        err instanceof Error ? err.message : 'unknown error',
+      );
+      return sonicError('FORWARD_ERROR', 'Failed to forward asset request', 502, {
         provider: 'forward',
       });
     }

@@ -7,7 +7,24 @@ import {
   resolveNeteaseCoverUrl,
   resolveQQCoverUrl,
 } from '../../_lib/sonic/native-protocols';
-import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from '../../_lib/sonic/security';
+import {
+  checkEngineAccess,
+  evaluateGatewayRateLimit,
+  buildRateLimitErrorResponse,
+  getAllowedMusicDomains,
+  hostMatchesDomain,
+  safeFetch,
+  validateSafeUrl,
+} from '../../_lib/sonic/security';
+import {
+  getContentType,
+  isAllowedContentType,
+  parseByteLimit,
+  parseConcurrency,
+  parseMaxRedirects,
+  parseTimeoutMs,
+  readBodyWithLimit,
+} from '../../_lib/sonic/proxy-safety';
 import type { AppEnv } from '../../_lib/types';
 
 const DEFAULT_COVER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="300" viewBox="0 0 300 300">
@@ -23,77 +40,98 @@ const DEFAULT_COVER_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="300" h
   <path d="M142 118v46a18 18 0 1 0 12 17v-40l24-7v-16z" fill="#ffffff"/>
 </svg>`;
 
-function svgResponse(degraded = false): Response {
-  const headers: Record<string, string> = {
-    'Content-Type': 'image/svg+xml;charset=utf-8',
+function coverHeaders(contentType: string, contentLength: number): Headers {
+  return new Headers({
+    'Content-Type': contentType,
+    'Content-Length': String(contentLength),
     'Access-Control-Allow-Origin': '*',
-    'Cache-Control': 'public, max-age=3600',
-    'X-Sonic-Cover-Fallback': 'svg',
-  };
-  if (degraded) headers['X-Sonic-Degraded'] = '1';
-  return new Response(DEFAULT_COVER_SVG, { status: 200, headers });
+    'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+    'Cache-Control': 'public, max-age=86400, s-maxage=604800',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+    'Referrer-Policy': 'no-referrer',
+    'Cross-Origin-Resource-Policy': 'cross-origin',
+  });
 }
 
-import {
-  SONIC_ALLOWED_MUSIC_DOMAINS,
-  safeFetch,
-  validateSafeUrl,
-} from '../../_lib/sonic/security';
+function svgResponse(degraded = false, isHead = false): Response {
+  const body = new TextEncoder().encode(DEFAULT_COVER_SVG);
+  const headers = coverHeaders('image/svg+xml; charset=utf-8', body.byteLength);
+  headers.set('Cache-Control', 'public, max-age=3600');
+  headers.set('X-Sonic-Cover-Fallback', 'svg');
+  if (degraded) headers.set('X-Sonic-Degraded', '1');
+  return new Response(isHead ? null : body, { status: 200, headers });
+}
 
 function getRefererForHost(hostname: string): string {
-  const h = hostname.toLowerCase();
-  if (h === 'gtimg.cn' || h.endsWith('.gtimg.cn') || h === 'qq.com' || h.endsWith('.qq.com')) return 'https://y.qq.com/';
-  if (h === '126.net' || h.endsWith('.126.net') || h === '163.com' || h.endsWith('.163.com')) return 'https://music.163.com/';
-  if (h === 'kugou.com' || h.endsWith('.kugou.com')) return 'https://www.kugou.com/';
-  if (h === 'kuwo.cn' || h.endsWith('.kuwo.cn')) return 'https://www.kuwo.cn/';
+  if (hostMatchesDomain(hostname, 'qqmusic.qq.com') || hostMatchesDomain(hostname, 'y.qq.com') || hostMatchesDomain(hostname, 'gtimg.cn')) {
+    return 'https://y.qq.com/';
+  }
+  if (hostMatchesDomain(hostname, 'music.126.net') || hostMatchesDomain(hostname, 'vod.126.net') || hostMatchesDomain(hostname, 'music.163.com')) {
+    return 'https://music.163.com/';
+  }
+  if (hostMatchesDomain(hostname, 'kugou.com')) return 'https://www.kugou.com/';
+  if (hostMatchesDomain(hostname, 'kuwo.cn')) return 'https://www.kuwo.cn/';
   return '';
 }
 
-async function proxyImage(imageUrl: string, providerTag = 'direct'): Promise<Response | null> {
+async function proxyImage(
+  imageUrl: string,
+  providerTag: string,
+  env: AppEnv,
+  isHead: boolean,
+): Promise<Response | null> {
+  const allowedDomains = getAllowedMusicDomains(env);
+  const valResult = validateSafeUrl(imageUrl, { allowHttp: false, allowedDomains });
+  if (!valResult.valid || !valResult.url) return null;
+
+  const headers: Record<string, string> = {
+    'User-Agent':
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    Accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif',
+  };
+  const referer = getRefererForHost(valResult.url.hostname);
+  if (referer) headers.Referer = referer;
+
   try {
-    const valResult = validateSafeUrl(imageUrl, {
-      allowHttp: false,
-      allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
-    });
-    if (!valResult.valid || !valResult.url) return null;
-
-    const headers: Record<string, string> = {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      Accept: 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
-    };
-    const referer = getRefererForHost(valResult.url.hostname);
-    if (referer) headers.Referer = referer;
-
     const upstream = await safeFetch(
       valResult.url,
-      { headers },
+      { method: isHead ? 'HEAD' : 'GET', headers },
       {
         allowHttp: false,
-        allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
-        maxRedirects: 3,
-        timeoutMs: 6000,
+        allowedDomains,
+        maxRedirects: parseMaxRedirects(env.SONIC_PROXY_MAX_REDIRECTS),
+        timeoutMs: parseTimeoutMs(env.SONIC_PROXY_TIMEOUT_MS, 6000),
+        maxConcurrency: parseConcurrency(env.SONIC_PROXY_MAX_CONCURRENCY),
       },
     );
 
-    if (!upstream.ok) return null;
+    if (!upstream.ok) {
+      upstream.body?.cancel().catch(() => {});
+      return null;
+    }
 
-    const contentType = upstream.headers.get('content-type') || 'image/jpeg';
-    if (!contentType.includes('image/')) return null;
+    const contentType = getContentType(upstream);
+    if (!isAllowedContentType(contentType, 'image')) {
+      upstream.body?.cancel().catch(() => {});
+      return null;
+    }
 
-    const respHeaders = new Headers();
-    respHeaders.set('Content-Type', contentType);
-    const cl = upstream.headers.get('content-length');
-    if (cl) respHeaders.set('Content-Length', cl);
-    respHeaders.set('Access-Control-Allow-Origin', '*');
-    respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-    respHeaders.set('Cache-Control', 'public, max-age=86400, s-maxage=604800');
-    respHeaders.set('X-Sonic-Provider', providerTag);
+    if (isHead) {
+      const length = parseInt(upstream.headers.get('content-length') || '0', 10) || 0;
+      upstream.body?.cancel().catch(() => {});
+      const responseHeaders = coverHeaders(contentType, length);
+      responseHeaders.set('X-Sonic-Provider', providerTag);
+      return new Response(null, { status: 200, headers: responseHeaders });
+    }
 
-    return new Response(upstream.body, {
-      status: 200,
-      headers: respHeaders,
-    });
+    const bytes = await readBodyWithLimit(
+      upstream,
+      parseByteLimit(env.SONIC_COVER_MAX_BYTES, 4 * 1024 * 1024, 1024, 16 * 1024 * 1024),
+    );
+    const responseHeaders = coverHeaders(contentType, bytes.byteLength);
+    responseHeaders.set('X-Sonic-Provider', providerTag);
+    return new Response(bytes, { status: 200, headers: responseHeaders });
   } catch {
     return null;
   }
@@ -105,6 +143,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     return new Response('Method not allowed', { status: 405 });
   }
 
+  const isHead = request.method === 'HEAD';
   const engineDenied = checkEngineAccess(request, env);
   if (engineDenied) return engineDenied;
   const rl = await evaluateGatewayRateLimit(request, env, 'music-cover');
@@ -119,24 +158,21 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   const cleanId = id.trim();
   const pPrefix = cfg.runtime === 'linux-engine' ? 'local-' : '';
 
-  // 1. Direct URL Proxy Mode (bypasses CORS & anti-hotlinking referer restrictions)
   if (targetUrl) {
-    const proxied = await proxyImage(targetUrl, `${pPrefix}proxy`);
+    const proxied = await proxyImage(targetUrl, `${pPrefix}proxy`, env, isHead);
     if (proxied) return proxied;
   }
 
-  // 2. ID-based Native Resolution
   if (cleanId) {
     if (cleanId.startsWith('http://') || cleanId.startsWith('https://')) {
-      const proxied = await proxyImage(cleanId, `${pPrefix}url`);
+      const proxied = await proxyImage(cleanId, `${pPrefix}url`, env, isHead);
       if (proxied) return proxied;
     }
 
-    // 2.1 NetEase Native (`ncm-api` / `linuxapi` song detail)
     if (source === 'netease' || source === 'ncm' || source === 'sonic' || (source === 'gdstudio' && /^\d+$/.test(cleanId))) {
       const picUrl = await resolveNeteaseCoverUrl(cleanId, env);
       if (picUrl) {
-        const proxied = await proxyImage(picUrl, `${pPrefix}netease`);
+        const proxied = await proxyImage(picUrl, `${pPrefix}netease`, env, isHead);
         if (proxied) return proxied;
       }
 
@@ -144,36 +180,33 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         try {
           const picData = await fetchMusicProvider(env, { types: 'pic', id: cleanId, source: 'netease' });
           if (picData?.url && typeof picData.url === 'string') {
-            const proxied = await proxyImage(picData.url, 'gdstudio');
+            const proxied = await proxyImage(picData.url, 'gdstudio', env, isHead);
             if (proxied) return proxied;
           }
         } catch {}
       }
     }
 
-    // 2.2 QQ Music Native (`albummid` direct + `songmid` -> `albummid` lookup)
     if (source === 'qq' || source === 'tencent') {
       const qqPicUrl = await resolveQQCoverUrl(cleanId, env);
       if (qqPicUrl) {
-        const proxied = await proxyImage(qqPicUrl, `${pPrefix}qq`);
+        const proxied = await proxyImage(qqPicUrl, `${pPrefix}qq`, env, isHead);
         if (proxied) return proxied;
       }
       const singerPhotoUrl = `https://y.gtimg.cn/music/photo_new/T001R300x300M000${cleanId}.jpg`;
-      const proxiedSinger = await proxyImage(singerPhotoUrl, `${pPrefix}qq-singer`);
+      const proxiedSinger = await proxyImage(singerPhotoUrl, `${pPrefix}qq-singer`, env, isHead);
       if (proxiedSinger) return proxiedSinger;
     }
 
-    // 2.3 Kugou Native (`getSongInfo` hash lookup)
     if (source === 'kugou') {
       const kgPicUrl = await resolveKugouCoverUrl(cleanId, env);
       if (kgPicUrl) {
-        const proxied = await proxyImage(kgPicUrl, `${pPrefix}kugou`);
+        const proxied = await proxyImage(kgPicUrl, `${pPrefix}kugou`, env, isHead);
         if (proxied) return proxied;
       }
     }
   }
 
-  // 3. Artist Avatar Native Resolution (`ncm-api` or encrypted `linuxapi` type=100)
   if (artist && artist.trim()) {
     const cleanArtist = artist.trim().split(/[/&,、]/)[0]?.trim() || artist.trim();
     if (cfg.ncmApiUrl) {
@@ -187,7 +220,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           const aItem = aJson?.result?.artists?.[0];
           const artPic = aItem?.img1v1Url || aItem?.picUrl;
           if (artPic) {
-            const proxied = await proxyImage(String(artPic).replace('http://', 'https://'), `${pPrefix}netease-artist`);
+            const proxied = await proxyImage(String(artPic).replace('http://', 'https://'), `${pPrefix}netease-artist`, env, isHead);
             if (proxied) return proxied;
           }
         }
@@ -207,14 +240,13 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       const aItem = artJson?.result?.artists?.[0];
       const artPic = aItem?.img1v1Url || aItem?.picUrl;
       if (artPic) {
-        const proxied = await proxyImage(String(artPic).replace('http://', 'https://'), `${pPrefix}netease-artist`);
+        const proxied = await proxyImage(String(artPic).replace('http://', 'https://'), `${pPrefix}netease-artist`, env, isHead);
         if (proxied) return proxied;
       }
     } catch {}
   }
 
-  // 4. Guaranteed SVG Fallback (never broken 404 image icon)
-  return svgResponse();
+  return svgResponse(false, isHead);
 }
 
 export const onRequestGet = onRequest;
