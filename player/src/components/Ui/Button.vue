@@ -2,6 +2,7 @@
 import { computed, ref, onMounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { gsap } from 'gsap'
+import { sanitizeHref } from '@/utils/urlSafety'
 
 type ClassBinding = string | Record<string, boolean> | (string | Record<string, boolean>)[]
 
@@ -150,6 +151,8 @@ const componentType = computed(() => {
   return 'button'
 })
 
+const safeHref = computed(() => (props.href ? sanitizeHref(props.href) : undefined))
+
 const variantClasses = computed(() => {
   switch (props.variant) {
     case 'glass':
@@ -244,7 +247,7 @@ const gradientStyle = computed(() => {
     :is="componentType"
     ref="buttonRef"
     :to="to"
-    :href="href"
+    :href="to ? undefined : safeHref"
     :type="!to && !href ? type : undefined"
     :class="[classes, { 'overflow-hidden': ripple, 'btn-3d': press3d }]"
     :style="gradientStyle"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useIntersectionObserver } from '@vueuse/core'
 import { formatCoverUrl, getProxyCoverUrl, DEFAULT_COVER_DATA_URI } from '@/utils/imageUrl'
+import { sanitizeImageSrc } from '@/utils/urlSafety'
 
 interface Props {
   src?: string
@@ -54,7 +55,7 @@ const hasError = ref(false)
 const attemptStage = ref<'primary' | 'proxy' | 'fallback' | 'failed'>('primary')
 
 const resolveInitialSrc = () => {
-  const primary = formatCoverUrl(props.src)
+  const primary = sanitizeImageSrc(formatCoverUrl(props.src))
   if (primary) {
     attemptStage.value = 'primary'
     activeSrc.value = primary
@@ -62,7 +63,7 @@ const resolveInitialSrc = () => {
     isLoading.value = true
     return
   }
-  const fallback = formatCoverUrl(props.fallbackSrc)
+  const fallback = sanitizeImageSrc(formatCoverUrl(props.fallbackSrc))
   if (fallback) {
     attemptStage.value = 'fallback'
     activeSrc.value = fallback
@@ -109,12 +110,12 @@ const handleError = () => {
     const rawPrimary = props.src ? formatCoverUrl(props.src) : ''
     if (rawPrimary && rawPrimary.startsWith('http') && !rawPrimary.includes('/api/music/cover')) {
       attemptStage.value = 'proxy'
-      activeSrc.value = getProxyCoverUrl(rawPrimary)
+      activeSrc.value = sanitizeImageSrc(getProxyCoverUrl(rawPrimary))
       isLoading.value = true
       return
     }
     // No proxy candidate, try fallback
-    const fallback = formatCoverUrl(props.fallbackSrc)
+    const fallback = sanitizeImageSrc(formatCoverUrl(props.fallbackSrc))
     if (fallback && fallback !== activeSrc.value) {
       attemptStage.value = 'fallback'
       activeSrc.value = fallback
@@ -125,7 +126,7 @@ const handleError = () => {
 
   // Step 2: If proxy failed, try fallback
   if (attemptStage.value === 'proxy') {
-    const fallback = formatCoverUrl(props.fallbackSrc)
+    const fallback = sanitizeImageSrc(formatCoverUrl(props.fallbackSrc))
     if (fallback && fallback !== activeSrc.value) {
       attemptStage.value = 'fallback'
       activeSrc.value = fallback

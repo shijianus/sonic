@@ -3,6 +3,7 @@ import { gsap } from 'gsap'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import { formatCount } from '@/utils/time'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { sanitizeHref, sanitizeImageSrc } from '@/utils/urlSafety'
 import { useI18n } from 'vue-i18n'
 import { prefersReducedMotion } from '@/utils/motion'
 
@@ -27,7 +28,7 @@ const router = useRouter()
 const { t } = useI18n()
 const cardRef = ref<HTMLElement | null>(null)
 const isAnimating = ref(false)
-const resolvedHref = computed(() => router.resolve(props.to).href)
+const resolvedHref = computed(() => sanitizeHref(router.resolve(props.to).href))
 
 // Tilt 效果相关
 const tiltConfig = {
@@ -91,51 +92,79 @@ const handleClick = async (event: MouseEvent) => {
   isAnimating.value = true
   const card = cardRef.value
   const rect = card.getBoundingClientRect()
-  const cleanCover = formatCoverUrl(props.coverUrl, { size: 400 })
+  const cleanCover = sanitizeImageSrc(formatCoverUrl(props.coverUrl, { size: 400 }))
 
-  // 创建克隆元素用于动画
+  // 创建克隆元素用于动画（DOM API 组装，避免字符串 HTML 注入）
   const clone = document.createElement('div')
   clone.className = 'hero-card-clone'
-  clone.innerHTML = `
-    <div class="hero-clone-bg" style="
-      position: absolute;
-      inset: 0;
-      background-image: url(${cleanCover});
-      background-size: cover;
-      background-position: center;
-      filter: blur(40px) saturate(1.5);
-      transform: scale(1.5);
-      opacity: 0.4;
-    "></div>
-    <div class="hero-clone-content" style="
-      position: relative;
-      z-index: 10;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      padding: 24px;
-      opacity: 0;
-    ">
-      <img src="${cleanCover}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.style.display='none';" style="
-        width: 200px;
-        height: 200px;
-        border-radius: 16px;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.4);
-        object-fit: cover;
-      " />
-      <h2 style="
-        margin-top: 24px;
-        font-size: 24px;
-        font-weight: bold;
-        color: white;
-        text-align: center;
-        max-width: 80%;
-      ">${props.title}</h2>
-      ${props.subtitle ? `<p style="margin-top: 8px; font-size: 14px; color: rgba(255,255,255,0.7);">${props.subtitle}</p>` : ''}
-    </div>
+
+  const background = document.createElement('div')
+  background.className = 'hero-clone-bg'
+  background.style.cssText = `
+    position: absolute;
+    inset: 0;
+    filter: blur(40px) saturate(1.5);
+    transform: scale(1.5);
+    opacity: 0.4;
+    overflow: hidden;
   `
+  if (cleanCover) {
+    const backgroundImage = document.createElement('img')
+    backgroundImage.src = cleanCover
+    backgroundImage.alt = ''
+    backgroundImage.setAttribute('referrerpolicy', 'no-referrer')
+    backgroundImage.style.cssText = 'width: 100%; height: 100%; object-fit: cover;'
+    backgroundImage.addEventListener('error', () => { backgroundImage.style.display = 'none' }, { once: true })
+    background.append(backgroundImage)
+  }
+
+  const content = document.createElement('div')
+  content.className = 'hero-clone-content'
+  content.style.cssText = `
+    position: relative;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    padding: 24px;
+    opacity: 0;
+  `
+
+  const image = document.createElement('img')
+  image.src = cleanCover
+  image.alt = ''
+  image.setAttribute('referrerpolicy', 'no-referrer')
+  image.style.cssText = `
+    width: 200px;
+    height: 200px;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+    object-fit: cover;
+  `
+  image.addEventListener('error', () => { image.style.display = 'none' }, { once: true })
+
+  const title = document.createElement('h2')
+  title.textContent = props.title
+  title.style.cssText = `
+    margin-top: 24px;
+    font-size: 24px;
+    font-weight: bold;
+    color: white;
+    text-align: center;
+    max-width: 80%;
+  `
+
+  content.append(image, title)
+  if (props.subtitle) {
+    const subtitle = document.createElement('p')
+    subtitle.textContent = props.subtitle
+    subtitle.style.cssText = 'margin-top: 8px; font-size: 14px; color: rgba(255,255,255,0.7);'
+    content.append(subtitle)
+  }
+
+  clone.append(background, content)
   clone.style.cssText = `
     position: fixed;
     z-index: 9999;
@@ -167,8 +196,6 @@ const handleClick = async (event: MouseEvent) => {
 
   // 隐藏原始卡片
   card.style.opacity = '0'
-
-  const content = clone.querySelector('.hero-clone-content') as HTMLElement
 
   // 创建动画时间线
   const tl = gsap.timeline({
