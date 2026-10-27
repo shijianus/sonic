@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { mvDetail, mvUrl, simiMv } from '@/api'
 import LazyImage from '@/components/Ui/LazyImage.vue'
+import { sanitizeMediaSrc } from '@/utils/urlSafety'
 import { useLibraryStore } from '@/stores/modules/library'
 
 const route = useRoute()
 const libraryStore = useLibraryStore()
 const mvId = computed(() => String(route.params.id || ''))
+const safeVideoUrl = computed(() => sanitizeMediaSrc(state.url))
 
 const state = reactive({
   name: '',
@@ -71,9 +73,9 @@ onMounted(() => { if (mvId.value) load(mvId.value) })
       <section class="mb-4">
         <div class="relative overflow-hidden rounded-2xl">
           <Artplayer
-            v-if="state.url && !state.error"
+            v-if="safeVideoUrl && !state.error"
             :key="state.retryKey"
-            :src="state.url"
+            :src="safeVideoUrl"
             class="h-48 w-full"
             @error="state.error = true"
           />

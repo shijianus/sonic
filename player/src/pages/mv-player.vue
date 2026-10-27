@@ -6,6 +6,7 @@ import { MVInfo, RelatedMV, MVComment } from '@/typings'
 import { formatCount, formatDateTime } from '@/utils/time'
 import Button from '@/components/Ui/Button.vue'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { sanitizeMediaSrc } from '@/utils/urlSafety'
 import { useLibraryStore } from '@/stores/modules/library'
 const router = useRouter()
 const route = useRoute()
@@ -27,6 +28,7 @@ const state = reactive({
   playerRetryKey: 0,
 })
 const { currentMV, relatedMVs, comments, isPageLoading } = toRefs(state)
+const safeVideoUrl = computed(() => sanitizeMediaSrc(state.currentMV.url))
 
 const playRelatedMV = (mv: any) => {
   router.push(`/mv-player/${mv.id}`)
@@ -167,9 +169,9 @@ watch(
               <div class="glass-card overflow-hidden">
                 <div class="aspect-video w-full bg-black">
                   <Artplayer
-                    v-if="currentMV.url && !state.playerError"
+                    v-if="safeVideoUrl && !state.playerError"
                     :key="state.playerRetryKey"
-                    :src="currentMV.url"
+                    :src="safeVideoUrl"
                     :title="currentMV.title"
                     :poster="currentMV.cover"
                     :autoplay="true"

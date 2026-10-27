@@ -2,6 +2,7 @@
 import { gsap } from 'gsap'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { sanitizeHref } from '@/utils/urlSafety'
 import { prefersReducedMotion } from '@/utils/motion'
 
 interface Props {
@@ -16,7 +17,7 @@ const router = useRouter()
 const cardRef = ref<HTMLElement | null>(null)
 const imageRef = ref<HTMLElement | null>(null)
 const isAnimating = ref(false)
-const resolvedHref = computed(() => router.resolve(props.to).href)
+const resolvedHref = computed(() => sanitizeHref(router.resolve(props.to).href))
 
 // 共享元素飞行动画
 const handleClick = async (event: MouseEvent) => {

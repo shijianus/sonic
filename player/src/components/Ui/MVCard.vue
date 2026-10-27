@@ -3,6 +3,7 @@ import { gsap } from 'gsap'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import { formatCount } from '@/utils/time'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { sanitizeHref, sanitizeImageSrc } from '@/utils/urlSafety'
 import { prefersReducedMotion } from '@/utils/motion'
 
 interface Props {
@@ -23,7 +24,7 @@ const router = useRouter()
 const cardRef = ref<HTMLElement | null>(null)
 const isHovering = ref(false)
 const isAnimating = ref(false)
-const resolvedHref = computed(() => router.resolve(props.to).href)
+const resolvedHref = computed(() => sanitizeHref(router.resolve(props.to).href))
 
 // Tilt 效果配置
 const tiltConfig = {
@@ -206,58 +207,71 @@ const handleClick = async (event: MouseEvent) => {
   document.body.appendChild(overlay)
 
   const clone = document.createElement('div')
-  const cleanCover = formatCoverUrl(props.cover, { width: 800, height: 450, artist: props.artist })
-  clone.innerHTML = `
-    <div style="
-      position: absolute;
-      inset: 0;
-      background-image: url(${cleanCover});
-      background-size: cover;
-      background-position: center;
-    "></div>
-    <div style="
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0,0,0,0.4);
-    ">
-      <div style="
-        width: 80px;
-        height: 80px;
-        border-radius: 50%;
-        background: rgba(255,255,255,0.2);
-        backdrop-filter: blur(10px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      ">
-        <div style="
-          width: 0;
-          height: 0;
-          border-left: 24px solid white;
-          border-top: 14px solid transparent;
-          border-bottom: 14px solid transparent;
-          margin-left: 6px;
-        "></div>
-      </div>
-      <p style="
-        margin-top: 20px;
-        font-size: 18px;
-        font-weight: 600;
-        color: white;
-        text-align: center;
-        max-width: 80%;
-      ">${props.name}</p>
-      <p style="
-        margin-top: 8px;
-        font-size: 14px;
-        color: rgba(255,255,255,0.7);
-      ">${props.artist}</p>
-    </div>
+  const cleanCover = sanitizeImageSrc(formatCoverUrl(props.cover, { width: 800, height: 450, artist: props.artist }))
+
+  const background = document.createElement('div')
+  background.style.cssText = 'position: absolute; inset: 0; overflow: hidden;'
+  if (cleanCover) {
+    const backgroundImage = document.createElement('img')
+    backgroundImage.src = cleanCover
+    backgroundImage.alt = ''
+    backgroundImage.setAttribute('referrerpolicy', 'no-referrer')
+    backgroundImage.style.cssText = 'width: 100%; height: 100%; object-fit: cover;'
+    backgroundImage.addEventListener('error', () => { backgroundImage.style.display = 'none' }, { once: true })
+    background.append(backgroundImage)
+  }
+
+  const contentOverlay = document.createElement('div')
+  contentOverlay.style.cssText = `
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.4);
   `
+
+  const playCircle = document.createElement('div')
+  playCircle.style.cssText = `
+    width: 80px;
+    height: 80px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    backdrop-filter: blur(10px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  `
+
+  const playTriangle = document.createElement('div')
+  playTriangle.style.cssText = `
+    width: 0;
+    height: 0;
+    border-left: 24px solid white;
+    border-top: 14px solid transparent;
+    border-bottom: 14px solid transparent;
+    margin-left: 6px;
+  `
+  playCircle.append(playTriangle)
+
+  const name = document.createElement('p')
+  name.textContent = props.name
+  name.style.cssText = `
+    margin-top: 20px;
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+    text-align: center;
+    max-width: 80%;
+  `
+
+  const artist = document.createElement('p')
+  artist.textContent = props.artist
+  artist.style.cssText = 'margin-top: 8px; font-size: 14px; color: rgba(255,255,255,0.7);'
+
+  contentOverlay.append(playCircle, name, artist)
+  clone.append(background, contentOverlay)
   clone.style.cssText = `
     position: fixed;
     z-index: 9999;
