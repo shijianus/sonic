@@ -39,7 +39,9 @@ function getAllowedOrigins(env: AppEnv): string[] {
 }
 
 export function getEpomailConfig(env: AppEnv, requestOrigin?: string) {
-  const baseUrl = String(env.EPOMAIL_BASE_URL || '').trim().replace(/\/+$/, '');
+  const rawBaseUrl = String(env.EPOMAIL_BASE_URL || '').trim().replace(/\/+$/, '');
+  const parsedBaseUrl = rawBaseUrl ? parseHttpsUrl(rawBaseUrl) : null;
+  const baseUrl = parsedBaseUrl ? parsedBaseUrl.toString().replace(/\/+$/, '') : '';
   const clientId = env.EPOMAIL_CLIENT_ID ? String(env.EPOMAIL_CLIENT_ID).trim() : '';
   const clientSecret = env.EPOMAIL_CLIENT_SECRET ? String(env.EPOMAIL_CLIENT_SECRET).trim() : '';
   const allowedOrigins = getAllowedOrigins(env);

@@ -3,7 +3,9 @@ import { createHash } from 'node:crypto';
 import {
   base64UrlEncode,
   base64UrlDecode,
+  buildAuthorizeUrl,
   createSession,
+  getEpomailConfig,
   MAX_SESSION_TTL_SEC,
   stringToBase64Url,
   verifyAuth,
@@ -305,6 +307,20 @@ describe('OAuth state, PKCE and redirect policy', () => {
       },
     });
     expect(response.status).toBe(400);
+  });
+
+  it('rejects a non-HTTPS provider base URL', async () => {
+    const config = getEpomailConfig({
+      ...oauthEnv,
+      EPOMAIL_BASE_URL: 'http://mail.example',
+    });
+    expect(config.baseUrl).toBe('');
+    expect(() => buildAuthorizeUrl(
+      { ...oauthEnv, EPOMAIL_BASE_URL: 'http://mail.example' },
+      'https://sonic.example',
+      's'.repeat(43),
+      'c'.repeat(43),
+    )).toThrow('OAuth configuration');
   });
 
   it('callback rejects missing, mismatched, error and missing-verifier requests with cookie clearing', async () => {
