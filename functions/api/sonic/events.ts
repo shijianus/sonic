@@ -8,7 +8,7 @@ import type { AppEnv } from '../../_lib/types';
 import { jsonResponse, handleOptions } from '../../_lib/http';
 import { getSonicConfig } from '../../_lib/sonic/config';
 import { callLocalEngineJson } from '../../_lib/sonic/local-engine';
-import { buildGatewayHeaders, guardGatewayRequest, sonicError } from '../../_lib/sonic/route-helpers';
+import { buildGatewayHeaders, guardGatewayRequest, readBoundedRequestBody, sonicError } from '../../_lib/sonic/route-helpers';
 import {
   buildUserPreferenceProfile,
   clearUserRecommendationData,
@@ -143,15 +143,13 @@ export async function onRequest({
   }
 
   // POST: Parse & validate JSON payload
-  let rawText = '';
-  try {
-    rawText = await request.text();
-  } catch {
-    return sonicError('INVALID_BODY', 'Failed to read request body', 400);
+  const bodyResult = await readBoundedRequestBody(request, MAX_BODY_BYTES);
+  if (bodyResult.ok === false) {
+    return bodyResult.reason === 'too_large'
+      ? sonicError('PAYLOAD_TOO_LARGE', 'Event payload exceeds 64KB limit', 413)
+      : sonicError('INVALID_BODY', 'Failed to read request body', 400);
   }
-  if (rawText.length > MAX_BODY_BYTES) {
-    return sonicError('PAYLOAD_TOO_LARGE', 'Event payload exceeds 64KB limit', 413);
-  }
+  const rawText = bodyResult.text;
 
   let parsed: any;
   try {

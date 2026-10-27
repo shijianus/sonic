@@ -10,19 +10,28 @@ import { callLocalEngineJson } from './local-engine';
 
 export { handleOptions };
 
+const MAX_SEARCH_QUERY_LEN = 256;
+const MAX_LYRICS_FIELD_LEN = 200;
+const MAX_ID_FIELD_LEN = 128;
+
+function cleanParam(value: string | null | undefined, maxLen: number): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed.slice(0, maxLen) : undefined;
+}
+
 export function parseLyricsParams(url: URL): SonicQueryParams {
-  const title = url.searchParams.get('title')?.trim() || url.searchParams.get('name')?.trim() || undefined;
-  const artist = url.searchParams.get('artist')?.trim() || url.searchParams.get('singer')?.trim() || undefined;
-  const album = url.searchParams.get('album')?.trim() || undefined;
+  const title = cleanParam(url.searchParams.get('title') || url.searchParams.get('name'), MAX_LYRICS_FIELD_LEN);
+  const artist = cleanParam(url.searchParams.get('artist') || url.searchParams.get('singer'), MAX_LYRICS_FIELD_LEN);
+  const album = cleanParam(url.searchParams.get('album'), MAX_LYRICS_FIELD_LEN);
   const durationStr = url.searchParams.get('duration');
   const duration = durationStr ? parseFloat(durationStr) : undefined;
-  const ncmMusicId = url.searchParams.get('ncmMusicId')?.trim() || undefined;
-  const qqMusicId = url.searchParams.get('qqMusicId')?.trim() || undefined;
-  const appleMusicId = url.searchParams.get('appleMusicId')?.trim() || undefined;
-  const spotifyId = url.searchParams.get('spotifyId')?.trim() || undefined;
-  const isrc = url.searchParams.get('isrc')?.trim() || undefined;
-  const platform = url.searchParams.get('platform')?.trim() || undefined;
-  const platformId = url.searchParams.get('platformId')?.trim() || undefined;
+  const ncmMusicId = cleanParam(url.searchParams.get('ncmMusicId'), MAX_ID_FIELD_LEN);
+  const qqMusicId = cleanParam(url.searchParams.get('qqMusicId'), MAX_ID_FIELD_LEN);
+  const appleMusicId = cleanParam(url.searchParams.get('appleMusicId'), MAX_ID_FIELD_LEN);
+  const spotifyId = cleanParam(url.searchParams.get('spotifyId'), MAX_ID_FIELD_LEN);
+  const isrc = cleanParam(url.searchParams.get('isrc'), MAX_ID_FIELD_LEN);
+  const platform = cleanParam(url.searchParams.get('platform'), MAX_ID_FIELD_LEN);
+  const platformId = cleanParam(url.searchParams.get('platformId'), MAX_ID_FIELD_LEN);
   const prefer = (url.searchParams.get('prefer')?.trim() || 'auto') as any;
   const nocache = url.searchParams.has('nocache') || url.searchParams.has('_t');
 
@@ -55,7 +64,7 @@ export function parseSearchParams(url: URL): {
     url.searchParams.get('name') ||
     url.searchParams.get('s') ||
     ''
-  ).trim();
+  ).trim().slice(0, MAX_SEARCH_QUERY_LEN);
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
   const count = Math.min(50, Math.max(1, parseInt(url.searchParams.get('count') || url.searchParams.get('limit') || '20', 10) || 20));
   const nocache = url.searchParams.has('nocache') || url.searchParams.has('_t');
@@ -69,6 +78,8 @@ export function buildGatewayHeaders(extra: Record<string, string> = {}, degraded
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Engine-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, Range',
     'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, X-Sonic-Cache, X-Sonic-Provider, X-Sonic-Degraded, X-Sonic-Circuit, X-Sonic-Stream-Trial, X-RateLimit-Limit, X-RateLimit-Remaining',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
     ...extra,
   };
   if (degraded) {
@@ -109,6 +120,52 @@ export async function guardGatewayRequest(request: Request, env: any, scope: str
   const rl = await evaluateGatewayRateLimit(request, env, scope);
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
   return null;
+}
+
+export type BoundedBodyResult =
+  | { ok: true; text: string }
+  | { ok: false; reason: 'too_large' | 'read_error' };
+
+export async function readBoundedRequestBody(
+  request: Request,
+  maxBytes: number,
+): Promise<BoundedBodyResult> {
+  const declared = Number(request.headers.get('content-length') || '');
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    return { ok: false, reason: 'too_large' };
+  }
+  if (!request.body) {
+    return { ok: true, text: '' };
+  }
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        try {
+          await reader.cancel();
+        } catch {}
+        return { ok: false, reason: 'too_large' };
+      }
+      chunks.push(value);
+    }
+  } catch {
+    return { ok: false, reason: 'read_error' };
+  }
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return { ok: true, text: new TextDecoder().decode(merged) };
 }
 
 export async function handleSingleProviderLyricsRequest(

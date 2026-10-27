@@ -12,10 +12,33 @@ import {
   checkEngineAccess,
   evaluateGatewayRateLimit,
   buildRateLimitErrorResponse,
+  buildSafeUpstreamResponseHeaders,
   validateSafeUrl,
   safeFetch,
   SONIC_ALLOWED_MUSIC_DOMAINS,
 } from '../../_lib/sonic/security';
+
+// Everything relayed here is served from the Sonic origin. Reject document-capable types
+// (HTML, XHTML, SVG) so an allowlisted host cannot become a same-origin script vector.
+const FORWARDABLE_TEXTUAL_TYPES = new Set([
+  'text/plain',
+  'text/xml',
+  'application/xml',
+  'application/json',
+  'application/ttml+xml',
+  'application/ttml',
+  'application/lrc',
+  'application/octet-stream',
+  'binary/octet-stream',
+]);
+
+function isForwardableAssetType(contentType: string | null): boolean {
+  const value = (contentType || '').split(';')[0].trim().toLowerCase();
+  if (!value) return true;
+  if (value.startsWith('audio/') || value.startsWith('video/')) return true;
+  if (value.startsWith('image/')) return value !== 'image/svg+xml' && value !== 'image/svg';
+  return FORWARDABLE_TEXTUAL_TYPES.has(value);
+}
 
 export async function onRequest({ request, env, waitUntil }: any): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
@@ -85,10 +108,24 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
         },
       );
 
-      const responseHeaders = new Headers(upstreamResp.headers);
-      responseHeaders.set('Access-Control-Allow-Origin', '*');
-      responseHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
-      responseHeaders.set('X-Sonic-Forwarded', 'true');
+      // Relay only asset-safe headers: upstream Set-Cookie must never be planted on the Sonic
+      // origin, and Content-Encoding must not be forwarded for an already-decoded body.
+      if (!isForwardableAssetType(upstreamResp.headers.get('content-type'))) {
+        return sonicError(
+          'UNSUPPORTED_CONTENT_TYPE',
+          'Upstream returned a document-capable content type and was not relayed',
+          415,
+          { provider: 'forward' },
+        );
+      }
+
+      const responseHeaders = buildSafeUpstreamResponseHeaders(upstreamResp.headers, {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+        'X-Sonic-Forwarded': 'true',
+        'X-Content-Type-Options': 'nosniff',
+        'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
+      });
 
       return new Response(upstreamResp.body, {
         status: upstreamResp.status,

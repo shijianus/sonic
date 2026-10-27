@@ -234,6 +234,19 @@ export async function evaluateGatewayRateLimit(
   }
 
   // Fallback: In-memory sliding window
+  const windowResult = bumpInMemoryWindow(bucketKey, limit, now, windowMs);
+  return {
+    ...windowResult,
+    tier,
+  };
+}
+
+function bumpInMemoryWindow(
+  bucketKey: string,
+  limit: number,
+  now: number,
+  windowMs = 60_000,
+): { allowed: boolean; limit: number; remaining: number; resetSec: number } {
   let entry = rateBuckets.get(bucketKey);
 
   if (!entry || now >= entry.resetAt) {
@@ -241,6 +254,11 @@ export async function evaluateGatewayRateLimit(
       for (const [k, v] of rateBuckets) {
         if (now >= v.resetAt) rateBuckets.delete(k);
         if (rateBuckets.size < MAX_RATE_BUCKETS - 256) break;
+      }
+      // If every bucket is still live, drop the oldest to keep memory bounded.
+      if (rateBuckets.size >= MAX_RATE_BUCKETS) {
+        const oldestKey = rateBuckets.keys().next().value;
+        if (oldestKey !== undefined) rateBuckets.delete(oldestKey);
       }
     }
     entry = { count: 0, resetAt: now + windowMs };
@@ -253,11 +271,47 @@ export async function evaluateGatewayRateLimit(
 
   return {
     allowed: entry.count <= limit,
-    tier,
     limit,
     remaining,
     resetSec,
   };
+}
+
+// Dedicated limiter for unauthenticated auth endpoints (OAuth login/callback).
+// It intentionally ignores SONIC_REQUIRE_AUTH (login must stay reachable for anonymous users)
+// and never issues API-key tier upgrades, so a valid key cannot widen the auth-attempt budget.
+export async function evaluateAuthRateLimit(
+  request: Request,
+  env?: AppEnv,
+  scope = 'auth',
+  limitPerMinute = 30,
+): Promise<RateLimitDecision> {
+  const now = Date.now();
+  const limit = Math.min(1000, Math.max(1, Math.floor(limitPerMinute) || 30));
+  const ip = getPublicClientIp(request);
+  const bucketKey = `${scope}:ip:${ip}`;
+
+  const kv = env?.RATE_LIMIT_KV || env?.KV;
+  if (kv && typeof kv.get === 'function' && typeof kv.put === 'function') {
+    try {
+      const windowMinute = Math.floor(now / 60_000);
+      const kvKey = `rl:${bucketKey}:${windowMinute}`;
+      const currentCount = parseInt((await kv.get(kvKey)) || '0', 10) || 0;
+      const nextCount = currentCount + 1;
+      await kv.put(kvKey, String(nextCount), { expirationTtl: 120 });
+      return {
+        allowed: nextCount <= limit,
+        tier: 'anonymous',
+        limit,
+        remaining: Math.max(0, limit - nextCount),
+        resetSec: Math.max(1, 60 - (Math.floor(now / 1000) % 60)),
+      };
+    } catch (kvErr) {
+      console.warn('[Sonic RateLimit] Auth KV rate limiter fallback to in-memory', kvErr);
+    }
+  }
+
+  return { ...bumpInMemoryWindow(bucketKey, limit, now), tier: 'anonymous' };
 }
 
 export function buildRateLimitErrorResponse(decision: RateLimitDecision): Response {
@@ -398,6 +452,16 @@ export function isBlockedIpv6(host: string): boolean {
     }
   }
 
+  // IPv4-compatible IPv6 (deprecated ::/96, e.g. ::7f00:1 == 127.0.0.1, ::a00:1 == 10.0.0.1)
+  const compatIpv4Match = clean.match(/^::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
+  if (compatIpv4Match) {
+    const high = parseInt(compatIpv4Match[1], 16);
+    const low = parseInt(compatIpv4Match[2], 16);
+    if (Number.isFinite(high) && Number.isFinite(low)) {
+      return isBlockedIpv4(((high << 16) | low) >>> 0);
+    }
+  }
+
   // fc00::/7 (Unique Local Address: fc00:: - fdff::)
   if (/^f[cd][0-9a-f]{2}:/i.test(clean) || clean.startsWith('fc') || clean.startsWith('fd')) return true;
 
@@ -510,6 +574,36 @@ export function validateSafeUrl(
   }
 
   return { valid: true, url };
+}
+
+// Response headers that are safe to relay from a third-party asset host back to our clients.
+// Deliberately excludes Set-Cookie (cookie injection onto the Sonic origin), Content-Encoding
+// (bodies are already decoded by fetch), Server/X-Powered-By (topology disclosure) and CSP/HSTS.
+const SAFE_UPSTREAM_RESPONSE_HEADERS = [
+  'content-type',
+  'content-range',
+  'accept-ranges',
+  'etag',
+  'last-modified',
+  'expires',
+  'cache-control',
+];
+
+export function buildSafeUpstreamResponseHeaders(
+  upstream: Headers,
+  extra?: HeadersInit,
+): Headers {
+  const headers = new Headers(extra);
+  for (const key of SAFE_UPSTREAM_RESPONSE_HEADERS) {
+    const value = upstream.get(key);
+    if (value) headers.set(key, value);
+  }
+  // Content-Length is only meaningful when the body was not transparently decoded.
+  if (!upstream.has('content-encoding')) {
+    const length = upstream.get('content-length');
+    if (length) headers.set('content-length', length);
+  }
+  return headers;
 }
 
 export async function safeFetch(

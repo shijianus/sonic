@@ -28,6 +28,18 @@ function isAllowedDirectTargetHost(hostname: string): boolean {
   return SONIC_ALLOWED_MUSIC_DOMAINS.some((d) => h === d || h.endsWith('.' + d));
 }
 
+// Proxied bytes are served from the Sonic origin, so HTML/SVG/XML responses must never be relayed.
+function isPlayableMediaType(contentType: string | null): boolean {
+  const value = (contentType || '').split(';')[0].trim().toLowerCase();
+  if (!value) return true;
+  return (
+    value.startsWith('audio/') ||
+    value.startsWith('video/') ||
+    value === 'application/octet-stream' ||
+    value === 'binary/octet-stream'
+  );
+}
+
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -230,6 +242,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     );
 
     const headers = corsHeaders();
+    if (!isPlayableMediaType(upstream.headers.get('content-type'))) {
+      return errorResponse('Upstream returned a non-audio content type', 415);
+    }
     const forwardHeaders = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified'];
     forwardHeaders.forEach((key) => {
       const val = upstream.headers.get(key);

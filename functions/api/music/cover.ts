@@ -29,6 +29,8 @@ function svgResponse(degraded = false): Response {
     'Access-Control-Allow-Origin': '*',
     'Cache-Control': 'public, max-age=3600',
     'X-Sonic-Cover-Fallback': 'svg',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
   };
   if (degraded) headers['X-Sonic-Degraded'] = '1';
   return new Response(DEFAULT_COVER_SVG, { status: 200, headers });
@@ -79,10 +81,15 @@ async function proxyImage(imageUrl: string, providerTag = 'direct'): Promise<Res
     if (!upstream.ok) return null;
 
     const contentType = upstream.headers.get('content-type') || 'image/jpeg';
-    if (!contentType.includes('image/')) return null;
+    const baseType = contentType.split(';')[0].trim().toLowerCase();
+    if (!baseType.startsWith('image/')) return null;
+    // SVG is an active document; never relay third-party SVG from our origin.
+    if (baseType === 'image/svg+xml' || baseType === 'image/svg') return null;
 
     const respHeaders = new Headers();
     respHeaders.set('Content-Type', contentType);
+    respHeaders.set('X-Content-Type-Options', 'nosniff');
+    respHeaders.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; sandbox");
     const cl = upstream.headers.get('content-length');
     if (cl) respHeaders.set('Content-Length', cl);
     respHeaders.set('Access-Control-Allow-Origin', '*');

@@ -4,10 +4,17 @@ import {
   getEpomailConfig,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
+import {
+  buildRateLimitErrorResponse,
+  evaluateAuthRateLimit,
+} from '../../_lib/sonic/security';
 import type { AppEnv } from '../../_lib/types';
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
+
+  const rl = await evaluateAuthRateLimit(request, env, 'auth-login');
+  if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   // Fail closed if OAuth credentials are not configured
   if (!env.EPOMAIL_CLIENT_ID || !env.EPOMAIL_CLIENT_SECRET) {

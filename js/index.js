@@ -1186,7 +1186,10 @@ function showAlbumCoverPlaceholder() {
 }
 
 function setAlbumCoverImage(url) {
-    dom.albumCover.innerHTML = `<img src="${url}" alt="专辑封面">`;
+    const img = document.createElement("img");
+    img.src = url;
+    img.alt = "专辑封面";
+    dom.albumCover.replaceChildren(img);
     dom.albumCover.classList.remove("loading");
 }
 
@@ -1303,7 +1306,9 @@ function debugLog(message) {
     console.log(`[DEBUG] ${message}`);
     if (state.debugMode) {
         const debugInfo = dom.debugInfo;
-        debugInfo.innerHTML += `<div>${new Date().toLocaleTimeString()}: ${message}</div>`;
+        const line = document.createElement("div");
+        line.textContent = `${new Date().toLocaleTimeString()}: ${message}`;
+        debugInfo.appendChild(line);
         debugInfo.classList.add("show");
         debugInfo.scrollTop = debugInfo.scrollHeight;
     }
@@ -2948,19 +2953,12 @@ function renderPlaylist() {
     }
 
     dom.playlist.classList.remove("empty");
-    const playlistHtml = state.playlistSongs.map((song, index) =>
-        `<div class="playlist-item" data-index="${index}" role="button" tabindex="0" aria-label="播放 ${song.name}">
-            ${song.name} - ${Array.isArray(song.artist) ? song.artist.join(", ") : song.artist}
-            <button class="playlist-item-remove" type="button" data-playlist-action="remove" data-index="${index}" title="从播放列表移除">
-                <i class="fas fa-times"></i>
-            </button>
-            <button class="playlist-item-download" type="button" data-playlist-action="download" data-index="${index}" title="下载">
-                <i class="fas fa-download"></i>
-            </button>
-        </div>`
-    ).join("");
-
-    dom.playlistItems.innerHTML = playlistHtml;
+    if (window.SonicPlaylistView) {
+        window.SonicPlaylistView.renderInto(dom.playlistItems, state.playlistSongs);
+    } else {
+        console.error("SonicPlaylistView missing; refusing to render unescaped playlist HTML");
+        dom.playlistItems.textContent = "";
+    }
 
     if (!dom.playlistItems._hasPreloadListener) {
         dom.playlistItems.addEventListener("pointerover", (event) => {

@@ -3,6 +3,7 @@ import { gsap } from 'gsap'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import { formatCount } from '@/utils/time'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { escapeHtmlAttribute } from '@/utils/escapeHtml'
 import { prefersReducedMotion } from '@/utils/motion'
 
 interface Props {
@@ -206,7 +207,9 @@ const handleClick = async (event: MouseEvent) => {
   document.body.appendChild(overlay)
 
   const clone = document.createElement('div')
-  const cleanCover = formatCoverUrl(props.cover, { width: 800, height: 450, artist: props.artist })
+  const cleanCover = escapeHtmlAttribute(
+    formatCoverUrl(props.cover, { width: 800, height: 450, artist: props.artist })
+  )
   clone.innerHTML = `
     <div style="
       position: absolute;

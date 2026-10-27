@@ -3,6 +3,7 @@ import { gsap } from 'gsap'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import { formatCount } from '@/utils/time'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { escapeHtmlAttribute } from '@/utils/escapeHtml'
 import { useI18n } from 'vue-i18n'
 import { prefersReducedMotion } from '@/utils/motion'
 
@@ -91,7 +92,7 @@ const handleClick = async (event: MouseEvent) => {
   isAnimating.value = true
   const card = cardRef.value
   const rect = card.getBoundingClientRect()
-  const cleanCover = formatCoverUrl(props.coverUrl, { size: 400 })
+  const cleanCover = escapeHtmlAttribute(formatCoverUrl(props.coverUrl, { size: 400 }))
 
   // 创建克隆元素用于动画
   const clone = document.createElement('div')

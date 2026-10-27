@@ -181,6 +181,23 @@ export function resetAuthCacheForTest(): void {
   authCache.clear();
 }
 
+function storeVerifiedAuth(apiKey: string, entry: CachedAuth): void {
+  if (authCache.size >= MAX_AUTH_CACHE) {
+    const now = Date.now();
+    for (const [k, v] of authCache) {
+      if (now >= v.cachedAt + AUTH_CACHE_TTL_MS || Math.floor(now / 1000) >= v.exp) {
+        authCache.delete(k);
+      }
+      if (authCache.size < MAX_AUTH_CACHE - 100) break;
+    }
+    if (authCache.size >= MAX_AUTH_CACHE) {
+      const firstKey = authCache.keys().next().value;
+      if (firstKey) authCache.delete(firstKey);
+    }
+  }
+  authCache.set(apiKey, entry);
+}
+
 export function getAuthSecrets(env: AppEnv): { primary: string; prev?: string } | null {
   const primary = (env.SONIC_SECRET || env.SOLARA_SECRET || '').trim();
   if (!primary || primary.length < 32) {
@@ -246,7 +263,7 @@ export async function createSession(
     expiresAt,
   };
 
-  authCache.set(apiKey, { user: session, exp: expSec, cachedAt: Date.now() });
+  storeVerifiedAuth(apiKey, { user: session, exp: expSec, cachedAt: Date.now() });
   return session;
 }
 
@@ -399,21 +416,8 @@ export async function verifyAuth(
       expiresAt: new Date(payload.exp * 1000).toISOString(),
     };
 
-    // Store verified session into cache
-    if (authCache.size >= MAX_AUTH_CACHE) {
-      const now = Date.now();
-      for (const [k, v] of authCache) {
-        if (now >= v.cachedAt + AUTH_CACHE_TTL_MS || Math.floor(now / 1000) >= v.exp) {
-          authCache.delete(k);
-        }
-        if (authCache.size < MAX_AUTH_CACHE - 100) break;
-      }
-      if (authCache.size >= MAX_AUTH_CACHE) {
-        const firstKey = authCache.keys().next().value;
-        if (firstKey) authCache.delete(firstKey);
-      }
-    }
-    authCache.set(apiKey, { user, exp: payload.exp, cachedAt: Date.now() });
+    // Store verified session into cache (bounded to avoid unbounded growth on key rotation)
+    storeVerifiedAuth(apiKey, { user, exp: payload.exp, cachedAt: Date.now() });
 
     return { authenticated: true, user };
   } catch {

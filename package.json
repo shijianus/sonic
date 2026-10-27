@@ -15,10 +15,10 @@
     "test:cover": "jiti scripts/test-cover-gateway.mjs",
     "lint:theme": "node scripts/lint-theme.mjs",
     "test:engine": "jiti scripts/test-local-engine-and-degradation.mjs",
-    "test:security": "pnpm --dir player exec vitest run --root .. tests/security.test.ts",
+    "test:security": "pnpm --dir player exec vitest run --root .. tests/security.test.ts tests/security-hardening.test.ts tests/frontend-xss.test.ts",
     "test:recommend": "pnpm --dir player exec vitest run --root .. tests/recommendation-and-search.test.ts",
     "eval:recommend": "jiti scripts/evaluate-recommendation.mjs",
-    "test": "npm run typecheck && jiti scripts/test-sonic-gateway.mjs && jiti scripts/test-auth-compatibility.mjs && jiti scripts/test-cover-gateway.mjs && jiti scripts/test-local-engine-and-degradation.mjs && pnpm --dir player exec vitest run --root .. tests/security.test.ts tests/recommendation-and-search.test.ts",
+    "test": "npm run typecheck && jiti scripts/test-sonic-gateway.mjs && jiti scripts/test-auth-compatibility.mjs && jiti scripts/test-cover-gateway.mjs && jiti scripts/test-local-engine-and-degradation.mjs && pnpm --dir player exec vitest run --root .. tests/security.test.ts tests/security-hardening.test.ts tests/frontend-xss.test.ts tests/recommendation-and-search.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

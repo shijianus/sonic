@@ -1,6 +1,9 @@
 import decodeJpeg from "./lib/vendor/jpeg-decoder.js";
 import {
+  buildRateLimitErrorResponse,
   checkEngineAccess,
+  evaluateGatewayRateLimit,
+  safeFetch,
   validateSafeUrl,
   SONIC_ALLOWED_MUSIC_DOMAINS,
 } from "./_lib/sonic/security";
@@ -8,6 +11,7 @@ import type { AppEnv } from "./_lib/types";
 
 const MAX_DIMENSION = 96;
 const TARGET_SAMPLE_COUNT = 2400;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 
 type SupportedFormat = "jpeg" | "jpg" | "pjpeg";
 
@@ -21,6 +25,13 @@ class UnsupportedImageFormatError extends Error {
   constructor(format: string) {
     super(`Unsupported image format: ${format}`);
     this.name = "UnsupportedImageFormatError";
+  }
+}
+
+class ImageTooLargeError extends Error {
+  constructor(maxBytes: number) {
+    super(`Image exceeds ${maxBytes} bytes limit`);
+    this.name = "ImageTooLargeError";
   }
 }
 
@@ -315,6 +326,45 @@ function decodeImage(arrayBuffer: ArrayBuffer, contentType: string): DecodedImag
   return resizeImage(image);
 }
 
+export async function readBoundedArrayBuffer(
+  response: Response,
+  maxBytes: number,
+): Promise<ArrayBuffer> {
+  const declared = Number(response.headers.get("content-length") || "");
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    throw new ImageTooLargeError(maxBytes);
+  }
+  if (!response.body) {
+    return new ArrayBuffer(0);
+  }
+
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      try {
+        await reader.cancel();
+      } catch {}
+      throw new ImageTooLargeError(maxBytes);
+    }
+    chunks.push(value);
+  }
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return merged.buffer;
+}
+
 async function buildPalette(arrayBuffer: ArrayBuffer, contentType: string): Promise<PaletteResponse> {
   const imageData = decodeImage(arrayBuffer, contentType);
   const analyzed = analyzeImageColors(imageData);
@@ -377,6 +427,8 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
 
   const engineDenied = checkEngineAccess(request, env);
   if (engineDenied) return engineDenied;
+  const rl = await evaluateGatewayRateLimit(request, env, "music-palette");
+  if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   const url = new URL(request.url);
   const imageParam = url.searchParams.get("image") ?? url.searchParams.get("url");
@@ -415,28 +467,42 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
   }
 
   let upstream: Response;
+  const imageInit = {
+    headers: {
+      Accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8",
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    },
+    cf: {
+      cacheTtl: 3600,
+      cacheEverything: true,
+      image: {
+        width: MAX_DIMENSION,
+        height: MAX_DIMENSION,
+        fit: "scale-down",
+        quality: 85,
+        format: "jpeg",
+      },
+    },
+  };
+  const fetchOptions = {
+    allowHttp: false,
+    allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
+    maxRedirects: 2,
+    timeoutMs: 6000,
+  };
   try {
-    upstream = await fetch(target.toString(), {
-      cf: {
-        cacheTtl: 3600,
-        cacheEverything: true,
-        image: {
-          width: MAX_DIMENSION,
-          height: MAX_DIMENSION,
-          fit: "scale-down",
-          quality: 85,
-          format: "jpeg",
-        },
-      },
-    } as any);
-  } catch (error) {
-    console.warn("Image resizing fetch failed, falling back to original", error);
-    upstream = await fetch(target.toString(), {
-      cf: {
-        cacheTtl: 3600,
-        cacheEverything: true,
-      },
-    } as any);
+    upstream = await safeFetch(target, imageInit as any, fetchOptions);
+  } catch {
+    try {
+      upstream = await safeFetch(target, { headers: imageInit.headers } as any, fetchOptions);
+    } catch (error) {
+      console.warn("Image fetch failed", error);
+      return new Response(JSON.stringify({ error: "Upstream image request failed" }), {
+        status: 502,
+        headers: createJsonHeaders(502),
+      });
+    }
   }
 
   if (!upstream.ok) {
@@ -454,7 +520,21 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
     });
   }
 
-  const buffer = await upstream.arrayBuffer();
+  let buffer: ArrayBuffer;
+  try {
+    buffer = await readBoundedArrayBuffer(upstream, MAX_IMAGE_BYTES);
+  } catch (error) {
+    if (error instanceof ImageTooLargeError) {
+      return new Response(JSON.stringify({ error: "Image exceeds the 8MB analysis limit" }), {
+        status: 413,
+        headers: createJsonHeaders(413),
+      });
+    }
+    return new Response(JSON.stringify({ error: "Failed to read upstream image" }), {
+      status: 502,
+      headers: createJsonHeaders(502),
+    });
+  }
 
   try {
     const palette = await buildPalette(buffer, contentType);

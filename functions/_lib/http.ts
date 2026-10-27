@@ -7,6 +7,9 @@ export function corsHeaders(): Headers {
     'Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, X-Shijianus-Device-Id, Range',
   );
   headers.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
+  // API payloads are JSON/text only; never let a browser treat one as an active document.
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; sandbox");
   return headers;
 }
 

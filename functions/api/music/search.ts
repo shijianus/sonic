@@ -17,7 +17,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   const url = new URL(request.url);
-  const query = url.searchParams.get('q') || url.searchParams.get('keyword') || url.searchParams.get('name') || '';
+  const query = (url.searchParams.get('q') || url.searchParams.get('keyword') || url.searchParams.get('name') || '')
+    .trim()
+    .slice(0, 256);
   const source = url.searchParams.get('source') || 'netease';
   const count = Math.min(50, Math.max(1, parseInt(url.searchParams.get('count') || '20', 10)));
   const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));

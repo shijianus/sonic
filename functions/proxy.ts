@@ -92,8 +92,24 @@ async function proxyKuwoAudio(targetUrl: string, request: Request): Promise<Resp
     (init.headers as Record<string, string>)["Range"] = rangeHeader;
   }
 
-  const upstream = await fetch(normalized.toString(), init);
+  const upstream = await safeFetch(normalized, init, {
+    allowHttp: false,
+    allowedDomains: ['kuwo.cn'],
+    maxRedirects: 2,
+    timeoutMs: 15000,
+  });
+  const upstreamType = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  if (
+    upstreamType &&
+    !upstreamType.startsWith('audio/') &&
+    upstreamType !== 'application/octet-stream' &&
+    upstreamType !== 'binary/octet-stream'
+  ) {
+    throw new Error(`Unexpected upstream content type: ${upstreamType}`);
+  }
   const headers = createCorsHeaders(upstream.headers);
+  headers.set('X-Content-Type-Options', 'nosniff');
+  headers.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; sandbox");
   if (!headers.has("Cache-Control")) {
     headers.set("Cache-Control", "public, max-age=3600");
   }
@@ -236,7 +252,15 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
   const target = url.searchParams.get("target");
 
   if (target) {
-    return proxyKuwoAudio(target, request);
+    try {
+      return await proxyKuwoAudio(target, request);
+    } catch (error) {
+      console.warn('[Sonic Proxy] Kuwo audio proxy rejected or failed', error);
+      return new Response("Upstream fetch rejected", {
+        status: 502,
+        headers: createCorsHeaders(),
+      });
+    }
   }
 
   return proxyApiRequest(url, request, env);

@@ -15,12 +15,12 @@ export async function onRequest({ request, env, waitUntil }: { request: Request;
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   const url = new URL(request.url);
-  const id = url.searchParams.get('id')?.trim() || undefined;
-  const source = url.searchParams.get('source')?.trim() || 'netease';
-  const title = (url.searchParams.get('title') || url.searchParams.get('name'))?.trim() || undefined;
-  const artist = (url.searchParams.get('artist') || url.searchParams.get('singer'))?.trim() || undefined;
-  const album = url.searchParams.get('album')?.trim() || undefined;
-  const q = (url.searchParams.get('q') || url.searchParams.get('keyword'))?.trim() || undefined;
+  const id = url.searchParams.get('id')?.trim().slice(0, 128) || undefined;
+  const source = url.searchParams.get('source')?.trim().slice(0, 32) || 'netease';
+  const title = (url.searchParams.get('title') || url.searchParams.get('name'))?.trim().slice(0, 200) || undefined;
+  const artist = (url.searchParams.get('artist') || url.searchParams.get('singer'))?.trim().slice(0, 200) || undefined;
+  const album = url.searchParams.get('album')?.trim().slice(0, 200) || undefined;
+  const q = (url.searchParams.get('q') || url.searchParams.get('keyword'))?.trim().slice(0, 256) || undefined;
   const durationStr = url.searchParams.get('duration');
   const duration = durationStr ? parseFloat(durationStr) : undefined;
 
