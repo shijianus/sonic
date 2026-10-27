@@ -532,7 +532,10 @@ export function validateSafeUrl(
     return { valid: false, error: 'Destination host is forbidden by SSRF policy' };
   }
 
-  if (options?.allowedDomains && options.allowedDomains.length > 0) {
+  if (options?.allowedDomains !== undefined) {
+    if (options.allowedDomains.length === 0) {
+      return { valid: false, error: 'Allowed domain whitelist is empty' };
+    }
     const matched = options.allowedDomains.some((domain) => hostMatchesDomain(hostname, domain));
     if (!matched) {
       return { valid: false, error: 'Destination host is not in allowed domain whitelist' };
