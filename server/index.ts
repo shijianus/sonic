@@ -263,12 +263,13 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
       }
 
       const url = new URL(webReq.url);
+      const pathname = url.pathname.replace(/\/+$/, '') || '/';
       const isBusinessRoute =
-        url.pathname === '/proxy'
-        || url.pathname === '/palette'
-        || url.pathname === '/api/music/palette'
-        || url.pathname === '/api'
-        || url.pathname.startsWith('/api/');
+        pathname === '/proxy'
+        || pathname === '/palette'
+        || pathname === '/api/music/palette'
+        || pathname === '/api'
+        || pathname.startsWith('/api/');
 
       // Engine mode: every dynamic/business route requires the internal secret,
       // regardless of the Host header or a misconfigured runtime flag.
