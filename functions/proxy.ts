@@ -6,10 +6,20 @@ import {
   evaluateGatewayRateLimit,
   isBlockedSsrfHost,
   safeFetch,
+  hostMatchesDomain,
 } from "./_lib/sonic/security";
+import {
+  buildStreamedProxyResponse,
+  getContentType,
+  isAllowedContentType,
+  parseByteLimit,
+  parseConcurrency,
+  parseMaxRedirects,
+  parseTimeoutMs,
+  readBodyWithLimit,
+} from "./_lib/sonic/proxy-safety";
 import type { AppEnv } from "./_lib/types";
 
-const KUWO_HOST_PATTERN = /(^|\.)kuwo\.cn$/i;
 const SAFE_RESPONSE_HEADERS = [
   "content-type",
   "cache-control",
@@ -34,6 +44,7 @@ function createCorsHeaders(init?: Headers): Headers {
     headers.set("Cache-Control", "no-store");
   }
   headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("X-Content-Type-Options", "nosniff");
   return headers;
 }
 
@@ -51,32 +62,28 @@ function handleOptions(): Response {
 
 function isAllowedKuwoHost(hostname: string): boolean {
   if (!hostname) return false;
-  const h = hostname.toLowerCase().trim().replace(/\.+$/, '');
-  return (h === 'kuwo.cn' || h.endsWith('.kuwo.cn')) && !isBlockedSsrfHost(h);
+  return hostMatchesDomain(hostname, "kuwo.cn") && !isBlockedSsrfHost(hostname);
 }
 
 function normalizeKuwoUrl(rawUrl: string): URL | null {
   try {
     const parsed = new URL(rawUrl);
     if (parsed.username || parsed.password) return null;
-    if (parsed.port && parsed.port !== '443' && parsed.port !== '80') return null;
-    if (!isAllowedKuwoHost(parsed.hostname)) {
-      return null;
-    }
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return null;
-    }
+    if (parsed.port && parsed.port !== "443" && parsed.port !== "80") return null;
+    if (!isAllowedKuwoHost(parsed.hostname)) return null;
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
     parsed.protocol = "https:";
+    parsed.port = "";
     return parsed;
   } catch {
     return null;
   }
 }
 
-async function proxyKuwoAudio(targetUrl: string, request: Request): Promise<Response> {
+async function proxyKuwoAudio(targetUrl: string, request: Request, env?: AppEnv): Promise<Response> {
   const normalized = normalizeKuwoUrl(targetUrl);
   if (!normalized) {
-    return new Response("Invalid target", { status: 400 });
+    return new Response("Invalid target", { status: 400, headers: createCorsHeaders() });
   }
 
   const init: RequestInit = {
@@ -84,25 +91,62 @@ async function proxyKuwoAudio(targetUrl: string, request: Request): Promise<Resp
     headers: {
       "User-Agent": request.headers.get("User-Agent") ?? "Mozilla/5.0",
       Referer: "https://www.kuwo.cn/",
+      Accept: "audio/*,application/octet-stream;q=0.8",
     },
   };
 
   const rangeHeader = request.headers.get("Range");
-  if (rangeHeader) {
+  if (rangeHeader && rangeHeader.length <= 256) {
     (init.headers as Record<string, string>)["Range"] = rangeHeader;
   }
 
-  const upstream = await fetch(normalized.toString(), init);
-  const headers = createCorsHeaders(upstream.headers);
-  if (!headers.has("Cache-Control")) {
-    headers.set("Cache-Control", "public, max-age=3600");
-  }
+  try {
+    const upstream = await safeFetch(
+      normalized.toString(),
+      init,
+      {
+        allowHttp: false,
+        allowedDomains: ["kuwo.cn"],
+        maxRedirects: parseMaxRedirects(env?.SONIC_PROXY_MAX_REDIRECTS),
+        timeoutMs: parseTimeoutMs(env?.SONIC_PROXY_TIMEOUT_MS, 15000),
+        maxConcurrency: parseConcurrency(env?.SONIC_PROXY_MAX_CONCURRENCY),
+      },
+    );
 
-  return new Response(upstream.body, {
-    status: upstream.status,
-    statusText: upstream.statusText,
-    headers,
-  });
+    if (!upstream.ok && upstream.status !== 206) {
+      upstream.body?.cancel().catch(() => {});
+      return new Response("Upstream audio request failed", {
+        status: 502,
+        headers: createCorsHeaders(),
+      });
+    }
+
+    if (!isAllowedContentType(getContentType(upstream), "audio")) {
+      upstream.body?.cancel().catch(() => {});
+      return new Response("Unsupported upstream content type", {
+        status: 415,
+        headers: createCorsHeaders(),
+      });
+    }
+
+    const response = buildStreamedProxyResponse(upstream, {
+      kind: "audio",
+      maxBytes: parseByteLimit(env?.SONIC_AUDIO_MAX_BYTES, 256 * 1024 * 1024, 1024, 512 * 1024 * 1024),
+      isHead: request.method === "HEAD",
+      cacheControl: "public, max-age=3600",
+    });
+    response.headers.set("X-Sonic-Provider", "kuwo-legacy");
+    return response;
+  } catch (error) {
+    console.warn(
+      "[Sonic Legacy Proxy] Audio proxy rejected:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+    return new Response("Upstream audio request failed", {
+      status: 502,
+      headers: createCorsHeaders(),
+    });
+  }
 }
 
 async function proxyApiRequest(url: URL, request: Request, env?: AppEnv): Promise<Response> {
@@ -200,16 +244,30 @@ async function proxyApiRequest(url: URL, request: Request, env?: AppEnv): Promis
         "User-Agent": request.headers.get("User-Agent") ?? "Mozilla/5.0",
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(parseTimeoutMs(env?.SONIC_PROXY_TIMEOUT_MS, 10000)),
     });
-    const outHeaders = createCorsHeaders(upstreamResponse.headers);
-    if (!outHeaders.has("Content-Type")) {
-      outHeaders.set("Content-Type", "application/json; charset=utf-8");
+
+    if (!upstreamResponse.ok) {
+      upstreamResponse.body?.cancel().catch(() => {});
+      return new Response(JSON.stringify({ error: "Upstream fetch failed" }), {
+        status: 502,
+        headers,
+      });
     }
-    return new Response(upstreamResponse.body, {
-      status: upstreamResponse.status,
-      statusText: upstreamResponse.statusText,
-      headers: outHeaders,
-    });
+
+    if (!isAllowedContentType(getContentType(upstreamResponse), "json")) {
+      upstreamResponse.body?.cancel().catch(() => {});
+      return new Response(JSON.stringify({ error: "Unsupported upstream content type" }), {
+        status: 502,
+        headers,
+      });
+    }
+
+    const bytes = await readBodyWithLimit(upstreamResponse, 4 * 1024 * 1024);
+    const outHeaders = createCorsHeaders(upstreamResponse.headers);
+    outHeaders.set("Content-Type", "application/json; charset=utf-8");
+    outHeaders.set("Content-Length", String(bytes.byteLength));
+    return new Response(bytes, { status: upstreamResponse.status, headers: outHeaders });
   } catch {
     return new Response(JSON.stringify({ error: "Upstream fetch failed" }), {
       status: 502,
@@ -236,7 +294,7 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
   const target = url.searchParams.get("target");
 
   if (target) {
-    return proxyKuwoAudio(target, request);
+    return proxyKuwoAudio(target, request, env);
   }
 
   return proxyApiRequest(url, request, env);

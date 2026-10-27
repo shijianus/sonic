@@ -1,9 +1,21 @@
 import decodeJpeg from "./lib/vendor/jpeg-decoder.js";
 import {
+  buildRateLimitErrorResponse,
   checkEngineAccess,
+  evaluateGatewayRateLimit,
+  getAllowedMusicDomains,
+  safeFetch,
   validateSafeUrl,
-  SONIC_ALLOWED_MUSIC_DOMAINS,
 } from "./_lib/sonic/security";
+import {
+  getContentType,
+  isAllowedContentType,
+  parseByteLimit,
+  parseConcurrency,
+  parseMaxRedirects,
+  parseTimeoutMs,
+  readBodyWithLimit,
+} from "./_lib/sonic/proxy-safety";
 import type { AppEnv } from "./_lib/types";
 
 const MAX_DIMENSION = 96;
@@ -346,6 +358,7 @@ function createCorsHeaders(init?: HeadersInit): Headers {
 function createJsonHeaders(status: number): Headers {
   const headers = createCorsHeaders({
     "Content-Type": "application/json; charset=utf-8",
+    "X-Content-Type-Options": "nosniff",
   });
   headers.set("Cache-Control", status === 200 ? "public, max-age=3600" : "no-store");
   return headers;
@@ -377,6 +390,8 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
 
   const engineDenied = checkEngineAccess(request, env);
   if (engineDenied) return engineDenied;
+  const rl = await evaluateGatewayRateLimit(request, env, "music-palette");
+  if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   const url = new URL(request.url);
   const imageParam = url.searchParams.get("image") ?? url.searchParams.get("url");
@@ -388,9 +403,10 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
     });
   }
 
+  const allowedDomains = getAllowedMusicDomains(env);
   const valResult = validateSafeUrl(imageParam, {
     allowHttp: false,
-    allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
+    allowedDomains,
   });
 
   if (!valResult.valid || !valResult.url) {
@@ -407,7 +423,7 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
 
   const cache = typeof caches !== "undefined" ? (caches as any).default : null;
   const cacheKey = new Request(request.url, request);
-  if (cache) {
+  if (cache && request.method === "GET") {
     const cachedResponse = await cache.match(cacheKey);
     if (cachedResponse) {
       return cachedResponse;
@@ -416,7 +432,7 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
 
   let upstream: Response;
   try {
-    upstream = await fetch(target.toString(), {
+    upstream = await safeFetch(target.toString(), {
       cf: {
         cacheTtl: 3600,
         cacheEverything: true,
@@ -428,44 +444,66 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
           format: "jpeg",
         },
       },
-    } as any);
+    } as any, {
+      allowHttp: false,
+      allowedDomains,
+      maxRedirects: parseMaxRedirects(env?.SONIC_PROXY_MAX_REDIRECTS),
+      timeoutMs: parseTimeoutMs(env?.SONIC_PROXY_TIMEOUT_MS, 8000),
+      maxConcurrency: parseConcurrency(env?.SONIC_PROXY_MAX_CONCURRENCY),
+    });
   } catch (error) {
-    console.warn("Image resizing fetch failed, falling back to original", error);
-    upstream = await fetch(target.toString(), {
-      cf: {
-        cacheTtl: 3600,
-        cacheEverything: true,
-      },
-    } as any);
-  }
-
-  if (!upstream.ok) {
-    return new Response(JSON.stringify({ error: `Upstream request failed with status ${upstream.status}` }), {
-      status: upstream.status,
-      headers: createJsonHeaders(upstream.status),
+    console.warn(
+      "Palette image fetch rejected:",
+      error instanceof Error ? error.message : "unknown error",
+    );
+    return new Response(JSON.stringify({ error: "Upstream image request failed" }), {
+      status: 502,
+      headers: createJsonHeaders(502),
     });
   }
 
-  const contentType = upstream.headers.get("content-type") ?? "";
-  if (!contentType.startsWith("image/")) {
+  if (!upstream.ok) {
+    upstream.body?.cancel().catch(() => {});
+    return new Response(JSON.stringify({ error: "Upstream image request failed" }), {
+      status: 502,
+      headers: createJsonHeaders(502),
+    });
+  }
+
+  const contentType = getContentType(upstream);
+  if (!isAllowedContentType(contentType, "image")) {
+    upstream.body?.cancel().catch(() => {});
     return new Response(JSON.stringify({ error: "Unsupported content type" }), {
       status: 415,
       headers: createJsonHeaders(415),
     });
   }
 
-  const buffer = await upstream.arrayBuffer();
+  let buffer: ArrayBuffer;
+  try {
+    const bytes = await readBodyWithLimit(
+      upstream,
+      parseByteLimit(env?.SONIC_PALETTE_MAX_BYTES, 4 * 1024 * 1024, 1024, 16 * 1024 * 1024),
+    );
+    buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  } catch {
+    return new Response(JSON.stringify({ error: "Upstream image exceeds size limit" }), {
+      status: 413,
+      headers: createJsonHeaders(413),
+    });
+  }
 
   try {
     const palette = await buildPalette(buffer, contentType);
-    palette.source = target.toString();
-
-    const response = new Response(JSON.stringify(palette), {
+    const payload = JSON.stringify(palette);
+    const headers = createJsonHeaders(200);
+    headers.set("Content-Length", String(new TextEncoder().encode(payload).byteLength));
+    const response = new Response(request.method === "HEAD" ? null : payload, {
       status: 200,
-      headers: createJsonHeaders(200),
+      headers,
     });
 
-    if (cache) {
+    if (cache && request.method === "GET") {
       try {
         await cache.put(cacheKey, response.clone());
       } catch (cacheError) {

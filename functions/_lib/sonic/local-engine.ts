@@ -173,7 +173,7 @@ export async function callLocalEngineJson<T = any>(
     headers['X-Sonic-Engine-Key'] = cfg.engineSecret;
   }
   if (options?.request) {
-    headers['X-Sonic-Client-IP'] = getPublicClientIp(options.request);
+    headers['X-Sonic-Client-IP'] = getPublicClientIp(options.request, env);
   } else if (options?.clientIp && isValidIpLiteral(options.clientIp)) {
     headers['X-Sonic-Client-IP'] = options.clientIp;
   }

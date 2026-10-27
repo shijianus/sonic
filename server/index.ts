@@ -8,8 +8,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 
 import type { AppEnv } from '../functions/_lib/types';
-import dns from 'node:dns/promises';
-import { checkEngineAccess, isBlockedSsrfHost } from '../functions/_lib/sonic/security';
+import { requireEngineSecret } from '../functions/_lib/sonic/security';
 import { handleOptions } from '../functions/_lib/http';
 
 // Route handlers shared directly from `functions/`
@@ -63,22 +62,6 @@ function buildRuntimeEnv(): AppEnv {
   return env as AppEnv;
 }
 
-export async function checkDnsRebinding(hostname: string): Promise<boolean> {
-  const clean = hostname.toLowerCase().trim().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
-  if (isBlockedSsrfHost(clean)) return true;
-  try {
-    const results = await dns.lookup(clean, { all: true });
-    for (const record of results) {
-      if (isBlockedSsrfHost(record.address)) {
-        return true;
-      }
-    }
-    return false;
-  } catch {
-    return true;
-  }
-}
-
 function toWebRequest(req: http.IncomingMessage): Request {
   const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || 'http';
   const host = req.headers.host || 'localhost:8080';
@@ -93,6 +76,7 @@ function toWebRequest(req: http.IncomingMessage): Request {
       headers.set(key, val);
     }
   }
+  headers.set('x-sonic-peer-ip', req.socket.remoteAddress || '');
 
   const method = (req.method || 'GET').toUpperCase();
   const hasBody = method !== 'GET' && method !== 'HEAD';
@@ -108,8 +92,17 @@ function toWebRequest(req: http.IncomingMessage): Request {
 async function sendWebResponse(res: http.ServerResponse, webResp: Response, isHead: boolean): Promise<void> {
   const outHeaders: Record<string, string | string[]> = {};
   webResp.headers.forEach((value, key) => {
+    if (key.toLowerCase() === 'set-cookie') return;
     outHeaders[key] = value;
   });
+  const getSetCookie = (webResp.headers as any).getSetCookie;
+  if (typeof getSetCookie === 'function') {
+    const cookies = getSetCookie.call(webResp.headers) as string[];
+    if (cookies.length > 0) outHeaders['set-cookie'] = cookies;
+  } else {
+    const cookie = webResp.headers.get('set-cookie');
+    if (cookie) outHeaders['set-cookie'] = cookie;
+  }
 
   res.writeHead(webResp.status, webResp.statusText || undefined, outHeaders);
 
@@ -269,11 +262,22 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
         return;
       }
 
-      // Mandatory top-level authentication gate on `engine-sonic.*` and internal engine paths (Condition 2c)
-      const engineDenied = checkEngineAccess(webReq, env);
-      if (engineDenied) {
-        await sendWebResponse(res, engineDenied, webReq.method === 'HEAD');
-        return;
+      const url = new URL(webReq.url);
+      const isBusinessRoute =
+        url.pathname === '/proxy'
+        || url.pathname === '/palette'
+        || url.pathname === '/api/music/palette'
+        || url.pathname === '/api'
+        || url.pathname.startsWith('/api/');
+
+      // Engine mode: every dynamic/business route requires the internal secret,
+      // regardless of the Host header or a misconfigured runtime flag.
+      if (isBusinessRoute) {
+        const engineDenied = requireEngineSecret(webReq, env);
+        if (engineDenied) {
+          await sendWebResponse(res, engineDenied, webReq.method === 'HEAD');
+          return;
+        }
       }
 
       const apiResp = await dispatchFunctionRoute(webReq, env);
@@ -282,7 +286,6 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
         return;
       }
 
-      const url = new URL(webReq.url);
       const staticResp = await serveStaticAsset(staticRoot, url.pathname, webReq.method === 'HEAD');
       await sendWebResponse(res, staticResp, webReq.method === 'HEAD');
     } catch (err: any) {
