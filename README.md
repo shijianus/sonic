@@ -219,8 +219,9 @@ Sonic 提供規範的 RESTful API 規格，對外統一承諾 `brand: "Sonic"` �
 1. **HMAC-SHA256 全量簽名防偽**：
    所有專案 API Key 均升級為基於密碼學簽名的安全格式：
    $$\text{API\_Key} = \text{sonic\_live\_v1}.\langle \text{Payload}_{\text{base64url}} \rangle.\langle \text{Signature}_{\text{base64url}} \rangle$$
-   - 載荷包含 `{ v: 1, email, exp, kid }`，簽名由伺服器端強隨機金鑰（`SONIC_SECRET`，長度 $\ge 32$ 字元）實施 HMAC-SHA256 驗證；
-   - 伺服器端使用 Web Crypto `crypto.subtle.verify` 進行常數時間比對，徹底阻斷時序攻擊；
+   - 載荷包含 `{ v: 1, sub, email, iat, exp }`（`sub` 來自 OAuth userinfo 的可信穩定識別，`iat`/`exp` 為 Unix 秒），簽名由伺服器端強隨機金鑰（`SONIC_SECRET`，長度 $\ge 32$ 字元）實施 HMAC-SHA256 驗證；
+   - 伺服器端使用 Web Crypto `crypto.subtle.verify` 進行常數時間比對，並嚴格檢查欄位型別、時間範圍、TTL、Base64URL 格式與 Token 長度；
+   - 驗簽不依賴進程內快取；過期、撤銷或移除 `SONIC_SECRET` 後立即失效。輪換時可暫時設定 `SONIC_SECRET_PREV`；
    - 舊版無簽名金鑰一律拒絕（Fail-closed），全面杜絕金鑰偽造風險。
 2. **傳遞方式標準化**：
    預設僅允許在 HTTP 請求標頭中傳遞金鑰，避免金鑰透過 URL Query 洩漏至伺服器存取日誌、瀏覽器歷史或 HTTP Referer：
@@ -230,7 +231,12 @@ Sonic 提供規範的 RESTful API 規格，對外統一承諾 `brand: "Sonic"` �
    Authorization: Bearer sonic_live_v1.<payload>.<signature>
    ```
 3. **SSRF 全鏈路立體攔截**：
-   針對媒體代理與音源外鏈轉發，Sonic 實施標準化 IP 規範解析，強行阻斷 `127.0.0.1`、RFC 1918 私有區域網路、Docker 內部網橋以及雲端伺服器中繼資料地址（如 `169.254.169.254`）。
+   針對媒體代理與音源外鏈轉發，Sonic 僅允許精確的官方音源/CDN 後綴白名單，拒絕 `http`、非標準埠、userinfo、內網/迴環/link-local/保留位址與雲端 Metadata 位址，並對每一跳重新驗證。`/api/sonic/forward?url=` 任意資源轉發預設關閉（`SONIC_ENABLE_ASSET_FORWARD=0`）。
+   - Cloudflare Pages 無法控制實際連線目標，因此不宣稱 DNS pinning；安全性依賴固定網域白名單與平台網路隔離。
+   - Node Engine 僅由 Cloudflare Tunnel/反向代理存取，Compose 僅綁定 `127.0.0.1`；所有 `/api/*` 業務路由在執行前強制驗證 `X-Sonic-Engine-Key`。
+4. **OAuth 與代理回應**：
+   - OAuth 使用 256-bit 隨機 `state` + HttpOnly/Secure/SameSite=Lax Cookie 綁定瀏覽器，一次性消費，並完整實作 PKCE S256；
+   - 代理回應採標頭白名單，拒絕 HTML/JavaScript/XHTML/可執行 SVG，設定 `nosniff` 與嚴格 CSP，保留 Range/206/HEAD，封面與歌詞設定實際讀取位元上限。
 
 ---
 
@@ -239,13 +245,14 @@ Sonic 提供規範的 RESTful API 規格，對外統一承諾 `brand: "Sonic"` �
 ### 方案 A：Cloudflare Pages 邊緣網關部署（推薦）
 
 ```bash
-# 1. 複製專案庫並安裝相依套件
+# 1. 複製專案庫並安裝相依套件（根目錄與 player 各自使用 pnpm）
 git clone git@github.com:shijianus/sonic.git
 cd sonic
-npm install
+pnpm install
+pnpm --dir player install --frozen-lockfile
 
 # 2. 構建前端 SPA 與雙端產物
-npm run build
+pnpm build
 
 # 3. 部署至 Cloudflare Pages (專案名稱: cfsolara)
 npx wrangler pages deploy dist --project-name cfsolara
@@ -285,7 +292,6 @@ curl -H "X-Sonic-Engine-Key: <YOUR_SECRET>" http://127.0.0.1:8080/api/sonic/engi
 # 1. 服務間通訊與本機引擎安全 (Pages 與 VPS 雙側必配，長度 >= 32 字元)
 SONIC_LOCAL_ENGINE_URL="https://engine-sonic.epocanvas.tech"
 SONIC_ENGINE_SECRET="<請使用 openssl rand -base64 48 生成強隨機金鑰>"
-SONIC_ENGINE_HOST="engine-sonic.epocanvas.tech"
 
 # 2. API Key 全量簽名金鑰 (必配，長度 >= 32 字元)
 SONIC_SECRET="<請使用 openssl rand -base64 48 生成強隨機金鑰>"
