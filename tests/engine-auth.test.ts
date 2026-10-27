@@ -42,7 +42,14 @@ describe('Linux engine route gate', () => {
   });
 
   it('rejects every business route without the engine key, regardless of Host', async () => {
-    for (const path of ['/api', '/api/music/search?q=test', '/api/music/stream?id=1', '/api/sonic/engine/health']) {
+    for (const path of [
+      '/api',
+      '/api/music/search?q=test',
+      '/api/music/stream?id=1',
+      '/api/sonic/engine/health',
+      '/proxy/',
+      '/palette/',
+    ]) {
       const response = await fetch(`${baseUrl}${path}`, {
         headers: {
           Host: 'localhost:8080',
