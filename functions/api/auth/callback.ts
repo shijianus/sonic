@@ -5,7 +5,11 @@ import {
   getEpomailConfig,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
-import { timingSafeEqualStr } from '../../_lib/sonic/security';
+import {
+  buildRateLimitErrorResponse,
+  evaluateAuthRateLimit,
+  timingSafeEqualStr,
+} from '../../_lib/sonic/security';
 import type { AppEnv } from '../../_lib/types';
 
 const CLEAR_OAUTH_COOKIES = [
@@ -43,6 +47,10 @@ function clearCookieHeaders(): Headers {
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
+
+  // Bounds unauthenticated upstream token-exchange amplification.
+  const rl = await evaluateAuthRateLimit(request, env, 'auth-callback', 30);
+  if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   if (!env.EPOMAIL_CLIENT_ID || !env.EPOMAIL_CLIENT_SECRET) {
     return errorResponse(

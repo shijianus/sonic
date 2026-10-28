@@ -4,6 +4,10 @@ import {
   getEpomailConfig,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
+import {
+  buildRateLimitErrorResponse,
+  evaluateAuthRateLimit,
+} from '../../_lib/sonic/security';
 import type { AppEnv } from '../../_lib/types';
 
 const OAUTH_COOKIE_MAX_AGE = 600;
@@ -21,6 +25,9 @@ function setOAuthCookies(headers: Headers, state: string, verifier: string): voi
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
+
+  const rl = await evaluateAuthRateLimit(request, env, 'auth-login', 60);
+  if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   if (!env.EPOMAIL_CLIENT_ID || !env.EPOMAIL_CLIENT_SECRET) {
     return errorResponse(

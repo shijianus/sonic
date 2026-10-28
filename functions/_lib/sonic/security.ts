@@ -455,6 +455,55 @@ export async function evaluateGatewayRateLimit(
   };
 }
 
+// Throttles unauthenticated OAuth entry points. Unlike the gateway limiter this
+// never upgrades to an API-key tier and never enforces SONIC_REQUIRE_AUTH:
+// anonymous visitors must still be able to start a login.
+export async function evaluateAuthRateLimit(
+  request: Request,
+  env?: AppEnv,
+  scope = 'auth',
+  limitPerMinute = 60,
+): Promise<RateLimitDecision> {
+  const now = Date.now();
+  const limit = parseLimit(limitPerMinute, 60, 1000);
+  const bucketKey = `${scope}:ip:${getPublicClientIp(request, env)}`;
+
+  const kv = env?.RATE_LIMIT_KV || env?.KV;
+  if (kv && typeof kv.get === 'function' && typeof kv.put === 'function') {
+    try {
+      const windowMinute = Math.floor(now / 60_000);
+      const kvKey = `rl:${bucketKey}:${windowMinute}`;
+      const currentCount = parseInt((await kv.get(kvKey)) || '0', 10) || 0;
+      const nextCount = currentCount + 1;
+      await kv.put(kvKey, String(nextCount), { expirationTtl: 120 });
+      return {
+        allowed: nextCount <= limit,
+        tier: 'anonymous',
+        limit,
+        remaining: Math.max(0, limit - nextCount),
+        resetSec: Math.max(1, 60 - (Math.floor(now / 1000) % 60)),
+        scope: 'kv',
+      };
+    } catch (kvErr) {
+      console.warn(
+        '[Sonic RateLimit] Auth KV limiter unavailable, using per-process fallback:',
+        kvErr instanceof Error ? kvErr.message : 'unknown error',
+      );
+    }
+  }
+
+  const entry = getOrCreateBucket(bucketKey, now);
+  entry.count += 1;
+  return {
+    allowed: entry.count <= limit,
+    tier: 'anonymous',
+    limit,
+    remaining: Math.max(0, limit - entry.count),
+    resetSec: Math.max(1, Math.ceil((entry.resetAt - now) / 1000)),
+    scope: 'memory',
+  };
+}
+
 export function buildRateLimitErrorResponse(decision: RateLimitDecision): Response {
   const isAuthRequired = decision.limit === 0;
   return jsonResponse(
