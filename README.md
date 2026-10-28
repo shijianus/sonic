@@ -216,18 +216,20 @@ Sonic 提供規範的 RESTful API 規格，對外統一承諾 `brand: "Sonic"` �
 
 為防止公網介面遭到惡意爬蟲濫用或偽造，Sonic 採用嚴謹的認證與金鑰簽發規範：
 
-1. **HMAC-SHA256 全量簽名防偽**：
-   所有專案 API Key 均升級為基於密碼學簽名的安全格式：
-   $$\text{API\_Key} = \text{sonic\_live\_v1}.\langle \text{Payload}_{\text{base64url}} \rangle.\langle \text{Signature}_{\text{base64url}} \rangle$$
-   - 載荷包含 `{ v: 1, email, exp, kid }`，簽名由伺服器端強隨機金鑰（`SONIC_SECRET`，長度 $\ge 32$ 字元）實施 HMAC-SHA256 驗證；
-   - 伺服器端使用 Web Crypto `crypto.subtle.verify` 進行常數時間比對，徹底阻斷時序攻擊；
-   - 舊版無簽名金鑰一律拒絕（Fail-closed），全面杜絕金鑰偽造風險。
+1. **HMAC-SHA256 版本化簽名防偽**：
+   所有專案 API Key 均採用下列版本化格式：
+   $$\text{API\_Key} = \text{sonic\_live\_v2}.\langle \text{Header} \rangle.\langle \text{Payload} \rangle.\langle \text{Signature} \rangle$$
+   - Header 宣告 `{ alg: "HS256", typ: "sonic-api-key", v: 2, kid }`；Payload 包含 `{ sub, iat, exp, jti, kid, role, uid }`；
+   - 簽名由伺服器端強隨機金鑰（`SONIC_SECRET`，長度 $\ge 32$ 字元）對 `sonic_live_v2.<header>.<payload>` 實施 HMAC-SHA256；
+   - 伺服器端使用 Web Crypto `crypto.subtle.verify` 進行常數時間比對，並嚴格檢查版本、`kid`、`iat`/`exp`、`jti` 與撤銷清單；
+   - 舊版 **v1 及無簽名金鑰一律拒絕**（Fail-closed）。本次升級後既有使用者需重新登入 OAuth 取得 v2 Key；
+   - 金鑰輪換：將舊密鑰移入 `SONIC_SECRET_PREV`；撤銷：`SONIC_REVOKED_JTIS`、`SONIC_REVOKED_SUBS` 或全域下限 `SONIC_TOKEN_MIN_IAT`。
 2. **傳遞方式標準化**：
-   預設僅允許在 HTTP 請求標頭中傳遞金鑰，避免金鑰透過 URL Query 洩漏至伺服器存取日誌、瀏覽器歷史或 HTTP Referer：
+   僅允許在 HTTP 請求標頭中傳遞金鑰；URL Query `?api_key=` 已完全移除，避免金鑰洩漏至伺服器存取日誌、瀏覽器歷史或 HTTP Referer：
    ```http
-   X-Sonic-Key: sonic_live_v1.<payload>.<signature>
+   X-Sonic-Key: sonic_live_v2.<header>.<payload>.<signature>
    # 或相容標準 Authorization 標頭：
-   Authorization: Bearer sonic_live_v1.<payload>.<signature>
+   Authorization: Bearer sonic_live_v2.<header>.<payload>.<signature>
    ```
 3. **SSRF 全鏈路立體攔截**：
    針對媒體代理與音源外鏈轉發，Sonic 實施標準化 IP 規範解析，強行阻斷 `127.0.0.1`、RFC 1918 私有區域網路、Docker 內部網橋以及雲端伺服器中繼資料地址（如 `169.254.169.254`）。
@@ -285,14 +287,20 @@ curl -H "X-Sonic-Engine-Key: <YOUR_SECRET>" http://127.0.0.1:8080/api/sonic/engi
 # 1. 服務間通訊與本機引擎安全 (Pages 與 VPS 雙側必配，長度 >= 32 字元)
 SONIC_LOCAL_ENGINE_URL="https://engine-sonic.epocanvas.tech"
 SONIC_ENGINE_SECRET="<請使用 openssl rand -base64 48 生成強隨機金鑰>"
-SONIC_ENGINE_HOST="engine-sonic.epocanvas.tech"
+# Linux 引擎對所有 /api 路由強制驗證此金鑰（不依賴 Host / X-Forwarded-Host）
 
 # 2. API Key 全量簽名金鑰 (必配，長度 >= 32 字元)
 SONIC_SECRET="<請使用 openssl rand -base64 48 生成強隨機金鑰>"
-# 輪換過渡期金鑰 (選配):
+# 輪換過渡期金鑰 (選配)，舊 Key 於過渡期後應移除：
 # SONIC_SECRET_PREV=""
-# 是否開放 URL Query 傳遞 api_key (預設 0 禁用，嚴防日誌與 Referer 洩露)
-SONIC_ALLOW_QUERY_KEY="0"
+# 選配穩定 kid 標籤；未設定時由密鑰派生：
+# SONIC_SECRET_KID="prod-2026-01"
+# SONIC_SECRET_PREV_KID="prod-2025-12"
+# 撤銷策略 (逗號分隔，需重新部署生效)：
+# SONIC_REVOKED_JTIS=""
+# SONIC_REVOKED_SUBS=""
+# SONIC_TOKEN_MIN_IAT="0"
+# API Key 僅接受請求標頭；?api_key= 已完全移除
 
 # 3. Epomail OAuth 2.0 鑑權登入 (選配)
 EPOMAIL_BASE_URL="https://mail.epocanvas.com"

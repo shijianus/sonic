@@ -109,9 +109,12 @@ async function runTests() {
     const wrongRes = await handleNexusSearchRequest(wrongReq, engineEnv);
     assert(wrongRes.status === 401, `Wrong engine key returns 401 (got ${wrongRes.status})`);
 
-    // Missing secret on engine host MUST fail-closed 503 (never fail-open!)
-    const misconfigRes = checkEngineAccess(new Request('https://engine-sonic.epocanvas.tech/api'), {});
-    assert(misconfigRes && misconfigRes.status === 503, `Unconfigured secret on engine host fails closed with 503`);
+    // Missing secret on the Linux engine runtime MUST fail-closed 503 (never fail-open!).
+    // The decision is based on runtime + path, never on a spoofable Host header.
+    const misconfigRes = checkEngineAccess(new Request('http://127.0.0.1/api'), {
+      SONIC_RUNTIME: 'linux-engine',
+    });
+    assert(misconfigRes && misconfigRes.status === 503, `Unconfigured engine secret fails closed with 503`);
 
     // Valid key succeeds 200
     const validReq = new Request('https://engine-sonic.epocanvas.tech/api/sonic/engine/health', {
@@ -346,7 +349,11 @@ async function runTests() {
   console.log('\n7. Testing Linux Node 22 HTTP Server (createSonicServer)');
   {
     const prevSecret = process.env.SONIC_ENGINE_SECRET;
-    process.env.SONIC_ENGINE_SECRET = 'node_server_test_secret_777_long_enough_32!';
+    const prevUserSecret = process.env.SONIC_SECRET;
+    const engineSecret = 'node_server_test_secret_777_long_enough_32!';
+    const userSecret = 'node_server_user_token_secret_long_enough_32!';
+    process.env.SONIC_ENGINE_SECRET = engineSecret;
+    process.env.SONIC_SECRET = userSecret;
     const srv = createSonicServer();
     await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve));
     const port = srv.address().port;
@@ -356,17 +363,40 @@ async function runTests() {
       const rAnonRoot = await fetch(`http://127.0.0.1:${port}/api/sonic/engine/health`);
       assert(rAnonRoot.status === 401, `Anonymous request on engine endpoint returns 401 (got ${rAnonRoot.status})`);
 
+      // Anonymous request on a public-looking route is still gated on the engine runtime.
+      const rAnonSearch = await fetch(`http://127.0.0.1:${port}/api/music/search?q=test`);
+      assert(rAnonSearch.status === 401, `Anonymous /api/music/search on Linux engine returns 401 (got ${rAnonSearch.status})`);
+
       // Authenticated request on `/api/sonic/engine/health` -> 200!
       const rAuthHealth = await fetch(`http://127.0.0.1:${port}/api/sonic/engine/health`, {
         headers: {
-          'X-Sonic-Engine-Key': 'node_server_test_secret_777_long_enough_32!',
+          'X-Sonic-Engine-Key': engineSecret,
         },
       });
       const jAuthHealth = await rAuthHealth.json();
       assert(rAuthHealth.status === 200 && jAuthHealth.ok === true, 'Authenticated engine health over HTTP returns 200');
+
+      // A valid v2 user token verifies in the real Node HTTP runtime.
+      const session = await createSession(
+        { SONIC_SECRET: userSecret },
+        { id: 'node_e2e_user', email: 'node-e2e@epocanvas.com', name: 'Node E2E', avatar: '' },
+      );
+      const rUser = await fetch(`http://127.0.0.1:${port}/api/auth/user`, {
+        headers: {
+          'X-Sonic-Engine-Key': engineSecret,
+          'X-Sonic-Key': session.apiKey,
+        },
+      });
+      const jUser = await rUser.json();
+      assert(
+        rUser.status === 200 && jUser?.user?.email === 'node-e2e@epocanvas.com',
+        `Valid v2 key authenticates over Node HTTP (got ${rUser.status})`,
+      );
     } finally {
       if (prevSecret === undefined) delete process.env.SONIC_ENGINE_SECRET;
       else process.env.SONIC_ENGINE_SECRET = prevSecret;
+      if (prevUserSecret === undefined) delete process.env.SONIC_SECRET;
+      else process.env.SONIC_SECRET = prevUserSecret;
       await new Promise((resolve) => srv.close(resolve));
     }
   }

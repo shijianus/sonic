@@ -8,7 +8,7 @@ import type { AppEnv } from '../types';
 import { verifyAuth } from '../auth';
 import { isEnvEnabled } from './config';
 import { jsonResponse } from '../http';
-import { sha256Bytes } from './crypto';
+import { sha256Bytes, sha256Hex } from './crypto';
 
 export const SONIC_ALLOWED_MUSIC_DOMAINS = [
   'music.126.net',
@@ -51,23 +51,26 @@ export function hasValidEngineSecret(request: Request, env?: AppEnv): boolean {
 }
 
 export function requiresEngineAuth(request: Request, env?: AppEnv): boolean {
-  if (isEnvEnabled(env?.SONIC_REQUIRE_ENGINE_AUTH, false)) {
-    return true;
-  }
-  const url = new URL(request.url);
-  // Do NOT rely on x-forwarded-host or host headers which can be forged by clients
-  const cleanHost = url.hostname.toLowerCase();
-  const expectedEngineHost = env?.SONIC_ENGINE_HOST
-    ? String(env.SONIC_ENGINE_HOST).toLowerCase().trim()
-    : '';
+  const { pathname } = new URL(request.url);
+  const isEngineSurface =
+    pathname === '/api' ||
+    pathname.startsWith('/api/') ||
+    pathname === '/proxy' ||
+    pathname === '/palette';
 
-  if (cleanHost.startsWith('engine-sonic.') || (expectedEngineHost && cleanHost === expectedEngineHost)) {
-    return true;
+  // The Linux engine is a service-facing process: every API surface it serves requires the
+  // inter-service key. Host / X-Forwarded-Host are never consulted, so a client cannot change
+  // the auth requirement by rewriting headers.
+  if (env?.SONIC_RUNTIME === 'linux-engine') {
+    return isEngineSurface;
   }
-  if (url.pathname.startsWith('/api/sonic/engine/') || url.pathname.startsWith('/api/sonic/resolve/')) {
-    return true;
+
+  if (isEnvEnabled(env?.SONIC_REQUIRE_ENGINE_AUTH, false)) {
+    return isEngineSurface;
   }
-  return false;
+
+  // Internal engine-only routes stay protected even on the public Pages edge.
+  return pathname.startsWith('/api/sonic/engine/') || pathname.startsWith('/api/sonic/resolve/');
 }
 
 export function checkEngineAccess(request: Request, env?: AppEnv): Response | null {
@@ -116,11 +119,48 @@ export function checkEngineAccess(request: Request, env?: AppEnv): Response | nu
 // ── IP Extraction and Validation ──
 
 const IPV4_REGEX = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
-const IPV6_REGEX = /^(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]+|::(ffff(:0{1,4})?:)?((25[0-5]|(2[0-4]|1?[0-9])?[0-9])\.){3}(25[0-5]|(2[0-4]|1?[0-9])?[0-9]))$/;
+
+export function parseIpv6Hextets(input: string): number[] | null {
+  let value = input.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  const zoneIndex = value.indexOf('%');
+  if (zoneIndex !== -1) value = value.slice(0, zoneIndex);
+  if (!value.includes(':')) return null;
+
+  const embeddedV4 = value.match(/(?:^|:)(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (embeddedV4) {
+    const v4 = parseIpv4ToUint32(embeddedV4[1]);
+    if (v4 === null) return null;
+    const high = ((v4 >>> 16) & 0xffff).toString(16);
+    const low = (v4 & 0xffff).toString(16);
+    value = `${value.slice(0, value.length - embeddedV4[1].length)}${high}:${low}`;
+  }
+
+  const halves = value.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+
+  let groups: string[];
+  if (halves.length === 2) {
+    const zeroCount = 8 - head.length - tail.length;
+    if (zeroCount < 1) return null;
+    groups = [...head, ...Array.from({ length: zeroCount }, () => '0'), ...tail];
+  } else {
+    groups = head;
+  }
+  if (groups.length !== 8) return null;
+
+  const hextets: number[] = [];
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+    hextets.push(parseInt(group, 16));
+  }
+  return hextets;
+}
 
 export function isValidIpLiteral(ip: string): boolean {
   const trimmed = ip.trim().replace(/^\[|\]$/g, '');
-  return IPV4_REGEX.test(trimmed) || IPV6_REGEX.test(trimmed);
+  return IPV4_REGEX.test(trimmed) || parseIpv6Hextets(trimmed) !== null;
 }
 
 export function getPublicClientIp(request: Request): string {
@@ -157,6 +197,7 @@ interface WindowCounter {
 
 const rateBuckets = new Map<string, WindowCounter>();
 const MAX_RATE_BUCKETS = 4096;
+const RATE_LIMIT_OVERFLOW_KEY = '__sonic_rate_limit_overflow__';
 
 export interface RateLimitDecision {
   allowed: boolean;
@@ -197,7 +238,7 @@ export async function evaluateGatewayRateLimit(
         10000,
         Math.max(1, parseInt(String(env?.SONIC_RATE_LIMIT_AUTH_RPM || '600'), 10) || 600),
       );
-      subject = `user:${authResult.user.email.toLowerCase()}`;
+      subject = `user:${sha256Hex(authResult.user.email.toLowerCase()).slice(0, 32)}`;
     } else if (isEnvEnabled(env?.SONIC_REQUIRE_AUTH, false)) {
       return {
         allowed: false,
@@ -211,7 +252,28 @@ export async function evaluateGatewayRateLimit(
 
   const bucketKey = `${scope}:${subject}`;
 
-  // Optional Cloudflare KV Rate Limiting binding
+  // Preferred: Cloudflare native Rate Limiting binding (atomic and shared across isolates).
+  const nativeLimiter = (env as any)?.RATE_LIMITER;
+  if (nativeLimiter && typeof nativeLimiter.limit === 'function') {
+    try {
+      const outcome = await nativeLimiter.limit({ key: bucketKey });
+      if (!outcome || typeof outcome.success !== 'boolean') {
+        throw new Error('RATE_LIMITER returned an invalid result');
+      }
+      return {
+        allowed: outcome.success,
+        tier,
+        limit,
+        remaining: outcome.success ? Math.max(0, limit - 1) : 0,
+        resetSec: 60,
+      };
+    } catch (nativeErr) {
+      console.warn('[Sonic RateLimit] Native RATE_LIMITER failed, falling back', nativeErr);
+    }
+  }
+
+  // Best-effort cross-isolate fallback: Cloudflare KV is not atomic under concurrency, so
+  // strict deployments should bind RATE_LIMITER. KV still raises the cost of abuse.
   const kv = env?.RATE_LIMIT_KV || env?.KV;
   if (kv && typeof kv.get === 'function' && typeof kv.put === 'function') {
     try {
@@ -241,28 +303,42 @@ export async function evaluateGatewayRateLimit(
   };
 }
 
+function purgeExpiredRateBuckets(now: number): void {
+  for (const [key, bucket] of rateBuckets) {
+    if (now >= bucket.resetAt) rateBuckets.delete(key);
+  }
+}
+
 function bumpInMemoryWindow(
   bucketKey: string,
   limit: number,
   now: number,
   windowMs = 60_000,
 ): { allowed: boolean; limit: number; remaining: number; resetSec: number } {
-  let entry = rateBuckets.get(bucketKey);
+  let key = bucketKey;
+  let entry = rateBuckets.get(key);
 
   if (!entry || now >= entry.resetAt) {
     if (rateBuckets.size >= MAX_RATE_BUCKETS) {
-      for (const [k, v] of rateBuckets) {
-        if (now >= v.resetAt) rateBuckets.delete(k);
-        if (rateBuckets.size < MAX_RATE_BUCKETS - 256) break;
-      }
-      // If every bucket is still live, drop the oldest to keep memory bounded.
-      if (rateBuckets.size >= MAX_RATE_BUCKETS) {
-        const oldestKey = rateBuckets.keys().next().value;
-        if (oldestKey !== undefined) rateBuckets.delete(oldestKey);
-      }
+      purgeExpiredRateBuckets(now);
     }
-    entry = { count: 0, resetAt: now + windowMs };
-    rateBuckets.set(bucketKey, entry);
+
+    // Never evict a live victim bucket to make room for a new identity: that would let an
+    // attacker churn buckets and reset the victim's counter. New identities share one
+    // overflow bucket instead, keeping memory strictly bounded.
+    if (!rateBuckets.has(key) && rateBuckets.size >= MAX_RATE_BUCKETS) {
+      key = RATE_LIMIT_OVERFLOW_KEY;
+      entry = rateBuckets.get(key);
+    }
+
+    if (entry && now >= entry.resetAt) {
+      rateBuckets.delete(key);
+      entry = undefined;
+    }
+    if (!entry) {
+      entry = { count: 0, resetAt: now + windowMs };
+      rateBuckets.set(key, entry);
+    }
   }
 
   entry.count += 1;
@@ -290,6 +366,25 @@ export async function evaluateAuthRateLimit(
   const limit = Math.min(1000, Math.max(1, Math.floor(limitPerMinute) || 30));
   const ip = getPublicClientIp(request);
   const bucketKey = `${scope}:ip:${ip}`;
+
+  const nativeLimiter = (env as any)?.RATE_LIMITER;
+  if (nativeLimiter && typeof nativeLimiter.limit === 'function') {
+    try {
+      const outcome = await nativeLimiter.limit({ key: bucketKey });
+      if (!outcome || typeof outcome.success !== 'boolean') {
+        throw new Error('RATE_LIMITER returned an invalid result');
+      }
+      return {
+        allowed: outcome.success,
+        tier: 'anonymous',
+        limit,
+        remaining: outcome.success ? Math.max(0, limit - 1) : 0,
+        resetSec: 60,
+      };
+    } catch (nativeErr) {
+      console.warn('[Sonic RateLimit] Auth RATE_LIMITER failed, falling back', nativeErr);
+    }
+  }
 
   const kv = env?.RATE_LIMIT_KV || env?.KV;
   if (kv && typeof kv.get === 'function' && typeof kv.put === 'function') {
@@ -341,6 +436,10 @@ export function buildRateLimitErrorResponse(decision: RateLimitDecision): Respon
 
 export function resetRateLimitsForTest(): void {
   rateBuckets.clear();
+}
+
+export function getRateLimitBucketCountForTest(): number {
+  return rateBuckets.size;
 }
 
 // ── SSRF Triple Validation & Canonicalization ──
@@ -422,6 +521,8 @@ export function isBlockedIpv4(ipInt: number): boolean {
   if ((ipInt & 0xfffe0000) >>> 0 === 0xc6120000) return true;
   // 198.51.100.0/24 (TEST-NET-2)
   if ((ipInt & 0xffffff00) >>> 0 === 0xc6336400) return true;
+  // 203.0.113.0/24 (TEST-NET-3)
+  if ((ipInt & 0xffffff00) >>> 0 === 0xcb007100) return true;
   // 224.0.0.0/4 (Multicast 224-239) and 240.0.0.0/4 (Reserved / Broadcast 240-255)
   if ((ipInt >>> 28) >= 14) return true;
 
@@ -429,54 +530,49 @@ export function isBlockedIpv4(ipInt: number): boolean {
 }
 
 export function isBlockedIpv6(host: string): boolean {
-  const clean = host.toLowerCase().trim().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
-  if (!clean || clean === '::' || clean === '::0') return true;
-  if (clean === '::1' || clean === '0:0:0:0:0:0:0:1') return true;
+  const hextets = parseIpv6Hextets(host);
+  if (!hextets) return false;
 
-  // IPv4-mapped IPv6: ::ffff:127.0.0.1 or 0:0:0:0:0:ffff:127.0.0.1
-  const mappedIpv4Match = clean.match(/^(?:0*:){0,5}(?:ffff|0*ffff):([0-9a-fA-F.:]+)$/i);
-  if (mappedIpv4Match) {
-    const sub = mappedIpv4Match[1];
-    if (sub.includes('.')) {
-      const parsed = parseIpv4ToUint32(sub);
-      if (parsed !== null) return isBlockedIpv4(parsed);
-    } else if (sub.includes(':')) {
-      const parts = sub.split(':');
-      if (parts.length === 2) {
-        const high = parseInt(parts[0], 16);
-        const low = parseInt(parts[1], 16);
-        if (Number.isFinite(high) && Number.isFinite(low)) {
-          return isBlockedIpv4(((high << 16) | low) >>> 0);
-        }
-      }
-    }
+  // :: (unspecified) and ::1 (loopback)
+  if (hextets.every((part) => part === 0)) return true;
+  if (hextets.slice(0, 7).every((part) => part === 0) && hextets[7] === 1) return true;
+
+  // fc00::/7 Unique Local Address
+  if ((hextets[0] & 0xfe00) === 0xfc00) return true;
+  // fe80::/10 Link-Local Unicast
+  if ((hextets[0] & 0xffc0) === 0xfe80) return true;
+  // fec0::/10 Deprecated Site-Local Unicast
+  if ((hextets[0] & 0xffc0) === 0xfec0) return true;
+  // ff00::/8 Multicast
+  if ((hextets[0] & 0xff00) === 0xff00) return true;
+
+  // 2001:db8::/32 Documentation, 2001:2::/48 Benchmarking
+  if (hextets[0] === 0x2001 && (hextets[1] === 0x0db8 || hextets[1] === 0x0002)) return true;
+  // 2001::/32 Teredo embeds a client IPv4 address and is not a safe proxy destination
+  if (hextets[0] === 0x2001 && hextets[1] === 0) return true;
+  // 2001:10::/28 and 2001:20::/28 ORCHID ranges
+  if (hextets[0] === 0x2001 && ((hextets[1] & 0xfff0) === 0x0010 || (hextets[1] & 0xfff0) === 0x0020)) {
+    return true;
+  }
+  // 100::/64 Discard-Only prefix
+  if (hextets[0] === 0x0100 && hextets[1] === 0 && hextets[2] === 0 && hextets[3] === 0) {
+    return true;
   }
 
-  // IPv4-compatible IPv6 (deprecated ::/96, e.g. ::7f00:1 == 127.0.0.1, ::a00:1 == 10.0.0.1)
-  const compatIpv4Match = clean.match(/^::([0-9a-f]{1,4}):([0-9a-f]{1,4})$/i);
-  if (compatIpv4Match) {
-    const high = parseInt(compatIpv4Match[1], 16);
-    const low = parseInt(compatIpv4Match[2], 16);
-    if (Number.isFinite(high) && Number.isFinite(low)) {
-      return isBlockedIpv4(((high << 16) | low) >>> 0);
-    }
+  // IPv4-mapped (::ffff:a.b.c.d) and deprecated IPv4-compatible (::a.b.c.d)
+  if (hextets.slice(0, 5).every((part) => part === 0) && (hextets[5] === 0xffff || hextets[5] === 0)) {
+    const v4 = ((hextets[6] << 16) | hextets[7]) >>> 0;
+    if (isBlockedIpv4(v4)) return true;
   }
 
-  // fc00::/7 (Unique Local Address: fc00:: - fdff::)
-  if (/^f[cd][0-9a-f]{2}:/i.test(clean) || clean.startsWith('fc') || clean.startsWith('fd')) return true;
-
-  // fe80::/10 (Link-Local Unicast: fe80:: - febf::)
-  if (/^fe[89ab][0-9a-f]:/i.test(clean) || clean.startsWith('fe80:')) return true;
-
-  // ff00::/8 (Multicast)
-  if (/^ff[0-9a-f]{2}:/i.test(clean)) return true;
-
-  // 64:ff9b::/96 (IPv4/IPv6 translation)
-  if (clean.startsWith('64:ff9b::')) {
-    const after = clean.slice('64:ff9b::'.length);
-    const parsed = parseIpv4ToUint32(after);
-    if (parsed !== null) return isBlockedIpv4(parsed);
+  // 2002::/16 6to4 embeds an IPv4 address in the first two hextets
+  if (hextets[0] === 0x2002) {
+    const v4 = ((hextets[1] << 16) | hextets[2]) >>> 0;
+    if (isBlockedIpv4(v4)) return true;
   }
+
+  // 64:ff9b::/32 and 64:ff9b:1::/48 NAT64 translation prefixes
+  if (hextets[0] === 0x0064 && hextets[1] === 0xff9b) return true;
 
   return false;
 }
@@ -511,9 +607,9 @@ export function isBlockedSsrfHost(hostname: string): boolean {
     return isBlockedIpv4(ipv4Int);
   }
 
-  // 3. IPv6 check
+  // 3. IPv6 check — malformed colon-bearing hostnames fail closed
   if (h.includes(':')) {
-    return isBlockedIpv6(h);
+    return parseIpv6Hextets(h) === null || isBlockedIpv6(h);
   }
 
   return false;
@@ -606,6 +702,111 @@ export function buildSafeUpstreamResponseHeaders(
   return headers;
 }
 
+export type SafeFetchHostResolver = (hostname: string) => Promise<string[]>;
+
+let safeFetchHostResolver: SafeFetchHostResolver | null = null;
+let activeUpstreamFetches = 0;
+
+const MAX_CONCURRENT_UPSTREAM_FETCHES = 64;
+const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+
+export function setSafeFetchHostResolver(resolver: SafeFetchHostResolver | null): void {
+  safeFetchHostResolver = resolver;
+}
+
+export function resetSafeFetchStateForTest(): void {
+  safeFetchHostResolver = null;
+  activeUpstreamFetches = 0;
+}
+
+async function assertResolvedHostIsPublic(url: URL): Promise<void> {
+  if (!safeFetchHostResolver) return;
+  const hostname = url.hostname.toLowerCase().trim().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
+  if (isValidIpLiteral(hostname)) return;
+
+  let addresses: string[];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    addresses = await Promise.race([
+      safeFetchHostResolver(hostname),
+      new Promise<string[]>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('dns timeout')), 2000);
+      }),
+    ]);
+  } catch {
+    throw new Error('SSRF check rejected: DNS resolution failed');
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+  if (!Array.isArray(addresses) || addresses.length === 0) {
+    throw new Error('SSRF check rejected: DNS returned no addresses');
+  }
+  for (const address of addresses) {
+    if (!isValidIpLiteral(address) || isBlockedSsrfHost(address)) {
+      throw new Error(`SSRF check rejected: ${hostname} resolves to a forbidden address`);
+    }
+  }
+}
+
+function createUpstreamSignal(
+  timeoutMs: number,
+  external?: AbortSignal,
+): { signal: AbortSignal; clearTimeout: () => void } {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  if (external) {
+    if (external.aborted) controller.abort();
+    else external.addEventListener('abort', () => controller.abort(), { once: true });
+  }
+  return {
+    signal: controller.signal,
+    // The timeout covers connection/header acquisition only; response bodies are bounded by
+    // maxBytes so a long audio stream is not cut off mid-track.
+    clearTimeout: () => clearTimeout(timer),
+  };
+}
+
+function enforceResponseSize(response: Response, maxBytes: number): Response {
+  const declared = Number(response.headers.get('content-length') || '');
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    response.body?.cancel().catch(() => {});
+    throw new Error(`Upstream response exceeds ${maxBytes} bytes`);
+  }
+  if (!response.body) return response;
+
+  const reader = response.body.getReader();
+  let totalBytes = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        totalBytes += value.byteLength;
+        if (totalBytes > maxBytes) {
+          await reader.cancel().catch(() => {});
+          controller.error(new Error(`Upstream response exceeds ${maxBytes} bytes`));
+          return;
+        }
+        controller.enqueue(value);
+      } catch (err) {
+        controller.error(err);
+      }
+    },
+    cancel(reason) {
+      return reader.cancel(reason);
+    },
+  });
+
+  return new Response(stream, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
 export async function safeFetch(
   targetUrl: string | URL,
   init?: RequestInit,
@@ -614,60 +815,85 @@ export async function safeFetch(
     allowedDomains?: string[];
     maxRedirects?: number;
     timeoutMs?: number;
+    maxBytes?: number;
   },
 ): Promise<Response> {
-  const maxRedirects = options?.maxRedirects ?? 3;
-  const timeoutMs = options?.timeoutMs ?? 15000;
+  const maxRedirects = Math.max(0, options?.maxRedirects ?? 3);
+  const timeoutMs = Math.max(1, options?.timeoutMs ?? 15000);
+  const maxBytes = options?.maxBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  const deadline = Date.now() + timeoutMs;
   let currentUrl = typeof targetUrl === 'string' ? targetUrl : targetUrl.toString();
-
   let redirectsRemaining = maxRedirects;
 
-  while (true) {
-    const valResult = validateSafeUrl(currentUrl, {
-      allowHttp: options?.allowHttp,
-      allowedDomains: options?.allowedDomains,
-    });
-    if (!valResult.valid || !valResult.url) {
-      throw new Error(`SSRF check rejected: ${valResult.error}`);
-    }
+  if (activeUpstreamFetches >= MAX_CONCURRENT_UPSTREAM_FETCHES) {
+    throw new Error('Upstream concurrency limit reached');
+  }
+  activeUpstreamFetches += 1;
 
-    // Header security: never forward client cookie or authorization to external target
-    const headers = new Headers(init?.headers);
-    headers.delete('cookie');
-    headers.delete('authorization');
-    headers.delete('x-sonic-engine-key');
-    headers.delete('x-sonic-key');
-    headers.delete('x-cfsolara-key');
+  try {
+    while (true) {
+      const valResult = validateSafeUrl(currentUrl, {
+        allowHttp: options?.allowHttp,
+        allowedDomains: options?.allowedDomains,
+      });
+      if (!valResult.valid || !valResult.url) {
+        throw new Error(`SSRF check rejected: ${valResult.error}`);
+      }
+      await assertResolvedHostIsPublic(valResult.url);
 
-    const signal = options?.timeoutMs
-      ? AbortSignal.timeout(timeoutMs)
-      : init?.signal || AbortSignal.timeout(15000);
+      // Header security: never forward client cookie or authorization to external target
+      const headers = new Headers(init?.headers);
+      headers.delete('cookie');
+      headers.delete('authorization');
+      headers.delete('x-sonic-engine-key');
+      headers.delete('x-sonic-key');
+      headers.delete('x-cfsolara-key');
 
-    const resp = await fetch(valResult.url.toString(), {
-      ...init,
-      headers,
-      redirect: 'manual',
-      signal,
-    });
+      const remainingMs = Math.max(1, deadline - Date.now());
+      const upstreamSignal = createUpstreamSignal(remainingMs, init?.signal);
 
-    if ([301, 302, 303, 307, 308].includes(resp.status)) {
-      const location = resp.headers.get('location');
-      if (!location) {
+      let resp: Response;
+      try {
+        resp = await fetch(valResult.url.toString(), {
+          ...init,
+          headers,
+          redirect: 'manual',
+          signal: upstreamSignal.signal,
+        });
+      } finally {
+        upstreamSignal.clearTimeout();
+      }
+
+      if ([301, 302, 303, 307, 308].includes(resp.status)) {
+        const location = resp.headers.get('location');
+        if (!location) {
+          return resp;
+        }
+        if (redirectsRemaining <= 0) {
+          resp.body?.cancel().catch(() => {});
+          throw new Error('Too many redirects');
+        }
+        redirectsRemaining -= 1;
+
+        const nextUrl = new URL(location, valResult.url);
+        if (valResult.url.protocol === 'https:' && nextUrl.protocol === 'http:') {
+          resp.body?.cancel().catch(() => {});
+          throw new Error('Protocol downgrade from https to http during redirect is forbidden');
+        }
+        resp.body?.cancel().catch(() => {});
+        currentUrl = nextUrl.toString();
+        continue;
+      }
+
+      const isHead = (init?.method || 'GET').toUpperCase() === 'HEAD';
+      if (isHead || !Number.isFinite(maxBytes) || maxBytes <= 0) {
         return resp;
       }
-      if (redirectsRemaining <= 0) {
-        throw new Error('Too many redirects');
-      }
-      redirectsRemaining--;
-
-      const nextUrl = new URL(location, valResult.url);
-      if (valResult.url.protocol === 'https:' && nextUrl.protocol === 'http:') {
-        throw new Error('Protocol downgrade from https to http during redirect is forbidden');
-      }
-      currentUrl = nextUrl.toString();
-      continue;
+      return enforceResponseSize(resp, maxBytes);
     }
-
-    return resp;
+  } finally {
+    // Counts upstream header acquisition. Long response bodies are bounded by maxBytes and
+    // intentionally do not hold a slot, so audio downloads cannot exhaust the gate.
+    activeUpstreamFetches = Math.max(0, activeUpstreamFetches - 1);
   }
 }

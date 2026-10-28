@@ -9,8 +9,9 @@ import { Readable } from 'node:stream';
 
 import type { AppEnv } from '../functions/_lib/types';
 import dns from 'node:dns/promises';
-import { checkEngineAccess, isBlockedSsrfHost } from '../functions/_lib/sonic/security';
+import { checkEngineAccess, setSafeFetchHostResolver } from '../functions/_lib/sonic/security';
 import { handleOptions } from '../functions/_lib/http';
+import { toWebRequest } from './request-adapter';
 
 // Route handlers shared directly from `functions/`
 import { onRequest as handleProxy } from '../functions/proxy';
@@ -77,56 +78,21 @@ function getOrInitServerRecommendStore(dbPath?: string): RecommendStore {
 
 function buildRuntimeEnv(overrides?: Partial<AppEnv>): AppEnv {
   const env: Record<string, any> = { ...process.env, ...(overrides || {}) };
-  if (!env.SONIC_RUNTIME) {
-    env.SONIC_RUNTIME = 'linux-engine';
-  }
+  // This process is always the Linux engine; a stray SONIC_RUNTIME=cf-pages must not
+  // disable the service-auth gate on every API route.
+  env.SONIC_RUNTIME = 'linux-engine';
   if (!env.RECOMMEND_STORE) {
     env.RECOMMEND_STORE = getOrInitServerRecommendStore(env.SONIC_RECOMMEND_DB_PATH);
   }
   return env as AppEnv;
 }
 
-export async function checkDnsRebinding(hostname: string): Promise<boolean> {
-  const clean = hostname.toLowerCase().trim().replace(/^\[|\]$/g, '').replace(/\.+$/, '');
-  if (isBlockedSsrfHost(clean)) return true;
-  try {
-    const results = await dns.lookup(clean, { all: true });
-    for (const record of results) {
-      if (isBlockedSsrfHost(record.address)) {
-        return true;
-      }
-    }
-    return false;
-  } catch {
-    return true;
-  }
-}
-
-function toWebRequest(req: http.IncomingMessage): Request {
-  const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim() || 'http';
-  const host = req.headers.host || 'localhost:8080';
-  const fullUrl = `${proto}://${host}${req.url || '/'}`;
-
-  const headers = new Headers();
-  for (const [key, val] of Object.entries(req.headers)) {
-    if (val === undefined) continue;
-    if (Array.isArray(val)) {
-      for (const v of val) headers.append(key, v);
-    } else {
-      headers.set(key, val);
-    }
-  }
-
-  const method = (req.method || 'GET').toUpperCase();
-  const hasBody = method !== 'GET' && method !== 'HEAD';
-
-  return new Request(fullUrl, {
-    method,
-    headers,
-    body: hasBody ? (Readable.toWeb(req) as any) : undefined,
-    duplex: hasBody ? 'half' : undefined,
-  } as RequestInit);
-}
+// Node performs its own DNS lookup before every upstream hop. The shared safeFetch keeps
+// an allowlist check for Cloudflare, where hostname resolution is not observable.
+setSafeFetchHostResolver(async (hostname: string) => {
+  const records = await dns.lookup(hostname, { all: true, verbatim: true });
+  return records.map((record) => record.address);
+});
 
 async function sendWebResponse(res: http.ServerResponse, webResp: Response, isHead: boolean): Promise<void> {
   const outHeaders: Record<string, string | string[]> = {};

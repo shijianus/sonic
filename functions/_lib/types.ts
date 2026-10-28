@@ -6,13 +6,20 @@ export interface AppEnv {
   MUSIC_API_BASE?: string;
   SOLARA_SECRET?: string;
   SONIC_SECRET?: string;
+  SONIC_SECRET_KID?: string;
+  SONIC_SECRET_PREV?: string;
+  SONIC_SECRET_PREV_KID?: string;
+  SONIC_REVOKED_JTIS?: string;
+  SONIC_REVOKED_SUBS?: string;
+  SONIC_TOKEN_MIN_IAT?: string;
   KV?: any;
+  RATE_LIMIT_KV?: any;
+  RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   DB?: any;
   // Linux VPS Local Engine & Inter-Service Auth
   SONIC_RUNTIME?: 'cf-pages' | 'linux-engine' | string;
   SONIC_LOCAL_ENGINE_URL?: string;
   SONIC_ENGINE_SECRET?: string;
-  SONIC_ENGINE_HOST?: string;
   SONIC_REQUIRE_ENGINE_AUTH?: string;
   SONIC_REQUIRE_AUTH?: string;
   SONIC_ENGINE_TIMEOUT_MS?: string;

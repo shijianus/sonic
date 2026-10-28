@@ -238,6 +238,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
         maxRedirects: 3,
         timeoutMs: 15000,
+        maxBytes: 256 * 1024 * 1024,
       },
     );
 

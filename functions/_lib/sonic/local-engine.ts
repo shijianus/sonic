@@ -123,17 +123,6 @@ export async function callLocalEngineJson<T = any>(
     };
   }
 
-  // Loop guard: never let an already-forwarded request call the engine again
-  if (options?.request?.headers.get('X-Sonic-Hop') === 'cf-pages') {
-    return {
-      ok: false,
-      latencyMs: 0,
-      skippedByCircuit: true,
-      circuitState: 'CLOSED',
-      error: 'Loop guard prevented recursive engine call',
-    };
-  }
-
   const c = getOrCreateCircuit(cfg.localEngineUrl);
   const threshold = Math.max(1, parseInt(String(env?.SONIC_CB_FAILURE_THRESHOLD || '3'), 10) || 3);
   const cooldownMs = Math.max(100, parseInt(String(env?.SONIC_CB_COOLDOWN_MS || '30000'), 10) || 30_000);
@@ -169,7 +158,6 @@ export async function callLocalEngineJson<T = any>(
   const headers: Record<string, string> = {
     Accept: 'application/json',
     'User-Agent': 'Sonic-Edge-Gateway/2.2',
-    'X-Sonic-Hop': 'cf-pages',
   };
   if (cfg.engineSecret) {
     headers['X-Sonic-Engine-Key'] = cfg.engineSecret;

@@ -1,5 +1,7 @@
 # Sonic 安全修复摘要与发布验收清单
 
+> **2026-10-28 P0 后续加固**：API Key 已升级为 `sonic_live_v2`（`sub/iat/exp/jti/kid`，移除内存认证缓存与 URL Query Key，v1 一律拒绝）；Linux 引擎按 `SONIC_RUNTIME=linux-engine` 对所有 API 强制服务认证，不再依赖 Host。本文中 SONIC-08（认证缓存）及下方旧版 Query Key 验收项已失效，以本轮代码与 `tests/security-p0-regression.test.ts` 为准。
+
 - 对应报告：`SECURITY_AUDIT_REPORT.md`
 - 基线：`feat/smart-reco` @ `f8f1129`（审计开始时工作区干净）
 - 修复变更：24 个修改文件 + 4 个新增文件（不含本摘要与审计报告）
@@ -64,7 +66,7 @@
 - [ ] `npm test`、`npm run build:engine`、`npm run build` 均 exit 0。
 - [ ] `dist/_headers` 包含：`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Content-Security-Policy: frame-ancestors 'none'`、`Permissions-Policy`。
 - [ ] `dist` 无 `*.map`；grep 不到任何真实密钥值。
-- [ ] 生产环境 `SONIC_SECRET`、`SONIC_ENGINE_SECRET` ≥32 字符；`SONIC_ALLOW_QUERY_KEY=0`。
+- [ ] 生产环境 `SONIC_SECRET`、`SONIC_ENGINE_SECRET` ≥32 字符；API Key 仅走请求头（Query Key 已移除）；用户重新 OAuth 登录以获取 `sonic_live_v2`。
 - [ ] **轮换 `SONIC_SECRET`**（历史 XSS 可能已导致 API Key 泄漏）；使用 `SONIC_SECRET_PREV` 平滑过渡，30 天后移除旧密钥。
 - [ ] 引擎仅监听 `127.0.0.1` 或经 Tunnel；公网不可直连 `:8080`。
 

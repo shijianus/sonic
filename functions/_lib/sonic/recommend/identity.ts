@@ -118,8 +118,8 @@ export async function resolveUserIdentity(request: Request, env?: AppEnv): Promi
   };
 }
 
-export function requestHasIdentitySignals(request: Request, env?: AppEnv): boolean {
-  const creds = extractAuthCredentials(request, env);
+export function requestHasIdentitySignals(request: Request): boolean {
+  const creds = extractAuthCredentials(request);
   if (creds.apiKey || creds.token) return true;
   if (request.headers.get('x-sonic-anon-id')) return true;
   if (request.headers.get('x-sonic-context')) return true;
@@ -134,7 +134,7 @@ export function buildPrivacySafeCacheHeaders(
   publicMaxAgeSec = 120,
 ): { headers: Record<string, string>; allowSharedCache: boolean } {
   const vary = 'Authorization, X-Sonic-Key, X-CFSolara-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context';
-  const hasSignals = identity.personalizationEnabled || Boolean(identity.subjectKey) || requestHasIdentitySignals(request, env);
+  const hasSignals = identity.personalizationEnabled || Boolean(identity.subjectKey) || requestHasIdentitySignals(request);
 
   if (hasSignals || publicMaxAgeSec <= 0) {
     return {

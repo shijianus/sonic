@@ -105,6 +105,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
           allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
           maxRedirects: 3,
           timeoutMs: 15000,
+          maxBytes: 128 * 1024 * 1024,
         },
       );
 

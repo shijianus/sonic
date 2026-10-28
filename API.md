@@ -3,9 +3,10 @@
 > **epocanvas sonic** 现已升级为**双层分布式平台化音乐服务**，将原有的单体音乐播放器解耦为细粒度的微服务 API，并通过 **Epomail OAuth 2.0** 与 **HMAC-SHA256 API Key** 作为统一接入鉴权体系，有效防止接口被滥用，同时允许第三方独立项目（如个人博客、静态站点、桌面与移动端应用）通过安全的 API Key 连结接入。
 >
 > **安全与密钥版本说明**：
-> 1. API Key 全面升级为基于 HMAC-SHA256 的全量签名格式 `sonic_live_v1.<payloadB64url>.<sigB64url>`。
-> 2. 为防止身份伪造，旧版本无签名密钥（`sonic_live_xxx_yyy` 及历史 `solara_live_*`）已彻底废弃并一律拒绝，用户需重新登录获取新版 Key。
-> 3. 默认仅接受 HTTP 请求头（`X-Sonic-Key`、`X-CFSolara-Key`、`X-Api-Key`、`Authorization: Bearer <key>`）；URL 查询参数 `?api_key=` 默认已被禁用（可通过 `SONIC_ALLOW_QUERY_KEY=1` 显式开启，但存在进入访问日志及 Referer 头被泄露的安全风险）。
+> 1. API Key 采用版本化 HMAC-SHA256 签名格式 `sonic_live_v2.<headerB64url>.<payloadB64url>.<sigB64url>`，Header 声明算法/版本/`kid`，Payload 包含 `sub`、`iat`、`exp`、`jti`、`kid`、`role`。
+> 2. 为防止身份伪造与过期凭证滥用，旧版无签名密钥（`sonic_live_xxx_yyy`、`solara_live_*`）以及 v1 签名格式一律拒绝。**迁移方式：升级后通过 `GET /api/auth/login` 重新完成 Epomail OAuth 登录，以签发 v2 Key。**
+> 3. 仅接受 HTTP 请求头（`X-Sonic-Key`、`X-CFSolara-Key`、`X-Api-Key`、`Authorization: Bearer <key>`）；URL 查询参数 `?api_key=` 已完全移除，不再提供兼容开关。
+> 4. 轮换使用 `SONIC_SECRET_PREV`（可选 `SONIC_SECRET_PREV_KID`）；撤销使用 `SONIC_REVOKED_JTIS`、`SONIC_REVOKED_SUBS` 或 `SONIC_TOKEN_MIN_IAT`，修改后需重新部署生效。
 
 ---
 
@@ -28,18 +29,18 @@
    - 回调端点：`GET /api/auth/callback?code=...`
    - 用户信息：`GET /api/auth/user`
 2. **专案连结 API Key 与分级限流**：
-   - 登录 Epomail 后即可自动获得专案 API Key（签发格式为 `sonic_live_v1.<payload>.<sig>`，旧版 `sonic_live_xxx_yyy` 及 `solara_live_*` 废弃）。
+   - 登录 Epomail 后即可自动获得专案 API Key（签发格式为 `sonic_live_v2.<header>.<payload>.<sig>`；旧版 `sonic_live_xxx_yyy`、`solara_live_*` 及 v1 格式均被拒绝，需重新登录）。
    - 在第三方专案发起请求时，支持以下方式传递凭据：
      ```http
-     X-Sonic-Key: sonic_live_v1.<payload>.<sig>
+     X-Sonic-Key: sonic_live_v2.<header>.<payload>.<sig>
      # 或请求头：
-     X-CFSolara-Key: sonic_live_v1.<payload>.<sig>
-     Authorization: Bearer sonic_live_v1.<payload>.<sig>
+     X-CFSolara-Key: sonic_live_v2.<header>.<payload>.<sig>
+     Authorization: Bearer sonic_live_v2.<header>.<payload>.<sig>
      ```
    - 网关内置滑动窗口分级限流（响应头携带 `X-RateLimit-Tier`、`X-RateLimit-Limit`、`X-RateLimit-Remaining`）：
      - 匿名前端访客（`anonymous`）：默认 `240` 次/分钟（可通过 `SONIC_REQUIRE_AUTH=1` 关闭匿名访问）；
      - 持有效 API Key 专案（`api-key`）：默认 `600` 次/分钟高配额；
-     - 内部引擎入口（`engine-sonic.epocanvas.tech`）：**强制要求 `X-Sonic-Engine-Key` 服务间密钥头**，匿名访问一律返回 `401 ENGINE_UNAUTHORIZED`。
+     - Linux 本地引擎（`SONIC_RUNTIME=linux-engine`）：**所有 `/api`、`/proxy`、`/palette` 路由强制要求 `X-Sonic-Engine-Key` 服务间密钥头**，匿名访问一律返回 `401 ENGINE_UNAUTHORIZED`；判定不依赖 `Host` / `X-Forwarded-Host`。
 
 ---
 
@@ -176,7 +177,7 @@
 ```typescript
 // 外部专案客户端示例
 const API_BASE = 'https://sonic.epocanvas.tech/api'; // epocanvas sonic 线上主域名（备用域 https://sonic.epocanvas.com/api）
-const API_KEY = 'sonic_live_v1.<payload>.<sig>'; // 新版带签名 API Key
+const API_KEY = 'sonic_live_v2.<header>.<payload>.<sig>'; // 版本化签名 API Key
 
 // 1. 点歌搜索 (优先使用 Sonic Nexus 聚合检索)
 async function searchSong(keyword: string) {

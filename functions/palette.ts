@@ -490,6 +490,8 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
     allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
     maxRedirects: 2,
     timeoutMs: 6000,
+    // readBoundedArrayBuffer enforces the image cap and returns 413 itself.
+    maxBytes: 0,
   };
   try {
     upstream = await safeFetch(target, imageInit as any, fetchOptions);

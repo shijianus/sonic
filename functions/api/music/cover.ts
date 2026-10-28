@@ -75,6 +75,7 @@ async function proxyImage(imageUrl: string, providerTag = 'direct'): Promise<Res
         allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
         maxRedirects: 3,
         timeoutMs: 6000,
+        maxBytes: 16 * 1024 * 1024,
       },
     );
 

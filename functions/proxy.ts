@@ -97,6 +97,7 @@ async function proxyKuwoAudio(targetUrl: string, request: Request): Promise<Resp
     allowedDomains: ['kuwo.cn'],
     maxRedirects: 2,
     timeoutMs: 15000,
+    maxBytes: 256 * 1024 * 1024,
   });
   const upstreamType = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   if (

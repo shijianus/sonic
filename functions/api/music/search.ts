@@ -32,11 +32,11 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   let degraded = false;
 
   // 1. Primary: Local Linux Engine when running on Cloudflare Edge
-  if (cfg.enableLocalEngine && cfg.runtime !== 'linux-engine' && !request.headers.get('X-Sonic-Hop')) {
+  if (cfg.enableLocalEngine && cfg.runtime !== 'linux-engine') {
     const engineRes = await callLocalEngineJson<any>(
       `/api/music/search?q=${encodeURIComponent(query.trim())}&source=${encodeURIComponent(source)}&count=${count}&page=${page}`,
       env,
-      { clientIp: extractClientIp(request) },
+      { clientIp: extractClientIp(request, env) },
     );
     if (engineRes.ok && engineRes.data && Array.isArray(engineRes.data.tracks)) {
       return jsonResponse(

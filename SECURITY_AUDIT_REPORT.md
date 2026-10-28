@@ -1,5 +1,7 @@
 # Sonic 全专案安全审计报告
 
+> **2026-10-28 P0 后续加固**：本报告记录的是加固前基线。此后 API Key 已升级为 `sonic_live_v2` 并移除认证缓存/Query Key，Linux 引擎改为按运行时对所有 API 强制服务认证；涉及 v1 格式与 Host 判定的旧描述以最新代码为准。
+
 - 审计日期：2026-10-28
 - 审计对象：`shijianus/sonic`（工作副本 `D:\Users\Smart Kevin\OneDrive\Desktop\sonic`）
 - 分支 / 基线提交：`feat/smart-reco` / `f8f1129 fix(deps): 补回 player 锁文件 overrides，修复冻结安装失败`
