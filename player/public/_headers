@@ -1,6 +1,10 @@
 /*
   Referrer-Policy: no-referrer
   Access-Control-Allow-Origin: *
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Content-Security-Policy: frame-ancestors 'none'
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
 
 /
   Cache-Control: no-store
