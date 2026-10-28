@@ -31,7 +31,7 @@ export interface GradientBackgroundState {
 }
 
 export function useGradientBackground(options: GradientBackgroundOptions) {
-  const { bgARef, bgBRef, isPlaying, isOpen } = options
+  const { bgARef, bgBRef } = options
 
   const state = reactive<GradientBackgroundState>({
     useCoverBg: true,

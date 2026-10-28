@@ -1,5 +1,7 @@
 # Sonic 全专案安全审计报告
 
+> **2026-10-28 第二轮整改（当前）**：OAuth 回调不再把 API Key 放入 URL，浏览器会话改为 HttpOnly Cookie；PKCE 在回调端强制校验；API Key 管理接口要求显式请求头二次授权；缓存键与 SSRF/CSRF 边界进一步加固。本报告是第二轮整改前的历史快照，最新状态与实测结果以 `docs/AUDIT_REMEDIATION.md` 为准。
+
 > **2026-10-28 P0 后续加固**：本报告记录的是加固前基线。此后 API Key 已升级为 `sonic_live_v2` 并移除认证缓存/Query Key，Linux 引擎改为按运行时对所有 API 强制服务认证；涉及 v1 格式与 Host 判定的旧描述以最新代码为准。
 
 - 审计日期：2026-10-28

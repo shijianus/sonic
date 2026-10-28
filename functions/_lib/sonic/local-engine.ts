@@ -167,6 +167,7 @@ export async function callLocalEngineJson<T = any>(
     // Forward end-user auth & privacy-safe personalization context to Linux Engine
     const forwardHeaderNames = [
       'authorization',
+      'cookie',
       'x-sonic-key',
       'x-cfsolara-key',
       'x-api-key',

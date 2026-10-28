@@ -1,5 +1,7 @@
 # 交付前最终验证报告(final-verification)
 
+> **2026-10-28 更新**：本文为旧提交 `4b9c4ef` 的历史交付报告，不代表当前安全/构建状态。当前整改与实测结果见 `docs/AUDIT_REMEDIATION.md`；生产运维限制见 `docs/OPERATIONS.md`。
+
 - 日期:2026-10-25
 - 分支:`main`(本地与 `origin/main` 一致)
 - 代码 HEAD:`4b9c4ef`(推送后远端 main 指向此提交)

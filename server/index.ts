@@ -22,6 +22,8 @@ import { onRequest as handleAuthLogin } from '../functions/api/auth/login';
 import { onRequest as handleAuthCallback } from '../functions/api/auth/callback';
 import { onRequest as handleAuthKey } from '../functions/api/auth/key';
 import { onRequest as handleAuthUser } from '../functions/api/auth/user';
+import { onRequest as handleAuthLogout } from '../functions/api/auth/logout';
+import { onRequest as handleAuthRevoke } from '../functions/api/auth/revoke';
 import { onRequest as handleMusicCover } from '../functions/api/music/cover';
 import { onRequest as handleMusicLyric } from '../functions/api/music/lyric';
 import { onRequest as handleMusicRandom } from '../functions/api/music/random';
@@ -97,7 +99,14 @@ setSafeFetchHostResolver(async (hostname: string) => {
 async function sendWebResponse(res: http.ServerResponse, webResp: Response, isHead: boolean): Promise<void> {
   const outHeaders: Record<string, string | string[]> = {};
   webResp.headers.forEach((value, key) => {
-    outHeaders[key] = value;
+    const lower = key.toLowerCase();
+    if (lower === 'set-cookie') {
+      const existing = outHeaders[lower];
+      if (Array.isArray(existing)) existing.push(value);
+      else outHeaders[lower] = [value];
+      return;
+    }
+    outHeaders[lower] = value;
   });
 
   res.writeHead(webResp.status, webResp.statusText || undefined, outHeaders);
@@ -148,6 +157,8 @@ async function dispatchFunctionRoute(request: Request, env: AppEnv): Promise<Res
   if (pathname === '/api/auth/callback') return handleAuthCallback({ request, env });
   if (pathname === '/api/auth/key') return handleAuthKey({ request, env });
   if (pathname === '/api/auth/user') return handleAuthUser({ request, env });
+  if (pathname === '/api/auth/logout') return handleAuthLogout({ request, env });
+  if (pathname === '/api/auth/revoke') return handleAuthRevoke({ request, env });
 
   // Music routes & aliases
   if (pathname === '/api/cover' || pathname === '/api/music/cover') {
@@ -194,7 +205,12 @@ async function dispatchFunctionRoute(request: Request, env: AppEnv): Promise<Res
     return handleSonicSearchNexus({ request, env, waitUntil });
   }
   if (pathname.startsWith('/api/sonic/search/')) {
-    const platform = decodeURIComponent(pathname.slice('/api/sonic/search/'.length));
+    let platform: string;
+    try {
+      platform = decodeURIComponent(pathname.slice('/api/sonic/search/'.length));
+    } catch {
+      return new Response('Bad Request', { status: 400 });
+    }
     return handleSonicSearchPlatform({ request, params: { platform }, env, waitUntil });
   }
 
@@ -205,17 +221,27 @@ async function dispatchFunctionRoute(request: Request, env: AppEnv): Promise<Res
     return handleSonicLyricsSync({ request, env, waitUntil });
   }
   if (pathname.startsWith('/api/sonic/lyrics/')) {
-    const platform = decodeURIComponent(pathname.slice('/api/sonic/lyrics/'.length));
+    let platform: string;
+    try {
+      platform = decodeURIComponent(pathname.slice('/api/sonic/lyrics/'.length));
+    } catch {
+      return new Response('Bad Request', { status: 400 });
+    }
     return handleSonicLyricsPlatform({ request, params: { platform }, env, waitUntil });
   }
 
   // Catch-all `/api/*` commercial endpoints (banners, playlists, charts, artists, MVs, comments)
   if (pathname.startsWith('/api/')) {
-    const segments = pathname
-      .slice('/api/'.length)
-      .split('/')
-      .filter(Boolean)
-      .map((s) => decodeURIComponent(s));
+    let segments: string[];
+    try {
+      segments = pathname
+        .slice('/api/'.length)
+        .split('/')
+        .filter(Boolean)
+        .map((s) => decodeURIComponent(s));
+    } catch {
+      return new Response('Bad Request', { status: 400 });
+    }
     return handleApiCatchAll({ request, params: { path: segments }, env });
   }
 
@@ -223,22 +249,32 @@ async function dispatchFunctionRoute(request: Request, env: AppEnv): Promise<Res
 }
 
 async function serveStaticAsset(staticRoot: string, pathname: string, isHead: boolean): Promise<Response> {
-  const safeRel = path.posix.normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, '').replace(/^\/+/, '');
-  let candidate = path.join(staticRoot, safeRel || 'index.html');
+  const normalizedRoot = path.resolve(staticRoot);
+  let safeRel = path.posix.normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, '').replace(/^\/+/, '');
+  if (safeRel.includes('\\') || safeRel.includes('\0')) {
+    return new Response('Not Found', { status: 404 });
+  }
+  let candidate = path.resolve(normalizedRoot, safeRel || 'index.html');
+  if (candidate !== normalizedRoot && !candidate.startsWith(normalizedRoot + path.sep)) {
+    return new Response('Not Found', { status: 404 });
+  }
 
   try {
     const stat = await fsp.stat(candidate);
     if (stat.isDirectory()) {
-      candidate = path.join(candidate, 'index.html');
+      candidate = path.resolve(candidate, 'index.html');
     }
   } catch {
     // SPA fallback for client-side routes (only when not requesting a missing asset file with extension)
     const ext = path.extname(safeRel);
     if (!ext || ext === '.html') {
-      candidate = path.join(staticRoot, 'index.html');
+      candidate = path.resolve(normalizedRoot, 'index.html');
     } else {
       return new Response('Not Found', { status: 404 });
     }
+  }
+  if (candidate !== normalizedRoot && !candidate.startsWith(normalizedRoot + path.sep)) {
+    return new Response('Not Found', { status: 404 });
   }
 
   try {
@@ -248,11 +284,16 @@ async function serveStaticAsset(staticRoot: string, pathname: string, isHead: bo
     }
     const ext = path.extname(candidate).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-    const isImmutable = pathname.startsWith('/assets/');
+    const isImmutable = pathname.startsWith('/assets/') || pathname.startsWith('/static/');
     const headers: Record<string, string> = {
       'Content-Type': contentType,
       'Content-Length': String(stat.size),
       'Cache-Control': isImmutable ? 'public, max-age=31536000, immutable' : 'public, max-age=300',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'X-Frame-Options': 'DENY',
+      'Content-Security-Policy': "frame-ancestors 'none'",
+      'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
     };
     if (isHead) {
       return new Response(null, { status: 200, headers });
@@ -262,13 +303,34 @@ async function serveStaticAsset(staticRoot: string, pathname: string, isHead: bo
   } catch {
     return new Response('Sonic Local Engine is running (static dist not mounted)', {
       status: 200,
-      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+      headers: { 'Content-Type': 'text/plain; charset=utf-8', 'X-Content-Type-Options': 'nosniff' },
     });
   }
 }
 
 export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist'), envOverrides?: Partial<AppEnv>) {
-  return http.createServer(async (req, res) => {
+  const server = http.createServer(async (req, res) => {
+    const startedAt = Date.now();
+    const requestId = crypto.randomUUID();
+    res.setHeader('X-Request-Id', requestId);
+    res.on('finish', () => {
+      // Structured access log: path only, never query strings or headers.
+      let pathname = '/';
+      try {
+        pathname = new URL(req.url || '/', 'http://engine.internal').pathname;
+      } catch {}
+      console.log(
+        JSON.stringify({
+          type: 'access',
+          requestId,
+          method: req.method || 'GET',
+          path: pathname,
+          status: res.statusCode,
+          durationMs: Date.now() - startedAt,
+        }),
+      );
+    });
+
     try {
       const webReq = toWebRequest(req);
       const env = buildRuntimeEnv(envOverrides);
@@ -295,7 +357,14 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
       const staticResp = await serveStaticAsset(staticRoot, url.pathname, webReq.method === 'HEAD');
       await sendWebResponse(res, staticResp, webReq.method === 'HEAD');
     } catch (err: any) {
-      console.error('[Sonic Engine Unhandled Error]', err);
+      console.error(
+        JSON.stringify({
+          type: 'unhandled_error',
+          requestId,
+          name: String(err?.name || 'Error'),
+          message: String(err?.message || '').slice(0, 200),
+        }),
+      );
       if (!res.headersSent) {
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(
@@ -309,6 +378,12 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
       }
     }
   });
+
+  // Bound slow-client and idle-connection resource consumption.
+  server.headersTimeout = 15_000;
+  server.requestTimeout = 30_000;
+  server.keepAliveTimeout = 5_000;
+  return server;
 }
 
 // Start server when executed as main entrypoint
@@ -320,7 +395,7 @@ const isMain =
 
 if (isMain) {
   const port = parseInt(process.env.PORT || '8080', 10) || 8080;
-  const host = process.env.HOST || '0.0.0.0';
+  const host = process.env.HOST || '127.0.0.1';
   const staticDir = process.env.SONIC_STATIC_DIR || path.resolve(process.cwd(), 'dist');
   const server = createSonicServer(staticDir);
 
@@ -332,7 +407,12 @@ if (isMain) {
 
   const shutdown = (sig: string) => {
     console.log(`[Sonic Local Engine] Received ${sig}, shutting down gracefully...`);
-    server.close(() => process.exit(0));
+    server.close(() => {
+      try {
+        (serverRecommendStore as any)?.close?.();
+      } catch {}
+      process.exit(0);
+    });
     setTimeout(() => process.exit(0), 5000).unref();
   };
   process.on('SIGTERM', () => shutdown('SIGTERM'));

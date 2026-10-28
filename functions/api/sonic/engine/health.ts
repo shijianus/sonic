@@ -58,6 +58,14 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         gorseConfigured: isGorseEnabled(env),
         meilisearchConfigured: isMeilisearchEnabled(env),
       },
+      process:
+        typeof process !== 'undefined'
+          ? {
+              nodeVersion: process.version,
+              uptimeSec: Math.floor(process.uptime()),
+              rssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+            }
+          : undefined,
       circuit: getLocalEngineCircuitSnapshot(env),
     },
     { status: 200, headers: { 'Cache-Control': 'no-store' } },

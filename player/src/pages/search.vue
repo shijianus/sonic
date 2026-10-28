@@ -405,7 +405,7 @@ const maxScore = computed(() => {
               v-for="(keyword, ki) in searchHistory"
               :key="keyword"
               class="history-chip group flex min-h-11 items-center rounded-full border border-white/10 bg-white/5 text-xs font-medium transition-all duration-200 hover:border-sky-500/30 hover:bg-white/10 hover:-translate-y-0.5"
-              :style="{ animationDelay: `${ki * 35}ms` }"
+              :style="{ animationDelay: `${Number(ki) * 35}ms` }"
             >
               <button
                 type="button"

@@ -1,5 +1,7 @@
 # CFSolara 已知问题与技术局限清单 (Known Issues & Technical Limitations)
 
+> **2026-10-28 更新**：安全与运维相关的最新已知限制（Docker 验证、Player 类型债、限流一致性、DNS rebinding 等）见 `docs/AUDIT_REMEDIATION.md` 与 `docs/OPERATIONS.md`。本文主要保留音频试听判定等内容层历史问题。
+
 > **文档性质**：公开代码仓库已知问题诚实披露清单  
 > **更新时间**：2026-10-25  
 > **编写原则**：客观坦诚、不隐瞒技术局限、不美化未完成项  

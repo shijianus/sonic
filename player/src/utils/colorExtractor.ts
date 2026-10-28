@@ -281,7 +281,7 @@ export async function getColorPalette(imageUrl: string, useCache: boolean = true
     // 限制缓存大小
     if (colorCache.size > 50) {
       const firstKey = colorCache.keys().next().value
-      colorCache.delete(firstKey)
+      if (firstKey !== undefined) colorCache.delete(firstKey)
     }
   }
 

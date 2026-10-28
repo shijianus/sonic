@@ -1,4 +1,4 @@
-import { ref, onUnmounted, computed } from 'vue'
+import { ref, computed } from 'vue'
 
 export type VisualizerType = 'bars' | 'wave' | 'circular'
 
@@ -16,8 +16,8 @@ let globalSourceNode: MediaElementAudioSourceNode | null = null
 let globalAnimationId: number | null = null
 let globalIsInitialized = ref(false)
 let globalIsAnalysing = ref(false)
-let globalFrequencyData = ref<Uint8Array>(new Uint8Array(0))
-let globalTimeDomainData = ref<Uint8Array>(new Uint8Array(0))
+let globalFrequencyData = ref<Uint8Array<ArrayBuffer>>(new Uint8Array(0))
+let globalTimeDomainData = ref<Uint8Array<ArrayBuffer>>(new Uint8Array(0))
 
 export function useAudioAnalyser(options: AudioAnalyserOptions = {}) {
   const {

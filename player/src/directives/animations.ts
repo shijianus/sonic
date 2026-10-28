@@ -6,7 +6,6 @@ import { prefersReducedMotion } from '@/utils/motion'
 // 注册 ScrollTrigger 插件
 gsap.registerPlugin(ScrollTrigger)
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type AnyDirective = Directive<HTMLElement, any>
 
 interface StaggerOptions {
@@ -432,8 +431,6 @@ export const vTilt: Directive<
 
       // 更新光泽位置
       if (glareEl) {
-        const glareX = (mouseX + 1) / 2
-        const glareY = (mouseY + 1) / 2
         const angle = Math.atan2(mouseY, mouseX) * (180 / Math.PI) + 135
         glareEl.style.background = `linear-gradient(${angle}deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, ${glareMax * Math.sqrt(mouseX ** 2 + mouseY ** 2)}) 100%)`
         glareEl.style.opacity = '1'

@@ -10,7 +10,6 @@ import {
   transformSearchSongs,
   transformSearchPlaylists,
   normalizeDurationMs,
-  type SongData,
   type PlaylistData,
 } from '@/utils/transformers'
 import { formatCoverUrl } from '@/utils/imageUrl'

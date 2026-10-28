@@ -5,7 +5,7 @@
 // 3. SSRF Triple Validation: Protocol (https only), Port (80/443), Host canonicalization (IPv4/IPv6/domain whitelist)
 
 import type { AppEnv } from '../types';
-import { verifyAuth } from '../auth';
+import { extractAuthCredentials, verifyAuth } from '../auth';
 import { isEnvEnabled } from './config';
 import { jsonResponse } from '../http';
 import { sha256Bytes, sha256Hex } from './crypto';
@@ -30,14 +30,14 @@ export function timingSafeEqualStr(a: string, b: string): boolean {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length === 0 || b.length === 0) {
     return false;
   }
-  // Pre-hash both strings to 32 bytes to ensure equal comparison length and avoid leaking string lengths
+  // Compare fixed-length digests so neither content nor length influences timing.
   const hashA = sha256Bytes(a);
   const hashB = sha256Bytes(b);
   let diff = 0;
   for (let i = 0; i < 32; i++) {
     diff |= hashA[i] ^ hashB[i];
   }
-  return diff === 0 && a === b;
+  return diff === 0;
 }
 
 export function hasValidEngineSecret(request: Request, env?: AppEnv): boolean {
@@ -186,6 +186,30 @@ export function extractClientIp(request: Request, env?: AppEnv): string {
   return hasValidEngineSecret(request, env)
     ? getForwardedClientIp(request, env)
     : getPublicClientIp(request);
+}
+
+export function isSameOriginRequest(request: Request): boolean {
+  let expectedOrigin = '';
+  try {
+    expectedOrigin = new URL(request.url).origin;
+  } catch {
+    return false;
+  }
+  const origin = request.headers.get('origin');
+  if (origin) return origin === expectedOrigin;
+  const referer = request.headers.get('referer');
+  if (referer) {
+    try {
+      return new URL(referer).origin === expectedOrigin;
+    } catch {
+      return false;
+    }
+  }
+  const fetchSite = request.headers.get('sec-fetch-site');
+  if (fetchSite) return fetchSite === 'same-origin' || fetchSite === 'none';
+  // Non-browser clients that manually attach a Cookie and a custom method are allowed;
+  // browsers attach Origin/Referer/Sec-Fetch-Site to unsafe requests.
+  return true;
 }
 
 // ── Sliding-Window Rate Limiter ──
@@ -565,6 +589,19 @@ export function isBlockedIpv6(host: string): boolean {
     if (isBlockedIpv4(v4)) return true;
   }
 
+  // IPv4-translated (::ffff:0:a.b.c.d, RFC 6052 / RFC 6145)
+  if (
+    hextets[0] === 0 &&
+    hextets[1] === 0 &&
+    hextets[2] === 0 &&
+    hextets[3] === 0 &&
+    hextets[4] === 0xffff &&
+    hextets[5] === 0
+  ) {
+    const v4 = ((hextets[6] << 16) | hextets[7]) >>> 0;
+    if (isBlockedIpv4(v4)) return true;
+  }
+
   // 2002::/16 6to4 embeds an IPv4 address in the first two hextets
   if (hextets[0] === 0x2002) {
     const v4 = ((hextets[1] << 16) | hextets[2]) >>> 0;
@@ -622,6 +659,9 @@ export function validateSafeUrl(
     allowedDomains?: string[];
   },
 ): { valid: boolean; url?: URL; error?: string } {
+  if (typeof urlInput === 'string' && urlInput.length > 8192) {
+    return { valid: false, error: 'URL is too long' };
+  }
   let url: URL;
   try {
     url = typeof urlInput === 'string' ? new URL(urlInput) : urlInput;
@@ -754,19 +794,24 @@ function createUpstreamSignal(
 ): { signal: AbortSignal; clearTimeout: () => void } {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let onAbort: (() => void) | undefined;
   if (external) {
+    onAbort = () => controller.abort();
     if (external.aborted) controller.abort();
-    else external.addEventListener('abort', () => controller.abort(), { once: true });
+    else external.addEventListener('abort', onAbort, { once: true });
   }
   return {
     signal: controller.signal,
     // The timeout covers connection/header acquisition only; response bodies are bounded by
     // maxBytes so a long audio stream is not cut off mid-track.
-    clearTimeout: () => clearTimeout(timer),
+    clearTimeout: () => {
+      clearTimeout(timer);
+      if (external && onAbort) external.removeEventListener('abort', onAbort);
+    },
   };
 }
 
-function enforceResponseSize(response: Response, maxBytes: number): Response {
+function enforceResponseSize(response: Response, maxBytes: number, idleTimeoutMs: number): Response {
   const declared = Number(response.headers.get('content-length') || '');
   if (Number.isFinite(declared) && declared > maxBytes) {
     response.body?.cancel().catch(() => {});
@@ -778,8 +823,17 @@ function enforceResponseSize(response: Response, maxBytes: number): Response {
   let totalBytes = 0;
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        const { done, value } = await reader.read();
+        const readPromise = reader.read();
+        const idlePromise = new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`Upstream body idle timeout after ${idleTimeoutMs}ms`)),
+            idleTimeoutMs,
+          );
+        });
+        const { done, value } = await Promise.race([readPromise, idlePromise]);
+        if (timer !== undefined) clearTimeout(timer);
         if (done) {
           controller.close();
           return;
@@ -792,6 +846,8 @@ function enforceResponseSize(response: Response, maxBytes: number): Response {
         }
         controller.enqueue(value);
       } catch (err) {
+        if (timer !== undefined) clearTimeout(timer);
+        await reader.cancel().catch(() => {});
         controller.error(err);
       }
     },
@@ -816,11 +872,13 @@ export async function safeFetch(
     maxRedirects?: number;
     timeoutMs?: number;
     maxBytes?: number;
+    bodyIdleTimeoutMs?: number;
   },
 ): Promise<Response> {
   const maxRedirects = Math.max(0, options?.maxRedirects ?? 3);
   const timeoutMs = Math.max(1, options?.timeoutMs ?? 15000);
   const maxBytes = options?.maxBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
+  const bodyIdleTimeoutMs = Math.max(10, options?.bodyIdleTimeoutMs ?? 30000);
   const deadline = Date.now() + timeoutMs;
   let currentUrl = typeof targetUrl === 'string' ? targetUrl : targetUrl.toString();
   let redirectsRemaining = maxRedirects;
@@ -841,13 +899,30 @@ export async function safeFetch(
       }
       await assertResolvedHostIsPublic(valResult.url);
 
-      // Header security: never forward client cookie or authorization to external target
+      // Header security: never forward client credentials, cookies or Sonic identity
+      // context to an external target.
       const headers = new Headers(init?.headers);
-      headers.delete('cookie');
-      headers.delete('authorization');
-      headers.delete('x-sonic-engine-key');
-      headers.delete('x-sonic-key');
-      headers.delete('x-cfsolara-key');
+      for (const name of [
+        'cookie',
+        'authorization',
+        'proxy-authorization',
+        'x-sonic-engine-key',
+        'x-sonic-key',
+        'x-cfsolara-key',
+        'x-api-key',
+        'x-sonic-anon-id',
+        'x-sonic-context',
+        'x-sonic-personalization',
+        'x-sonic-client-ip',
+        'forwarded',
+        'x-forwarded-for',
+        'x-forwarded-host',
+        'x-forwarded-proto',
+        'x-real-ip',
+        'cf-connecting-ip',
+      ]) {
+        headers.delete(name);
+      }
 
       const remainingMs = Math.max(1, deadline - Date.now());
       const upstreamSignal = createUpstreamSignal(remainingMs, init?.signal);
@@ -889,7 +964,7 @@ export async function safeFetch(
       if (isHead || !Number.isFinite(maxBytes) || maxBytes <= 0) {
         return resp;
       }
-      return enforceResponseSize(resp, maxBytes);
+      return enforceResponseSize(resp, maxBytes, bodyIdleTimeoutMs);
     }
   } finally {
     // Counts upstream header acquisition. Long response bodies are bounded by maxBytes and

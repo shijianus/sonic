@@ -8,6 +8,7 @@ import { getSonicConfig } from './config';
 import { buildNeteaseEapiParams, buildNeteaseLinuxApiParams } from './crypto';
 import { normalizeArtistString, normalizeText, normalizeCjkText, calcLevenshteinSimilarity } from './utils';
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
+import { safeFetch } from './security';
 import { callLocalEngineJson, getLocalEngineCircuitSnapshot, type CircuitState } from './local-engine';
 
 const DESKTOP_UA =
@@ -654,10 +655,19 @@ async function resolveKuwoSingleStream(
   const finalUrl = toHttpsIfSafe(rawUrl);
   // Verify byte length via 1-byte Range probe to guarantee full-length real audio (>= 350 KB)
   try {
-    const probe = await fetch(finalUrl, {
+    const probe = await safeFetch(
+    finalUrl,
+    {
       headers: { Range: 'bytes=0-0', Referer: 'https://www.kuwo.cn/', 'User-Agent': DESKTOP_UA },
-      signal: AbortSignal.timeout(4000),
-    });
+    },
+    {
+      allowHttp: false,
+      allowedDomains: ['kuwo.cn'],
+      maxRedirects: 1,
+      timeoutMs: 4000,
+      maxBytes: 64 * 1024,
+    },
+  );
     const cr = probe.headers.get('content-range') || '';
     const cl = probe.headers.get('content-length') || '';
     probe.body?.cancel?.().catch(() => {});
@@ -1196,10 +1206,19 @@ export async function resolvePlayableStream(
       gdUrl.searchParams.set('id', cleanId);
       gdUrl.searchParams.set('source', cleanSource === 'qq' ? 'tencent' : cleanSource);
       gdUrl.searchParams.set('br', quality);
-      const gdRes = await fetch(gdUrl.toString(), {
-        headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
-        signal: AbortSignal.timeout(4500),
-      });
+      const gdRes = await safeFetch(
+        gdUrl,
+        {
+          headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
+        },
+        {
+          allowHttp: false,
+          allowedDomains: [gdUrl.hostname],
+          maxRedirects: 2,
+          timeoutMs: 4500,
+          maxBytes: 1024 * 1024,
+        },
+      );
       if (gdRes.ok) {
         const gdData = (await gdRes.json()) as any;
         if (gdData?.url && typeof gdData.url === 'string' && gdData.url.startsWith('http')) {

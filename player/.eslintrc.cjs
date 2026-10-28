@@ -1,4 +1,5 @@
-// .eslintrc.cjs
+// Legacy ESLint 8 configuration.
+// ESLint 9 (the version used by `pnpm lint`) reads ../eslint.config.mjs instead.
 module.exports = {
   root: true,
   env: {

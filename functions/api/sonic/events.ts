@@ -55,7 +55,7 @@ export async function onRequest({
   const config = getSonicConfig(env);
   const privateHeaders = {
     'Cache-Control': 'private, no-store',
-    Vary: 'Authorization, X-Sonic-Key, X-CFSolara-Key, X-Sonic-Anon-Id, X-Sonic-Personalization',
+    Vary: 'Authorization, Cookie, X-Sonic-Key, X-CFSolara-Key, X-Sonic-Anon-Id, X-Sonic-Personalization',
   };
 
   if (method === 'GET') {

@@ -39,7 +39,7 @@ const hasAudioActivity = (data: Uint8Array, threshold = 10) => {
 
 // 绘制频谱柱状图
 const drawBars = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-  const { frequencyData, barCount, barWidth, barGap, gradientColors, showMirror } = props
+  const { frequencyData, barWidth, barGap, gradientColors, showMirror } = props
 
   if (frequencyData.length === 0) return
 

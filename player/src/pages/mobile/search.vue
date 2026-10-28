@@ -39,7 +39,7 @@ const creativeEffect = {
 type SearchTab = 'song' | 'playlist' | 'mv'
 
 const { t } = useI18n()
-const { setPlaylist, play, currentSong } = useAudio()
+const { setPlaylist, play } = useAudio()
 const route = useRoute()
 const router = useRouter()
 const globalStore = useGlobalStore()
@@ -409,18 +409,6 @@ const mapToStoreSong = (s: SongData): Song => ({
   duration: s.duration,
   cover: s.cover,
 })
-
-const playSong = (s: SongData, index: number) => {
-  const list: Song[] = state.songs.map(mapToStoreSong)
-  setPlaylist(list, index)
-  play(list[index], index)
-}
-
-const isCurrent = (s: SongData) => {
-  const cur = currentSong.value
-  if (!cur) return false
-  return String(s.id) === String(cur.id)
-}
 
 const playAllSongs = () => {
   if (!state.songs.length) return

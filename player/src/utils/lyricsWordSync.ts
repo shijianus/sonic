@@ -326,7 +326,7 @@ export function syncWordElements(
   container: HTMLElement | null,
   lyricsData: Array<{ time?: number; words?: LyricWord[] }>,
   currentTime: number,
-  currentIndex?: number,
+  _currentIndex?: number,
   lastLineIndexRef?: { value: number },
   latencyCompensation = 0.08
 ) {

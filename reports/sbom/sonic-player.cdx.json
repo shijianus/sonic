@@ -1,0 +1,2010 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:e6905860-9bac-4bfb-8b5c-f4d7d9549f45",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-10-28T10:28:27.263Z",
+    "tools": [
+      {
+        "vendor": "Sonic",
+        "name": "generate-sbom.mjs",
+        "version": "1.0.0"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "sonic-music-player",
+      "version": "2.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40babel/helper-string-parser@7.29.11",
+      "name": "@babel/helper-string-parser",
+      "version": "7.29.11",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40babel/helper-string-parser@7.29.11",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://babel.dev/docs/en/next/babel-helper-string-parser"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40babel/helper-validator-identifier@7.29.7",
+      "name": "@babel/helper-validator-identifier",
+      "version": "7.29.7",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40babel/helper-validator-identifier@7.29.7",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/babel/babel#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40babel/parser@7.29.11",
+      "name": "@babel/parser",
+      "version": "7.29.11",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40babel/parser@7.29.11",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://babel.dev/docs/en/next/babel-parser"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40babel/types@7.29.11",
+      "name": "@babel/types",
+      "version": "7.29.11",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40babel/types@7.29.11",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://babel.dev/docs/en/next/babel-types"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40borewit/text-codec@0.2.2",
+      "name": "@borewit/text-codec",
+      "version": "0.2.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40borewit/text-codec@0.2.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Borewit/text-codec#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40intlify/core-base@11.4.16",
+      "name": "@intlify/core-base",
+      "version": "11.4.16",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40intlify/core-base@11.4.16",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/intlify/vue-i18n/tree/master/packages/core-base#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40intlify/devtools-types@11.4.16",
+      "name": "@intlify/devtools-types",
+      "version": "11.4.16",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40intlify/devtools-types@11.4.16",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/intlify/vue-i18n/tree/master/packages/devtools-types#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40intlify/message-compiler@11.4.16",
+      "name": "@intlify/message-compiler",
+      "version": "11.4.16",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40intlify/message-compiler@11.4.16",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/intlify/vue-i18n/tree/master/packages/message-compiler#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40intlify/shared@11.4.16",
+      "name": "@intlify/shared",
+      "version": "11.4.16",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40intlify/shared@11.4.16",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/intlify/vue-i18n/tree/master/packages/shared#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40jridgewell/sourcemap-codec@1.6.0",
+      "name": "@jridgewell/sourcemap-codec",
+      "version": "1.6.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40jridgewell/sourcemap-codec@1.6.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jridgewell/sourcemaps/tree/main/packages/sourcemap-codec"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40tokenizer/inflate@0.4.1",
+      "name": "@tokenizer/inflate",
+      "version": "0.4.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40tokenizer/inflate@0.4.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Borewit/tokenizer-inflate#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40tokenizer/token@0.3.0",
+      "name": "@tokenizer/token",
+      "version": "0.3.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40tokenizer/token@0.3.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Borewit/tokenizer-token#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40types/web-bluetooth@0.0.21",
+      "name": "@types/web-bluetooth",
+      "version": "0.0.21",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40types/web-bluetooth@0.0.21",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/DefinitelyTyped/DefinitelyTyped/tree/master/types/web-bluetooth"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/compiler-core@3.5.44",
+      "name": "@vue/compiler-core",
+      "version": "3.5.44",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/compiler-core@3.5.44",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/core/tree/main/packages/compiler-core#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/compiler-dom@3.5.44",
+      "name": "@vue/compiler-dom",
+      "version": "3.5.44",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/compiler-dom@3.5.44",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/core/tree/main/packages/compiler-dom#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/compiler-sfc@3.5.44",
+      "name": "@vue/compiler-sfc",
+      "version": "3.5.44",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/compiler-sfc@3.5.44",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/core/tree/main/packages/compiler-sfc#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/compiler-ssr@3.5.44",
+      "name": "@vue/compiler-ssr",
+      "version": "3.5.44",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/compiler-ssr@3.5.44",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/core/tree/main/packages/compiler-ssr#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/devtools-api@6.6.4",
+      "name": "@vue/devtools-api",
+      "version": "6.6.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/devtools-api@6.6.4",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/devtools#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/devtools-api@7.7.10",
+      "name": "@vue/devtools-api",
+      "version": "7.7.10",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/devtools-api@7.7.10",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/devtools#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/devtools-kit@7.7.10",
+      "name": "@vue/devtools-kit",
+      "version": "7.7.10",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/devtools-kit@7.7.10",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/devtools#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/devtools-shared@7.7.10",
+      "name": "@vue/devtools-shared",
+      "version": "7.7.10",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/devtools-shared@7.7.10",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/devtools#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/reactivity@3.5.44",
+      "name": "@vue/reactivity",
+      "version": "3.5.44",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/reactivity@3.5.44",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/core/tree/main/packages/reactivity#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/runtime-core@3.5.44",
+      "name": "@vue/runtime-core",
+      "version": "3.5.44",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/runtime-core@3.5.44",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/core/tree/main/packages/runtime-core#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/runtime-dom@3.5.44",
+      "name": "@vue/runtime-dom",
+      "version": "3.5.44",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/runtime-dom@3.5.44",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/core/tree/main/packages/runtime-dom#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/server-renderer@3.5.44",
+      "name": "@vue/server-renderer",
+      "version": "3.5.44",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/server-renderer@3.5.44",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/core/tree/main/packages/server-renderer#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vue/shared@3.5.44",
+      "name": "@vue/shared",
+      "version": "3.5.44",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vue/shared@3.5.44",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vuejs/core/tree/main/packages/shared#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vueuse/core@13.9.0",
+      "name": "@vueuse/core",
+      "version": "13.9.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vueuse/core@13.9.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vueuse/vueuse#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vueuse/metadata@13.9.0",
+      "name": "@vueuse/metadata",
+      "version": "13.9.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vueuse/metadata@13.9.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vueuse/vueuse/tree/main/packages/metadata#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40vueuse/shared@13.9.0",
+      "name": "@vueuse/shared",
+      "version": "13.9.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/%40vueuse/shared@13.9.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vueuse/vueuse/tree/main/packages/shared#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/agent-base@6.0.2",
+      "name": "agent-base",
+      "version": "6.0.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/agent-base@6.0.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/TooTallNate/node-agent-base#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/artplayer@5.4.0",
+      "name": "artplayer",
+      "version": "5.4.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/artplayer@5.4.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://artplayer.org"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/artplayer-plugin-hls-control@1.1.0",
+      "name": "artplayer-plugin-hls-control",
+      "version": "1.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/artplayer-plugin-hls-control@1.1.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://artplayer.org"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/asynckit@0.4.0",
+      "name": "asynckit",
+      "version": "0.4.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/asynckit@0.4.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/alexindigo/asynckit#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/axios@1.20.0",
+      "name": "axios",
+      "version": "1.20.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/axios@1.20.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://axios-http.com"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/birpc@2.9.0",
+      "name": "birpc",
+      "version": "2.9.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/birpc@2.9.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/antfu-collective/birpc#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/call-bind-apply-helpers@1.0.2",
+      "name": "call-bind-apply-helpers",
+      "version": "1.0.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/call-bind-apply-helpers@1.0.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ljharb/call-bind-apply-helpers#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/combined-stream@1.0.8",
+      "name": "combined-stream",
+      "version": "1.0.8",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/combined-stream@1.0.8",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/felixge/node-combined-stream"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/content-type@2.1.0",
+      "name": "content-type",
+      "version": "2.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/content-type@2.1.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jshttp/content-type#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/copy-anything@4.1.5",
+      "name": "copy-anything",
+      "version": "4.1.5",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/copy-anything@4.1.5",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/mesqueeb/copy-anything#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/csstype@3.2.3",
+      "name": "csstype",
+      "version": "3.2.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/csstype@3.2.3",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/frenic/csstype#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/debug@4.4.3",
+      "name": "debug",
+      "version": "4.4.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/debug@4.4.3",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/debug-js/debug#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/defu@6.1.7",
+      "name": "defu",
+      "version": "6.1.7",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/defu@6.1.7",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/unjs/defu#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/delayed-stream@1.0.0",
+      "name": "delayed-stream",
+      "version": "1.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/delayed-stream@1.0.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/felixge/node-delayed-stream"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/dunder-proto@1.0.1",
+      "name": "dunder-proto",
+      "version": "1.0.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/dunder-proto@1.0.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/es-shims/dunder-proto#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/entities@7.0.1",
+      "name": "entities",
+      "version": "7.0.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-2-Clause"
+          }
+        }
+      ],
+      "purl": "pkg:npm/entities@7.0.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/fb55/entities#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/es-define-property@1.0.1",
+      "name": "es-define-property",
+      "version": "1.0.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/es-define-property@1.0.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ljharb/es-define-property#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/es-errors@1.3.0",
+      "name": "es-errors",
+      "version": "1.3.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/es-errors@1.3.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ljharb/es-errors#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/es-object-atoms@1.1.2",
+      "name": "es-object-atoms",
+      "version": "1.1.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/es-object-atoms@1.1.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ljharb/es-object-atoms#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/es-set-tostringtag@2.1.0",
+      "name": "es-set-tostringtag",
+      "version": "2.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/es-set-tostringtag@2.1.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/es-shims/es-set-tostringtag#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/estree-walker@2.0.2",
+      "name": "estree-walker",
+      "version": "2.0.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/estree-walker@2.0.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Rich-Harris/estree-walker#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/file-type@21.3.4",
+      "name": "file-type",
+      "version": "21.3.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/file-type@21.3.4",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/sindresorhus/file-type#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/follow-redirects@1.16.2",
+      "name": "follow-redirects",
+      "version": "1.16.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/follow-redirects@1.16.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/follow-redirects/follow-redirects"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/form-data@4.0.6",
+      "name": "form-data",
+      "version": "4.0.6",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/form-data@4.0.6",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/form-data/form-data#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/function-bind@1.1.2",
+      "name": "function-bind",
+      "version": "1.1.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/function-bind@1.1.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Raynos/function-bind"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/get-intrinsic@1.3.0",
+      "name": "get-intrinsic",
+      "version": "1.3.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/get-intrinsic@1.3.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ljharb/get-intrinsic#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/get-proto@1.0.1",
+      "name": "get-proto",
+      "version": "1.0.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/get-proto@1.0.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ljharb/get-proto#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/gopd@1.2.0",
+      "name": "gopd",
+      "version": "1.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/gopd@1.2.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ljharb/gopd#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/gsap@3.15.0",
+      "name": "gsap",
+      "version": "3.15.0",
+      "licenses": [
+        {
+          "license": {
+            "name": "Standard 'no charge' license: https://gsap.com/standard-license."
+          }
+        }
+      ],
+      "purl": "pkg:npm/gsap@3.15.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://gsap.com"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/has-symbols@1.1.0",
+      "name": "has-symbols",
+      "version": "1.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/has-symbols@1.1.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ljharb/has-symbols#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/has-tostringtag@1.0.2",
+      "name": "has-tostringtag",
+      "version": "1.0.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/has-tostringtag@1.0.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/inspect-js/has-tostringtag#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/hasown@2.0.4",
+      "name": "hasown",
+      "version": "2.0.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/hasown@2.0.4",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/inspect-js/hasOwn#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/hls.js@1.7.3",
+      "name": "hls.js",
+      "version": "1.7.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:npm/hls.js@1.7.3",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/video-dev/hls.js"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/hookable@5.5.3",
+      "name": "hookable",
+      "version": "5.5.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/hookable@5.5.3",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/unjs/hookable#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/https-proxy-agent@5.0.1",
+      "name": "https-proxy-agent",
+      "version": "5.0.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/https-proxy-agent@5.0.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/TooTallNate/node-https-proxy-agent#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/ieee754@1.2.1",
+      "name": "ieee754",
+      "version": "1.2.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "purl": "pkg:npm/ieee754@1.2.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/feross/ieee754#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/kind-of@6.0.3",
+      "name": "kind-of",
+      "version": "6.0.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/kind-of@6.0.3",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jonschlinkert/kind-of"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/lottie-web@5.13.0",
+      "name": "lottie-web",
+      "version": "5.13.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/lottie-web@5.13.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/airbnb/lottie-web#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/magic-string@0.30.21",
+      "name": "magic-string",
+      "version": "0.30.21",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/magic-string@0.30.21",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Rich-Harris/magic-string#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/math-intrinsics@1.1.0",
+      "name": "math-intrinsics",
+      "version": "1.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/math-intrinsics@1.1.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/es-shims/math-intrinsics#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/media-typer@2.0.0",
+      "name": "media-typer",
+      "version": "2.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/media-typer@2.0.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jshttp/media-typer#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/mime-db@1.52.0",
+      "name": "mime-db",
+      "version": "1.52.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/mime-db@1.52.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jshttp/mime-db#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/mime-types@2.1.35",
+      "name": "mime-types",
+      "version": "2.1.35",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/mime-types@2.1.35",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/jshttp/mime-types#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/mitt@3.0.1",
+      "name": "mitt",
+      "version": "3.0.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/mitt@3.0.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/developit/mitt"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/ms@2.1.3",
+      "name": "ms",
+      "version": "2.1.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/ms@2.1.3",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/vercel/ms#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/music-metadata@11.16.1",
+      "name": "music-metadata",
+      "version": "11.16.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/music-metadata@11.16.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Borewit/music-metadata#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/nanoid@3.3.20",
+      "name": "nanoid",
+      "version": "3.3.20",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/nanoid@3.3.20",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/ai/nanoid#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/nprogress@0.2.0",
+      "name": "nprogress",
+      "version": "0.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/nprogress@0.2.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/rstacruz/nprogress#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/ogl@1.0.11",
+      "name": "ogl",
+      "version": "1.0.11",
+      "licenses": [
+        {
+          "license": {
+            "id": "Unlicense"
+          }
+        }
+      ],
+      "purl": "pkg:npm/ogl@1.0.11",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/oframe/ogl#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/option-validator@2.0.6",
+      "name": "option-validator",
+      "version": "2.0.6",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/option-validator@2.0.6",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/zhw2590582/option-validator#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/perfect-debounce@1.0.0",
+      "name": "perfect-debounce",
+      "version": "1.0.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/perfect-debounce@1.0.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/unjs/perfect-debounce#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/picocolors@1.1.1",
+      "name": "picocolors",
+      "version": "1.1.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "ISC"
+          }
+        }
+      ],
+      "purl": "pkg:npm/picocolors@1.1.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/alexeyraspopov/picocolors#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/pinia@3.0.4",
+      "name": "pinia",
+      "version": "3.0.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/pinia@3.0.4",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://pinia.vuejs.org"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/pinia-plugin-persistedstate@4.7.1",
+      "name": "pinia-plugin-persistedstate",
+      "version": "4.7.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/pinia-plugin-persistedstate@4.7.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://praz.codeberg.page/pinia-plugin-persistedstate"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/postcss@8.5.31",
+      "name": "postcss",
+      "version": "8.5.31",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/postcss@8.5.31",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://postcss.org/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/proxy-from-env@2.1.0",
+      "name": "proxy-from-env",
+      "version": "2.1.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/proxy-from-env@2.1.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Rob--W/proxy-from-env#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/rfdc@1.4.1",
+      "name": "rfdc",
+      "version": "1.4.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/rfdc@1.4.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/davidmarkclements/rfdc#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/source-map-js@1.2.2",
+      "name": "source-map-js",
+      "version": "1.2.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "purl": "pkg:npm/source-map-js@1.2.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/7rulnik/source-map-js"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/speakingurl@14.0.1",
+      "name": "speakingurl",
+      "version": "14.0.1",
+      "licenses": [
+        {
+          "license": {
+            "name": "BSD"
+          }
+        }
+      ],
+      "purl": "pkg:npm/speakingurl@14.0.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "http://pid.github.io/speakingurl/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/strtok3@10.6.3",
+      "name": "strtok3",
+      "version": "10.6.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/strtok3@10.6.3",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Borewit/strtok3#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/superjson@2.2.6",
+      "name": "superjson",
+      "version": "2.2.6",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/superjson@2.2.6",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/blitz-js/superjson#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/swiper@12.2.0",
+      "name": "swiper",
+      "version": "12.2.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/swiper@12.2.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://swiperjs.com"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/three@0.181.2",
+      "name": "three",
+      "version": "0.181.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/three@0.181.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://threejs.org/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/token-types@6.1.2",
+      "name": "token-types",
+      "version": "6.1.2",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/token-types@6.1.2",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Borewit/token-types#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/typescript@5.9.3",
+      "name": "typescript",
+      "version": "5.9.3",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "purl": "pkg:npm/typescript@5.9.3",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://www.typescriptlang.org/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/uint8array-extras@1.6.0",
+      "name": "uint8array-extras",
+      "version": "1.6.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/uint8array-extras@1.6.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/sindresorhus/uint8array-extras#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/vue@3.5.44",
+      "name": "vue",
+      "version": "3.5.44",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/vue@3.5.44",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://vuejs.org/"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/vue-i18n@11.4.16",
+      "name": "vue-i18n",
+      "version": "11.4.16",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/vue-i18n@11.4.16",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/intlify/vue-i18n/tree/master/packages/vue-i18n#readme"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/vue-router@4.6.4",
+      "name": "vue-router",
+      "version": "4.6.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/vue-router@4.6.4",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://router.vuejs.org"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/win-guid@0.2.1",
+      "name": "win-guid",
+      "version": "0.2.1",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "purl": "pkg:npm/win-guid@0.2.1",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://github.com/Borewit/win-guid#readme"
+        }
+      ]
+    }
+  ]
+}

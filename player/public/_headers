@@ -5,6 +5,7 @@
   X-Frame-Options: DENY
   Content-Security-Policy: frame-ancestors 'none'
   Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
 
 /
   Cache-Control: no-store

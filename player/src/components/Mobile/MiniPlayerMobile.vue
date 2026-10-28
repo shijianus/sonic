@@ -6,7 +6,9 @@ import { storeToRefs } from 'pinia'
 import MusicProgress from '@/components/Ui/MusicProgress.vue'
 import Button from '@/components/Ui/Button.vue'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { useI18n } from 'vue-i18n'
 
+const { t } = useI18n()
 const settingsStore = useSettingsStore()
 
 const { footerLyrics } = storeToRefs(settingsStore)
@@ -96,7 +98,7 @@ onUnmounted(() => {
           @error="(e: Event) => {
             const el = e.target as HTMLImageElement;
             if (el && !el.src.includes('data:image')) {
-              el.src = formatCoverUrl('', { artist: currentSong.artist });
+              el.src = formatCoverUrl('', { artist: currentSong?.artist });
             }
           }"
         />

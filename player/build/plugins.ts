@@ -8,11 +8,10 @@ import path from 'path'
 import viteCompression from 'vite-plugin-compression'
 import removeConsole from 'vite-plugin-remove-console'
 import { qrcode } from 'vite-plugin-qrcode'
-import vueDevTools from 'vite-plugin-vue-devtools'
 
 import Icons from 'unplugin-icons/vite'
 
-export const createVitePlugins = (viteEnv: ViteEnv): (PluginOption | PluginOption[])[] => {
+export const createVitePlugins = (_viteEnv: ViteEnv): (PluginOption | PluginOption[])[] => {
   return [
     vue(),
     // vueDevTools(),

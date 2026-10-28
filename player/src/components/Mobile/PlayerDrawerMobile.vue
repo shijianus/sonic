@@ -94,6 +94,7 @@ const {
   resetLyrics,
   increaseScale,
   decreaseScale,
+  scrollToCurrentLyric,
 } = useLyricsScroll({
   lyricsRef,
   timeline: activeTimeline,
@@ -291,7 +292,7 @@ const runWordSync = () => {
     lastWordSyncLine,
     isPlaying.value ? 0.08 : 0
   )
-  if (lastWordSyncLine.value !== currentLyricIndex.value && !state.isDraggingLyrics) {
+  if (lastWordSyncLine.value !== currentLyricIndex.value && !state.draggingLyrics) {
     currentLyricIndex.value = lastWordSyncLine.value
     if (lastWordSyncLine.value >= 0) {
       scrollToCurrentLyric()

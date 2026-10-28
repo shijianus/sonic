@@ -390,6 +390,9 @@ async function buildPalette(arrayBuffer: ArrayBuffer, contentType: string): Prom
 function createCorsHeaders(init?: HeadersInit): Headers {
   const headers = new Headers(init);
   headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; sandbox");
+  headers.set("Referrer-Policy", "no-referrer");
   return headers;
 }
 
@@ -508,6 +511,7 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
   }
 
   if (!upstream.ok) {
+    upstream.body?.cancel().catch(() => {});
     return new Response(JSON.stringify({ error: `Upstream request failed with status ${upstream.status}` }), {
       status: upstream.status,
       headers: createJsonHeaders(upstream.status),
@@ -516,6 +520,7 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
 
   const contentType = upstream.headers.get("content-type") ?? "";
   if (!contentType.startsWith("image/")) {
+    upstream.body?.cancel().catch(() => {});
     return new Response(JSON.stringify({ error: "Unsupported content type" }), {
       status: 415,
       headers: createJsonHeaders(415),

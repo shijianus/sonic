@@ -54,7 +54,6 @@ export async function parseAudioBlob(blob: Blob, durationSeconds?: number, reqQu
   let bitsPerSample: number | null = null
   let isVbr = false
   let xingFrames: number | null = null
-  let xingBytes: number | null = null
 
   // 1. FLAC: 0x66 0x4C 0x61 0x43 ("fLaC")
   if (initBytes.length >= 4 && initBytes[0] === 0x66 && initBytes[1] === 0x4C && initBytes[2] === 0x61 && initBytes[3] === 0x43) {
@@ -146,7 +145,6 @@ export async function parseAudioBlob(blob: Blob, durationSeconds?: number, reqQu
               pos += 4
             }
             if (flags & 0x0002 && bytes.length >= pos + 4) {
-              xingBytes = ((bytes[pos] << 24) | (bytes[pos + 1] << 16) | (bytes[pos + 2] << 8) | bytes[pos + 3]) >>> 0
               pos += 4
             }
           }
@@ -158,7 +156,6 @@ export async function parseAudioBlob(blob: Blob, durationSeconds?: number, reqQu
           const tag = String.fromCharCode(bytes[vbriOffset], bytes[vbriOffset + 1], bytes[vbriOffset + 2], bytes[vbriOffset + 3])
           if (tag === 'VBRI') {
             isVbr = true
-            xingBytes = ((bytes[vbriOffset + 10] << 24) | (bytes[vbriOffset + 11] << 16) | (bytes[vbriOffset + 12] << 8) | bytes[vbriOffset + 13]) >>> 0
             xingFrames = ((bytes[vbriOffset + 14] << 24) | (bytes[vbriOffset + 15] << 16) | (bytes[vbriOffset + 16] << 8) | bytes[vbriOffset + 17]) >>> 0
           }
         }

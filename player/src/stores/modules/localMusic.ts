@@ -52,7 +52,7 @@ export const useLocalMusicStore = defineStore('localMusic', {
         // 获取封面
         if (metadata.common.picture && metadata.common.picture.length > 0) {
           const picture = metadata.common.picture[0]
-          const blob = new Blob([picture.data], { type: picture.format })
+          const blob = new Blob([new Uint8Array(picture.data)], { type: picture.format })
           cover = URL.createObjectURL(blob)
           // 注意：Blob URL 生命周期问题。
           // 更好的方式是将图片 Blob 也存入 IndexedDB，或者转换为 Base64

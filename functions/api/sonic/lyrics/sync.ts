@@ -60,6 +60,8 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
     const baseHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
       'X-Sonic-Cache': 'MISS',
       'X-Sonic-Provider': result.provider,
       'X-Sonic-Level': result.data.level,

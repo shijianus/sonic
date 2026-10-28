@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Artplayer from 'artplayer'
 import Hls from 'hls.js'
-import type { Option } from 'artplayer/types/option'
+import type { Option } from 'artplayer'
 import artplayerPluginHlsControl from 'artplayer-plugin-hls-control'
 import { useAudio } from '@/composables/useAudio'
 

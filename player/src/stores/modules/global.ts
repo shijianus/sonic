@@ -10,7 +10,7 @@ export const useGlobalStore = defineStore('global', {
     count: 0,
     theme: 'system' as 'light' | 'dark' | 'system',
     /** 搜索历史记录（最多保留 10 条） */
-    searchHistory: [],
+    searchHistory: [] as string[],
     lang: undefined,
   }),
   actions: {

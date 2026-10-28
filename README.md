@@ -8,7 +8,7 @@
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED.svg?style=flat-square)](docker-compose.yml)
 [![Vue 3](https://img.shields.io/badge/Vue-3.x-4FC08D.svg?style=flat-square)](player/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6.svg?style=flat-square)](tsconfig.json)
-[![License: CC BY-NC-SA 4.0](https://img.shields.io/badge/License-CC_BY--NC--SA_4.0-lightgrey.svg?style=flat-square)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
 **專為高品質音質、毫秒級逐字歌詞、自主智慧推薦與極致隱私而生的新一代現代化音樂平台**
 
@@ -231,8 +231,14 @@ Sonic 提供規範的 RESTful API 規格，對外統一承諾 `brand: "Sonic"` �
    # 或相容標準 Authorization 標頭：
    Authorization: Bearer sonic_live_v2.<header>.<payload>.<signature>
    ```
-3. **SSRF 全鏈路立體攔截**：
-   針對媒體代理與音源外鏈轉發，Sonic 實施標準化 IP 規範解析，強行阻斷 `127.0.0.1`、RFC 1918 私有區域網路、Docker 內部網橋以及雲端伺服器中繼資料地址（如 `169.254.169.254`）。
+3. **瀏覽器 OAuth 會話隔離**：
+   - 登入使用 `state` + PKCE S256；`state`/`code_verifier` 存放於短效 `HttpOnly` Cookie，回調時強制校驗，缺失或重放一律拒絕；
+   - 回調成功後僅簽發 `HttpOnly; Secure; SameSite=Lax` 的 `sonic_session` Cookie，API Key **不寫入 URL hash、查詢參數或 localStorage**；
+   - `GET /api/auth/user` 僅返回資料；需取得 Key 時呼叫 `GET /api/auth/key`；`POST /api/auth/key` 重新簽發必須顯式提供當前 Key 請求頭；
+   - 撤銷：`POST /api/auth/revoke` 需顯式 Key 請求頭；配置 `SONIC_KEY_REVOCATION_KV` + `SONIC_ENABLE_KEY_REVOCATION=1` 時即時撤銷 jti，否則返回 501 並提示改用 `SONIC_REVOKED_JTIS`；
+   - 登出使用 `POST /api/auth/logout`；配置 KV 撤銷存儲時會同時撤銷當前 jti。
+4. **SSRF 全鏈路立體攔截**：
+   針對媒體代理與音源外鏈轉發，Sonic 實施標準化 IP 規範解析，強行阻斷 `127.0.0.1`、RFC 1918 私有區域網路、Docker 內部網橋以及雲端伺服器中繼資料地址（如 `169.254.169.254`），並在每次重定向時重新校驗目標與 DNS 解析結果。
 
 ---
 
@@ -241,10 +247,13 @@ Sonic 提供規範的 RESTful API 規格，對外統一承諾 `brand: "Sonic"` �
 ### 方案 A：Cloudflare Pages 邊緣網關部署（推薦）
 
 ```bash
-# 1. 複製專案庫並安裝相依套件
+# 1. 複製專案庫並安裝相依套件（需要 Node.js >= 22.13）
 git clone git@github.com:shijianus/sonic.git
 cd sonic
-npm install
+corepack enable
+corepack prepare pnpm@10.34.5 --activate
+npm ci
+pnpm --dir player install --frozen-lockfile
 
 # 2. 構建前端 SPA 與雙端產物
 npm run build
@@ -264,18 +273,24 @@ npx wrangler pages deploy dist --project-name cfsolara
 # 1. 在伺服器上建立目標工作目錄
 mkdir -p /opt/sonic && cd /opt/sonic
 
-# 2. 準備 .env 配置檔並賦予嚴格權限 (600)
+# 2. 取得原始碼（Dockerfile 會自行構建前端與 Node 引擎，不依賴本機 dist/）
+git clone git@github.com:shijianus/sonic.git .
+# 或將已檢出的倉庫放在此目錄
+
+# 3. 準備 .env 配置檔並賦予嚴格權限 (600)
 cp .env.example .env
 chmod 600 .env
 vim .env  # 填入強隨機 SONIC_ENGINE_SECRET 與 SONIC_SECRET
 
-# 3. 構建並啟動容器堆疊 (包含 sonic-engine 與 ncm-api)
+# 4. 從乾淨原始碼構建並啟動容器堆疊 (包含 sonic-engine 與 ncm-api)
 docker compose up -d --build
 
-# 4. 驗證容器運作狀態與健康檢查
+# 5. 驗證容器運作狀態與健康檢查
 docker compose ps
 curl -H "X-Sonic-Engine-Key: <YOUR_SECRET>" http://127.0.0.1:8080/api/sonic/engine/health
 ```
+
+> 部署、備份/還原、健康檢查、OAuth 配置、限流與回滾細節見 [docs/OPERATIONS.md](docs/OPERATIONS.md)。
 
 ### ⚙️ 核心環境變數配置參考 (`.env.example`)
 
@@ -301,6 +316,7 @@ SONIC_SECRET="<請使用 openssl rand -base64 48 生成強隨機金鑰>"
 # SONIC_REVOKED_SUBS=""
 # SONIC_TOKEN_MIN_IAT="0"
 # API Key 僅接受請求標頭；?api_key= 已完全移除
+# 可選即時撤銷：在 Pages 綁定 SONIC_KEY_REVOCATION_KV，並設定 SONIC_ENABLE_KEY_REVOCATION=1
 
 # 3. Epomail OAuth 2.0 鑑權登入 (選配)
 EPOMAIL_BASE_URL="https://mail.epocanvas.com"
@@ -333,6 +349,16 @@ SONIC_RATE_LIMIT_AUTH_RPM="600"
 
 ---
 
+## 📚 安全、合規與運維文檔
+
+- [整改記錄與實測結果](docs/AUDIT_REMEDIATION.md)
+- [生產運維手冊（部署、備份/恢復、回滾、密鑰輪換、監控）](docs/OPERATIONS.md)
+- [許可證、依賴與音樂內容合規核驗](docs/COMPLIANCE.md)
+- [第三方依賴聲明](THIRD_PARTY_NOTICES.md)
+- [已知問題與技術局限](docs/KNOWN_ISSUES.md)
+
+---
+
 ## 💖 致謝與開源協議參考 (Credits)
 
 Sonic 平台的研發與多源聚合實踐借鑑並致謝以下優秀的開源社群專案與研究成果：
@@ -352,9 +378,12 @@ Sonic 平台的研發與多源聚合實踐借鑑並致謝以下優秀的開源�
 
 ## 📄 版權與許可證 (Copyright & License)
 
-Copyright © 2026 **epocanvas sonic**. All rights reserved.
+Copyright © 2026 **epocanvas & CFSolara Contributors**. The root `LICENSE` file is the authoritative license text.
 
-本專案核心原始碼採用 **[CC BY-NC-SA 4.0 (知識共享 署名-非商業性使用-相同方式共享 4.0 國際版)](LICENSE)** 協議發布：
-- **非商業用途**：允許個人學習、研究、私有部署與非商業性質分享；
-- **署名保留**：任何基於本專案的衍生作品或二次開發，均必須明確保留原作者署名與本倉庫位址；
-- **相同方式共享**：衍生版本必須採用相同或相容之開放協議釋出，嚴禁進行封閉式商業轉售行為。
+> [!IMPORTANT]
+> **許可證聲明不一致（待維護者裁決）**：本倉庫根目錄的 [`LICENSE`](LICENSE) 文件目前為 **MIT License**；而本 README 歷史版本與 `player/package.json` 曾聲明 **CC BY-NC-SA 4.0**。兩者不能同時成立。在維護者明確裁決並統一之前，請以倉庫根目錄的 `LICENSE` 文件為準；本次整改不會擅自變更專案許可證。詳細核驗記錄與待辦見 [docs/COMPLIANCE.md](docs/COMPLIANCE.md)。
+
+無論最終採用何種開源許可證，以下限制均適用：
+- **第三方內容**：音樂錄音、歌詞、封面、藝人圖片等內容的權利歸屬於各自權利人；本專案不授予任何音樂內容的再授權；
+- **非商業與合規**：部署者需自行確認其使用場景符合當地法律、上游服務條款與內容授權要求；
+- **商標與品牌**：epocanvas / Sonic 名稱與標識不隨源碼許可證授予商標使用權。

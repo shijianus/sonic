@@ -3,23 +3,32 @@
   "version": "2.2.0",
   "description": "epocanvas sonic Music Cloud Platform & Aggregation Gateway",
   "private": true,
+  "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "scripts": {
     "build": "pnpm --dir player build && node scripts/copy-dist.mjs",
     "build:engine": "esbuild server/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist-server/index.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
     "build:server": "npm run build:engine",
-    "start:engine": "node dist-server/index.mjs",
+    "start:engine": "node --experimental-sqlite dist-server/index.mjs",
     "deploy": "npm run build && node scripts/deploy-pages.mjs",
+    "lint": "npm run lint:theme && pnpm --dir player run lint",
+    "lint:theme": "node scripts/lint-theme.mjs",
+    "backup:db": "node --experimental-sqlite scripts/backup-recommend-db.mjs",
+    "sbom": "node scripts/generate-sbom.mjs",
+    "test": "npm run typecheck && jiti scripts/test-sonic-gateway.mjs && jiti scripts/test-auth-compatibility.mjs && jiti scripts/test-cover-gateway.mjs && jiti scripts/test-local-engine-and-degradation.mjs && pnpm --dir player exec vitest run --root .. tests/security.test.ts tests/security-hardening.test.ts tests/security-p0-regression.test.ts tests/oauth-security.test.ts tests/ssrf-security.test.ts tests/engine-static.test.ts tests/frontend-xss.test.ts tests/recommendation-and-search.test.ts",
     "test:gateway": "jiti scripts/test-sonic-gateway.mjs",
     "test:auth": "jiti scripts/test-auth-compatibility.mjs",
     "test:cover": "jiti scripts/test-cover-gateway.mjs",
-    "lint:theme": "node scripts/lint-theme.mjs",
     "test:engine": "jiti scripts/test-local-engine-and-degradation.mjs",
-    "test:security": "pnpm --dir player exec vitest run --root .. tests/security.test.ts tests/security-hardening.test.ts tests/security-p0-regression.test.ts tests/frontend-xss.test.ts",
+    "test:security": "pnpm --dir player exec vitest run --root .. tests/security.test.ts tests/security-hardening.test.ts tests/security-p0-regression.test.ts tests/oauth-security.test.ts tests/ssrf-security.test.ts tests/engine-static.test.ts tests/frontend-xss.test.ts",
     "test:recommend": "pnpm --dir player exec vitest run --root .. tests/recommendation-and-search.test.ts",
     "eval:recommend": "jiti scripts/evaluate-recommendation.mjs",
-    "test": "npm run typecheck && jiti scripts/test-sonic-gateway.mjs && jiti scripts/test-auth-compatibility.mjs && jiti scripts/test-cover-gateway.mjs && jiti scripts/test-local-engine-and-degradation.mjs && pnpm --dir player exec vitest run --root .. tests/security.test.ts tests/security-hardening.test.ts tests/security-p0-regression.test.ts tests/frontend-xss.test.ts tests/recommendation-and-search.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit && pnpm --dir player run typecheck",
+    "typecheck:server": "tsc --noEmit",
+    "typecheck:player": "pnpm --dir player run typecheck"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",

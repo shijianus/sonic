@@ -10,8 +10,30 @@ import {
 const DEFAULT_API_BASE = 'https://music-api.gdstudio.xyz/api.php';
 const KUWO_HOST_PATTERN = /(^|\.)kuwo\.cn$/i;
 
+function timedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return fetch(input, {
+    ...init,
+    signal: init?.signal ?? AbortSignal.timeout(8000),
+  });
+}
+
 export function getMusicApiBase(env: AppEnv): string {
-  return env.MUSIC_API_BASE || DEFAULT_API_BASE;
+  const configured = typeof env.MUSIC_API_BASE === 'string' ? env.MUSIC_API_BASE.trim() : '';
+  if (configured) {
+    try {
+      const parsed = new URL(configured);
+      if (
+        parsed.protocol === 'https:' &&
+        !parsed.username &&
+        !parsed.password &&
+        !parsed.search &&
+        !parsed.hash
+      ) {
+        return parsed.toString();
+      }
+    } catch {}
+  }
+  return getSonicConfig(env).upstreamGdstudio || DEFAULT_API_BASE;
 }
 
 export function generateSignature(): string {
@@ -70,7 +92,7 @@ export async function fetchMusicProvider(env: AppEnv, params: Record<string, str
     url.searchParams.set(key, value);
   });
 
-  const response = await fetch(url.toString(), {
+  const response = await timedFetch(url.toString(), {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       Accept: 'application/json',
@@ -944,7 +966,7 @@ export function hasWordSyncTags(raw: string): boolean {
 export async function fetchDirectNetEaseLyrics(id: string): Promise<string> {
   try {
     const url = `https://music.163.com/api/song/lyric/v1?id=${encodeURIComponent(id)}&cp=false&tv=0&lv=0&rv=0&kv=0&yv=-1&ytv=0&yrv=0`;
-    const resp = await fetch(url, {
+    const resp = await timedFetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         Referer: 'https://music.163.com/',
@@ -966,7 +988,7 @@ export async function fetchDirectNetEaseLyrics(id: string): Promise<string> {
 export async function fetchDirectQQLyrics(songmid: string): Promise<string> {
   try {
     const url = `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(songmid)}&format=json&nobase64=1`;
-    const resp = await fetch(url, {
+    const resp = await timedFetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         Referer: 'https://y.qq.com/',
@@ -1015,7 +1037,7 @@ async function crawlNetEaseBySearch(query: string, env?: AppEnv): Promise<{ raw:
 async function crawlQQBySearch(query: string): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
   try {
     const sUrl = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=5&w=${encodeURIComponent(query)}&format=json`;
-    const sRes = await fetch(sUrl, {
+    const sRes = await timedFetch(sUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         Referer: 'https://y.qq.com/',
@@ -1050,7 +1072,7 @@ async function crawlLrclibBySearch(query: string, title?: string, artist?: strin
     } else {
       url = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
     }
-    const res = await fetch(url, {
+    const res = await timedFetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
     });
     if (!res.ok) return null;
@@ -1129,7 +1151,7 @@ async function crawlKugouBySearch(
       ];
       for (const sUrl of searchApis) {
         try {
-          const sRes = await fetch(sUrl, {
+          const sRes = await timedFetch(sUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
           });
           if (sRes.ok) {
@@ -1143,7 +1165,7 @@ async function crawlKugouBySearch(
               if (!hash || !sSong) continue;
 
               const lUrl = `http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(sSong)}&hash=${hash}&timelength=${sDur * 1000}`;
-              const lRes = await fetch(lUrl, {
+              const lRes = await timedFetch(lUrl, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
               });
               if (lRes.ok) {
@@ -1176,7 +1198,7 @@ async function crawlKugouBySearch(
       const durParam = targetDuration ? `&timelength=${Math.round(targetDuration * 1000)}` : '';
       const dUrl = `http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(dq)}${durParam}`;
       try {
-        const dRes = await fetch(dUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' } });
+        const dRes = await timedFetch(dUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' } });
         if (dRes.ok) {
           const dJson = (await dRes.json()) as any;
           for (const c of dJson.candidates || []) {
@@ -1274,7 +1296,7 @@ async function crawlKugouBySearch(
         // 1. 优先尝试获取并解码毫秒级逐字 KRC 格式
         try {
           const krcUrl = `http://lyrics.kugou.com/download?ver=1&client=pc&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=krc&charset=utf8`;
-          const krcRes = await fetch(krcUrl, {
+          const krcRes = await timedFetch(krcUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
           });
           if (krcRes.ok) {
@@ -1415,7 +1437,7 @@ async function crawlKugouBySearch(
         // 2. 降级尝试获取普通行级 LRC
         try {
           const lrcUrl = `http://lyrics.kugou.com/download?ver=1&client=pc&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=lrc&charset=utf8`;
-          const lrcRes = await fetch(lrcUrl, {
+          const lrcRes = await timedFetch(lrcUrl, {
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
           });
           if (lrcRes.ok) {
@@ -1447,7 +1469,7 @@ async function crawlMusixmatchBySearch(
 ): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
   if (!title) return null;
   try {
-    const tokenRes = await fetch('https://apic-desktop.musixmatch.com/ws/1.1/token.get?app_id=web-desktop-app-v1.0', {
+    const tokenRes = await timedFetch('https://apic-desktop.musixmatch.com/ws/1.1/token.get?app_id=web-desktop-app-v1.0', {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
       signal: AbortSignal.timeout(3000),
     });
@@ -1459,7 +1481,7 @@ async function crawlMusixmatchBySearch(
     const qTrack = encodeURIComponent(title);
     const qArtist = artist ? encodeURIComponent(artist) : '';
     const subUrl = `https://apic-desktop.musixmatch.com/ws/1.1/macro.subtitles.get?format=json&q_track=${qTrack}&q_artist=${qArtist}&user_token=${token}&app_id=web-desktop-app-v1.0`;
-    const subRes = await fetch(subUrl, {
+    const subRes = await timedFetch(subUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         Cookie: 'AWSELBCORS=0; AWSELB=0',
@@ -1618,7 +1640,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
   // 若缺失歌曲标题但提供了网易云 ID，自动解析曲名与歌手以便进行全网高精逐字匹配
   if (!finalTitle && id && id !== 'undefined' && id !== 'null' && (source === 'netease' || /^\d+$/.test(id))) {
     try {
-      const dRes = await fetch(`https://music.163.com/api/song/detail/?id=${encodeURIComponent(id)}&ids=[${encodeURIComponent(id)}]`, {
+      const dRes = await timedFetch(`https://music.163.com/api/song/detail/?id=${encodeURIComponent(id)}&ids=[${encodeURIComponent(id)}]`, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
       });
       if (dRes.ok) {

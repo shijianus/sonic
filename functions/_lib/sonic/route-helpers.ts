@@ -5,7 +5,8 @@ import type { SonicQueryParams, SonicMeta, SonicErrorResponse } from './types';
 import { jsonResponse, handleOptions } from '../http';
 import { getSonicConfig } from './config';
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
-import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from './security';
+import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse, isSameOriginRequest } from './security';
+import { extractAuthCredentials } from '../auth';
 import { callLocalEngineJson } from './local-engine';
 
 export { handleOptions };
@@ -80,6 +81,8 @@ export function buildGatewayHeaders(extra: Record<string, string> = {}, degraded
     'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, X-Sonic-Cache, X-Sonic-Provider, X-Sonic-Degraded, X-Sonic-Circuit, X-Sonic-Stream-Trial, X-RateLimit-Limit, X-RateLimit-Remaining',
     'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
+    'Referrer-Policy': 'no-referrer',
+    'Strict-Transport-Security': 'max-age=31536000; includeSubDomains',
     ...extra,
   };
   if (degraded) {
@@ -117,6 +120,15 @@ export function sonicError(code: string, message: string, status = 400, meta?: P
 export async function guardGatewayRequest(request: Request, env: any, scope: string): Promise<Response | null> {
   const engineDenied = checkEngineAccess(request, env);
   if (engineDenied) return engineDenied;
+
+  const method = request.method.toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    const credentials = extractAuthCredentials(request);
+    if (credentials.source === 'cookie' && !isSameOriginRequest(request)) {
+      return sonicError('CSRF_REJECTED', 'Cross-site cookie-authenticated write request rejected', 403);
+    }
+  }
+
   const rl = await evaluateGatewayRateLimit(request, env, scope);
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
   return null;

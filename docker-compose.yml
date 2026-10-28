@@ -5,6 +5,11 @@ services:
       dockerfile: Dockerfile.ncm
     container_name: sonic-ncm-api
     restart: unless-stopped
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       PORT: "3000"
       HOST: "0.0.0.0"
@@ -18,6 +23,8 @@ services:
       dockerfile: Dockerfile
     container_name: sonic-local-engine
     restart: unless-stopped
+    init: true
+    stop_grace_period: 15s
     depends_on:
       ncm-api:
         condition: service_healthy
@@ -38,6 +45,10 @@ services:
       SONIC_GORSE_API_KEY: "${SONIC_GORSE_API_KEY:-}"
       SONIC_MEILISEARCH_URL: "${SONIC_MEILISEARCH_URL:-}"
       SONIC_MEILISEARCH_KEY: "${SONIC_MEILISEARCH_KEY:-}"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     volumes:
       - sonic-data:/app/data
     ports:

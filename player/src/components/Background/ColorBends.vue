@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import * as THREE from 'three'
+import type { WebGLRenderer, ShaderMaterial, Vector2, Vector3 } from 'three/src/Three.js'
 import { type CSSProperties } from 'vue'
 
 type ColorBendsProps = {
@@ -127,9 +128,9 @@ const props = withDefaults(defineProps<ColorBendsProps>(), {
 })
 
 const containerRef = useTemplateRef('containerRef')
-const rendererRef = ref<THREE.WebGLRenderer | null>(null)
+const rendererRef = ref<WebGLRenderer | null>(null)
 const rafRef = ref<number | null>(null)
-const materialRef = ref<THREE.ShaderMaterial | null>(null)
+const materialRef = ref<ShaderMaterial | null>(null)
 const resizeObserverRef = ref<ResizeObserver | null>(null)
 const rotationRef = ref(props.rotation)
 const autoRotateRef = ref(props.autoRotate)
@@ -194,7 +195,7 @@ const setup = () => {
     const w = container.clientWidth || 1
     const h = container.clientHeight || 1
     renderer.setSize(w, h, false)
-    ;(material.uniforms.uCanvas.value as THREE.Vector2).set(w, h)
+    ;(material.uniforms.uCanvas.value as Vector2).set(w, h)
   }
 
   handleResize()
@@ -216,13 +217,13 @@ const setup = () => {
     const rad = (deg * Math.PI) / 180
     const c = Math.cos(rad)
     const s = Math.sin(rad)
-    ;(material.uniforms.uRot.value as THREE.Vector2).set(c, s)
+    ;(material.uniforms.uRot.value as Vector2).set(c, s)
 
     const cur = pointerCurrentRef.value
     const tgt = pointerTargetRef.value
     const amt = Math.min(1, dt * pointerSmoothRef.value)
     cur.lerp(tgt, amt)
-    ;(material.uniforms.uPointer.value as THREE.Vector2).copy(cur)
+    ;(material.uniforms.uPointer.value as Vector2).copy(cur)
     renderer.render(scene, camera)
     rafRef.value = requestAnimationFrame(loop)
   }
@@ -282,7 +283,7 @@ watch(
 
     const arr = (props.colors || []).filter(Boolean).slice(0, MAX_COLORS).map(toVec3)
     for (let i = 0; i < MAX_COLORS; i++) {
-      const vec = (material.uniforms.uColors.value as THREE.Vector3[])[i]
+      const vec = (material.uniforms.uColors.value as Vector3[])[i]
       if (i < arr.length) vec.copy(arr[i])
       else vec.set(0, 0, 0)
     }

@@ -91,9 +91,9 @@ watch(
       ></div>
 
       <div
-        class="relative z-10 w-full max-w-[380px] rounded-[20px] border border-white/10 bg-[#101b2e]/95 p-5 shadow-2xl"
+        class="relative z-10 w-full max-w-[380px] rounded-[20px] border border-glass bg-[#101b2e]/95 p-5 shadow-2xl"
       >
-        <div class="mb-3 flex items-center justify-between border-b border-white/10 pb-3">
+        <div class="mb-3 flex items-center justify-between border-b border-glass pb-3">
           <h3 class="text-primary text-[16px] font-semibold leading-tight">
             {{ t('player.addToPlaylist') }}
           </h3>
@@ -147,13 +147,13 @@ watch(
             type="text"
             maxlength="30"
             :placeholder="t('player.newPlaylistName')"
-            class="text-primary placeholder:text-primary/40 bg-hover-glass focus:ring-sky-400/60 min-h-11 min-w-0 flex-1 rounded-xl border border-white/10 px-3 text-[13px] outline-none focus:ring-2"
+            class="text-primary placeholder:text-primary/40 bg-hover-glass focus:ring-sky-400/60 min-h-11 min-w-0 flex-1 rounded-xl border border-glass px-3 text-[13px] outline-none focus:ring-2"
             :aria-label="t('player.newPlaylistName')"
           />
           <button
             type="submit"
             :disabled="!newPlaylistName.trim() || !song"
-            class="min-h-11 shrink-0 rounded-xl bg-gradient-to-r from-blue-600 to-sky-500 px-4 text-[13px] font-semibold text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
+            class="min-h-11 shrink-0 rounded-xl bg-gradient-to-r from-blue-600 to-sky-500 px-4 text-[13px] font-semibold text-[var(--glass-text-accent)] transition-opacity disabled:cursor-not-allowed disabled:opacity-40"
           >
             {{ t('player.createPlaylist') }}
           </button>

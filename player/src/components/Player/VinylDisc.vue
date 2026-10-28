@@ -110,8 +110,6 @@ const flipCover = (newCover: string) => {
 
   state.isFlipping = true
 
-  // 获取当前旋转角度
-  const currentRotation = albumRotationTween ? gsap.getProperty(albumCoverRef.value, 'rotation') : 0
 
   // 创建翻转动画时间线
   const tl = gsap.timeline({

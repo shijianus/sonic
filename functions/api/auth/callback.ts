@@ -1,8 +1,17 @@
 import {
+  buildClearSessionCookie,
+  buildSessionCookie,
+  consumeOAuthState,
   createSession,
   exchangeCode,
   fetchUserInfo,
   getEpomailConfig,
+  OAUTH_STATE_REGEX,
+  PKCE_VERIFIER_REGEX,
+  readCookie,
+  shouldUseSecureCookie,
+  SONIC_OAUTH_STATE_COOKIE,
+  SONIC_OAUTH_VERIFIER_COOKIE,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import {
@@ -12,24 +21,36 @@ import {
 } from '../../_lib/sonic/security';
 import type { AppEnv } from '../../_lib/types';
 
-function parseCookies(request: Request): Record<string, string> {
-  const header = request.headers.get('cookie') || '';
-  const cookies: Record<string, string> = {};
-  for (const part of header.split(';')) {
-    const trimmed = part.trim();
-    if (!trimmed) continue;
-    const eqIdx = trimmed.indexOf('=');
-    if (eqIdx !== -1) {
-      const key = trimmed.slice(0, eqIdx).trim();
-      const val = trimmed.slice(eqIdx + 1).trim();
-      cookies[key] = decodeURIComponent(val);
-    }
-  }
-  return cookies;
+function clearOAuthCookies(requestUrl: URL): Headers {
+  const headers = new Headers({
+    'Cache-Control': 'no-store',
+    'Referrer-Policy': 'no-referrer',
+    Pragma: 'no-cache',
+  });
+  const secureAttr = shouldUseSecureCookie(requestUrl) ? '; Secure' : '';
+  const suffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+  headers.append('Set-Cookie', `${SONIC_OAUTH_STATE_COOKIE}=${suffix}`);
+  headers.append('Set-Cookie', `${SONIC_OAUTH_VERIFIER_COOKIE}=${suffix}`);
+  return headers;
+}
+
+function oauthFailure(
+  message: string,
+  status: number,
+  headers: Headers,
+  code = 'OAUTH_FAILED',
+): Response {
+  return jsonResponse(
+    { brand: 'Sonic', ok: false, error: { code, message } },
+    { status, headers },
+  );
 }
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return errorResponse('Method not allowed', 405);
+  }
 
   // Bounds unauthenticated upstream token-exchange amplification.
   const rl = await evaluateAuthRateLimit(request, env, 'auth-callback');
@@ -44,60 +65,82 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   }
 
   const url = new URL(request.url);
+  const clearHeaders = clearOAuthCookies(url);
   const code = url.searchParams.get('code');
-  const error = url.searchParams.get('error');
+  const rawError = url.searchParams.get('error');
   const state = url.searchParams.get('state');
 
-  // Headers to clear state & verifier cookies
-  const clearCookieHeaders = new Headers();
-  clearCookieHeaders.append(
-    'Set-Cookie',
-    'sonic_oauth_state=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-  );
-  clearCookieHeaders.append(
-    'Set-Cookie',
-    'sonic_oauth_verifier=; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT',
-  );
-
-  if (error) {
-    return errorResponse(`Epomail 授权失败: ${error}`, 400, undefined);
+  if (rawError) {
+    const safeError = /^[a-z0-9_]{1,64}$/i.test(rawError) ? rawError : 'oauth_error';
+    return oauthFailure(`Epomail 授权失败: ${safeError}`, 400, clearHeaders, 'OAUTH_DENIED');
   }
 
-  // 1. Verify OAuth State (CSRF Protection)
-  const cookies = parseCookies(request);
-  const cookieState = cookies['sonic_oauth_state'];
-
-  if (!state || !cookieState || !timingSafeEqualStr(state, cookieState)) {
-    return jsonResponse(
-      { ok: false, error: '无效或已过期的登录 state 标识 (OAuth CSRF 校验失败)' },
-      { status: 400, headers: clearCookieHeaders },
+  // 1. Verify OAuth state (CSRF) using the HttpOnly transaction cookie
+  const cookieState = readCookie(request, SONIC_OAUTH_STATE_COOKIE);
+  if (
+    !state ||
+    !OAUTH_STATE_REGEX.test(state) ||
+    !cookieState ||
+    !OAUTH_STATE_REGEX.test(cookieState) ||
+    !timingSafeEqualStr(state, cookieState)
+  ) {
+    return oauthFailure(
+      '无效或已过期的登录 state 标识 (OAuth CSRF 校验失败)',
+      400,
+      clearHeaders,
+      'OAUTH_STATE_INVALID',
     );
   }
 
-  if (!code) {
-    return jsonResponse(
-      { ok: false, error: '缺少授权码 (Missing authorization code)' },
-      { status: 400, headers: clearCookieHeaders },
+  // 2. PKCE is mandatory: login always issues a verifier; a missing/malformed verifier
+  // must never silently downgrade the authorization-code exchange.
+  const codeVerifier = readCookie(request, SONIC_OAUTH_VERIFIER_COOKIE);
+  if (!codeVerifier || !PKCE_VERIFIER_REGEX.test(codeVerifier)) {
+    return oauthFailure(
+      '缺少或无效的 PKCE code_verifier，登录事务已拒绝',
+      400,
+      clearHeaders,
+      'OAUTH_PKCE_MISSING',
     );
   }
 
-  // 2. Validate redirect URI
+  if (!code || code.length > 2048 || /[\u0000-\u0020\u007f]/.test(code)) {
+    return oauthFailure(
+      '缺少或格式错误的授权码 (Invalid authorization code)',
+      400,
+      clearHeaders,
+      'OAUTH_CODE_INVALID',
+    );
+  }
+
+  // 3. Redirect URI must still be valid for this deployment
   const config = getEpomailConfig(env, url.origin);
-  if (!config.redirectUri) {
-    return jsonResponse(
-      { ok: false, error: '未配置合法重定向地址或请求来源未授权' },
-      { status: 400, headers: clearCookieHeaders },
+  if (!config.baseUrl || !config.redirectUri) {
+    return oauthFailure(
+      '未配置合法重定向地址或请求来源未授权',
+      400,
+      clearHeaders,
+      'OAUTH_REDIRECT_INVALID',
     );
   }
 
-  const codeVerifier = cookies['sonic_oauth_verifier'];
+  if (!consumeOAuthState(state)) {
+    return oauthFailure(
+      '登录 state 已被使用，请重新发起登录 (OAuth state replay)',
+      400,
+      clearHeaders,
+      'OAUTH_STATE_REPLAYED',
+    );
+  }
 
   try {
     const { accessToken } = await exchangeCode(env, url.origin, code, codeVerifier);
     const userInfo = await fetchUserInfo(env, accessToken);
     const session = await createSession(env, userInfo);
 
-    // If request asks for json or has accept json
+    // Session is carried by an HttpOnly cookie; it is never placed in the redirect URL.
+    clearHeaders.append('Set-Cookie', buildSessionCookie(session.apiKey, session.expiresAt, url));
+
     const acceptsJson =
       request.headers.get('Accept')?.includes('application/json') ||
       url.searchParams.get('format') === 'json';
@@ -109,45 +152,31 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           session,
           message: 'Epomail OAuth 登录成功',
         },
-        { headers: clearCookieHeaders },
+        { headers: clearHeaders },
       );
     }
 
-    // Redirect to frontend with session hash
-    const targetUrl = new URL('/', url.origin);
+    const targetUrl = new URL('/', new URL(config.redirectUri).origin);
     targetUrl.searchParams.set('auth', 'success');
-    targetUrl.hash = `session=${encodeURIComponent(
-      JSON.stringify({
-        email: session.email,
-        name: session.name,
-        avatar: session.avatar,
-        apiKey: session.apiKey,
-        expiresAt: session.expiresAt,
-      }),
-    )}`;
-
-    clearCookieHeaders.set('Location', targetUrl.toString());
+    clearHeaders.set('Location', targetUrl.toString());
     return new Response(null, {
       status: 302,
-      headers: clearCookieHeaders,
+      headers: clearHeaders,
     });
   } catch (err: any) {
-    console.error('[Sonic Auth Callback Error]', err);
+    console.error(
+      '[Sonic Auth Callback Error]',
+      String(err?.name || 'Error'),
+      String(err?.message || '').slice(0, 200),
+    );
     const isMisconfig = String(err?.message || '').includes('SONIC_SECRET');
-    return jsonResponse(
-      {
-        brand: 'Sonic',
-        error: {
-          code: isMisconfig ? 'AUTH_SECRET_MISCONFIGURED' : 'OAUTH_EXCHANGE_FAILED',
-          message: isMisconfig
-            ? 'API Key signing secret is not configured or shorter than 32 characters'
-            : 'OAuth 登录授权处理失败',
-        },
-      },
-      {
-        status: isMisconfig ? 503 : 500,
-        headers: clearCookieHeaders,
-      },
+    return oauthFailure(
+      isMisconfig
+        ? 'API Key signing secret is not configured or shorter than 32 characters'
+        : 'OAuth 登录授权处理失败',
+      isMisconfig ? 503 : 500,
+      clearHeaders,
+      isMisconfig ? 'AUTH_SECRET_MISCONFIGURED' : 'OAUTH_EXCHANGE_FAILED',
     );
   }
 }

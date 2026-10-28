@@ -8,7 +8,6 @@ const { t } = useI18n()
 const { volume, isMuted, setVolume } = useAudio()
 
 const showPopup = ref(false)
-const popupRef = useTemplateRef('popupRef')
 const controlRef = useTemplateRef('controlRef')
 const volumeTrackRef = useTemplateRef('volumeTrackRef')
 
@@ -100,7 +99,6 @@ const handleVolumeKeydown = (event: KeyboardEvent) => {
     <Transition name="fade-slide">
       <div
         v-if="showPopup"
-        ref="popupRef"
         class="absolute bottom-full mb-3 flex flex-col items-center justify-center rounded-2xl border border-white/5 bg-white/10 p-4 shadow-xl backdrop-blur-xl"
       >
         <!-- Volume Value Text -->

@@ -6,7 +6,7 @@
     "module": "ESNext",
     "skipLibCheck": true,
     /* Bundler mode */
-    "moduleResolution": "node", // 使用 Node 的模块解析策略
+    "moduleResolution": "bundler", // 使用 Vite/打包器的模块解析策略
     "allowImportingTsExtensions": true, //允许在模块导入语句中使用Typescript文件的扩展名（.ts）
     "allowJs": true, //允许使用js
     "resolveJsonModule": true, // 允许引入 JSON 文件
@@ -18,7 +18,9 @@
     // 模块名到基于 baseUrl的路径映射的列表。
     "paths": {
       "@": ["src"],
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "three": ["node_modules/@types/three/index.d.ts"],
+      "three/*": ["node_modules/@types/three/*"]
     },
     /* Linting */
     "strict": true, // 开启所有严格的类型检查
@@ -27,7 +29,7 @@
     "noUnusedParameters": true, //报告函数中未使用参数的错误
     "noFallthroughCasesInSwitch": true //确保switch语句中的任何非空情况都包含
   },
-  "types": ["vite,client", "vite-plugin-svg-icons/client"],
+  "types": ["vite/client", "vite-plugin-svg-icons/client", "node", "three", "nprogress"],
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "vite.config.ts"],
   "exclude": ["node_modules", "dist", "**/*.js"]
 }

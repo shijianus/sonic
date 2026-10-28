@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { watch } from 'vue'
 import { useSettingsStore } from '@/stores/modules/settings'
 import { useI18n } from 'vue-i18n'
 

@@ -39,7 +39,7 @@ const isCriticalStreamDegraded = computed(
           ? 'bg-rose-950/80 border-rose-400/40 text-rose-100'
           : gatewayHealth.statusKind === 'degraded'
             ? 'bg-amber-950/80 border-amber-400/40 text-amber-100'
-            : 'bg-slate-900/85 border-white/15 text-slate-200'
+            : 'bg-slate-900/85 border-glass text-slate-200'
       "
     >
       <span

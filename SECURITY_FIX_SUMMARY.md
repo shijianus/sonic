@@ -1,5 +1,7 @@
 # Sonic 安全修复摘要与发布验收清单
 
+> **2026-10-28 第二轮整改（当前）**：新增 HttpOnly OAuth 会话 Cookie、强制 PKCE、移除回调 URL 中的 API Key、API Key 重签发二次授权、Cookie 写操作同源校验、SSRF/缓存键加固。本文为历史摘要；最新验证结果见 `docs/AUDIT_REMEDIATION.md`。
+
 > **2026-10-28 P0 后续加固**：API Key 已升级为 `sonic_live_v2`（`sub/iat/exp/jti/kid`，移除内存认证缓存与 URL Query Key，v1 一律拒绝）；Linux 引擎按 `SONIC_RUNTIME=linux-engine` 对所有 API 强制服务认证，不再依赖 Host。本文中 SONIC-08（认证缓存）及下方旧版 Query Key 验收项已失效，以本轮代码与 `tests/security-p0-regression.test.ts` 为准。
 
 - 对应报告：`SECURITY_AUDIT_REPORT.md`

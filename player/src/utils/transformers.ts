@@ -37,6 +37,7 @@ export interface SongData {
   albumId?: number | string
   cover: string
   duration: number
+  dt?: number
   liked?: boolean
   mvId?: number | string
   sha?: string

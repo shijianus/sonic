@@ -83,9 +83,15 @@ async function proxyImage(imageUrl: string, providerTag = 'direct'): Promise<Res
 
     const contentType = upstream.headers.get('content-type') || 'image/jpeg';
     const baseType = contentType.split(';')[0].trim().toLowerCase();
-    if (!baseType.startsWith('image/')) return null;
+    if (!baseType.startsWith('image/')) {
+      upstream.body?.cancel().catch(() => {});
+      return null;
+    }
     // SVG is an active document; never relay third-party SVG from our origin.
-    if (baseType === 'image/svg+xml' || baseType === 'image/svg') return null;
+    if (baseType === 'image/svg+xml' || baseType === 'image/svg') {
+      upstream.body?.cancel().catch(() => {});
+      return null;
+    }
 
     const respHeaders = new Headers();
     respHeaders.set('Content-Type', contentType);

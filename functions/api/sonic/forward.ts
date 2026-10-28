@@ -112,6 +112,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
       // Relay only asset-safe headers: upstream Set-Cookie must never be planted on the Sonic
       // origin, and Content-Encoding must not be forwarded for an already-decoded body.
       if (!isForwardableAssetType(upstreamResp.headers.get('content-type'))) {
+        upstreamResp.body?.cancel().catch(() => {});
         return sonicError(
           'UNSUPPORTED_CONTENT_TYPE',
           'Upstream returned a document-capable content type and was not relayed',
@@ -200,6 +201,8 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
   // Cloudflare Cache API
   const cache = typeof caches !== 'undefined' ? (caches as any).default : null;
   const cacheKeyUrl = new URL(request.url);
+  cacheKeyUrl.searchParams.delete('nocache');
+  cacheKeyUrl.searchParams.delete('_t');
   cacheKeyUrl.searchParams.sort();
   cacheKeyUrl.searchParams.set('_sonic_cache_v', '2.0');
   const cacheKey = new Request(cacheKeyUrl.toString(), { method: 'GET' });
@@ -223,6 +226,8 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
     const baseHeaders = {
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
       'X-Sonic-Cache': 'MISS',
       'X-Sonic-Provider': result.provider,
       'X-Sonic-Level': result.data.level,

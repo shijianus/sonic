@@ -1,0 +1,126 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - 'security/**'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Typecheck, lint, tests and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Node 22 exposes node:sqlite behind this flag on older 22.x releases; newer
+      # releases accept it as a no-op. The engine itself also starts with this flag.
+      NODE_OPTIONS: --experimental-sqlite
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.34.5 --activate
+          pnpm --version
+
+      - name: Install root dependencies (lockfile)
+        run: npm ci
+
+      - name: Install player dependencies (lockfile)
+        run: pnpm --dir player install --frozen-lockfile
+
+      - name: TypeScript check
+        run: npm run typecheck
+
+      - name: Theme token + ESLint
+        run: npm run lint
+
+      - name: Security, OAuth and SSRF regression tests
+        run: npm run test:security
+
+      - name: Auth compatibility suite
+        run: npm run test:auth
+
+      - name: Local engine and degradation suite
+        run: npm run test:engine
+
+      - name: Recommendation and smart-search tests
+        run: npm run test:recommend
+
+      - name: Player unit tests
+        run: pnpm --dir player test
+
+      - name: Frontend + asset build
+        run: npm run build
+
+      - name: Root production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Player production dependency audit
+        run: pnpm --dir player audit --prod --audit-level=high
+
+      - name: Generate CycloneDX dependency inventory
+        run: npm run sbom
+
+      - name: Upload build output
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonic-dist
+          path: |
+            dist
+            reports/sbom
+          retention-days: 7
+
+  docker:
+    name: Docker build and runtime smoke test
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image from a clean checkout
+        run: docker build -t sonic-ci:${{ github.sha }} .
+
+      - name: Run container and verify auth-gated health endpoint
+        env:
+          ENGINE_SECRET: ci_engine_secret_at_least_32_characters_long
+          AUTH_SECRET: ci_auth_secret_at_least_32_characters_long_ok
+        run: |
+          docker run -d --name sonic-ci \
+            -e SONIC_ENGINE_SECRET="$ENGINE_SECRET" \
+            -e SONIC_SECRET="$AUTH_SECRET" \
+            -e SONIC_RUNTIME=linux-engine \
+            -p 18080:8080 \
+            sonic-ci:${{ github.sha }}
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null \
+              -H "X-Sonic-Engine-Key: $ENGINE_SECRET" \
+              http://127.0.0.1:18080/api/sonic/engine/health; then
+              break
+            fi
+            sleep 1
+          done
+          curl -fsS -H "X-Sonic-Engine-Key: $ENGINE_SECRET" \
+            http://127.0.0.1:18080/api/sonic/engine/health | grep -q '"ok":true'
+          status=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/sonic/engine/health)
+          test "$status" = "401"
+          docker logs sonic-ci
+          docker rm -f sonic-ci

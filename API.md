@@ -25,9 +25,14 @@
 为了防止曲库 API 被恶意爬取与高频滥用，平台提供两级安全机制：
 
 1. **Epomail OAuth 唯一登录**：
-   - 授权端点：`GET /api/auth/login` （自动重定向至 Epomail 官方授权中心）
-   - 回调端点：`GET /api/auth/callback?code=...`
-   - 用户信息：`GET /api/auth/user`
+   - 授权端点：`GET /api/auth/login`（自动重定向至 Epomail 官方授权中心；固定使用 `state` + PKCE S256）
+   - 回调端点：`GET /api/auth/callback?code=...&state=...`
+   - 用户信息：`GET /api/auth/user`（仅返回用户资料，不返回 bearer key）
+   - 浏览器会话：回调成功后签发 `HttpOnly; Secure; SameSite=Lax` 的 `sonic_session` Cookie；**API Key 不再写入重定向 URL 的 hash 或查询参数**
+   - 获取/复制 API Key：`GET /api/auth/key`
+   - 重新签发 API Key：`POST /api/auth/key`（必须通过显式 `X-Sonic-Key` / `Authorization` 请求头证明持有当前密钥，Cookie 会话本身不足；配置 KV 撤销存储后会同步撤销旧 jti）
+   - 实时撤销当前 API Key：`POST /api/auth/revoke`（必须使用显式请求头；未配置 `SONIC_ENABLE_KEY_REVOCATION` + `SONIC_KEY_REVOCATION_KV` 时返回 501，不会伪装成功）
+   - 退出登录：`POST /api/auth/logout`（清除浏览器 Cookie；配置 KV 撤销存储时同时撤销当前 jti）
 2. **专案连结 API Key 与分级限流**：
    - 登录 Epomail 后即可自动获得专案 API Key（签发格式为 `sonic_live_v2.<header>.<payload>.<sig>`；旧版 `sonic_live_xxx_yyy`、`solara_live_*` 及 v1 格式均被拒绝，需重新登录）。
    - 在第三方专案发起请求时，支持以下方式传递凭据：
@@ -260,4 +265,4 @@ async function getRecommendations() {
 ## 🛡️ 架构独立性与多专案协作准则
 - epocanvas sonic 作为一个**独立的 Cloudflare Pages + Linux 本地解析引擎服务**运行，完全独立于任何特定博客或网站。
 - 外部专案（如 `shijianus-blog`）仅通过 HTTP RESTful API 与 epocanvas sonic 交互，保证了微服务架构的高内聚、低耦合与分布式弹性部署。
-- 本项目采用 CC BY-NC-SA 协议，禁止商业化转售行为。
+- 本仓库根 `LICENSE` 当前为 MIT；历史文档中的 CC BY-NC-SA 声明与许可证文件冲突，尚待维护者裁决。详见 `docs/COMPLIANCE.md`。音乐内容本身的授权不随源代码许可证授予。

@@ -1,8 +1,10 @@
 # CFSolara 交付审计与技术交接文档 (Audit & Handoff Specification)
 
+> **2026-10-28 更新**：本文为历史交接文档，其中的许可证声明与当前仓库冲突。根 `LICENSE` 为 MIT；最新整改与验证结果见 `docs/AUDIT_REMEDIATION.md`，许可证核验见 `docs/COMPLIANCE.md`。
+
 > **文档性质**：公开代码仓库审计交接文档  
 > **保密级别**：无敏感信息（所有令牌、IP、密钥、私有凭据均已脱敏/排除）  
-> **遵循协议**：CC BY-NC-SA 4.0 国际非商业共享协议  
+> **遵循协议**：历史声明为 CC BY-NC-SA 4.0；当前以根 `LICENSE`（MIT）为准，待维护者裁决
 
 ---
 
@@ -115,7 +117,9 @@ npm run lint:theme
 
 ## 六、开源非商业合规与许可证声明
 
-- **主许可证**：本项目采用 **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)** 许可证。
+> **当前状态（2026-10-28）**：以下“主许可证”描述为历史声明，与仓库根 `LICENSE`（MIT）冲突，尚待维护者裁决。裁决前以根 `LICENSE` 为准；详见 `docs/COMPLIANCE.md`。
+
+- **历史声明**：本项目曾声明采用 **Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)** 许可证。
 - **开源非商业准则**：
   1. 系统不包含任何形式的商业收费接口、付费 API 购买中继或盈利性功能；
   2. 系统不包含任何打赏、赞助弹窗、会员充值或强制广告展示逻辑；

@@ -467,7 +467,7 @@ watch(
     setBackgroundGradient(resolvedCover, 0)
 
     // 触发圆形可视化器封面翻转动画
-    if (resolvedCover && oldSong && oldSong.id !== s.id) {
+    if (resolvedCover && oldSong && oldSong.id !== s?.id) {
       flipCircularCover(resolvedCover)
     } else if (resolvedCover && !state.circularCover) {
       state.circularCover = resolvedCover

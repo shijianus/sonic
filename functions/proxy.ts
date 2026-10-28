@@ -6,6 +6,7 @@ import {
   evaluateGatewayRateLimit,
   isBlockedSsrfHost,
   safeFetch,
+  validateSafeUrl,
 } from "./_lib/sonic/security";
 import type { AppEnv } from "./_lib/types";
 
@@ -34,6 +35,9 @@ function createCorsHeaders(init?: Headers): Headers {
     headers.set("Cache-Control", "no-store");
   }
   headers.set("Access-Control-Allow-Origin", "*");
+  headers.set("X-Content-Type-Options", "nosniff");
+  headers.set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; sandbox");
+  headers.set("Referrer-Policy", "no-referrer");
   return headers;
 }
 
@@ -106,6 +110,7 @@ async function proxyKuwoAudio(targetUrl: string, request: Request): Promise<Resp
     upstreamType !== 'application/octet-stream' &&
     upstreamType !== 'binary/octet-stream'
   ) {
+    upstream.body?.cancel().catch(() => {});
     throw new Error(`Unexpected upstream content type: ${upstreamType}`);
   }
   const headers = createCorsHeaders(upstream.headers);
@@ -206,21 +211,60 @@ async function proxyApiRequest(url: URL, request: Request, env?: AppEnv): Promis
   }
 
   const apiUrl = new URL(cfg.upstreamGdstudio);
+  const forwardedParams = new Set(['types', 'source', 'id', 'name', 'count', 'pages', 'page', 'br']);
   url.searchParams.forEach((value, key) => {
-    if (key === "target" || key === "callback") return;
-    apiUrl.searchParams.set(key, value);
+    if (forwardedParams.has(key)) apiUrl.searchParams.set(key, value);
   });
 
-  try {
-    const upstreamResponse = await fetch(apiUrl.toString(), {
-      headers: {
-        "User-Agent": request.headers.get("User-Agent") ?? "Mozilla/5.0",
-        Accept: "application/json",
-      },
+  const upstreamCheck = validateSafeUrl(apiUrl, {
+    allowHttp: false,
+    allowedDomains: [apiUrl.hostname],
+  });
+  if (!upstreamCheck.valid) {
+    return new Response(JSON.stringify({ error: 'Configured upstream is not a safe HTTPS target' }), {
+      status: 502,
+      headers,
     });
+  }
+
+  try {
+    const upstreamResponse = await safeFetch(
+      upstreamCheck.url!,
+      {
+        headers: {
+          'User-Agent': 'Sonic-Gateway/2.2',
+          Accept: 'application/json',
+        },
+      },
+      {
+        allowHttp: false,
+        allowedDomains: [apiUrl.hostname],
+        maxRedirects: 2,
+        timeoutMs: 8000,
+        maxBytes: 8 * 1024 * 1024,
+      },
+    );
+    const upstreamContentType = (upstreamResponse.headers.get('content-type') || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    if (
+      upstreamContentType &&
+      upstreamContentType !== 'application/json' &&
+      upstreamContentType !== 'text/json' &&
+      upstreamContentType !== 'text/plain'
+    ) {
+      upstreamResponse.body?.cancel().catch(() => {});
+      return new Response(JSON.stringify({ error: 'Upstream returned a non-JSON content type' }), {
+        status: 502,
+        headers,
+      });
+    }
     const outHeaders = createCorsHeaders(upstreamResponse.headers);
-    if (!outHeaders.has("Content-Type")) {
-      outHeaders.set("Content-Type", "application/json; charset=utf-8");
+    outHeaders.set('X-Content-Type-Options', 'nosniff');
+    outHeaders.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; sandbox");
+    if (!outHeaders.has('Content-Type')) {
+      outHeaders.set('Content-Type', 'application/json; charset=utf-8');
     }
     return new Response(upstreamResponse.body, {
       status: upstreamResponse.status,

@@ -187,13 +187,12 @@ export const parseAnyLrc = (raw: string): RawLyricLine[] => {
   return result.sort((a, b) => a.time - b.time)
 }
 
-const parseLrc = parseAnyLrc
-
 interface LyricMerged {
   time: number
   ori: string
   tran?: string
   roma?: string
+  words?: LyricWord[]
 }
 const mergedLines = computed<LyricMerged[]>(() => {
   const ori = state.lyricsOriginal

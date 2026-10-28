@@ -99,13 +99,8 @@ export const useRecommendStore = defineStore('recommend', {
         headers['X-Sonic-Anon-Id'] = id
       }
 
-      try {
-        const apiKey =
-          typeof localStorage !== 'undefined' ? localStorage.getItem('sonic_api_key') : null
-        if (apiKey && apiKey.startsWith('sonic_live_v1.')) {
-          headers['X-Sonic-Key'] = apiKey
-        }
-      } catch {}
+      // Browser sessions are authenticated by the HttpOnly `sonic_session` cookie set
+      // by the OAuth callback; the SPA must not read or persist bearer API keys.
 
       if (includeContext) {
         try {
@@ -113,13 +108,13 @@ export const useRecommendStore = defineStore('recommend', {
           const audioStore = useAudioStore()
 
           const likedArtists = Array.from(
-            new Set(libraryStore.likedSongs.slice(0, 15).map((s) => s.artist).filter(Boolean))
+            new Set(libraryStore.likedSongs.slice(0, 15).map((s: { artist?: string }) => s.artist).filter(Boolean))
           ).slice(0, 10)
           const recentArtists = Array.from(
             new Set(
               (audioStore.audio.playHistory || [])
                 .slice(0, 15)
-                .map((s) => s.artist)
+                .map((s: { artist?: string }) => s.artist)
                 .filter(Boolean)
             )
           ).slice(0, 10)
@@ -321,7 +316,7 @@ export const useRecommendStore = defineStore('recommend', {
       if (!this.autoDjEnabled) return []
       try {
         const audioStore = useAudioStore()
-        const excludeIds = audioStore.audio.playlist.slice(-15).map((s) => String(s.id))
+        const excludeIds = audioStore.audio.playlist.slice(-15).map((s: { id: string | number }) => String(s.id))
         const res = await fetchRecommendForYou(
           {
             mode: 'next',

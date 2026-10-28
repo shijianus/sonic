@@ -67,14 +67,14 @@ export const httpGet = <T>(
     params?: object,
     config?: { signal?: AbortSignal }
 ): Promise<T> =>
-    instance.get(url, { params, ...config })
+    instance.get<T, T>(url, { params, ...config }) as unknown as Promise<T>
 
 /** POST 请求 */
 export const httpPost = <T>(
     url: string,
     data?: object,
     header?: object
-): Promise<T> => instance.post(url, data, header)
+): Promise<T> => instance.post<T, T>(url, data, header) as unknown as Promise<T>
 
 /** 文件上传（multipart/form-data） */
 export const httpUpload = <T>(
@@ -82,10 +82,10 @@ export const httpUpload = <T>(
     formData: FormData,
     header?: object
 ): Promise<T> => {
-    return instance.post(url, formData, {
+    return instance.post<T, T>(url, formData, {
         headers: {
             'Content-Type': 'multipart/form-data',
             ...header,
         },
-    })
+    }) as unknown as Promise<T>
 }

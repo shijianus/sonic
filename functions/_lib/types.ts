@@ -3,6 +3,7 @@ export interface AppEnv {
   EPOMAIL_CLIENT_ID?: string;
   EPOMAIL_CLIENT_SECRET?: string;
   EPOMAIL_REDIRECT_URI?: string;
+  EPOMAIL_HTTP_TIMEOUT_MS?: string;
   MUSIC_API_BASE?: string;
   SOLARA_SECRET?: string;
   SONIC_SECRET?: string;
@@ -12,6 +13,9 @@ export interface AppEnv {
   SONIC_REVOKED_JTIS?: string;
   SONIC_REVOKED_SUBS?: string;
   SONIC_TOKEN_MIN_IAT?: string;
+  SONIC_ENABLE_KEY_REVOCATION?: string;
+  SONIC_KEY_REVOCATION_KV?: any;
+  SONIC_KEY_REVOCATION_FAIL_CLOSED?: string;
   KV?: any;
   RATE_LIMIT_KV?: any;
   RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };

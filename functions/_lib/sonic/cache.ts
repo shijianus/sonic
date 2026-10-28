@@ -11,6 +11,7 @@ interface MemoryCacheEntry {
 }
 
 const MAX_MEMORY_ENTRIES = 1500;
+const MAX_MEMORY_VALUE_BYTES = 512 * 1024;
 const memoryLru = new Map<string, MemoryCacheEntry>();
 
 function touchMemoryLru(key: string, entry: MemoryCacheEntry): void {
@@ -26,7 +27,9 @@ function touchMemoryLru(key: string, entry: MemoryCacheEntry): void {
 }
 
 export function buildSonicCacheKey(namespace: string, identifier: string): string {
-  const cleanId = identifier.trim().replace(/\s+/g, '_');
+  // Encode the whole identifier so user-controlled ':' / '=' characters cannot collide
+  // with the field separators used by callers.
+  const cleanId = encodeURIComponent(identifier.trim().replace(/\s+/g, '_'));
   return `sonic:${namespace}:${cleanId}`;
 }
 
@@ -133,12 +136,14 @@ export async function putSonicCachedJson<T>(
   const effectiveStaleSec = Math.max(freshTtlSec, staleTtlSec);
   const json = JSON.stringify(value);
 
-  // 1. Populate bounded in-memory LRU
-  touchMemoryLru(key, {
-    json,
-    freshUntil: now + freshTtlSec * 1000,
-    staleUntil: now + effectiveStaleSec * 1000,
-  });
+  // 1. Populate bounded in-memory LRU (large payloads go only to edge/KV storage)
+  if (json.length <= MAX_MEMORY_VALUE_BYTES) {
+    touchMemoryLru(key, {
+      json,
+      freshUntil: now + freshTtlSec * 1000,
+      staleUntil: now + effectiveStaleSec * 1000,
+    });
+  }
 
   const tasks: Promise<any>[] = [];
 

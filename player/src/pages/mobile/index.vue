@@ -323,7 +323,7 @@ watch(prefersReduced, syncAutoplay)
                   class="bg-overlay/50 text-primary absolute top-2 right-2 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] backdrop-blur-sm"
                 >
                   <span class="icon-[mdi--play] h-2.5 w-2.5"></span>
-                  {{ formatCount(mv.playCount) }}
+                  {{ formatCount(mv.playCount ?? 0) }}
                 </div>
                 <div class="absolute inset-0 flex items-center justify-center">
                   <div

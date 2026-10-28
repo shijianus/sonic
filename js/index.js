@@ -4495,30 +4495,80 @@ function showNotification(message, type = "success") {
 
     function saveSession(session) {
         try {
-            localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+            // Only non-secret profile metadata is persisted. The API key lives in an
+            // HttpOnly cookie and is fetched on demand for explicit copy operations.
+            const profile = {
+                id: session.id,
+                email: session.email,
+                name: session.name,
+                avatar: session.avatar,
+                role: session.role,
+                expiresAt: session.expiresAt,
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(profile));
         } catch {}
     }
 
     function clearSession() {
         try {
             localStorage.removeItem(STORAGE_KEY);
+            localStorage.removeItem("sonic_api_key");
         } catch {}
     }
 
-    // 检查 URL Hash 中的 Session（来自 OAuth 回调跳转）
-    if (window.location.hash.includes("session=")) {
-        try {
-            const raw = window.location.hash.split("session=")[1];
-            const parsed = JSON.parse(decodeURIComponent(raw));
-            if (parsed && parsed.apiKey) {
-                saveSession(parsed);
-                window.history.replaceState(null, "", window.location.pathname);
-                showNotification("EpoMail OAuth 验证成功，epocanvas sonic API Key 已就绪！", "success");
-            }
-        } catch (e) {
-            console.warn("Failed to parse session from hash", e);
-        }
+    async function fetchCurrentUser() {
+        const res = await fetch("/api/auth/user", {
+            credentials: "same-origin",
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+        });
+        if (!res.ok) return null;
+        const json = await res.json().catch(() => null);
+        return json && json.ok && json.user ? json.user : null;
     }
+
+    async function fetchApiKey() {
+        const res = await fetch("/api/auth/key", {
+            credentials: "same-origin",
+            headers: { Accept: "application/json" },
+            cache: "no-store",
+        });
+        if (!res.ok) return "";
+        const json = await res.json().catch(() => null);
+        return json && json.ok && typeof json.apiKey === "string" ? json.apiKey : "";
+    }
+
+    // OAuth callback historically embedded the API key in location.hash. That legacy
+    // behaviour is removed: clear any stale fragment without ever persisting it.
+    if (window.location.hash.includes("session=")) {
+        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        showNotification("旧版登录回调已停用，请重新通过 EpoMail 登录", "info");
+    }
+
+    // New callback flow: only a non-secret status flag appears in the URL; the session
+    // itself is an HttpOnly cookie set by /api/auth/callback.
+    (async function restoreOAuthSession() {
+        const params = new URLSearchParams(window.location.search);
+        const authStatus = params.get("auth");
+        if (!authStatus) return;
+        params.delete("auth");
+        const cleanUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : "") + window.location.hash;
+        window.history.replaceState(null, "", cleanUrl);
+
+        if (authStatus !== "success") {
+            showNotification("EpoMail 登录未完成，请重试", "error");
+            return;
+        }
+        const user = await fetchCurrentUser();
+        if (user) {
+            saveSession(user);
+            renderAuthUI();
+            showNotification("EpoMail OAuth 验证成功，会话已就绪！", "success");
+        } else {
+            clearSession();
+            showNotification("登录会话已失效，请重新登录", "error");
+        }
+    })();
 
     function renderAuthUI() {
         const session = getSavedSession();
@@ -4526,7 +4576,7 @@ function showNotification(message, type = "success") {
             if (userLabel) userLabel.textContent = session.name || session.email.split("@")[0];
             if (userName) userName.textContent = session.name || "EpoMail 用户";
             if (userEmail) userEmail.textContent = session.email;
-            if (keyInput) keyInput.value = session.apiKey || "";
+            if (keyInput) keyInput.value = "";
             if (userAvatar && session.avatar) userAvatar.src = session.avatar;
             if (loginBtn) {
                 loginBtn.classList.add("is-authenticated");
@@ -4542,13 +4592,22 @@ function showNotification(message, type = "success") {
     }
 
     if (loginBtn) {
-        loginBtn.addEventListener("click", () => {
+        loginBtn.addEventListener("click", async () => {
             const session = getSavedSession();
             if (session && session.email) {
-                // 已登录 -> 展开 API Key 模态框
+                // 已登录 -> 展开 API Key 模态框（密钥按需从 HttpOnly 会话换取）
                 if (modal) {
                     modal.style.display = "flex";
                     modal.setAttribute("aria-hidden", "false");
+                }
+                if (keyInput) {
+                    keyInput.value = "载入中…";
+                    const apiKey = await fetchApiKey();
+                    keyInput.value = apiKey || "会话已过期，请重新登录";
+                    if (!apiKey) {
+                        clearSession();
+                        renderAuthUI();
+                    }
                 }
             } else {
                 // 未登录 -> 跳转至 Epomail OAuth 授权页
@@ -4586,13 +4645,29 @@ function showNotification(message, type = "success") {
     }
 
     if (logoutBtn) {
-        logoutBtn.addEventListener("click", () => {
+        logoutBtn.addEventListener("click", async () => {
+            try {
+                await fetch("/api/auth/logout", {
+                    method: "POST",
+                    credentials: "same-origin",
+                    headers: { Accept: "application/json" },
+                });
+            } catch {}
             clearSession();
+            if (keyInput) keyInput.value = "";
             closeModal();
             renderAuthUI();
             showNotification("已退出 EpoMail 登录", "info");
         });
     }
+
+    // One-time migration: strip API keys persisted by older front-end versions.
+    (function migrateLegacySession() {
+        const session = getSavedSession();
+        if (session && Object.prototype.hasOwnProperty.call(session, "apiKey")) {
+            saveSession(session);
+        }
+    })();
 
     renderAuthUI();
 })();

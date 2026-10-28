@@ -331,7 +331,8 @@ describe('Task 3: OAuth State CSRF & Security', () => {
     const resMismatch = await handleAuthCallback({ request: reqMismatch, env });
     expect(resMismatch.status).toBe(400);
     const json = await resMismatch.json();
-    expect(json.error).toContain('CSRF');
+    expect(json.error?.code).toBe('OAUTH_STATE_INVALID');
+    expect(json.error?.message).toContain('CSRF');
   });
 });
 

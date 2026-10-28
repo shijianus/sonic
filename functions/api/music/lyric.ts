@@ -73,6 +73,8 @@ export async function onRequest({ request, env, waitUntil }: { request: Request;
       'Cache-Control': 'public, max-age=86400, s-maxage=86400',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
     };
 
     let response: Response;

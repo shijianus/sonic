@@ -133,7 +133,7 @@ export function buildPrivacySafeCacheHeaders(
   env?: AppEnv,
   publicMaxAgeSec = 120,
 ): { headers: Record<string, string>; allowSharedCache: boolean } {
-  const vary = 'Authorization, X-Sonic-Key, X-CFSolara-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context';
+  const vary = 'Authorization, Cookie, X-Sonic-Key, X-CFSolara-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context';
   const hasSignals = identity.personalizationEnabled || Boolean(identity.subjectKey) || requestHasIdentitySignals(request);
 
   if (hasSignals || publicMaxAgeSec <= 0) {

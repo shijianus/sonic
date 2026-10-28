@@ -1,22 +1,185 @@
 import type { AppEnv, UserSession } from './types';
 import { sha256Hex } from './sonic/crypto';
+import { isEnvEnabled } from './sonic/config';
 
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+export const SONIC_SESSION_COOKIE = 'sonic_session';
+export const SONIC_SESSION_MAX_AGE_SEC = 30 * 86400;
+export const SONIC_OAUTH_STATE_COOKIE = 'sonic_oauth_state';
+export const SONIC_OAUTH_VERIFIER_COOKIE = 'sonic_oauth_verifier';
+export const OAUTH_TRANSACTION_MAX_AGE_SEC = 600;
+export const OAUTH_STATE_REGEX = /^[A-Za-z0-9_-]{43}$/;
+export const PKCE_VERIFIER_REGEX = /^[A-Za-z0-9_-]{43,128}$/;
+const TOKEN_MAX_LENGTH = 8192;
+
+// Best-effort single-use enforcement inside one isolate/process. The authorization code
+// itself is single-use at the provider; this cache additionally rejects state replay on
+// the same warm isolate. Multi-isolate deployments still rely on provider code semantics.
+const usedOAuthStates = new Map<string, number>();
+const MAX_USED_OAUTH_STATES = 4096;
+
+export function consumeOAuthState(state: string, now = Date.now()): boolean {
+  for (const [key, expiresAt] of usedOAuthStates) {
+    if (expiresAt <= now) usedOAuthStates.delete(key);
+  }
+  if (usedOAuthStates.has(state)) return false;
+  if (usedOAuthStates.size >= MAX_USED_OAUTH_STATES) {
+    const oldest = usedOAuthStates.keys().next().value;
+    if (oldest !== undefined) usedOAuthStates.delete(oldest);
+  }
+  usedOAuthStates.set(state, now + OAUTH_TRANSACTION_MAX_AGE_SEC * 1000);
+  return true;
+}
+
+export function resetOAuthStateReplayCacheForTest(): void {
+  usedOAuthStates.clear();
+}
+
+// ── Optional KV-backed immediate API Key revocation ──
+// Enabled only when a KV binding is present and SONIC_ENABLE_KEY_REVOCATION=1.
+// Positive/negative lookups are cached briefly per isolate; revocation therefore
+// propagates to other isolates within KEY_REVOCATION_CACHE_TTL_MS, while the local
+// isolate sees the revocation immediately.
+const KEY_REVOCATION_CACHE_TTL_MS = 30_000;
+const KEY_REVOCATION_CACHE_MAX = 4096;
+const keyRevocationCache = new Map<string, { revoked: boolean; until: number }>();
+
+export function isKeyRevocationKvEnabled(env: AppEnv): boolean {
+  const kv = env?.SONIC_KEY_REVOCATION_KV;
+  return (
+    isEnvEnabled(env?.SONIC_ENABLE_KEY_REVOCATION, false) &&
+    Boolean(kv) &&
+    typeof kv.get === 'function' &&
+    typeof kv.put === 'function'
+  );
+}
+
+function cacheKeyRevocation(jti: string, revoked: boolean): void {
+  if (keyRevocationCache.size >= KEY_REVOCATION_CACHE_MAX && !keyRevocationCache.has(jti)) {
+    const oldest = keyRevocationCache.keys().next().value;
+    if (oldest !== undefined) keyRevocationCache.delete(oldest);
+  }
+  keyRevocationCache.set(jti, { revoked, until: Date.now() + KEY_REVOCATION_CACHE_TTL_MS });
+}
+
+export async function revokeJtiInKv(
+  env: AppEnv,
+  jti: string,
+  expSec: number,
+): Promise<{ ok: boolean; error?: 'not_configured' | 'store_unavailable' }> {
+  if (!isKeyRevocationKvEnabled(env)) return { ok: false, error: 'not_configured' };
+  const ttl = Math.max(60, Math.min(90 * 86400, Math.floor(expSec - Date.now() / 1000)));
+  try {
+    await env.SONIC_KEY_REVOCATION_KV.put(`sonic:revoked:jti:${jti}`, '1', {
+      expirationTtl: ttl,
+    });
+    cacheKeyRevocation(jti, true);
+    return { ok: true };
+  } catch (error: any) {
+    console.warn(
+      '[Sonic Auth] Key revocation KV write failed:',
+      String(error?.message || error).slice(0, 160),
+    );
+    return { ok: false, error: 'store_unavailable' };
+  }
+}
+
+async function isJtiRevokedInKv(env: AppEnv, jti: string): Promise<boolean> {
+  if (!isKeyRevocationKvEnabled(env)) return false;
+  const cached = keyRevocationCache.get(jti);
+  if (cached && cached.until > Date.now()) return cached.revoked;
+  try {
+    const value = await env.SONIC_KEY_REVOCATION_KV.get(`sonic:revoked:jti:${jti}`);
+    const revoked = value === '1' || value === 'true';
+    cacheKeyRevocation(jti, revoked);
+    return revoked;
+  } catch (error: any) {
+    console.warn(
+      '[Sonic Auth] Key revocation KV read failed:',
+      String(error?.message || error).slice(0, 160),
+    );
+    if (isEnvEnabled(env.SONIC_KEY_REVOCATION_FAIL_CLOSED, true)) return true;
+    return false;
+  }
+}
+
+export function resetKeyRevocationCacheForTest(): void {
+  keyRevocationCache.clear();
+}
+
+function isLocalHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1';
+}
+
+// Cookies are Secure by default, including when TLS terminates at a trusted tunnel in
+// front of the Node engine (the app then sees http://engine.internal). Only plain-HTTP
+// localhost development may omit the flag.
+export function shouldUseSecureCookie(url: URL): boolean {
+  return !(url.protocol === 'http:' && isLocalHostname(url.hostname));
+}
+
+function normalizeServiceBase(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return '';
+  try {
+    const parsed = new URL(value);
+    if (parsed.username || parsed.password || parsed.search || parsed.hash) return '';
+    if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLocalHostname(parsed.hostname))) {
+      return '';
+    }
+    return parsed.toString().replace(/\/+$/, '');
+  } catch {
+    return '';
+  }
+}
+
+function normalizeRedirectUri(raw: unknown): string {
+  const value = typeof raw === 'string' ? raw.trim() : '';
+  if (!value) return '';
+  try {
+    const parsed = new URL(value);
+    if (parsed.username || parsed.password) return '';
+    if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && isLocalHostname(parsed.hostname))) {
+      return '';
+    }
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+function normalizeOrigin(raw: string): string {
+  try {
+    return new URL(raw).origin.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+export function getAllowedOrigins(env: AppEnv): string[] {
+  return (env.SONIC_ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((origin) => normalizeOrigin(origin.trim()))
+    .filter(Boolean);
+}
+
 export function getEpomailConfig(env: AppEnv, requestOrigin?: string) {
-  const baseUrl = (env.EPOMAIL_BASE_URL || '').replace(/\/+$/, '');
+  const baseUrl = normalizeServiceBase(env.EPOMAIL_BASE_URL);
   const clientId = env.EPOMAIL_CLIENT_ID ? String(env.EPOMAIL_CLIENT_ID).trim() : '';
   const clientSecret = env.EPOMAIL_CLIENT_SECRET ? String(env.EPOMAIL_CLIENT_SECRET).trim() : '';
+  const timeoutMs = Math.min(
+    30000,
+    Math.max(1000, parseInt(String(env.EPOMAIL_HTTP_TIMEOUT_MS || '8000'), 10) || 8000),
+  );
 
-  let redirectUri = env.EPOMAIL_REDIRECT_URI ? String(env.EPOMAIL_REDIRECT_URI).trim() : '';
-  if (!redirectUri && requestOrigin) {
-    const allowedOrigins = (env.SONIC_ALLOWED_ORIGINS || '')
-      .split(',')
-      .map((o) => o.trim().toLowerCase())
-      .filter(Boolean);
-    const originLower = requestOrigin.toLowerCase();
-    if (allowedOrigins.includes(originLower)) {
-      redirectUri = `${requestOrigin}/api/auth/callback`;
+  const rawRedirectUri = env.EPOMAIL_REDIRECT_URI ? String(env.EPOMAIL_REDIRECT_URI).trim() : '';
+  let redirectUri = rawRedirectUri ? normalizeRedirectUri(rawRedirectUri) : '';
+  if (!rawRedirectUri && requestOrigin) {
+    const origin = normalizeOrigin(requestOrigin);
+    if (origin && getAllowedOrigins(env).includes(origin)) {
+      redirectUri = `${origin}/api/auth/callback`;
     }
   }
 
@@ -25,10 +188,45 @@ export function getEpomailConfig(env: AppEnv, requestOrigin?: string) {
     clientId,
     clientSecret,
     redirectUri,
+    timeoutMs,
     authorizeUrl: baseUrl ? `${baseUrl}/oauth/authorize` : '',
     tokenUrl: baseUrl ? `${baseUrl}/oauth/token` : '',
     userInfoUrl: baseUrl ? `${baseUrl}/oauth/userinfo` : '',
   };
+}
+
+export function buildSessionCookie(token: string, expiresAt: string, requestUrl: URL): string {
+  const expiresMs = Date.parse(expiresAt);
+  const maxAge = Number.isFinite(expiresMs)
+    ? Math.floor((expiresMs - Date.now()) / 1000)
+    : SONIC_SESSION_MAX_AGE_SEC;
+  const maxAgeSec = Math.max(0, Math.min(SONIC_SESSION_MAX_AGE_SEC, maxAge));
+  const secure = shouldUseSecureCookie(requestUrl) ? '; Secure' : '';
+  return `${SONIC_SESSION_COOKIE}=${token}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}`;
+}
+
+export function buildClearSessionCookie(requestUrl: URL): string {
+  const secure = shouldUseSecureCookie(requestUrl) ? '; Secure' : '';
+  return `${SONIC_SESSION_COOKIE}=; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+}
+
+export function readCookie(request: Request, name: string): string | undefined {
+  const header = request.headers.get('cookie');
+  if (!header || header.length > 16384) return undefined;
+  for (const part of header.split(';')) {
+    const trimmed = part.trim();
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx <= 0) continue;
+    if (trimmed.slice(0, eqIdx).trim() !== name) continue;
+    const rawValue = trimmed.slice(eqIdx + 1).trim();
+    if (!rawValue || rawValue.length > TOKEN_MAX_LENGTH) return undefined;
+    try {
+      return decodeURIComponent(rawValue);
+    } catch {
+      return undefined;
+    }
+  }
+  return undefined;
 }
 
 export function buildAuthorizeUrl(
@@ -83,23 +281,38 @@ export async function exchangeCode(
 
   const response = await fetch(config.tokenUrl, {
     method: 'POST',
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
     body: JSON.stringify(bodyPayload),
+    signal: AbortSignal.timeout(config.timeoutMs),
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`[Sonic OAuth Error] Epomail token exchange failed (${response.status}): ${errorText}`);
+    const errorText = await response.text().catch(() => '');
+    // Never log the authorization code, client secret or full provider response.
+    console.error(
+      `[Sonic OAuth Error] Epomail token exchange failed (${response.status}): ${errorText
+        .replace(/[\r\n]+/g, ' ')
+        .slice(0, 160)}`,
+    );
     throw new Error('Epomail token exchange failed');
   }
 
-  const data = (await response.json()) as { access_token: string; id_token?: string };
+  const data = (await response.json()) as { access_token?: unknown; id_token?: unknown };
+  if (
+    typeof data.access_token !== 'string' ||
+    data.access_token.length < 8 ||
+    data.access_token.length > 4096 ||
+    !/^[\x21-\x7e]+$/.test(data.access_token)
+  ) {
+    throw new Error('Epomail token exchange returned no valid access_token');
+  }
   return {
     accessToken: data.access_token,
-    idToken: data.id_token,
+    idToken: typeof data.id_token === 'string' ? data.id_token : undefined,
   };
 }
 
@@ -113,10 +326,12 @@ export async function fetchUserInfo(
   }
 
   const response = await fetch(config.userInfoUrl, {
+    cache: 'no-store',
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Accept: 'application/json',
     },
+    signal: AbortSignal.timeout(config.timeoutMs),
   });
 
   if (!response.ok) {
@@ -125,10 +340,18 @@ export async function fetchUserInfo(
   }
 
   const user = (await response.json()) as Record<string, any>;
+  if (user?.email_verified === false) {
+    throw new Error('Epomail account email is not verified');
+  }
+  const email = String(user.email || '').trim().toLowerCase();
+  if (!EMAIL_REGEX.test(email)) {
+    throw new Error('Epomail userInfo did not contain a valid email');
+  }
+
   return {
-    id: String(user.id || user.sub || user.email || ''),
-    email: String(user.email || '').trim().toLowerCase(),
-    name: String(user.name || user.username || user.nickname || user.email || 'Epomail User'),
+    id: String(user.id || user.sub || email),
+    email,
+    name: String(user.name || user.username || user.nickname || email || 'Epomail User'),
     avatar: String(user.avatar || user.picture || ''),
     role: String(user.role || 'user'),
   };
@@ -178,7 +401,6 @@ export function base64UrlToString(str: string): string {
 const TOKEN_PREFIX = 'sonic_live_v2';
 const TOKEN_VERSION = 2;
 const TOKEN_TYPE = 'sonic-api-key';
-const TOKEN_MAX_LENGTH = 8192;
 const TOKEN_HEADER_MAX_BYTES = 512;
 const TOKEN_PAYLOAD_MAX_BYTES = 4096;
 const SIGNATURE_BYTES = 32;
@@ -187,7 +409,6 @@ const CLOCK_SKEW_SEC = 120;
 const KID_REGEX = /^[A-Za-z0-9_-]{1,64}$/;
 const JTI_REGEX = /^[A-Za-z0-9_-]{16,128}$/;
 const UID_REGEX = /^[A-Za-z0-9_.:@-]{1,128}$/;
-const ROLE_REGEX = /^[A-Za-z0-9_-]{1,32}$/;
 
 export interface AuthSigningKey {
   kid: string;
@@ -262,9 +483,11 @@ export function getAuthSecrets(env: AppEnv): AuthKeyMaterial | null {
   };
 }
 
+const ALLOWED_SESSION_ROLES = new Set(['user', 'developer', 'admin']);
+
 function sanitizeRole(value: unknown): string {
-  const role = typeof value === 'string' ? value.trim() : '';
-  return ROLE_REGEX.test(role) ? role : 'user';
+  const role = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  return ALLOWED_SESSION_ROLES.has(role) ? role : 'user';
 }
 
 function sanitizeUid(value: unknown): string | undefined {
@@ -416,7 +639,13 @@ export async function createSession(
   };
 }
 
-export function extractAuthCredentials(request: Request): { token?: string; apiKey?: string } {
+export type AuthCredentialSource = 'header' | 'cookie';
+
+export function extractAuthCredentials(request: Request): {
+  token?: string;
+  apiKey?: string;
+  source?: AuthCredentialSource;
+} {
   const headerKey =
     request.headers.get('x-sonic-key') ||
     request.headers.get('x-cfsolara-key') ||
@@ -428,19 +657,33 @@ export function extractAuthCredentials(request: Request): { token?: string; apiK
     bearerToken = authHeader.substring(7).trim();
   }
 
+  const headerCredential = headerKey?.trim() || bearerToken || undefined;
+  if (headerCredential) {
+    return { token: bearerToken, apiKey: headerCredential, source: 'header' };
+  }
+
+  const cookieToken = readCookie(request, SONIC_SESSION_COOKIE);
+  if (cookieToken) {
+    return { token: cookieToken, apiKey: cookieToken, source: 'cookie' };
+  }
+
   // API keys are never accepted from the URL query string: query strings leak into
   // access logs, browser history, Referer headers and CDN caches.
-  return {
-    token: bearerToken,
-    apiKey: headerKey?.trim() || bearerToken || undefined,
-  };
+  return { token: bearerToken };
 }
 
 export async function verifyAuth(
   request: Request,
   env: AppEnv,
-): Promise<{ authenticated: boolean; user?: UserSession; isRateLimited?: boolean }> {
-  const { apiKey } = extractAuthCredentials(request);
+): Promise<{
+  authenticated: boolean;
+  user?: UserSession;
+  isRateLimited?: boolean;
+  source?: AuthCredentialSource;
+  tokenId?: string;
+  tokenExpiresAt?: number;
+}> {
+  const { apiKey, source } = extractAuthCredentials(request);
   if (!apiKey) {
     return { authenticated: false };
   }
@@ -499,11 +742,15 @@ export async function verifyAuth(
   const email = payload.sub.trim().toLowerCase();
   if (secrets.revokedSubs.has(email)) return { authenticated: false };
   if (secrets.revokedJtis.has(payload.jti)) return { authenticated: false };
+  if (await isJtiRevokedInKv(env, payload.jti)) return { authenticated: false };
 
   const uid = sanitizeUid(payload.uid) || deriveUserId(email);
 
   return {
     authenticated: true,
+    source,
+    tokenId: payload.jti,
+    tokenExpiresAt: payload.exp,
     user: {
       id: uid,
       email,

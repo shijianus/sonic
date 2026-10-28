@@ -9,6 +9,13 @@ import { callLocalEngineJson } from './local-engine';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from './security';
 import type { AppEnv } from '../types';
 
+function timedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return fetch(input, {
+    ...init,
+    signal: init?.signal ?? AbortSignal.timeout(8000),
+  });
+}
+
 function buildUpstreamHeaders(realIp: string): Record<string, string> {
   const headers: Record<string, string> = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -157,7 +164,7 @@ export async function handleUpstreamEndpoint(
       qs.set('realIP', cfg.realIp);
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (env?.NETEASE_COOKIE) headers.Cookie = String(env.NETEASE_COOKIE).trim();
-      const ncmResp = await fetch(`${cfg.ncmApiUrl}/${normEndpoint}?${qs.toString()}`, {
+      const ncmResp = await timedFetch(`${cfg.ncmApiUrl}/${normEndpoint}?${qs.toString()}`, {
         headers,
         signal: AbortSignal.timeout(cfg.timeoutMs),
       });
@@ -178,7 +185,7 @@ export async function handleUpstreamEndpoint(
   // 1. Banner
   if (normEndpoint === 'banner') {
     try {
-      const resp = await fetch('https://music.163.com/api/v2/banner/get?clientType=pc', {
+      const resp = await timedFetch('https://music.163.com/api/v2/banner/get?clientType=pc', {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -233,7 +240,7 @@ export async function handleUpstreamEndpoint(
     const limit = url.searchParams.get('limit') || '20';
     const cat = url.searchParams.get('cat') || '全部';
     try {
-      const resp = await fetch(`https://music.163.com/api/playlist/highquality/list?limit=${limit}&cat=${encodeURIComponent(cat)}`, {
+      const resp = await timedFetch(`https://music.163.com/api/playlist/highquality/list?limit=${limit}&cat=${encodeURIComponent(cat)}`, {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -258,7 +265,7 @@ export async function handleUpstreamEndpoint(
   // 3. Top Songs / New Songs
   if (normEndpoint === 'top/song' || normEndpoint === 'personalized/newsong') {
     try {
-      const resp = await fetch('https://music.163.com/api/v1/discovery/new/songs', {
+      const resp = await timedFetch('https://music.163.com/api/v1/discovery/new/songs', {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -279,7 +286,7 @@ export async function handleUpstreamEndpoint(
   if (normEndpoint === 'top/artists' || normEndpoint === 'artist/list') {
     const limit = parseInt(url.searchParams.get('limit') || '16', 10);
     try {
-      const resp = await fetch(`https://music.163.com/api/artist/list?categoryCode=1001&limit=${limit}`, {
+      const resp = await timedFetch(`https://music.163.com/api/artist/list?categoryCode=1001&limit=${limit}`, {
         headers: buildUpstreamHeaders(cfg.realIp),
         signal: AbortSignal.timeout(5000),
       });
@@ -312,7 +319,7 @@ export async function handleUpstreamEndpoint(
   // 5. Personalized MV
   if (normEndpoint === 'personalized/mv' || normEndpoint === 'mv/first') {
     try {
-      const resp = await fetch('https://music.163.com/api/personalized/mv', {
+      const resp = await timedFetch('https://music.163.com/api/personalized/mv', {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -334,7 +341,7 @@ export async function handleUpstreamEndpoint(
 
     try {
       const upstreamUrl = `https://music.163.com/api/mv/all?limit=${limit}&offset=${offset}&order=${encodeURIComponent(order)}${type ? `&type=${encodeURIComponent(type)}` : ''}`;
-      const resp = await fetch(upstreamUrl, { headers: buildUpstreamHeaders(cfg.realIp) });
+      const resp = await timedFetch(upstreamUrl, { headers: buildUpstreamHeaders(cfg.realIp) });
       const data: any = await resp.json();
       return jsonResponse(
         {
@@ -356,7 +363,7 @@ export async function handleUpstreamEndpoint(
     if (!id) return jsonResponse({ code: 400, message: 'Missing MV id' }, { status: 400 });
 
     try {
-      const resp = await fetch(`https://music.163.com/api/mv/detail?id=${encodeURIComponent(id)}`, {
+      const resp = await timedFetch(`https://music.163.com/api/mv/detail?id=${encodeURIComponent(id)}`, {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -375,7 +382,7 @@ export async function handleUpstreamEndpoint(
     if (!id) return jsonResponse({ code: 400, message: 'Missing MV id' }, { status: 400 });
 
     try {
-      const resp = await fetch(`https://music.163.com/api/mv/detail?id=${encodeURIComponent(id)}`, {
+      const resp = await timedFetch(`https://music.163.com/api/mv/detail?id=${encodeURIComponent(id)}`, {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -409,7 +416,7 @@ export async function handleUpstreamEndpoint(
   // 9. Simi MV
   if (normEndpoint === 'simi/mv') {
     try {
-      const resp = await fetch('https://music.163.com/api/mv/all?limit=10', { headers: buildUpstreamHeaders(cfg.realIp) });
+      const resp = await timedFetch('https://music.163.com/api/mv/all?limit=10', { headers: buildUpstreamHeaders(cfg.realIp) });
       const data: any = await resp.json();
       return jsonResponse(
         { code: 200, brand: 'Sonic', mvs: desensitizeData(data.data || []) },
@@ -426,7 +433,7 @@ export async function handleUpstreamEndpoint(
     const type = normEndpoint.includes('mv') || url.searchParams.has('mvid') ? '5' : '4';
 
     try {
-      const resp = await fetch(`https://music.163.com/api/v1/resource/comments/R_${type === '5' ? 'MV' : 'SO'}_${type}_${encodeURIComponent(id)}?limit=${limit}`, {
+      const resp = await timedFetch(`https://music.163.com/api/v1/resource/comments/R_${type === '5' ? 'MV' : 'SO'}_${type}_${encodeURIComponent(id)}?limit=${limit}`, {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -447,7 +454,7 @@ export async function handleUpstreamEndpoint(
   // 11. Toplists / Charts
   if (normEndpoint === 'toplist/detail' || normEndpoint === 'toplist') {
     try {
-      const resp = await fetch('https://music.163.com/api/toplist/detail', { headers: buildUpstreamHeaders(cfg.realIp) });
+      const resp = await timedFetch('https://music.163.com/api/toplist/detail', { headers: buildUpstreamHeaders(cfg.realIp) });
       const data: any = await resp.json();
       return jsonResponse(
         {
@@ -466,7 +473,7 @@ export async function handleUpstreamEndpoint(
   if (normEndpoint === 'playlist/detail' || normEndpoint === 'playlist/track/all') {
     const id = url.searchParams.get('id') || '3778678';
     try {
-      const resp = await fetch(`https://music.163.com/api/playlist/detail?id=${encodeURIComponent(id)}`, {
+      const resp = await timedFetch(`https://music.163.com/api/playlist/detail?id=${encodeURIComponent(id)}`, {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -507,7 +514,7 @@ export async function handleUpstreamEndpoint(
     const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
     if (normEndpoint === 'artist/album') {
       try {
-        const resp = await fetch(
+        const resp = await timedFetch(
           `https://music.163.com/api/artist/albums/${encodeURIComponent(id)}?limit=${limit}&offset=${offset}`,
           { headers: buildUpstreamHeaders(cfg.realIp) },
         );
@@ -522,7 +529,7 @@ export async function handleUpstreamEndpoint(
     if (normEndpoint === 'artist/songs') {
       const order = url.searchParams.get('order') === 'time' ? 'time' : 'hot';
       try {
-        const resp = await fetch(
+        const resp = await timedFetch(
           `https://music.163.com/api/artist/songs?id=${encodeURIComponent(id)}&limit=${limit}&offset=${offset}&order=${order}`,
           { headers: buildUpstreamHeaders(cfg.realIp) },
         );
@@ -536,7 +543,7 @@ export async function handleUpstreamEndpoint(
     }
 
     try {
-      const resp = await fetch(`https://music.163.com/api/artist/${encodeURIComponent(id)}`, {
+      const resp = await timedFetch(`https://music.163.com/api/artist/${encodeURIComponent(id)}`, {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -578,7 +585,7 @@ export async function handleUpstreamEndpoint(
     const s = url.searchParams.get('keywords') || url.searchParams.get('s') || '';
     if (!s) return jsonResponse({ code: 200, result: {} });
     try {
-      const resp = await fetch(`https://music.163.com/api/search/suggest/web?s=${encodeURIComponent(s)}`, {
+      const resp = await timedFetch(`https://music.163.com/api/search/suggest/web?s=${encodeURIComponent(s)}`, {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -598,7 +605,7 @@ export async function handleUpstreamEndpoint(
     }
     const cleanId = ids.replace(/[\[\]\s]/g, '');
     try {
-      const resp = await fetch(`https://music.163.com/api/song/detail/?id=${encodeURIComponent(cleanId)}&ids=${encodeURIComponent(ids)}`, {
+      const resp = await timedFetch(`https://music.163.com/api/song/detail/?id=${encodeURIComponent(cleanId)}&ids=${encodeURIComponent(ids)}`, {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       const data: any = await resp.json();
@@ -615,7 +622,7 @@ export async function handleUpstreamEndpoint(
     const id = url.searchParams.get('id') || '';
     if (id) {
       try {
-        const resp = await fetch(`https://music.163.com/api/v1/album/${encodeURIComponent(id)}`, {
+        const resp = await timedFetch(`https://music.163.com/api/v1/album/${encodeURIComponent(id)}`, {
           headers: buildUpstreamHeaders(cfg.realIp),
         });
         const data: any = await resp.json();
@@ -658,7 +665,7 @@ export async function handleUpstreamEndpoint(
     if (type === '1000') {
       // Search playlists
       try {
-        const resp = await fetch(`https://music.163.com/api/search/get/web?s=${encodeURIComponent(keywords)}&type=1000&limit=${limit}&offset=${offset}`, {
+        const resp = await timedFetch(`https://music.163.com/api/search/get/web?s=${encodeURIComponent(keywords)}&type=1000&limit=${limit}&offset=${offset}`, {
           headers: buildUpstreamHeaders(cfg.realIp),
         });
         const data: any = await resp.json();
@@ -677,7 +684,7 @@ export async function handleUpstreamEndpoint(
     if (type === '1004') {
       // Search MVs
       try {
-        const resp = await fetch(`https://music.163.com/api/mv/all?limit=${limit}&offset=${offset}`, {
+        const resp = await timedFetch(`https://music.163.com/api/mv/all?limit=${limit}&offset=${offset}`, {
           headers: buildUpstreamHeaders(cfg.realIp),
         });
         const data: any = await resp.json();

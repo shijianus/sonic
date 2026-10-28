@@ -69,14 +69,15 @@ const restoredBlobUrls = new Set<string>()
 /** 获取 Audio 单例（懒初始化） */
 const getAudioSingleton = (): HTMLAudioElement => {
   if (!globalAudio) {
-    globalAudio = new Audio()
+    const audio = new Audio()
+    globalAudio = audio
     // 允许跨域，以便 AudioContext 进行音频可视化分析
-    globalAudio.crossOrigin = 'anonymous'
-    globalAudio.id = 'audioPlayer'
+    audio.crossOrigin = 'anonymous'
+    audio.id = 'audioPlayer'
     if (typeof document !== 'undefined') {
       const attachAudio = () => {
         if (!document.getElementById('audioPlayer') && document.body) {
-          document.body.appendChild(globalAudio)
+          document.body.appendChild(audio)
         }
       }
       if (document.body) {
@@ -666,7 +667,7 @@ export const useAudioStore = defineStore('audio', {
             const recStore = useRecommendStore()
             if (recStore.autoDjEnabled && this.audio.currentSong) {
               const moreSongs = await recStore.fetchAutoDjNextSongs(this.audio.currentSong, 5)
-              const existingIds = new Set(this.audio.playlist.map((s) => String(s.id)))
+              const existingIds = new Set(this.audio.playlist.map((s: { id: string | number }) => String(s.id)))
               const fresh = moreSongs.filter((s) => !existingIds.has(String(s.id)))
               if (fresh.length > 0) {
                 this.audio.playlist.push(...fresh)
@@ -722,7 +723,7 @@ export const useAudioStore = defineStore('audio', {
 
       song.url = url
       // 同步到播放列表对应项
-      const idx = this.audio.playlist.findIndex(p => p.id === song.id)
+      const idx = this.audio.playlist.findIndex((p: { id: string | number }) => p.id === song.id)
       if (idx !== -1) {
         this.audio.playlist[idx].url = url
       }

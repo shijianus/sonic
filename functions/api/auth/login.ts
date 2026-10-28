@@ -2,6 +2,10 @@ import {
   base64UrlEncode,
   buildAuthorizeUrl,
   getEpomailConfig,
+  OAUTH_TRANSACTION_MAX_AGE_SEC,
+  shouldUseSecureCookie,
+  SONIC_OAUTH_STATE_COOKIE,
+  SONIC_OAUTH_VERIFIER_COOKIE,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import {
@@ -12,6 +16,9 @@ import type { AppEnv } from '../../_lib/types';
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return errorResponse('Method not allowed', 405);
+  }
 
   const rl = await evaluateAuthRateLimit(request, env, 'auth-login');
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
@@ -29,9 +36,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
   // Validate redirect URI origin against config or allowed origins whitelist
   const config = getEpomailConfig(env, url.origin);
-  if (!config.redirectUri) {
+  if (!config.baseUrl || !config.redirectUri) {
     return errorResponse(
-      '未配置合法重定向地址 (EPOMAIL_REDIRECT_URI 缺失且请求来源不在 SONIC_ALLOWED_ORIGINS 白名单)',
+      '未配置合法重定向地址 (EPOMAIL_REDIRECT_URI 缺失/非 HTTPS 且请求来源不在 SONIC_ALLOWED_ORIGINS 白名单)',
       400,
     );
   }
@@ -56,15 +63,15 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     return errorResponse(err?.message || '构建授权跳转链接失败', 500);
   }
 
-  const headers = new Headers();
-  headers.append(
-    'Set-Cookie',
-    `sonic_oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=600`,
-  );
-  headers.append(
-    'Set-Cookie',
-    `sonic_oauth_verifier=${codeVerifier}; HttpOnly; Secure; SameSite=Lax; Path=/api/auth; Max-Age=600`,
-  );
+  const secureAttr = shouldUseSecureCookie(url) ? '; Secure' : '';
+  const cookieSuffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=/api/auth; Max-Age=${OAUTH_TRANSACTION_MAX_AGE_SEC}`;
+  const headers = new Headers({
+    'Cache-Control': 'no-store',
+    'Referrer-Policy': 'no-referrer',
+    Pragma: 'no-cache',
+  });
+  headers.append('Set-Cookie', `${SONIC_OAUTH_STATE_COOKIE}=${state}${cookieSuffix}`);
+  headers.append('Set-Cookie', `${SONIC_OAUTH_VERIFIER_COOKIE}=${codeVerifier}${cookieSuffix}`);
 
   if (redirectMode === 'json') {
     return jsonResponse({ ok: true, authorizeUrl }, { headers });

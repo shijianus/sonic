@@ -39,6 +39,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       callbackUrl: `${base}/api/auth/callback`,
       userUrl: `${base}/api/auth/user`,
       keyManagementUrl: `${base}/api/auth/key`,
+      logoutUrl: `${base}/api/auth/logout`,
+      revokeUrl: `${base}/api/auth/revoke`,
+      browserSession: 'HttpOnly Secure SameSite=Lax cookie: sonic_session (API key is never placed in the URL)',
       header: 'X-Sonic-Key: <your_key> or X-CFSolara-Key: <your_key> or Authorization: Bearer <your_key>',
     },
     endpoints: [

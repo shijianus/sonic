@@ -244,6 +244,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
     const headers = corsHeaders();
     if (!isPlayableMediaType(upstream.headers.get('content-type'))) {
+      upstream.body?.cancel().catch(() => {});
       return errorResponse('Upstream returned a non-audio content type', 415);
     }
     const forwardHeaders = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'etag', 'last-modified'];

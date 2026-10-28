@@ -170,7 +170,7 @@ export const albumDetail = (params: { id: number | string }) => httpGet('/album'
 export const playlistDetail = (params: { id: number; s?: number }) =>
   httpGet('/playlist/detail', params)
 
-export const playlistTrackAll = (params: { id: number; limit?: number; offset?: number }) =>
+export const playlistTrackAll = (params: { id: number | string; limit?: number; offset?: number }) =>
   httpGet('/playlist/track/all', params)
 
 export const userPlaylist = (params: { uid: number; limit?: number; offset?: number }) =>
@@ -233,10 +233,10 @@ export const artistSongs = (params: {
   offset?: number
   order?: 'hot' | 'time'
 }) => httpGet('/artist/songs', params)
-export const artistAlbum = (params: { id: number; limit?: number; offset?: number }) =>
+export const artistAlbum = (params: { id: number | string; limit?: number; offset?: number }) =>
   httpGet('/artist/album', params)
 export const artistDesc = (params: { id: number }) => httpGet('/artist/desc', params)
-export const artistMv = (params: { id: number; limit?: number; offset?: number }) =>
+export const artistMv = (params: { id: number | string; limit?: number; offset?: number }) =>
   httpGet('/artist/mv', params)
 
 export const albumNew = (params?: { area?: 'ALL' | 'ZH' | 'EA' | 'KR' | 'JP'; limit?: number; offset?: number }) =>
