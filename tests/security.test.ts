@@ -12,6 +12,7 @@ import {
 } from '../functions/_lib/auth';
 import { sha256Bytes } from '../functions/_lib/sonic/crypto';
 import {
+  evaluateAuthRateLimit,
   evaluateGatewayRateLimit,
   getForwardedClientIp,
   getPublicClientIp,
@@ -768,5 +769,81 @@ describe('Engine credential enforcement', () => {
       headers: { 'X-Sonic-Engine-Key': 'wrong' },
     }), { SONIC_ENGINE_SECRET: ENGINE_SECRET })?.status).toBe(401);
     expect(requireEngineSecret(request, { SONIC_ENGINE_SECRET: ENGINE_SECRET })).toBeNull();
+  });
+});
+
+describe('OAuth endpoint throttling', () => {
+  const oauthEnv = {
+    EPOMAIL_BASE_URL: 'https://mail.epocanvas.com',
+    EPOMAIL_CLIENT_ID: 'client-id',
+    EPOMAIL_CLIENT_SECRET: 'client-secret',
+    EPOMAIL_REDIRECT_URI: 'https://sonic.example/api/auth/callback',
+    SONIC_SECRET: VALID_SECRET,
+  };
+
+  beforeEach(() => resetRateLimitsForTest());
+
+  it('rejects the 31st callback from one client IP while login stays reachable', async () => {
+    const callback = (ip: string) => new Request(
+      'https://sonic.example/api/auth/callback?code=c&state=s',
+      { headers: { 'CF-Connecting-IP': ip } },
+    );
+
+    let lastStatus = 0;
+    for (let i = 0; i < 30; i += 1) {
+      lastStatus = (await handleAuthCallback({
+        request: callback('198.51.100.240'),
+        env: oauthEnv,
+      })).status;
+    }
+    expect(lastStatus).toBe(400);
+
+    const blocked = await handleAuthCallback({
+      request: callback('198.51.100.240'),
+      env: oauthEnv,
+    });
+    expect(blocked.status).toBe(429);
+    expect(blocked.headers.get('Retry-After')).toBeTruthy();
+
+    const otherIp = await handleAuthCallback({
+      request: callback('198.51.100.241'),
+      env: oauthEnv,
+    });
+    expect(otherIp.status).toBe(400);
+
+    const login = await handleAuthLogin({
+      request: new Request('https://sonic.example/api/auth/login', {
+        headers: { 'CF-Connecting-IP': '198.51.100.240' },
+      }),
+      env: oauthEnv,
+    });
+    expect(login.status).toBe(302);
+  });
+
+  it('ignores SONIC_REQUIRE_AUTH and cannot be widened by credentials', async () => {
+    const env = { SONIC_REQUIRE_AUTH: '1', SONIC_SECRET: VALID_SECRET };
+    const request = () => new Request('https://sonic.example/api/auth/login', {
+      headers: { 'CF-Connecting-IP': '198.51.100.242' },
+    });
+
+    const decisions = [];
+    for (let i = 0; i < 3; i += 1) {
+      decisions.push(await evaluateAuthRateLimit(request(), env, 'auth-unit', 2));
+    }
+
+    expect(decisions.map((decision) => decision.allowed)).toEqual([true, true, false]);
+    expect(decisions[2].tier).toBe('anonymous');
+  });
+
+  it('does not reset the bucket when X-Sonic-Client-IP is spoofed', async () => {
+    const env = { SONIC_RATE_LIMIT_ANON_RPM: '1000' };
+    const request = (spoof: string) => new Request('https://sonic.example/api/auth/login', {
+      headers: { 'CF-Connecting-IP': '198.51.100.243', 'X-Sonic-Client-IP': spoof },
+    });
+
+    const first = await evaluateAuthRateLimit(request('1.1.1.1'), env, 'auth-spoof', 1);
+    const second = await evaluateAuthRateLimit(request('2.2.2.2'), env, 'auth-spoof', 1);
+    expect(first.allowed).toBe(true);
+    expect(second.allowed).toBe(false);
   });
 });
