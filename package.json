@@ -19,9 +19,9 @@
     "test:cover": "jiti scripts/test-cover-gateway.mjs",
     "lint:theme": "node scripts/lint-theme.mjs",
     "test:engine": "jiti scripts/test-local-engine-and-degradation.mjs",
-    "test:security": "vitest run tests/security.test.ts tests/engine-auth.test.ts",
+    "test:security": "vitest run tests/security.test.ts tests/engine-auth.test.ts tests/deploy-headers.test.ts",
     "typecheck": "tsc --noEmit",
-    "test": "pnpm run typecheck && jiti scripts/test-sonic-gateway.mjs && jiti scripts/test-auth-compatibility.mjs && jiti scripts/test-cover-gateway.mjs && jiti scripts/test-local-engine-and-degradation.mjs && vitest run tests/security.test.ts tests/engine-auth.test.ts"
+    "test": "pnpm run typecheck && jiti scripts/test-sonic-gateway.mjs && jiti scripts/test-auth-compatibility.mjs && jiti scripts/test-cover-gateway.mjs && jiti scripts/test-local-engine-and-degradation.mjs && vitest run tests/security.test.ts tests/engine-auth.test.ts tests/deploy-headers.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
