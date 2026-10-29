@@ -124,3 +124,63 @@ jobs:
           test "$status" = "401"
           docker logs sonic-ci
           docker rm -f sonic-ci
+
+      - name: Verify SQLite data survives container recreation on a named volume
+        env:
+          ENGINE_SECRET: ci_engine_secret_at_least_32_characters_long
+          AUTH_SECRET: ci_auth_secret_at_least_32_characters_long_ok
+        run: |
+          set -euo pipefail
+          NAME="sonic-ci-persist"
+          VOLUME="sonic-ci-data-${{ github.run_id }}"
+          cleanup() {
+            docker rm -f "$NAME" >/dev/null 2>&1 || true
+            docker volume rm "$VOLUME" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          wait_ready() {
+            for i in $(seq 1 30); do
+              if curl -fsS -o /tmp/sonic-health.json \
+                -H "X-Sonic-Engine-Key: $ENGINE_SECRET" \
+                http://127.0.0.1:18081/api/sonic/engine/health \
+                && grep -q '"ok":true' /tmp/sonic-health.json; then
+                return 0
+              fi
+              sleep 1
+            done
+            docker logs "$NAME" || true
+            return 1
+          }
+
+          docker volume create "$VOLUME" >/dev/null
+          docker run -d --name "$NAME" \
+            -e SONIC_ENGINE_SECRET="$ENGINE_SECRET" \
+            -e SONIC_SECRET="$AUTH_SECRET" \
+            -e SONIC_RUNTIME=linux-engine \
+            -v "$VOLUME":/app/data \
+            -p 18081:8080 \
+            sonic-ci:${{ github.sha }}
+          wait_ready
+          grep -q '"storageKind":"sqlite"' /tmp/sonic-health.json
+
+          curl -fsS -X POST \
+            -H "X-Sonic-Engine-Key: $ENGINE_SECRET" \
+            -H "Content-Type: application/json" \
+            -H "X-Sonic-Anon-Id: anon_cipersist20261029abcdef" \
+            -H "X-Sonic-Personalization: on" \
+            -d '{"events":[{"type":"search","query":"ci-persistence-smoke"}]}' \
+            http://127.0.0.1:18081/api/sonic/events | grep -q '"accepted":1'
+
+          docker rm -f "$NAME" >/dev/null
+          sleep 1
+          docker run -d --name "$NAME" \
+            -e SONIC_ENGINE_SECRET="$ENGINE_SECRET" \
+            -e SONIC_SECRET="$AUTH_SECRET" \
+            -e SONIC_RUNTIME=linux-engine \
+            -v "$VOLUME":/app/data \
+            -p 18081:8080 \
+            sonic-ci:${{ github.sha }}
+          wait_ready
+          grep -q '"eventCount":1' /tmp/sonic-health.json
+          docker logs "$NAME"
