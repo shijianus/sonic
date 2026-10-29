@@ -35,7 +35,7 @@ services:
       SONIC_ENABLE_LISTENBRAINZ: "0"
       SONIC_ENABLE_LYRIVA: "0"
       SONIC_ENABLE_UNBLOCK: "0"
-      SONIC_ENGINE_SECRET: local_test_engine_secret_32_chars_minimum_0001
+      SONIC_ENGINE_SECRET: <redacted-local-test-value>
       SONIC_GORSE_API_KEY: ""
       SONIC_GORSE_URL: ""
       SONIC_MEILISEARCH_KEY: ""
@@ -44,7 +44,7 @@ services:
       SONIC_RECOMMEND_DB_PATH: /app/data/sonic-recommend.sqlite
       SONIC_RECOMMEND_RETENTION_DAYS: "90"
       SONIC_RUNTIME: linux-engine
-      SONIC_SECRET: local_test_auth_secret_32_chars_minimum_0000001
+      SONIC_SECRET: <redacted-local-test-value>
     init: true
     networks:
       sonic-internal: null
