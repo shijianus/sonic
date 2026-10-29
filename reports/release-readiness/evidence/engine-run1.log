@@ -1,0 +1,10 @@
+(node:144984) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Sonic Local Engine] Listening on http://127.0.0.1:18081 (runtime=linux-engine, ncmApi=none)
+{"type":"access","requestId":"01ca0821-482f-495c-a9c8-dda6dfc68532","method":"GET","path":"/api/sonic/engine/health","status":200,"durationMs":26}
+{"type":"access","requestId":"a8eca38d-16c6-429c-8e13-b37dde0e53c0","method":"GET","path":"/api/sonic/engine/health","status":401,"durationMs":4}
+{"type":"access","requestId":"53c722c5-91f3-4042-b1ae-d10ca252dcc5","method":"POST","path":"/api/sonic/events","status":200,"durationMs":62}
+{"type":"access","requestId":"4d7c12b1-2fee-46f4-ab79-a103ee362f87","method":"GET","path":"/api/sonic/engine/health","status":200,"durationMs":3}
+{"type":"access","requestId":"63d5ea38-479a-4c4a-9c48-7cba1917df99","method":"POST","path":"/api/sonic/events","status":200,"durationMs":11}
+{"type":"access","requestId":"ff24ea2d-6a19-407d-9a50-650b559aa349","method":"GET","path":"/api/sonic/engine/health","status":200,"durationMs":3}
+{"type":"access","requestId":"c51a2a6e-e04d-48a9-b66e-0e5b22c8493b","method":"GET","path":"/api/sonic/engine/health","status":401,"durationMs":2}

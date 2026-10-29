@@ -1,0 +1,31 @@
+Typecheck, lint, tests and build | completed | success | 2026-10-29T12:36:31Z -> 2026-10-29T12:37:49Z
+    1 Set up job | completed | success
+    2 Run actions/checkout@v4 | completed | success
+    3 Run actions/setup-node@v4 | completed | success
+    4 Enable pinned pnpm | completed | success
+    5 Install root dependencies (lockfile) | completed | success
+    6 Install player dependencies (lockfile) | completed | success
+    7 TypeScript check | completed | success
+    8 Theme token + ESLint | completed | success
+    9 Security, OAuth and SSRF regression tests | completed | success
+    10 Auth compatibility suite | completed | success
+    11 Local engine and degradation suite | completed | success
+    12 Recommendation and smart-search tests | completed | success
+    13 Player unit tests | completed | success
+    14 Frontend + asset build | completed | success
+    15 Root production dependency audit | completed | success
+    16 Player production dependency audit | completed | success
+    17 Generate CycloneDX dependency inventory | completed | success
+    18 Upload build output | completed | success
+    35 Post Run actions/setup-node@v4 | completed | success
+    36 Post Run actions/checkout@v4 | completed | success
+    37 Complete job | completed | success
+Docker build and runtime smoke test | completed | success | 2026-10-29T12:37:51Z -> 2026-10-29T12:38:39Z
+    1 Set up job | completed | success
+    2 Run actions/checkout@v4 | completed | success
+    3 Run docker/setup-buildx-action@v3 | completed | success
+    4 Build image from a clean checkout | completed | success
+    5 Run container and verify auth-gated health endpoint | completed | success
+    9 Post Run docker/setup-buildx-action@v3 | completed | success
+    10 Post Run actions/checkout@v4 | completed | success
+    11 Complete job | completed | success

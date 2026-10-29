@@ -1,0 +1,4 @@
+(node:118796) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Sonic Local Engine] Listening on http://127.0.0.1:18081 (runtime=linux-engine, ncmApi=none)
+{"type":"access","requestId":"d8994a4b-000e-4c7d-9f09-ef33c98a5a04","method":"GET","path":"/api/sonic/engine/health","status":200,"durationMs":17}

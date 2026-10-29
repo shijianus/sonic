@@ -1,0 +1,80 @@
+
+> sonic@2.2.0 test:engine
+> jiti scripts/test-local-engine-and-degradation.mjs
+
+=== Running Sonic Local Engine, Security & Degradation Test Suite ===
+
+1. Testing Pure-TS MD5 & AES-128-ECB Crypto Parity
+  ✓ MD5 matches node:crypto for ""
+  ✓ MD5 matches node:crypto for "abc"
+  ✓ MD5 matches node:crypto for "nobody/api/song/enhance/"
+  ✓ MD5 matches node:crypto for "起风了 - 买辣椒也用券"
+  ✓ AES-128-ECB matches node:crypto byte-for-byte
+  ✓ buildNeteaseLinuxApiParams matches
+  ✓ buildNeteaseEapiParams generates encrypted hex
+
+2. Testing Condition 1b (Third-Party & VIP Unblock Disabled by Default + Honest Provenance)
+  ✓ SONIC_ENABLE_GDSTUDIO defaults to false
+  ✓ SONIC_ENABLE_LYRIVA defaults to false
+  ✓ SONIC_ENABLE_UNBLOCK defaults to false
+  ✓ Single gdstudio search reports meta.disabled=true
+  ✓ gdstudio attempt honestly marked via=third-party, ok=false
+  ✓ Single lyriva lyrics reports meta.disabled=true
+  ✓ lyriva attempt honestly marked via=third-party, ok=false
+
+3. Testing Condition 2c (Mandatory X-Sonic-Engine-Key on engine-sonic.*)
+  ✓ Anonymous access to engine-sonic returns 401 (got 401)
+  ✓ Error code is ENGINE_UNAUTHORIZED
+  ✓ Wrong engine key returns 401 (got 401)
+[Sonic Engine Access] SONIC_ENGINE_SECRET is missing or shorter than 32 characters; rejecting access (fail closed)
+  ✓ Unconfigured engine secret fails closed with 503
+  ✓ Valid X-Sonic-Engine-Key returns 200 (got 200)
+  ✓ Engine health payload ok=true & runtime=linux-engine
+  ✓ SSRF blocks 127.0.0.1
+  ✓ SSRF blocks cloud metadata IP 169.254.169.254
+  ✓ SSRF blocks Docker internal bridge 172.18.0.2
+  ✓ SSRF blocks engine-sonic loop
+  ✓ SSRF allows public music CDN
+  ✓ Forwarding to 127.0.0.1 rejected with 400 (got 400)
+
+4. Testing Tiered Rate Limiter (Anonymous vs API Key)
+  ✓ Anonymous burst > limit is rate-limited (got allowed=false, tier=anonymous, limit=10)
+(node:156216) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓ Valid sonic_live_ API Key upgrades to api-key tier
+
+5. Testing Degradation State Machine (CLOSED -> 530 OPEN -> Fast-Fail -> HALF_OPEN -> CLOSED)
+  ✓ Healthy engine search returns 200
+  ✓ Healthy response has no X-Sonic-Degraded header
+  ✓ Primary attempt is local-engine ok=true
+  ✓ Engine sub-attempt preserves local-netease provenance
+  ✓ 530 Tunnel error trips circuit breaker immediately to OPEN
+  ✓ Outage response sets X-Sonic-Degraded: 1
+  ✓ Outage response sets meta.degraded=true
+  ✓ OPEN circuit fast-fails without hitting dead tunnel
+  ✓ Fast-fail recorded in meta.attempts
+  ✓ Cached search result served immediately during outage
+  ✓ Degraded unresolvable stream returns 503 (got 503)
+  ✓ Degraded 503 stream sets X-Sonic-Degraded: 1
+  ✓ Degraded stream returns machine-readable STREAM_UNAVAILABLE_DEGRADED
+  ✓ Circuit recovers HALF_OPEN -> CLOSED after healthy probe
+  ✓ Recovered response clears degraded=false
+
+6. Testing GET /api Empty-Path Index & login/status Compatibility
+  ✓ GET /api returns 200 Sonic index
+  ✓ GET /api/login/status returns clean guest session
+
+7. Testing Linux Node 22 HTTP Server (createSonicServer)
+{"type":"access","requestId":"03a96bf1-43f5-4d17-81d5-4e8c749a2f92","method":"GET","path":"/api/sonic/engine/health","status":401,"durationMs":12}
+  ✓ Anonymous request on engine endpoint returns 401 (got 401)
+{"type":"access","requestId":"d8ad86ba-8497-41f9-ae38-beb1444a4040","method":"GET","path":"/api/music/search","status":401,"durationMs":1}
+  ✓ Anonymous /api/music/search on Linux engine returns 401 (got 401)
+{"type":"access","requestId":"9ff8e55a-ca37-4bdf-9a0f-b30510f0687e","method":"GET","path":"/api/sonic/engine/health","status":200,"durationMs":2}
+  ✓ Authenticated engine health over HTTP returns 200
+{"type":"access","requestId":"ecae5519-fb09-4e4b-990e-129d7630f747","method":"GET","path":"/api/auth/user","status":200,"durationMs":2}
+  ✓ Valid v2 key authenticates over Node HTTP (got 200)
+
+========================================
+Local Engine & Degradation Test Results: 49 passed, 0 failed
+========================================
+

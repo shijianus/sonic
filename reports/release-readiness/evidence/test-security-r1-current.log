@@ -1,0 +1,78 @@
+
+> sonic@2.2.0 test:security
+> pnpm --dir player exec vitest run --root .. tests/security.test.ts tests/security-hardening.test.ts tests/security-p0-regression.test.ts tests/oauth-security.test.ts tests/ssrf-security.test.ts tests/engine-static.test.ts tests/frontend-xss.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90mD:/Users/Smart Kevin/OneDrive/Desktop/sonic[39m
+
+[90mstderr[2m | tests/security-p0-regression.test.ts[2m > [22m[2mP0-2: Linux engine enforces service auth regardless of Host[2m > [22m[2mfails closed with 503 when the engine secret is not configured
+[22m[39m[Sonic Engine Access] SONIC_ENGINE_SECRET is missing or shorter than 32 characters; rejecting access (fail closed)
+
+ [32m✓[39m tests/ssrf-security.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 102[2mms[22m[39m
+[90mstderr[2m | tests/security.test.ts[2m > [22m[2mTask 1 & Task 2: API Key Signature, Rotation & Revocation[2m > [22m[2mfails closed when the signing secret is missing or short
+[22m[39m[Sonic Auth] SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters; rejecting authentication (fail closed)
+
+[90mstderr[2m | tests/security.test.ts[2m > [22m[2mTask 1 & Task 2: API Key Signature, Rotation & Revocation[2m > [22m[2mfails closed when the signing secret is missing or short
+[22m[39m[Sonic Auth] Cannot issue API Key: SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters
+
+[90mstderr[2m | tests/security.test.ts[2m > [22m[2mTask 1 & Task 2: API Key Signature, Rotation & Revocation[2m > [22m[2mfails closed when the signing secret is missing or short
+[22m[39m[Sonic Auth] Cannot issue API Key: SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters
+
+ [32m✓[39m tests/security.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 85[2mms[22m[39m
+ [32m✓[39m tests/security-p0-regression.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 115[2mms[22m[39m
+[90mstderr[2m | tests/oauth-security.test.ts[2m > [22m[2mOAuth callback: state, PKCE, code exchange and session delivery[2m > [22m[2mrejects a verified-email=false account
+[22m[39m[Sonic Auth Callback Error] Error Epomail account email is not verified
+
+[90mstderr[2m | tests/oauth-security.test.ts[2m > [22m[2mOptional KV-backed API key revocation[2m > [22m[2mfails closed when an enabled revocation store read fails
+[22m[39m[Sonic Auth] Key revocation KV read failed: KV unavailable
+
+ [32m✓[39m tests/oauth-security.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 88[2mms[22m[39m
+[90mstderr[2m | tests/security-hardening.test.ts[2m > [22m[2mProxy: Kuwo audio redirects stay inside the allowlist[2m > [22m[2mreturns 502 instead of following a redirect to loopback
+[22m[39m[Sonic Proxy] Kuwo audio proxy rejected or failed Error: Protocol downgrade from https to http during redirect is forbidden
+    at safeFetch (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/_lib/sonic/security.ts:956:17)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at proxyKuwoAudio (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/proxy.ts:99:20)
+    at onRequest (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/proxy.ts:301:14)
+    at D:/Users/Smart Kevin/OneDrive/Desktop/sonic/tests/security-hardening.test.ts:88:17
+    at [90mfile:///D:/Users/Smart%20Kevin/OneDrive/Desktop/sonic/player/[39mnode_modules/[4m.pnpm[24m/vitest@5.0.5_@types+node@24_3cfcd22be6bff814c5e0f9d3f318fbdf/node_modules/[4mvitest[24m/dist/chunks/run.BPv-BBRv.js:2801:20
+
+[90mstderr[2m | tests/security-hardening.test.ts[2m > [22m[2mPalette: bounded resource consumption[2m > [22m[2mrate-limits palette requests
+[22m[39mPalette generation failed Error: SOI not found
+    at constructor.parse (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/lib/vendor/jpeg-decoder.js:632:15)
+    at decode (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/lib/vendor/jpeg-decoder.js:1110:11)
+    at decodeImage (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/palette.ts:315:19)
+    at buildPalette (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/palette.ts:369:21)
+    at onRequest (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/palette.ts:547:27)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at D:/Users/Smart Kevin/OneDrive/Desktop/sonic/tests/security-hardening.test.ts:196:19
+    at [90mfile:///D:/Users/Smart%20Kevin/OneDrive/Desktop/sonic/player/[39mnode_modules/[4m.pnpm[24m/vitest@5.0.5_@types+node@24_3cfcd22be6bff814c5e0f9d3f318fbdf/node_modules/[4mvitest[24m/dist/chunks/run.BPv-BBRv.js:2801:20
+
+ [32m✓[39m tests/security-hardening.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 103[2mms[22m[39m
+(node:79932) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"08b33661-1b26-471b-b8b6-935bf728b849","method":"GET","path":"/","status":200,"durationMs":21}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"a8d8eb2e-09cb-447e-b4a5-55fc1a1e1c30","method":"GET","path":"/secret.txt","status":404,"durationMs":3}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"444f30fb-aa51-4f90-8235-53e4b49a5fbc","method":"GET","path":"/..%2F..%2Fsecret.txt","status":404,"durationMs":3}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"d50fab6c-6a83-45c3-b11e-d877c217cb77","method":"GET","path":"/secret.txt","status":404,"durationMs":2}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mpreserves multiple Set-Cookie headers on the Node HTTP adapter
+[22m[39m{"type":"access","requestId":"015ae85c-b529-4ae0-a8a7-cbe7bc31a5f4","method":"GET","path":"/api/auth/login","status":302,"durationMs":5}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mreports not-ready when a persistent DB path is configured but the store is in memory
+[22m[39m{"type":"access","requestId":"b9402101-17bf-4e2f-a286-d9e67aa7b8b7","method":"GET","path":"/api/sonic/engine/health","status":503,"durationMs":4}
+
+ [32m✓[39m tests/engine-static.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 117[2mms[22m[39m
+ [32m✓[39m tests/frontend-xss.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 41[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m7 passed[39m[22m[90m (7)[39m
+[2m      Tests [22m [1m[32m98 passed[39m[22m[90m (98)[39m
+[2m   Start at [22m 20:29:39
+[2m   Duration [22m 4.86s[2m (transform 46%, environment 40%, import 7%, tests 6%, worker 1%)[22m
+

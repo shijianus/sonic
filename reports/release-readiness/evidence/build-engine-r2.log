@@ -1,0 +1,8 @@
+
+> sonic@2.2.0 build:engine
+> esbuild server/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist-server/index.mjs --banner:js="import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
+
+
+  dist-server\index.mjs  726.2kb
+
+Done in 50ms

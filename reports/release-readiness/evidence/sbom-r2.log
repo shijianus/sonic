@@ -1,0 +1,6 @@
+
+> sonic@2.2.0 sbom
+> node scripts/generate-sbom.mjs
+
+{"ok":true,"output":"reports\\sbom\\sonic-player.cdx.json","components":99,"licenseCounts":{"MIT":90,"BSD-2-Clause":1,"Standard 'no charge' license: https://gsap.com/standard-license.":1,"Apache-2.0":2,"BSD-3-Clause":2,"Unlicense":1,"ISC":1,"BSD":1},"reviewLicenses":["Standard 'no charge' license: https://gsap.com/standard-license.","BSD"]}
+[sbom] licenses requiring manual review: Standard 'no charge' license: https://gsap.com/standard-license., BSD (not automatically a violation)

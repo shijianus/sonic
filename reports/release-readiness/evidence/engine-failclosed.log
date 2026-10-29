@@ -1,0 +1,3 @@
+(node:82132) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[Sonic Local Engine] Fatal: Failed to open the persistent recommendation store at C:\Users\SMARTK~1\AppData\Local\Temp\tmp.BrsjuntZDm\blocker\store.sqlite: EEXIST: file already exists, mkdir 'C:\Users\SMARTK~1\AppData\Local\Temp\tmp.BrsjuntZDm\blocker'

@@ -1,0 +1,13 @@
+
+> sonic@2.2.0 lint
+> npm run lint:theme && pnpm --dir player run lint
+
+
+> sonic@2.2.0 lint:theme
+> node scripts/lint-theme.mjs
+
+✓ lint:theme passed: 430 existing hardcoded white occurrence(s) are covered by the baseline.
+
+> sonic-music-player@2.1.0 lint D:\Users\Smart Kevin\OneDrive\Desktop\sonic\player
+> eslint "src/**/*.{js,mjs,ts,vue}" "scripts/**/*.{js,mjs}"
+

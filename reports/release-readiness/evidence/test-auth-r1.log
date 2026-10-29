@@ -1,0 +1,72 @@
+
+> sonic@2.2.0 test:auth
+> jiti scripts/test-auth-compatibility.mjs
+
+=== Running Sonic v2 Auth Security Test Suite ===
+
+1. Testing OAuth Config & Authorize URL Generation
+  ✓ Base URL parsed
+  ✓ Client ID matched
+  ✓ Redirect URI matched
+  ✓ Authorize pathname is correct
+  ✓ Authorize client_id parameter matches
+  ✓ Custom state preserved
+  ✓ PKCE code_challenge added
+
+2. Testing Session Creation & sonic_live_v2 API Key Generation
+  ✓ User ID preserved
+  ✓ User email preserved
+  ✓ API key has sonic_live_v2. prefix
+  ✓ API key has v2, header, payload and signature segments
+  ✓ Header declares HS256 API key type
+  ✓ Header kid is derived from the signing secret
+  ✓ Payload subject matches email
+  ✓ Payload kid matches header kid
+  ✓ iat/exp present
+  ✓ jti present
+
+3. Testing Secret Priority & Fallback
+  ✓ Key generated using SOLARA_SECRET fallback
+  ✓ Key generated with both secrets present
+
+4. Testing Credential Extraction (Headers Only)
+  ✓ Extracted from X-Sonic-Key
+  ✓ Extracted from X-CFSolara-Key
+  ✓ Extracted from X-Api-Key
+  ✓ Extracted from Bearer token
+  ✓ Bearer token string preserved
+  ✓ Query param api_key is never accepted
+  ✓ Legacy query-key opt-in is ignored
+
+5. Testing v2 Signature Verification
+  ✓ Valid v2 session authenticated
+  ✓ Session user email matches
+  ✓ Session user apiKey matches
+
+6. Testing Cross-Header Verification
+  ✓ v2 key authenticated via X-CFSolara-Key
+  ✓ v2 key authenticated via Bearer token
+
+7. Testing Secret Rotation & Revocation
+  ✓ Key verified via SONIC_SECRET_PREV during rotation
+  ✓ Retired secret no longer verifies old keys
+  ✓ Revoked jti is rejected without a cache bypass
+
+8. Testing Rejection of Legacy & Forged Keys
+  ✓ Legacy solara_live_ key is rejected
+  ✓ Legacy unsigned sonic_live_ key is rejected
+  ✓ Signed v1 key is rejected (re-login required)
+  ✓ Truncated v2 key is rejected
+
+9. Testing Negative & Edge Cases
+  ✓ Request with no auth is rejected
+  ✓ Invalid key prefix is rejected
+  ✓ Malformed base64 is rejected gracefully
+[Sonic Auth] SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters; rejecting authentication (fail closed)
+  ✓ Secret shorter than 32 chars rejects authentication
+  ✓ Unknown kid is rejected
+
+========================================
+Auth Security Test Results: 43 passed, 0 failed
+========================================
+

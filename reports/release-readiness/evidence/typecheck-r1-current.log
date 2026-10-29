@@ -1,0 +1,8 @@
+
+> sonic@2.2.0 typecheck
+> tsc --noEmit && pnpm --dir player run typecheck
+
+
+> sonic-music-player@2.1.0 typecheck D:\Users\Smart Kevin\OneDrive\Desktop\sonic\player
+> vue-tsc --noEmit
+

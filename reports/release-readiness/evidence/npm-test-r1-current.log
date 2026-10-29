@@ -1,0 +1,359 @@
+
+> sonic@2.2.0 test
+> npm run typecheck && jiti scripts/test-sonic-gateway.mjs && jiti scripts/test-auth-compatibility.mjs && jiti scripts/test-cover-gateway.mjs && jiti scripts/test-local-engine-and-degradation.mjs && pnpm --dir player exec vitest run --root .. tests/security.test.ts tests/security-hardening.test.ts tests/security-p0-regression.test.ts tests/oauth-security.test.ts tests/ssrf-security.test.ts tests/engine-static.test.ts tests/frontend-xss.test.ts tests/recommendation-and-search.test.ts
+
+
+> sonic@2.2.0 typecheck
+> tsc --noEmit && pnpm --dir player run typecheck
+
+
+> sonic-music-player@2.1.0 typecheck D:\Users\Smart Kevin\OneDrive\Desktop\sonic\player
+> vue-tsc --noEmit
+
+=== Running Sonic Gateway Test Suite ===
+
+1. Testing GET /api/sonic/lyrics/nexus (with platformId)
+  ✓ Status is 200 (got 200)
+  ✓ Brand is Sonic (got Sonic)
+  ✓ Data object exists
+  ✓ Meta object exists
+  ✓ Meta.attempts is an array
+  ✓ LatencyMs is number (1440ms)
+  ✓ Netease attempt recorded
+
+2. Testing GET /api/sonic/lyrics/nexus (title only)
+  ✓ Status is 200 (got 200)
+  ✓ Brand is Sonic
+  ✓ Meta.attempts recorded (1 attempts)
+
+3. Testing GET /api/sonic/lyrics/apple & ytmusic (disabled without keys)
+  ✓ Apple returns 501 Not Implemented (got 501)
+  ✓ Apple error code is PROVIDER_DISABLED
+  ✓ Brand is Sonic
+  ✓ YouTube Music returns 501 Not Implemented (got 501)
+  ✓ YouTube Music error code is PROVIDER_DISABLED
+
+4. Testing GET /api/sonic/lyrics/netease
+  ✓ Status is 200 (got 200)
+  ✓ Brand is Sonic
+  ✓ Provider is netease
+  ✓ Attempts logged
+
+5. Testing GET /api/sonic/search/nexus
+  ✓ Status is 200 (got 200)
+  ✓ Brand is Sonic
+  ✓ Tracks array returned (8 tracks)
+  ✓ Meta.attempts logged (3 attempts)
+  ✓ Track has title: "海阔天空"
+  ✓ Track has artist: "Beyond"
+  ✓ Track has platform: "sonic"
+  ✓ Track has platformId: "347230"
+  ✓ Track has sources[]: [{"platform":"netease","platformId":"1357375695","duration":240},{"platform":"netease","platformId":"1357374736","duration":240},{"platform":"netease","platformId":"347230","duration":326},{"platform":"qq","platformId":"001yS0N33yPm1B","duration":324},{"platform":"kugou","platformId":"c41e80a18d1448fa47086372999c7f43","duration":324},{"platform":"kugou","platformId":"e5c40a31c3c16ba461f650035734c123","duration":239}]
+
+6. Testing GET /api/sonic/search/gdstudio (disabled by default)
+  ✓ Status is 200 (got 200)
+  ✓ Brand is Sonic
+  ✓ Meta provider is gdstudio
+  ✓ GDStudio is disabled by default (got true)
+  ✓ Disabled GDStudio returns 0 tracks
+
+7. Testing Upstream Timeout Isolation (1ms timeout)
+  ✓ Search returns 200 despite timeouts (got 200)
+  ✓ Brand is Sonic
+  ✓ Attempts logged with timeout errors
+
+8. Testing GET /api/sonic/search/qq (u.y.qq.com modern API)
+  ✓ Status is 200 (got 200)
+  ✓ Brand is Sonic
+  ✓ QQ returned 3 tracks
+
+9. Testing Native NetEase/Kugou Search & meta.attempts Provenance
+  ✓ NetEase Status is 200 (got 200)
+  ✓ Brand is Sonic
+  ✓ Native NetEase returned 3 tracks
+  ✓ NetEase did not call gdstudio
+  ✓ Nexus search excludes gdstudio by default
+  ✓ Every attempt records truthful source & via
+
+10. Testing GET /api/sonic/search/kuwo (registered provider)
+  ✓ Status is 200, NOT 404 (got 200)
+  ✓ Brand is Sonic
+
+11. Testing Random String Lyrics (Must NOT return false-positive song)
+  ✓ Status is 200 (got 200)
+  ✓ Brand is Sonic
+  ✓ Level is 'none' for gibberish (got 'none')
+  ✓ No false-positive lyrics returned (length=0)
+
+12. Testing Relative Threshold Stream Evaluation (evaluateStreamTypeByRelativeBytes)
+  ✓ 320k 45s preview (1.8MB) on 240s song is classified as trial (got trial, ratio=0.34)
+  ✓ 320k 30s preview (1.2MB) on 240s song is classified as trial (got trial)
+  ✓ 320k 45s preview (1.8MB) on 150s song is classified as trial (got trial, ratio=0.55)
+  ✓ 128k 45s preview (721KB) is classified as trial
+  ✓ 128k 30s preview (481KB) is classified as trial
+  ✓ Full 320k track (9.6MB) is classified as full (got full, ratio=1.82)
+  ✓ Full 128k track (3.8MB) is classified as full (got full, ratio=1.33)
+  ✓ Kuwo 181,521 bytes fake prompt is rejected as unavailable
+  ✓ 0 bytes is unavailable
+
+========================================
+Test Results: 60 passed, 0 failed
+========================================
+
+=== Running Sonic v2 Auth Security Test Suite ===
+
+1. Testing OAuth Config & Authorize URL Generation
+  ✓ Base URL parsed
+  ✓ Client ID matched
+  ✓ Redirect URI matched
+  ✓ Authorize pathname is correct
+  ✓ Authorize client_id parameter matches
+  ✓ Custom state preserved
+  ✓ PKCE code_challenge added
+
+2. Testing Session Creation & sonic_live_v2 API Key Generation
+  ✓ User ID preserved
+  ✓ User email preserved
+  ✓ API key has sonic_live_v2. prefix
+  ✓ API key has v2, header, payload and signature segments
+  ✓ Header declares HS256 API key type
+  ✓ Header kid is derived from the signing secret
+  ✓ Payload subject matches email
+  ✓ Payload kid matches header kid
+  ✓ iat/exp present
+  ✓ jti present
+
+3. Testing Secret Priority & Fallback
+  ✓ Key generated using SOLARA_SECRET fallback
+  ✓ Key generated with both secrets present
+
+4. Testing Credential Extraction (Headers Only)
+  ✓ Extracted from X-Sonic-Key
+  ✓ Extracted from X-CFSolara-Key
+  ✓ Extracted from X-Api-Key
+  ✓ Extracted from Bearer token
+  ✓ Bearer token string preserved
+  ✓ Query param api_key is never accepted
+  ✓ Legacy query-key opt-in is ignored
+
+5. Testing v2 Signature Verification
+  ✓ Valid v2 session authenticated
+  ✓ Session user email matches
+  ✓ Session user apiKey matches
+
+6. Testing Cross-Header Verification
+  ✓ v2 key authenticated via X-CFSolara-Key
+  ✓ v2 key authenticated via Bearer token
+
+7. Testing Secret Rotation & Revocation
+  ✓ Key verified via SONIC_SECRET_PREV during rotation
+  ✓ Retired secret no longer verifies old keys
+  ✓ Revoked jti is rejected without a cache bypass
+
+8. Testing Rejection of Legacy & Forged Keys
+  ✓ Legacy solara_live_ key is rejected
+  ✓ Legacy unsigned sonic_live_ key is rejected
+  ✓ Signed v1 key is rejected (re-login required)
+  ✓ Truncated v2 key is rejected
+
+9. Testing Negative & Edge Cases
+  ✓ Request with no auth is rejected
+  ✓ Invalid key prefix is rejected
+  ✓ Malformed base64 is rejected gracefully
+[Sonic Auth] SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters; rejecting authentication (fail closed)
+  ✓ Secret shorter than 32 chars rejects authentication
+  ✓ Unknown kid is rejected
+
+========================================
+Auth Security Test Results: 43 passed, 0 failed
+========================================
+
+=== Running Cover Gateway Test Suite ===
+
+1. Testing GET /api/music/cover with no params
+  ✓ Status is 200 (got 200)
+  ✓ Returns SVG fallback
+  ✓ Contains valid SVG vector graphic
+
+2. Testing NetEase Song ID Cover Resolution
+  ✓ Status is 200 (got 200)
+  ✓ Content type is valid (image/jpg)
+  ✓ CORS Allow-Origin header is *
+
+3. Testing QQ Music Mid Cover Resolution
+  ✓ Status is 200 (got 200)
+  ✓ Returns valid image format (image/svg+xml;charset=utf-8)
+
+4. Testing Artist Avatar Search Fallback
+  ✓ Status is 200 (got 200)
+  ✓ Returns artist image (image/jpg)
+
+5. Testing Direct URL Proxy Mode
+  ✓ Status is 200 (got 200)
+  ✓ CORS Allow-Origin header is present on proxy
+  ✓ Image content type is preserved (len=unknown)
+
+6. Testing Invalid Target URL Fallback
+  ✓ Status is 200 (got 200)
+  ✓ Fails over to SVG fallback instead of 404
+
+========================================
+Cover Gateway Test Results: 15 passed, 0 failed
+========================================
+
+=== Running Sonic Local Engine, Security & Degradation Test Suite ===
+
+1. Testing Pure-TS MD5 & AES-128-ECB Crypto Parity
+  ✓ MD5 matches node:crypto for ""
+  ✓ MD5 matches node:crypto for "abc"
+  ✓ MD5 matches node:crypto for "nobody/api/song/enhance/"
+  ✓ MD5 matches node:crypto for "起风了 - 买辣椒也用券"
+  ✓ AES-128-ECB matches node:crypto byte-for-byte
+  ✓ buildNeteaseLinuxApiParams matches
+  ✓ buildNeteaseEapiParams generates encrypted hex
+
+2. Testing Condition 1b (Third-Party & VIP Unblock Disabled by Default + Honest Provenance)
+  ✓ SONIC_ENABLE_GDSTUDIO defaults to false
+  ✓ SONIC_ENABLE_LYRIVA defaults to false
+  ✓ SONIC_ENABLE_UNBLOCK defaults to false
+  ✓ Single gdstudio search reports meta.disabled=true
+  ✓ gdstudio attempt honestly marked via=third-party, ok=false
+  ✓ Single lyriva lyrics reports meta.disabled=true
+  ✓ lyriva attempt honestly marked via=third-party, ok=false
+
+3. Testing Condition 2c (Mandatory X-Sonic-Engine-Key on engine-sonic.*)
+  ✓ Anonymous access to engine-sonic returns 401 (got 401)
+  ✓ Error code is ENGINE_UNAUTHORIZED
+  ✓ Wrong engine key returns 401 (got 401)
+[Sonic Engine Access] SONIC_ENGINE_SECRET is missing or shorter than 32 characters; rejecting access (fail closed)
+  ✓ Unconfigured engine secret fails closed with 503
+  ✓ Valid X-Sonic-Engine-Key returns 200 (got 200)
+  ✓ Engine health payload ok=true & runtime=linux-engine
+  ✓ SSRF blocks 127.0.0.1
+  ✓ SSRF blocks cloud metadata IP 169.254.169.254
+  ✓ SSRF blocks Docker internal bridge 172.18.0.2
+  ✓ SSRF blocks engine-sonic loop
+  ✓ SSRF allows public music CDN
+  ✓ Forwarding to 127.0.0.1 rejected with 400 (got 400)
+
+4. Testing Tiered Rate Limiter (Anonymous vs API Key)
+  ✓ Anonymous burst > limit is rate-limited (got allowed=false, tier=anonymous, limit=10)
+(node:13336) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓ Valid sonic_live_ API Key upgrades to api-key tier
+
+5. Testing Degradation State Machine (CLOSED -> 530 OPEN -> Fast-Fail -> HALF_OPEN -> CLOSED)
+  ✓ Healthy engine search returns 200
+  ✓ Healthy response has no X-Sonic-Degraded header
+  ✓ Primary attempt is local-engine ok=true
+  ✓ Engine sub-attempt preserves local-netease provenance
+  ✓ 530 Tunnel error trips circuit breaker immediately to OPEN
+  ✓ Outage response sets X-Sonic-Degraded: 1
+  ✓ Outage response sets meta.degraded=true
+  ✓ OPEN circuit fast-fails without hitting dead tunnel
+  ✓ Fast-fail recorded in meta.attempts
+  ✓ Cached search result served immediately during outage
+  ✓ Degraded unresolvable stream returns 503 (got 503)
+  ✓ Degraded 503 stream sets X-Sonic-Degraded: 1
+  ✓ Degraded stream returns machine-readable STREAM_UNAVAILABLE_DEGRADED
+  ✓ Circuit recovers HALF_OPEN -> CLOSED after healthy probe
+  ✓ Recovered response clears degraded=false
+
+6. Testing GET /api Empty-Path Index & login/status Compatibility
+  ✓ GET /api returns 200 Sonic index
+  ✓ GET /api/login/status returns clean guest session
+
+7. Testing Linux Node 22 HTTP Server (createSonicServer)
+{"type":"access","requestId":"c4714e96-a141-4b11-86ff-cae889a1e1d2","method":"GET","path":"/api/sonic/engine/health","status":401,"durationMs":25}
+  ✓ Anonymous request on engine endpoint returns 401 (got 401)
+{"type":"access","requestId":"3293f87c-1b13-425e-8de9-34aa507c1bec","method":"GET","path":"/api/music/search","status":401,"durationMs":3}
+  ✓ Anonymous /api/music/search on Linux engine returns 401 (got 401)
+{"type":"access","requestId":"de8a053e-9eb8-450e-9a17-265cbea46996","method":"GET","path":"/api/sonic/engine/health","status":200,"durationMs":4}
+  ✓ Authenticated engine health over HTTP returns 200
+{"type":"access","requestId":"acb1c2ca-3ded-4aa0-b252-d7a31ac50a31","method":"GET","path":"/api/auth/user","status":200,"durationMs":3}
+  ✓ Valid v2 key authenticates over Node HTTP (got 200)
+
+========================================
+Local Engine & Degradation Test Results: 49 passed, 0 failed
+========================================
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90mD:/Users/Smart Kevin/OneDrive/Desktop/sonic[39m
+
+[90mstderr[2m | tests/security-p0-regression.test.ts[2m > [22m[2mP0-2: Linux engine enforces service auth regardless of Host[2m > [22m[2mfails closed with 503 when the engine secret is not configured
+[22m[39m[Sonic Engine Access] SONIC_ENGINE_SECRET is missing or shorter than 32 characters; rejecting access (fail closed)
+
+[90mstderr[2m | tests/security.test.ts[2m > [22m[2mTask 1 & Task 2: API Key Signature, Rotation & Revocation[2m > [22m[2mfails closed when the signing secret is missing or short
+[22m[39m[Sonic Auth] SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters; rejecting authentication (fail closed)
+
+[90mstderr[2m | tests/security.test.ts[2m > [22m[2mTask 1 & Task 2: API Key Signature, Rotation & Revocation[2m > [22m[2mfails closed when the signing secret is missing or short
+[22m[39m[Sonic Auth] Cannot issue API Key: SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters
+
+[90mstderr[2m | tests/security.test.ts[2m > [22m[2mTask 1 & Task 2: API Key Signature, Rotation & Revocation[2m > [22m[2mfails closed when the signing secret is missing or short
+[22m[39m[Sonic Auth] Cannot issue API Key: SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters
+
+ [32m✓[39m tests/ssrf-security.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 94[2mms[22m[39m
+ [32m✓[39m tests/security-p0-regression.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 94[2mms[22m[39m
+ [32m✓[39m tests/security.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 68[2mms[22m[39m
+[90mstderr[2m | tests/oauth-security.test.ts[2m > [22m[2mOAuth callback: state, PKCE, code exchange and session delivery[2m > [22m[2mrejects a verified-email=false account
+[22m[39m[Sonic Auth Callback Error] Error Epomail account email is not verified
+
+[90mstderr[2m | tests/oauth-security.test.ts[2m > [22m[2mOptional KV-backed API key revocation[2m > [22m[2mfails closed when an enabled revocation store read fails
+[22m[39m[Sonic Auth] Key revocation KV read failed: KV unavailable
+
+ [32m✓[39m tests/oauth-security.test.ts [2m([22m[2m18 tests[22m[2m)[22m[32m 83[2mms[22m[39m
+(node:95456) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/security-hardening.test.ts[2m > [22m[2mProxy: Kuwo audio redirects stay inside the allowlist[2m > [22m[2mreturns 502 instead of following a redirect to loopback
+[22m[39m[Sonic Proxy] Kuwo audio proxy rejected or failed Error: Protocol downgrade from https to http during redirect is forbidden
+    at safeFetch (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/_lib/sonic/security.ts:956:17)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at proxyKuwoAudio (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/proxy.ts:99:20)
+    at onRequest (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/proxy.ts:301:14)
+    at D:/Users/Smart Kevin/OneDrive/Desktop/sonic/tests/security-hardening.test.ts:88:17
+    at [90mfile:///D:/Users/Smart%20Kevin/OneDrive/Desktop/sonic/player/[39mnode_modules/[4m.pnpm[24m/vitest@5.0.5_@types+node@24_3cfcd22be6bff814c5e0f9d3f318fbdf/node_modules/[4mvitest[24m/dist/chunks/run.BPv-BBRv.js:2801:20
+
+[90mstderr[2m | tests/security-hardening.test.ts[2m > [22m[2mPalette: bounded resource consumption[2m > [22m[2mrate-limits palette requests
+[22m[39mPalette generation failed Error: SOI not found
+    at constructor.parse (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/lib/vendor/jpeg-decoder.js:632:15)
+    at decode (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/lib/vendor/jpeg-decoder.js:1110:11)
+    at decodeImage (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/palette.ts:315:19)
+    at buildPalette (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/palette.ts:369:21)
+    at onRequest (D:/Users/Smart Kevin/OneDrive/Desktop/sonic/functions/palette.ts:547:27)
+[90m    at processTicksAndRejections (node:internal/process/task_queues:104:5)[39m
+    at D:/Users/Smart Kevin/OneDrive/Desktop/sonic/tests/security-hardening.test.ts:196:19
+    at [90mfile:///D:/Users/Smart%20Kevin/OneDrive/Desktop/sonic/player/[39mnode_modules/[4m.pnpm[24m/vitest@5.0.5_@types+node@24_3cfcd22be6bff814c5e0f9d3f318fbdf/node_modules/[4mvitest[24m/dist/chunks/run.BPv-BBRv.js:2801:20
+
+ [32m✓[39m tests/security-hardening.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 86[2mms[22m[39m
+(node:124548) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"5b828847-c4ed-4026-be4a-5b80efa5f91a","method":"GET","path":"/","status":200,"durationMs":16}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"dd4a1703-7ab6-4f72-b702-73f151203f5b","method":"GET","path":"/secret.txt","status":404,"durationMs":2}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"9823cf44-701a-4688-84af-1de80dcb448a","method":"GET","path":"/..%2F..%2Fsecret.txt","status":404,"durationMs":2}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"35fe9c92-ecb6-4f00-98e5-fc2ee575a852","method":"GET","path":"/secret.txt","status":404,"durationMs":2}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mpreserves multiple Set-Cookie headers on the Node HTTP adapter
+[22m[39m{"type":"access","requestId":"06b66445-839d-4a5b-a0fd-590b317b0759","method":"GET","path":"/api/auth/login","status":302,"durationMs":4}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mreports not-ready when a persistent DB path is configured but the store is in memory
+[22m[39m{"type":"access","requestId":"d82379fd-c462-4722-b805-80a13b824d58","method":"GET","path":"/api/sonic/engine/health","status":503,"durationMs":2}
+
+ [32m✓[39m tests/engine-static.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 99[2mms[22m[39m
+[90mstderr[2m | tests/recommendation-and-search.test.ts[2m > [22m[2m推荐存储持久化 fail-closed[2m > [22m[2m开发/测试环境在数据库不可写时回退内存并保留告警
+[22m[39m[Sonic Recommend] Failed to open SQLite store at C:\Users\SMARTK~1\AppData\Local\Temp\sonic-db-30I6ZE\not-a-directory\store.sqlite (EEXIST: file already exists, mkdir 'C:\Users\SMARTK~1\AppData\Local\Temp\sonic-db-30I6ZE\not-a-directory'); falling back to MemoryRecommendStore
+
+ [32m✓[39m tests/recommendation-and-search.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 228[2mms[22m[39m
+ [32m✓[39m tests/frontend-xss.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 50[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m8 passed[39m[22m[90m (8)[39m
+[2m      Tests [22m [1m[32m123 passed[39m[22m[90m (123)[39m
+[2m   Start at [22m 20:35:32
+[2m   Duration [22m 3.98s[2m (environment 54%, transform 16%, import 15%, tests 14%, worker 2%)[22m
+

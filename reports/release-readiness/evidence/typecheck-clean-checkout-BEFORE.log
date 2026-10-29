@@ -1,0 +1,746 @@
+
+> sonic-music-player@2.1.0 typecheck D:\Users\Smart Kevin\OneDrive\Desktop\sonic\player
+> vue-tsc --noEmit
+
+src/api/index.ts(10,62): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(21,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(25,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(28,35): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(31,34): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(34,37): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(40,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(44,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(49,33): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(53,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(57,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(67,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(75,29): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(81,6): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(83,32): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(85,38): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(87,36): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(90,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(95,65): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(102,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(105,68): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(108,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(118,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(126,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(135,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(145,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(154,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(162,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(165,56): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(167,65): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(171,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(174,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(177,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(184,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(186,67): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(188,30): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(190,36): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(193,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(196,64): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(197,71): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(198,62): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(205,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(207,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(210,59): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(213,62): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(215,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(216,37): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(217,38): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(219,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(226,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(228,57): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(229,58): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(235,7): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(237,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(238,55): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(240,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(243,3): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(245,34): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(247,37): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(249,40): error TS2304: Cannot find name 'httpGet'.
+src/api/index.ts(251,33): error TS2304: Cannot find name 'httpGet'.
+src/components/Artplayer.vue(38,19): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Artplayer.vue(177,1): error TS2304: Cannot find name 'watch'.
+src/components/Artplayer.vue(179,3): error TS7006: Parameter 'newSrc' implicitly has an 'any' type.
+src/components/Artplayer.vue(184,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Artplayer.vue(188,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Background/Aurora.vue(277,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Background/Aurora.vue(281,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Background/Aurora.vue(285,1): error TS2304: Cannot find name 'watch'.
+src/components/Background/AuroraSettingsPanel.vue(9,15): error TS2304: Cannot find name 'reactive'.
+src/components/Background/AuroraSettingsPanel.vue(32,3): error TS2304: Cannot find name 'toRefs'.
+src/components/Background/AuroraSettingsPanel.vue(35,1): error TS2304: Cannot find name 'watch'.
+src/components/Background/AuroraSettingsPanel.vue(45,1): error TS2304: Cannot find name 'watch'.
+src/components/Background/AuroraSettingsPanel.vue(57,1): error TS2304: Cannot find name 'watch'.
+src/components/Background/AuroraSettingsPanel.vue(79,22): error TS2304: Cannot find name 'computed'.
+src/components/Background/ColorBends.vue(130,22): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Background/ColorBends.vue(131,21): error TS2304: Cannot find name 'ref'.
+src/components/Background/ColorBends.vue(132,16): error TS2304: Cannot find name 'ref'.
+src/components/Background/ColorBends.vue(133,21): error TS2304: Cannot find name 'ref'.
+src/components/Background/ColorBends.vue(134,27): error TS2304: Cannot find name 'ref'.
+src/components/Background/ColorBends.vue(135,21): error TS2304: Cannot find name 'ref'.
+src/components/Background/ColorBends.vue(136,23): error TS2304: Cannot find name 'ref'.
+src/components/Background/ColorBends.vue(137,26): error TS2304: Cannot find name 'ref'.
+src/components/Background/ColorBends.vue(138,27): error TS2304: Cannot find name 'ref'.
+src/components/Background/ColorBends.vue(139,26): error TS2304: Cannot find name 'ref'.
+src/components/Background/ColorBends.vue(255,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Background/ColorBends.vue(256,1): error TS2304: Cannot find name 'onBeforeUnmount'.
+src/components/Background/ColorBends.vue(258,1): error TS2304: Cannot find name 'watch'.
+src/components/Background/ColorBendsSettingsPanel.vue(9,15): error TS2304: Cannot find name 'reactive'.
+src/components/Background/ColorBendsSettingsPanel.vue(48,5): error TS2304: Cannot find name 'toRefs'.
+src/components/Background/ColorBendsSettingsPanel.vue(104,22): error TS2304: Cannot find name 'computed'.
+src/components/Background/Ultimate.vue(44,17): error TS2304: Cannot find name 'computed'.
+src/components/Background/UltimateSettingsPanel.vue(9,15): error TS2304: Cannot find name 'reactive'.
+src/components/Background/UltimateSettingsPanel.vue(32,5): error TS2304: Cannot find name 'toRefs'.
+src/components/Background/UltimateSettingsPanel.vue(53,1): error TS2304: Cannot find name 'watch'.
+src/components/Background/UltimateSettingsPanel.vue(96,22): error TS2304: Cannot find name 'computed'.
+src/components/Comments/SongCommentsDialog.vue(15,18): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Comments/SongCommentsDialog.vue(24,15): error TS2304: Cannot find name 'reactive'.
+src/components/Comments/SongCommentsDialog.vue(51,1): error TS2304: Cannot find name 'watch'.
+src/components/Comments/SongCommentsDialog.vue(53,3): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/components/Comments/SongCommentsDialog.vue(57,1): error TS2304: Cannot find name 'watch'.
+src/components/Comments/SongCommentsDialog.vue(63,1): error TS2304: Cannot find name 'watch'.
+src/components/Comments/SongCommentsDialog.vue(71,20): error TS2304: Cannot find name 'ref'.
+src/components/Comments/SongCommentsDialog.vue(72,16): error TS2304: Cannot find name 'ref'.
+src/components/Comments/SongCommentsDialog.vue(73,20): error TS2304: Cannot find name 'ref'.
+src/components/Comments/SongCommentsDialog.vue(74,20): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/MiniPlayerMobile.vue(28,15): error TS2304: Cannot find name 'reactive'.
+src/components/Mobile/MiniPlayerMobile.vue(36,28): error TS7006: Parameter 'time' implicitly has an 'any' type.
+src/components/Mobile/MiniPlayerMobile.vue(36,34): error TS7006: Parameter 'k' implicitly has an 'any' type.
+src/components/Mobile/MiniPlayerMobile.vue(43,30): error TS7006: Parameter 'time' implicitly has an 'any' type.
+src/components/Mobile/MiniPlayerMobile.vue(48,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/MiniPlayerMobile.vue(50,3): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/components/Mobile/MiniPlayerMobile.vue(52,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/MiniPlayerMobile.vue(54,17): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Mobile/MiniPlayerMobile.vue(60,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Mobile/MiniPlayerMobile.vue(67,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Mobile/MobileDrawer.vue(14,19): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Mobile/MobileDrawer.vue(25,20): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/MobileDrawer.vue(26,16): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/MobileDrawer.vue(27,18): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/MobileDrawer.vue(28,19): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/MobileDrawer.vue(69,27): error TS2304: Cannot find name 'computed'.
+src/components/Mobile/MobileDrawer.vue(74,21): error TS2304: Cannot find name 'computed'.
+src/components/Mobile/PlayerDrawerMobile.vue(31,29): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/PlayerDrawerMobile.vue(32,24): error TS2304: Cannot find name 'computed'.
+src/components/Mobile/PlayerDrawerMobile.vue(53,19): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Mobile/PlayerDrawerMobile.vue(54,19): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Mobile/PlayerDrawerMobile.vue(55,28): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Mobile/PlayerDrawerMobile.vue(56,16): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Mobile/PlayerDrawerMobile.vue(57,16): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Mobile/PlayerDrawerMobile.vue(116,21): error TS2304: Cannot find name 'Ref'.
+src/components/Mobile/PlayerDrawerMobile.vue(120,16): error TS2304: Cannot find name 'computed'.
+src/components/Mobile/PlayerDrawerMobile.vue(124,15): error TS2304: Cannot find name 'reactive'.
+src/components/Mobile/PlayerDrawerMobile.vue(145,5): error TS2304: Cannot find name 'toRefs'.
+src/components/Mobile/PlayerDrawerMobile.vue(150,9): error TS2304: Cannot find name 'nextTick'.
+src/components/Mobile/PlayerDrawerMobile.vue(157,9): error TS2304: Cannot find name 'nextTick'.
+src/components/Mobile/PlayerDrawerMobile.vue(169,9): error TS2304: Cannot find name 'nextTick'.
+src/components/Mobile/PlayerDrawerMobile.vue(182,35): error TS2304: Cannot find name 'computed'.
+src/components/Mobile/PlayerDrawerMobile.vue(197,11): error TS2304: Cannot find name 'nextTick'.
+src/components/Mobile/PlayerDrawerMobile.vue(246,11): error TS2304: Cannot find name 'nextTick'.
+src/components/Mobile/PlayerDrawerMobile.vue(341,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/PlayerDrawerMobile.vue(343,9): error TS7006: Parameter 'newVal' implicitly has an 'any' type.
+src/components/Mobile/PlayerDrawerMobile.vue(346,13): error TS2304: Cannot find name 'nextTick'.
+src/components/Mobile/PlayerDrawerMobile.vue(365,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/PlayerDrawerMobile.vue(367,3): error TS7006: Parameter 'playing' implicitly has an 'any' type.
+src/components/Mobile/PlayerDrawerMobile.vue(382,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/PlayerDrawerMobile.vue(389,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/PlayerDrawerMobile.vue(391,9): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/components/Mobile/PlayerDrawerMobile.vue(395,11): error TS2304: Cannot find name 'nextTick'.
+src/components/Mobile/PlayerDrawerMobile.vue(403,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Mobile/PlayerDrawerMobile.vue(434,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/PlayerDrawerMobile.vue(434,15): error TS7006: Parameter 'val' implicitly has an 'any' type.
+src/components/Mobile/PlayerDrawerMobile.vue(451,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Mobile/PlayerDrawerMobile.vue(460,22): error TS2304: Cannot find name 'computed'.
+src/components/Mobile/PlaylistCommentsPopup.vue(21,15): error TS2304: Cannot find name 'reactive'.
+src/components/Mobile/PlaylistCommentsPopup.vue(47,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/PlaylistCommentsPopup.vue(49,3): error TS7006: Parameter 'val' implicitly has an 'any' type.
+src/components/Mobile/PlaylistCommentsPopup.vue(56,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/PlaylistCommentsPopup.vue(66,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/PlaylistDrawerMobile.vue(38,19): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/PlaylistDrawerMobile.vue(39,24): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/PlaylistDrawerMobile.vue(41,22): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/PlaylistDrawerMobile.vue(54,1): error TS2304: Cannot find name 'watch'.
+src/components/Mobile/PlaylistDrawerMobile.vue(54,18): error TS7006: Parameter 'val' implicitly has an 'any' type.
+src/components/Mobile/PlaylistDrawerMobile.vue(64,22): error TS2304: Cannot find name 'computed'.
+src/components/Mobile/PlaylistDrawerMobile.vue(85,42): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/components/Mobile/PlaylistInfoPopover.vue(14,14): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/PlaylistInfoPopover.vue(15,20): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/PlaylistInfoPopover.vue(16,20): error TS2304: Cannot find name 'ref'.
+src/components/Mobile/PlaylistInfoPopover.vue(27,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Mobile/PlaylistInfoPopover.vue(28,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/PageSkeleton.vue(3,18): error TS2304: Cannot find name 'computed'.
+src/components/PageSkeleton.vue(4,19): error TS2304: Cannot find name 'computed'.
+src/components/PageSkeleton.vue(5,19): error TS2304: Cannot find name 'computed'.
+src/components/Player/VinylDisc.vue(29,23): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Player/VinylDisc.vue(30,23): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Player/VinylDisc.vue(34,15): error TS2304: Cannot find name 'reactive'.
+src/components/Player/VinylDisc.vue(40,21): error TS2304: Cannot find name 'computed'.
+src/components/Player/VinylDisc.vue(89,25): error TS2304: Cannot find name 'computed'.
+src/components/Player/VinylDisc.vue(181,1): error TS2304: Cannot find name 'watch'.
+src/components/Player/VinylDisc.vue(183,3): error TS7006: Parameter 'playing' implicitly has an 'any' type.
+src/components/Player/VinylDisc.vue(190,1): error TS2304: Cannot find name 'watch'.
+src/components/Player/VinylDisc.vue(192,4): error TS7006: Parameter 'newCover' implicitly has an 'any' type.
+src/components/Player/VinylDisc.vue(192,14): error TS7006: Parameter 'oldCover' implicitly has an 'any' type.
+src/components/Player/VinylDisc.vue(200,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Player/VinylDisc.vue(207,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/PlayerDrawer.vue(26,21): error TS2304: Cannot find name 'useGlobalStore'.
+src/components/PlayerDrawer.vue(27,20): error TS2304: Cannot find name 'useAudioStore'.
+src/components/PlayerDrawer.vue(28,23): error TS2304: Cannot find name 'useSettingsStore'.
+src/components/PlayerDrawer.vue(29,29): error TS2304: Cannot find name 'storeToRefs'.
+src/components/PlayerDrawer.vue(35,29): error TS2304: Cannot find name 'ref'.
+src/components/PlayerDrawer.vue(36,24): error TS2304: Cannot find name 'computed'.
+src/components/PlayerDrawer.vue(57,19): error TS2304: Cannot find name 'computed'.
+src/components/PlayerDrawer.vue(83,28): error TS2304: Cannot find name 'computed'.
+src/components/PlayerDrawer.vue(98,19): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/PlayerDrawer.vue(99,19): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/PlayerDrawer.vue(100,16): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/PlayerDrawer.vue(101,16): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/PlayerDrawer.vue(102,28): error TS2304: Cannot find name 'ref'.
+src/components/PlayerDrawer.vue(103,22): error TS2304: Cannot find name 'ref'.
+src/components/PlayerDrawer.vue(185,21): error TS2304: Cannot find name 'Ref'.
+src/components/PlayerDrawer.vue(189,16): error TS2304: Cannot find name 'computed'.
+src/components/PlayerDrawer.vue(219,15): error TS2304: Cannot find name 'reactive'.
+src/components/PlayerDrawer.vue(232,60): error TS2304: Cannot find name 'toRefs'.
+src/components/PlayerDrawer.vue(236,26): error TS2304: Cannot find name 'ref'.
+src/components/PlayerDrawer.vue(292,28): error TS2304: Cannot find name 'computed'.
+src/components/PlayerDrawer.vue(297,31): error TS7006: Parameter 'color' implicitly has an 'any' type.
+src/components/PlayerDrawer.vue(305,10): error TS2304: Cannot find name 'adaptColorsForTheme'.
+src/components/PlayerDrawer.vue(309,27): error TS2304: Cannot find name 'computed'.
+src/components/PlayerDrawer.vue(325,9): error TS2304: Cannot find name 'nextTick'.
+src/components/PlayerDrawer.vue(404,1): error TS2304: Cannot find name 'watch'.
+src/components/PlayerDrawer.vue(406,9): error TS7006: Parameter 'newVal' implicitly has an 'any' type.
+src/components/PlayerDrawer.vue(409,13): error TS2304: Cannot find name 'nextTick'.
+src/components/PlayerDrawer.vue(428,1): error TS2304: Cannot find name 'watch'.
+src/components/PlayerDrawer.vue(430,3): error TS7006: Parameter 'playing' implicitly has an 'any' type.
+src/components/PlayerDrawer.vue(449,1): error TS2304: Cannot find name 'watch'.
+src/components/PlayerDrawer.vue(457,1): error TS2304: Cannot find name 'watch'.
+src/components/PlayerDrawer.vue(459,10): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/components/PlayerDrawer.vue(459,13): error TS7006: Parameter 'oldSong' implicitly has an 'any' type.
+src/components/PlayerDrawer.vue(463,11): error TS2304: Cannot find name 'nextTick'.
+src/components/PlayerDrawer.vue(479,1): error TS2304: Cannot find name 'onMounted'.
+src/components/PlayerDrawer.vue(492,1): error TS2304: Cannot find name 'watch'.
+src/components/PlayerDrawer.vue(494,3): error TS7006: Parameter 'audioElement' implicitly has an 'any' type.
+src/components/PlayerDrawer.vue(531,1): error TS2304: Cannot find name 'watch'.
+src/components/PlayerDrawer.vue(531,15): error TS7006: Parameter 'val' implicitly has an 'any' type.
+src/components/PlayerDrawer.vue(541,5): error TS2304: Cannot find name 'nextTick'.
+src/components/PlayerDrawer.vue(551,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Search/SearchMVs.vue(24,15): error TS2304: Cannot find name 'reactive'.
+src/components/Search/SearchMVs.vue(25,21): error TS2304: Cannot find name 'toRefs'.
+src/components/Search/SearchMVs.vue(74,1): error TS2304: Cannot find name 'watch'.
+src/components/Search/SearchPlaylists.vue(24,15): error TS2304: Cannot find name 'reactive'.
+src/components/Search/SearchPlaylists.vue(25,21): error TS2304: Cannot find name 'toRefs'.
+src/components/Search/SearchPlaylists.vue(71,1): error TS2304: Cannot find name 'watch'.
+src/components/Search/SearchSongs.vue(35,15): error TS2304: Cannot find name 'reactive'.
+src/components/Search/SearchSongs.vue(42,75): error TS2304: Cannot find name 'toRefs'.
+src/components/Search/SearchSongs.vue(223,1): error TS2304: Cannot find name 'watch'.
+src/components/Settings/LocalMusicSettings.vue(16,19): error TS2304: Cannot find name 'ref'.
+src/components/Settings/LocalMusicSettings.vue(17,20): error TS2304: Cannot find name 'ref'.
+src/components/Settings/LocalMusicSettings.vue(24,22): error TS2304: Cannot find name 'reactive'.
+src/components/Settings/LocalMusicSettings.vue(31,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Settings/PrivacyDataSection.vue(13,21): error TS2304: Cannot find name 'ref'.
+src/components/Settings/PrivacyDataSection.vue(14,20): error TS2304: Cannot find name 'ref'.
+src/components/Settings/PrivacyDataSection.vue(15,29): error TS2304: Cannot find name 'ref'.
+src/components/Settings/PrivacyDataSection.vue(16,19): error TS2304: Cannot find name 'ref'.
+src/components/SongList.vue(132,33): error TS2304: Cannot find name 'computed'.
+src/components/Ui/ArtistCard.vue(15,16): error TS2304: Cannot find name 'useRouter'.
+src/components/Ui/ArtistCard.vue(16,17): error TS2304: Cannot find name 'ref'.
+src/components/Ui/ArtistCard.vue(17,18): error TS2304: Cannot find name 'ref'.
+src/components/Ui/ArtistCard.vue(18,21): error TS2304: Cannot find name 'ref'.
+src/components/Ui/ArtistCard.vue(19,22): error TS2304: Cannot find name 'computed'.
+src/components/Ui/AudioVisualizer.vue(26,19): error TS2304: Cannot find name 'ref'.
+src/components/Ui/AudioVisualizer.vue(262,1): error TS2304: Cannot find name 'watch'.
+src/components/Ui/AudioVisualizer.vue(289,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Ui/AudioVisualizer.vue(295,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Ui/GlassSelect.vue(14,15): error TS2304: Cannot find name 'reactive'.
+src/components/Ui/GlassSelect.vue(17,18): error TS2304: Cannot find name 'toRefs'.
+src/components/Ui/GlassSelect.vue(23,17): error TS2304: Cannot find name 'ref'.
+src/components/Ui/GlassSelect.vue(24,20): error TS2304: Cannot find name 'ref'.
+src/components/Ui/GlassSelect.vue(25,21): error TS2304: Cannot find name 'ref'.
+src/components/Ui/GlassSelect.vue(26,20): error TS2304: Cannot find name 'ref'.
+src/components/Ui/GlassSelect.vue(27,20): error TS2304: Cannot find name 'ref'.
+src/components/Ui/GlassSelect.vue(28,21): error TS2304: Cannot find name 'ref'.
+src/components/Ui/GlassSelect.vue(30,23): error TS2304: Cannot find name 'computed'.
+src/components/Ui/GlassSelect.vue(34,23): error TS2304: Cannot find name 'ref'.
+src/components/Ui/GlassSelect.vue(50,23): error TS2304: Cannot find name 'computed'.
+src/components/Ui/GlassSelect.vue(55,9): error TS2304: Cannot find name 'nextTick'.
+src/components/Ui/GlassSelect.vue(74,5): error TS2304: Cannot find name 'nextTick'.
+src/components/Ui/GlassSelect.vue(161,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Ui/GlassSelect.vue(162,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Ui/HeroCard.vue(27,16): error TS2304: Cannot find name 'useRouter'.
+src/components/Ui/HeroCard.vue(29,17): error TS2304: Cannot find name 'ref'.
+src/components/Ui/HeroCard.vue(30,21): error TS2304: Cannot find name 'ref'.
+src/components/Ui/HeroCard.vue(31,22): error TS2304: Cannot find name 'computed'.
+src/components/Ui/HeroCard.vue(42,18): error TS2304: Cannot find name 'ref'.
+src/components/Ui/HeroCard.vue(44,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Ui/HeroCard.vue(73,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Ui/InfiniteScroll.vue(45,19): error TS2304: Cannot find name 'ref'.
+src/components/Ui/InfiniteScroll.vue(46,24): error TS2304: Cannot find name 'ref'.
+src/components/Ui/InfiniteScroll.vue(47,19): error TS2304: Cannot find name 'ref'.
+src/components/Ui/InfiniteScroll.vue(50,29): error TS2304: Cannot find name 'computed'.
+src/components/Ui/InfiniteScroll.vue(51,27): error TS2304: Cannot find name 'computed'.
+src/components/Ui/InfiniteScroll.vue(54,28): error TS2304: Cannot find name 'computed'.
+src/components/Ui/InfiniteScroll.vue(57,27): error TS2304: Cannot find name 'computed'.
+src/components/Ui/InfiniteScroll.vue(60,27): error TS2304: Cannot find name 'computed'.
+src/components/Ui/InfiniteScroll.vue(63,27): error TS2304: Cannot find name 'computed'.
+src/components/Ui/InfiniteScroll.vue(102,1): error TS2304: Cannot find name 'watch'.
+src/components/Ui/InfiniteScroll.vue(104,3): error TS7006: Parameter 'val' implicitly has an 'any' type.
+src/components/Ui/InfiniteScroll.vue(112,7): error TS2304: Cannot find name 'nextTick'.
+src/components/Ui/InfiniteScroll.vue(148,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Ui/LazyImage.vue(25,21): error TS2304: Cannot find name 'computed'.
+src/components/Ui/LazyImage.vue(31,25): error TS2304: Cannot find name 'computed'.
+src/components/Ui/LazyImage.vue(49,12): error TS2304: Cannot find name 'ref'.
+src/components/Ui/LazyImage.vue(50,23): error TS2304: Cannot find name 'ref'.
+src/components/Ui/LazyImage.vue(51,19): error TS2304: Cannot find name 'ref'.
+src/components/Ui/LazyImage.vue(52,19): error TS2304: Cannot find name 'ref'.
+src/components/Ui/LazyImage.vue(53,18): error TS2304: Cannot find name 'ref'.
+src/components/Ui/LazyImage.vue(54,22): error TS2304: Cannot find name 'ref'.
+src/components/Ui/LazyImage.vue(90,1): error TS2304: Cannot find name 'watch'.
+src/components/Ui/MusicProgress.vue(10,20): error TS2304: Cannot find name 'PropType'.
+src/components/Ui/MusicProgress.vue(16,23): error TS2304: Cannot find name 'computed'.
+src/components/Ui/MusicProgress.vue(27,24): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Ui/MusicProgress.vue(29,15): error TS2304: Cannot find name 'reactive'.
+src/components/Ui/MusicProgress.vue(43,22): error TS2304: Cannot find name 'computed'.
+src/components/Ui/MusicProgress.vue(52,24): error TS2304: Cannot find name 'computed'.
+src/components/Ui/MusicProgress.vue(56,27): error TS2304: Cannot find name 'computed'.
+src/components/Ui/MusicProgress.vue(170,25): error TS2304: Cannot find name 'computed'.
+src/components/Ui/MusicProgress.vue(174,32): error TS2304: Cannot find name 'computed'.
+src/components/Ui/MVCard.vue(23,16): error TS2304: Cannot find name 'useRouter'.
+src/components/Ui/MVCard.vue(24,17): error TS2304: Cannot find name 'ref'.
+src/components/Ui/MVCard.vue(25,20): error TS2304: Cannot find name 'ref'.
+src/components/Ui/MVCard.vue(26,21): error TS2304: Cannot find name 'ref'.
+src/components/Ui/MVCard.vue(27,22): error TS2304: Cannot find name 'computed'.
+src/components/Ui/MVCard.vue(38,18): error TS2304: Cannot find name 'ref'.
+src/components/Ui/MVCard.vue(40,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Ui/MVCard.vue(67,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Ui/PageTransition.vue(13,28): error TS2304: Cannot find name 'reactive'.
+src/components/Ui/PageTransition.vue(122,1): error TS2304: Cannot find name 'provide'.
+src/components/Ui/PageTransition.vue(126,16): error TS2304: Cannot find name 'computed'.
+src/components/Ui/PageTransition.vue(130,16): error TS2304: Cannot find name 'useRouter'.
+src/components/Ui/Pagination.vue(19,14): error TS2304: Cannot find name 'computed'.
+src/components/Ui/Pagination.vue(21,8): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/components/Ui/Pagination.vue(23,20): error TS2304: Cannot find name 'computed'.
+src/components/Ui/Pagination.vue(26,17): error TS2304: Cannot find name 'computed'.
+src/components/Ui/Pagination.vue(27,17): error TS2304: Cannot find name 'computed'.
+src/components/Ui/Pagination.vue(29,21): error TS2304: Cannot find name 'computed'.
+src/components/Ui/PlaylistBubble.vue(20,19): error TS2304: Cannot find name 'ref'.
+src/components/Ui/PlaylistBubble.vue(21,14): error TS2304: Cannot find name 'computed'.
+src/components/Ui/PlaylistBubble.vue(23,8): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/components/Ui/PlaylistBubble.vue(29,20): error TS2304: Cannot find name 'ref'.
+src/components/Ui/PlaylistBubble.vue(30,19): error TS2304: Cannot find name 'ref'.
+src/components/Ui/PlaylistBubble.vue(31,24): error TS2304: Cannot find name 'ref'.
+src/components/Ui/PlaylistBubble.vue(32,23): error TS2304: Cannot find name 'ref'.
+src/components/Ui/PlaylistBubble.vue(66,1): error TS2304: Cannot find name 'watch'.
+src/components/Ui/PlaylistBubble.vue(66,13): error TS7006: Parameter 'isOpen' implicitly has an 'any' type.
+src/components/Ui/PlaylistBubble.vue(69,5): error TS2304: Cannot find name 'nextTick'.
+src/components/Ui/PlaylistBubble.vue(84,21): error TS2304: Cannot find name 'computed'.
+src/components/Ui/PlaylistBubble.vue(99,1): error TS2304: Cannot find name 'onMounted'.
+src/components/Ui/PlaylistBubble.vue(100,1): error TS2304: Cannot find name 'onUnmounted'.
+src/components/Ui/PlaylistBubble.vue(116,23): error TS2304: Cannot find name 'ref'.
+src/components/Ui/PlaylistBubble.vue(117,23): error TS2304: Cannot find name 'ref'.
+src/components/Ui/PlaylistBubble.vue(118,18): error TS2304: Cannot find name 'reactive'.
+src/components/Ui/PlaylistBubble.vue(122,21): error TS2304: Cannot find name 'computed'.
+src/components/Ui/PlaylistBubble.vue(129,23): error TS2304: Cannot find name 'computed'.
+src/components/Ui/PlaylistBubble.vue(132,44): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/components/Ui/PlaylistBubble.vue(133,26): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/components/Ui/PlaylistBubble.vue(170,23): error TS2304: Cannot find name 'computed'.
+src/components/Ui/PlaylistBubble.vue(171,33): error TS7006: Parameter 'acc' implicitly has an 'any' type.
+src/components/Ui/PlaylistBubble.vue(171,38): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/components/Ui/SongCard.vue(24,16): error TS2304: Cannot find name 'useRouter'.
+src/components/Ui/SongCard.vue(25,17): error TS2304: Cannot find name 'ref'.
+src/components/Ui/SongCard.vue(26,18): error TS2304: Cannot find name 'ref'.
+src/components/Ui/SongCard.vue(29,19): error TS2304: Cannot find name 'computed'.
+src/components/Ui/VolumeControl.vue(9,22): error TS2304: Cannot find name 'useTemplateRef'.
+src/components/Ui/VolumeControl.vue(11,15): error TS2304: Cannot find name 'reactive'.
+src/components/Ui/VolumeControl.vue(19,20): error TS2304: Cannot find name 'computed'.
+src/components/Ui/VolumeControl.vue(100,23): error TS2304: Cannot find name 'computed'.
+src/components/Ui/VolumeControl.vue(104,32): error TS2304: Cannot find name 'computed'.
+src/components/Ui/VolumeControl.vue(113,27): error TS2304: Cannot find name 'computed'.
+src/components/Ui/VolumeControl.vue(117,25): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(12,22): error TS2304: Cannot find name 'useAudioStore'.
+src/composables/useAudio.ts(20,23): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(21,21): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(22,21): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(23,20): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(24,23): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(25,20): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(26,18): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(27,19): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(28,23): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(29,20): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(30,20): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(31,19): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(32,23): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(35,32): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(36,29): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(39,24): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(53,24): error TS2304: Cannot find name 'computed'.
+src/composables/useAudio.ts(259,3): error TS2304: Cannot find name 'watch'.
+src/composables/useAudio.ts(268,3): error TS2304: Cannot find name 'onUnmounted'.
+src/composables/useCommentCount.ts(16,24): error TS2304: Cannot find name 'ref'.
+src/composables/useCommentCount.ts(17,21): error TS2304: Cannot find name 'ref'.
+src/composables/useCommentCount.ts(41,3): error TS2304: Cannot find name 'watch'.
+src/composables/useCommentCount.ts(43,5): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/composables/useDrawerTransition.ts(12,14): error TS2304: Cannot find name 'Ref'.
+src/composables/useDrawerTransition.ts(14,17): error TS2304: Cannot find name 'Ref'.
+src/composables/useDrawerTransition.ts(16,16): error TS2304: Cannot find name 'Ref'.
+src/composables/useDrawerTransition.ts(18,14): error TS2304: Cannot find name 'Ref'.
+src/composables/useDrawerTransition.ts(25,22): error TS2304: Cannot find name 'ref'.
+src/composables/useDrawerTransition.ts(76,11): error TS2304: Cannot find name 'nextTick'.
+src/composables/useGradientBackground.ts(36,17): error TS2304: Cannot find name 'reactive'.
+src/composables/useGradientBackground.ts(57,20): error TS2304: Cannot find name 'computed'.
+src/composables/useGradientBackground.ts(65,20): error TS2304: Cannot find name 'computed'.
+src/composables/useGradientBackground.ts(73,26): error TS2304: Cannot find name 'computed'.
+src/composables/useGradientBackground.ts(191,3): error TS2304: Cannot find name 'onUnmounted'.
+src/composables/useGradientBackground.ts(196,8): error TS2304: Cannot find name 'toRefs'.
+src/composables/useLyrics.ts(26,15): error TS2304: Cannot find name 'reactive'.
+src/composables/useLyrics.ts(33,22): error TS2304: Cannot find name 'ref'.
+src/composables/useLyrics.ts(34,17): error TS2304: Cannot find name 'ref'.
+src/composables/useLyrics.ts(197,21): error TS2304: Cannot find name 'computed'.
+src/composables/useLyrics.ts(224,28): error TS2304: Cannot find name 'computed'.
+src/composables/useLyrics.ts(225,32): error TS7006: Parameter 'm' implicitly has an 'any' type.
+src/composables/useLyrics.ts(234,24): error TS2304: Cannot find name 'computed'.
+src/composables/useLyrics.ts(234,71): error TS7006: Parameter 'm' implicitly has an 'any' type.
+src/composables/useLyrics.ts(425,8): error TS2304: Cannot find name 'toRefs'.
+src/composables/useLyricsDrag.ts(10,14): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsDrag.ts(12,23): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsDrag.ts(14,23): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsDrag.ts(20,22): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsDrag.ts(22,15): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsDrag.ts(28,22): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsDrag.ts(30,14): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsDrag.ts(49,17): error TS2304: Cannot find name 'reactive'.
+src/composables/useLyricsDrag.ts(161,23): error TS2304: Cannot find name 'computed'.
+src/composables/useLyricsDrag.ts(180,3): error TS2304: Cannot find name 'onMounted'.
+src/composables/useLyricsDrag.ts(187,3): error TS2304: Cannot find name 'onUnmounted'.
+src/composables/useLyricsDrag.ts(196,17): error TS2304: Cannot find name 'toRef'.
+src/composables/useLyricsDrag.ts(198,19): error TS2304: Cannot find name 'toRef'.
+src/composables/useLyricsScroll.ts(10,14): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsScroll.ts(12,13): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsScroll.ts(14,16): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsScroll.ts(16,12): error TS2304: Cannot find name 'Ref'.
+src/composables/useLyricsScroll.ts(33,17): error TS2304: Cannot find name 'reactive'.
+src/composables/useLyricsScroll.ts(51,32): error TS7006: Parameter 't' implicitly has an 'any' type.
+src/composables/useLyricsScroll.ts(51,35): error TS7006: Parameter 'i' implicitly has an 'any' type.
+src/composables/useLyricsScroll.ts(59,34): error TS7006: Parameter 't' implicitly has an 'any' type.
+src/composables/useLyricsScroll.ts(163,3): error TS2304: Cannot find name 'watch'.
+src/composables/useLyricsScroll.ts(168,8): error TS2304: Cannot find name 'toRefs'.
+src/layout/aside.vue(24,21): error TS2304: Cannot find name 'ref'.
+src/layout/aside.vue(75,28): error TS2304: Cannot find name 'computed'.
+src/layout/aside.vue(79,20): error TS2304: Cannot find name 'useToastStore'.
+src/layout/aside.vue(81,23): error TS2304: Cannot find name 'computed'.
+src/layout/aside.vue(98,22): error TS2304: Cannot find name 'ref'.
+src/layout/aside.vue(99,25): error TS2304: Cannot find name 'ref'.
+src/layout/aside.vue(153,1): error TS2304: Cannot find name 'watch'.
+src/layout/aside.vue(156,5): error TS2304: Cannot find name 'nextTick'.
+src/layout/aside.vue(164,1): error TS2304: Cannot find name 'onMounted'.
+src/layout/aside.vue(165,3): error TS2304: Cannot find name 'nextTick'.
+src/layout/aside.vue(189,24): error TS2304: Cannot find name 'ref'.
+src/layout/aside.vue(193,19): error TS2304: Cannot find name 'computed'.
+src/layout/aside.vue(197,22): error TS2304: Cannot find name 'computed'.
+src/layout/aside.vue(202,1): error TS2304: Cannot find name 'watch'.
+src/layout/aside.vue(203,1): error TS2304: Cannot find name 'onMounted'.
+src/layout/aside.vue(204,1): error TS2304: Cannot find name 'onUnmounted'.
+src/layout/footer.vue(25,18): error TS2304: Cannot find name 'computed'.
+src/layout/footer.vue(63,15): error TS2304: Cannot find name 'reactive'.
+src/layout/footer.vue(77,42): error TS2304: Cannot find name 'toRefs'.
+src/layout/footer.vue(80,18): error TS2304: Cannot find name 'ref'.
+src/layout/footer.vue(83,28): error TS2304: Cannot find name 'computed'.
+src/layout/footer.vue(130,32): error TS7006: Parameter 'time' implicitly has an 'any' type.
+src/layout/footer.vue(173,1): error TS2304: Cannot find name 'watch'.
+src/layout/footer.vue(174,1): error TS2304: Cannot find name 'watch'.
+src/layout/footer.vue(176,5): error TS7031: Binding element 'enabled' implicitly has an 'any' type.
+src/layout/footer.vue(183,1): error TS2304: Cannot find name 'watch'.
+src/layout/footer.vue(185,4): error TS7006: Parameter 'song' implicitly has an 'any' type.
+src/layout/footer.vue(185,10): error TS7006: Parameter 'oldSong' implicitly has an 'any' type.
+src/layout/footer.vue(202,1): error TS2304: Cannot find name 'watch'.
+src/layout/footer.vue(218,1): error TS2304: Cannot find name 'onMounted'.
+src/layout/footer.vue(226,1): error TS2304: Cannot find name 'watch'.
+src/layout/footer.vue(228,3): error TS7006: Parameter 'audioElement' implicitly has an 'any' type.
+src/layout/footer.vue(239,1): error TS2304: Cannot find name 'onUnmounted'.
+src/layout/footer.vue(256,25): error TS2304: Cannot find name 'ref'.
+src/layout/footer.vue(257,24): error TS2304: Cannot find name 'ref'.
+src/layout/footer.vue(258,23): error TS2304: Cannot find name 'ref'.
+src/layout/footer.vue(259,25): error TS2304: Cannot find name 'ref'.
+src/layout/footer.vue(260,29): error TS2304: Cannot find name 'ref'.
+src/layout/footer.vue(261,25): error TS2304: Cannot find name 'ref'.
+src/layout/footer.vue(265,26): error TS2304: Cannot find name 'ref'.
+src/layout/footer.vue(267,29): error TS2304: Cannot find name 'computed'.
+src/layout/footer.vue(278,31): error TS2304: Cannot find name 'computed'.
+src/layout/footer.vue(336,1): error TS2304: Cannot find name 'watch'.
+src/layout/footer.vue(338,4): error TS7006: Parameter 'newSong' implicitly has an 'any' type.
+src/layout/footer.vue(338,13): error TS7006: Parameter 'oldSong' implicitly has an 'any' type.
+src/layout/footer.vue(358,1): error TS2304: Cannot find name 'watch'.
+src/layout/footer.vue(360,4): error TS7006: Parameter 'isOpen' implicitly has an 'any' type.
+src/layout/footer.vue(368,28): error TS2304: Cannot find name 'computed'.
+src/layout/footer.vue(398,28): error TS2304: Cannot find name 'computed'.
+src/layout/footer.vue(463,28): error TS2304: Cannot find name 'computed'.
+src/layout/footer.vue(464,30): error TS2304: Cannot find name 'computed'.
+src/layout/footer.vue(465,26): error TS2304: Cannot find name 'computed'.
+src/layout/footer.vue(466,27): error TS2304: Cannot find name 'computed'.
+src/layout/footer.vue(468,20): error TS2304: Cannot find name 'ref'.
+src/layout/footer.vue(482,56): error TS7006: Parameter 'q' implicitly has an 'any' type.
+src/layout/footer.vue(484,3): error TS2304: Cannot find name 'nextTick'.
+src/layout/footer.vue(491,3): error TS2304: Cannot find name 'nextTick'.
+src/layout/footer.vue(508,3): error TS2304: Cannot find name 'nextTick'.
+src/layout/footer.vue(532,49): error TS7006: Parameter 'q' implicitly has an 'any' type.
+src/layout/footer.vue(581,20): error TS2304: Cannot find name 'ref'.
+src/layout/footer.vue(589,1): error TS2304: Cannot find name 'onMounted'.
+src/layout/footer.vue(601,1): error TS2304: Cannot find name 'onUnmounted'.
+src/layout/index.vue(19,15): error TS2304: Cannot find name 'reactive'.
+src/layout/index.vue(23,26): error TS2304: Cannot find name 'toRefs'.
+src/layout/mobile/Header.vue(3,16): error TS2304: Cannot find name 'useRouter'.
+src/layout/mobile/Header.vue(12,15): error TS2304: Cannot find name 'useRoute'.
+src/layout/mobile/Header.vue(14,21): error TS2304: Cannot find name 'computed'.
+src/layout/mobile/Header.vue(18,19): error TS2304: Cannot find name 'computed'.
+src/layout/mobile/Header.vue(32,19): error TS2304: Cannot find name 'computed'.
+src/layout/mobile/Header.vue(38,27): error TS2304: Cannot find name 'computed'.
+src/layout/mobile/Header.vue(39,19): error TS2304: Cannot find name 'computed'.
+src/layout/mobile/index.vue(9,15): error TS2304: Cannot find name 'reactive'.
+src/layout/mobile/index.vue(10,26): error TS2304: Cannot find name 'toRefs'.
+src/layout/mobile/TabBar.vue(15,15): error TS2304: Cannot find name 'useRoute'.
+src/layout/mobile/TabBar.vue(32,19): error TS2304: Cannot find name 'computed'.
+src/layout/mobile/TabBar.vue(52,19): error TS2304: Cannot find name 'useTemplateRef'.
+src/layout/mobile/TabBar.vue(75,1): error TS2304: Cannot find name 'onMounted'.
+src/layout/mobile/TabBar.vue(91,1): error TS2304: Cannot find name 'onUnmounted'.
+src/pages/album.vue(19,17): error TS2304: Cannot find name 'computed'.
+src/pages/album.vue(21,15): error TS2304: Cannot find name 'reactive'.
+src/pages/album.vue(22,18): error TS2304: Cannot find name 'ref'.
+src/pages/album.vue(59,1): error TS2304: Cannot find name 'watch'.
+src/pages/album.vue(60,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/artist.vue(17,15): error TS2304: Cannot find name 'useRoute'.
+src/pages/artist.vue(18,16): error TS2304: Cannot find name 'useRouter'.
+src/pages/artist.vue(19,18): error TS2304: Cannot find name 'computed'.
+src/pages/artist.vue(35,15): error TS2304: Cannot find name 'reactive'.
+src/pages/artist.vue(52,23): error TS2304: Cannot find name 'toRefs'.
+src/pages/artist.vue(121,42): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/pages/artist.vue(144,43): error TS7006: Parameter 'a' implicitly has an 'any' type.
+src/pages/artist.vue(156,1): error TS2304: Cannot find name 'watch'.
+src/pages/artist.vue(158,3): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/pages/artist.vue(179,14): error TS2304: Cannot find name 'computed'.
+src/pages/artists.vue(14,15): error TS2304: Cannot find name 'reactive'.
+src/pages/artists.vue(27,33): error TS2304: Cannot find name 'toRefs'.
+src/pages/artists.vue(103,1): error TS2304: Cannot find name 'watch'.
+src/pages/artists.vue(105,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/charts.vue(15,15): error TS2304: Cannot find name 'reactive'.
+src/pages/charts.vue(26,35): error TS2304: Cannot find name 'toRefs'.
+src/pages/charts.vue(28,18): error TS2304: Cannot find name 'computed'.
+src/pages/charts.vue(89,22): error TS2304: Cannot find name 'computed'.
+src/pages/charts.vue(90,24): error TS2304: Cannot find name 'computed'.
+src/pages/charts.vue(94,1): error TS2304: Cannot find name 'watch'.
+src/pages/charts.vue(98,1): error TS2304: Cannot find name 'watch'.
+src/pages/charts.vue(98,18): error TS7006: Parameter 'val' implicitly has an 'any' type.
+src/pages/charts.vue(106,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/index.vue(36,16): error TS2304: Cannot find name 'useRouter'.
+src/pages/index.vue(39,15): error TS2304: Cannot find name 'reactive'.
+src/pages/index.vue(49,76): error TS2304: Cannot find name 'toRefs'.
+src/pages/index.vue(87,24): error TS2304: Cannot find name 'computed'.
+src/pages/index.vue(88,24): error TS2304: Cannot find name 'ref'.
+src/pages/index.vue(89,21): error TS2304: Cannot find name 'ref'.
+src/pages/index.vue(121,1): error TS2304: Cannot find name 'watch'.
+src/pages/index.vue(144,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/likes.vue(22,15): error TS2304: Cannot find name 'reactive'.
+src/pages/likes.vue(25,20): error TS2304: Cannot find name 'toRefs'.
+src/pages/likes.vue(27,20): error TS2304: Cannot find name 'computed'.
+src/pages/likes.vue(28,28): error TS2304: Cannot find name 'computed'.
+src/pages/likes.vue(29,18): error TS2304: Cannot find name 'computed'.
+src/pages/likes.vue(31,17): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/album.vue(18,15): error TS2304: Cannot find name 'useRoute'.
+src/pages/mobile/album.vue(19,16): error TS2304: Cannot find name 'useRouter'.
+src/pages/mobile/album.vue(20,17): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/album.vue(34,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mobile/album.vue(90,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/album.vue(92,3): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/pages/mobile/artist.vue(18,15): error TS2304: Cannot find name 'useRoute'.
+src/pages/mobile/artist.vue(19,16): error TS2304: Cannot find name 'useRouter'.
+src/pages/mobile/artist.vue(20,18): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/artist.vue(36,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mobile/artist.vue(124,42): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/pages/mobile/artist.vue(147,43): error TS7006: Parameter 'a' implicitly has an 'any' type.
+src/pages/mobile/artist.vue(159,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/artist.vue(161,3): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/pages/mobile/charts.vue(16,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mobile/charts.vue(28,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/mobile/index.vue(31,16): error TS2304: Cannot find name 'useRouter'.
+src/pages/mobile/index.vue(62,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mobile/index.vue(71,67): error TS2304: Cannot find name 'toRefs'.
+src/pages/mobile/index.vue(94,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/mobile/index.vue(99,24): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/index.vue(100,22): error TS2304: Cannot find name 'ref'.
+src/pages/mobile/index.vue(101,24): error TS2304: Cannot find name 'ref'.
+src/pages/mobile/index.vue(102,21): error TS2304: Cannot find name 'ref'.
+src/pages/mobile/index.vue(133,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/likes.vue(11,20): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/mv-list.vue(7,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mobile/mv-list.vue(21,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/mobile/mv-player.vue(6,15): error TS2304: Cannot find name 'useRoute'.
+src/pages/mobile/mv-player.vue(8,14): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/mv-player.vue(10,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mobile/mv-player.vue(64,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/mobile/playlist.vue(33,15): error TS2304: Cannot find name 'useRoute'.
+src/pages/mobile/playlist.vue(34,20): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/playlist.vue(38,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mobile/playlist.vue(62,42): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/pages/mobile/playlist.vue(163,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/playlist.vue(165,3): error TS7006: Parameter 'idNum' implicitly has an 'any' type.
+src/pages/mobile/recent.vue(29,24): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/recent.vue(32,20): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/recent.vue(34,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mobile/recent.vue(38,23): error TS2304: Cannot find name 'toRefs'.
+src/pages/mobile/recent.vue(39,24): error TS2304: Cannot find name 'ref'.
+src/pages/mobile/recent.vue(49,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/recent.vue(49,18): error TS7006: Parameter 'val' implicitly has an 'any' type.
+src/pages/mobile/recent.vue(57,21): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/recent.vue(70,14): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/search.vue(43,15): error TS2304: Cannot find name 'useRoute'.
+src/pages/mobile/search.vue(44,16): error TS2304: Cannot find name 'useRouter'.
+src/pages/mobile/search.vue(71,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mobile/search.vue(116,5): error TS2304: Cannot find name 'toRefs'.
+src/pages/mobile/search.vue(182,3): error TS2304: Cannot find name 'nextTick'.
+src/pages/mobile/search.vue(328,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/mobile/search.vue(342,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/search.vue(344,3): error TS7006: Parameter 'value' implicitly has an 'any' type.
+src/pages/mobile/search.vue(355,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/search.vue(357,9): error TS7006: Parameter 'raw' implicitly has an 'any' type.
+src/pages/mobile/search.vue(374,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/search.vue(380,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/search.vue(386,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/search.vue(409,18): error TS2304: Cannot find name 'useTemplateRef'.
+src/pages/mobile/search.vue(418,22): error TS2304: Cannot find name 'ref'.
+src/pages/mobile/search.vue(427,1): error TS2304: Cannot find name 'onUnmounted'.
+src/pages/mobile/search.vue(450,27): error TS2304: Cannot find name 'ref'.
+src/pages/mobile/search.vue(458,7): error TS2304: Cannot find name 'useToastStore'.
+src/pages/mobile/search.vue(464,5): error TS2304: Cannot find name 'useToastStore'.
+src/pages/mobile/search.vue(470,14): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/search.vue(480,24): error TS2304: Cannot find name 'ref'.
+src/pages/mobile/search.vue(488,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/search.vue(490,3): error TS7006: Parameter 'val' implicitly has an 'any' type.
+src/pages/mobile/search.vue(491,40): error TS7006: Parameter 't' implicitly has an 'any' type.
+src/pages/mobile/settings.vue(28,23): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/settings.vue(30,8): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/pages/mobile/settings.vue(33,19): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/settings.vue(34,22): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/settings.vue(35,21): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/settings.vue(36,24): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/settings.vue(37,25): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/settings.vue(38,31): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/settings.vue(44,1): error TS2304: Cannot find name 'watch'.
+src/pages/mobile/settings.vue(44,13): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/pages/mobile/settings.vue(70,25): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/settings.vue(72,8): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/pages/mobile/settings.vue(74,22): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/settings.vue(76,8): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/pages/mobile/settings.vue(78,21): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/settings.vue(80,8): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/pages/mobile/settings.vue(84,27): error TS2304: Cannot find name 'ref'.
+src/pages/mobile/settings.vue(101,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/mobile/song.vue(8,15): error TS2304: Cannot find name 'useRoute'.
+src/pages/mobile/song.vue(11,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mobile/song.vue(56,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/mobile/song.vue(63,26): error TS2304: Cannot find name 'computed'.
+src/pages/mobile/song.vue(91,17): error TS2304: Cannot find name 'computed'.
+src/pages/mv-list.vue(11,16): error TS2304: Cannot find name 'useRouter'.
+src/pages/mv-list.vue(15,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mv-list.vue(60,105): error TS2304: Cannot find name 'toRefs'.
+src/pages/mv-list.vue(109,40): error TS7006: Parameter 'c' implicitly has an 'any' type.
+src/pages/mv-list.vue(145,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/mv-player.vue(20,15): error TS2304: Cannot find name 'reactive'.
+src/pages/mv-player.vue(29,60): error TS2304: Cannot find name 'toRefs'.
+src/pages/mv-player.vue(145,1): error TS2304: Cannot find name 'watch'.
+src/pages/mv-player.vue(147,3): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/pages/my-music.vue(13,15): error TS2304: Cannot find name 'reactive'.
+src/pages/my-music.vue(17,23): error TS2304: Cannot find name 'toRefs'.
+src/pages/my-music.vue(20,19): error TS2304: Cannot find name 'storeToRefs'.
+src/pages/my-music.vue(21,21): error TS2304: Cannot find name 'computed'.
+src/pages/my-music.vue(39,14): error TS2304: Cannot find name 'computed'.
+src/pages/new-albums.vue(14,15): error TS2304: Cannot find name 'reactive'.
+src/pages/new-albums.vue(25,18): error TS2304: Cannot find name 'toRefs'.
+src/pages/new-albums.vue(86,1): error TS2304: Cannot find name 'watch'.
+src/pages/new-albums.vue(88,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/playlist.vue(20,15): error TS2304: Cannot find name 'useRoute'.
+src/pages/playlist.vue(21,16): error TS2304: Cannot find name 'useRouter'.
+src/pages/playlist.vue(55,15): error TS2304: Cannot find name 'reactive'.
+src/pages/playlist.vue(92,5): error TS2304: Cannot find name 'toRefs'.
+src/pages/playlist.vue(108,42): error TS7006: Parameter 's' implicitly has an 'any' type.
+src/pages/playlist.vue(321,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/playlist.vue(332,1): error TS2304: Cannot find name 'watch'.
+src/pages/playlist.vue(334,3): error TS7006: Parameter 'idNum' implicitly has an 'any' type.
+src/pages/playlist.vue(344,1): error TS2304: Cannot find name 'watch'.
+src/pages/playlist.vue(346,3): error TS7006: Parameter 'name' implicitly has an 'any' type.
+src/pages/playlist.vue(385,23): error TS2304: Cannot find name 'computed'.
+src/pages/recent.vue(9,19): error TS2304: Cannot find name 'storeToRefs'.
+src/pages/recent.vue(13,20): error TS2304: Cannot find name 'computed'.
+src/pages/search.vue(16,15): error TS2304: Cannot find name 'useRoute'.
+src/pages/search.vue(17,16): error TS2304: Cannot find name 'useRouter'.
+src/pages/search.vue(23,11): error TS2304: Cannot find name 'computed'.
+src/pages/search.vue(26,15): error TS2304: Cannot find name 'reactive'.
+src/pages/search.vue(35,48): error TS2304: Cannot find name 'toRefs'.
+src/pages/search.vue(37,18): error TS2304: Cannot find name 'ref'.
+src/pages/search.vue(40,21): error TS2304: Cannot find name 'ref'.
+src/pages/search.vue(41,18): error TS2304: Cannot find name 'ref'.
+src/pages/search.vue(42,22): error TS2304: Cannot find name 'ref'.
+src/pages/search.vue(43,21): error TS2304: Cannot find name 'ref'.
+src/pages/search.vue(44,25): error TS2304: Cannot find name 'ref'.
+src/pages/search.vue(47,1): error TS2304: Cannot find name 'watch'.
+src/pages/search.vue(47,21): error TS7006: Parameter 'val' implicitly has an 'any' type.
+src/pages/search.vue(92,20): error TS2304: Cannot find name 'computed'.
+src/pages/search.vue(95,18): error TS2304: Cannot find name 'computed'.
+src/pages/search.vue(108,1): error TS2304: Cannot find name 'watch'.
+src/pages/search.vue(115,1): error TS2304: Cannot find name 'watch'.
+src/pages/search.vue(162,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/search.vue(169,1): error TS2304: Cannot find name 'watch'.
+src/pages/search.vue(169,11): error TS7006: Parameter 'val' implicitly has an 'any' type.
+src/pages/search.vue(176,18): error TS2304: Cannot find name 'computed'.
+src/pages/search.vue(178,44): error TS7006: Parameter 'h' implicitly has an 'any' type.
+src/pages/settings.vue(34,73): error TS2304: Cannot find name 'storeToRefs'.
+src/pages/settings.vue(37,25): error TS2304: Cannot find name 'storeToRefs'.
+src/pages/settings.vue(39,19): error TS2304: Cannot find name 'computed'.
+src/pages/settings.vue(40,22): error TS2304: Cannot find name 'computed'.
+src/pages/settings.vue(41,21): error TS2304: Cannot find name 'computed'.
+src/pages/settings.vue(42,24): error TS2304: Cannot find name 'computed'.
+src/pages/settings.vue(43,31): error TS2304: Cannot find name 'computed'.
+src/pages/settings.vue(49,1): error TS2304: Cannot find name 'watch'.
+src/pages/settings.vue(49,13): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/pages/settings.vue(54,15): error TS2304: Cannot find name 'reactive'.
+src/pages/settings.vue(76,25): error TS2304: Cannot find name 'computed'.
+src/pages/settings.vue(78,8): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/pages/settings.vue(80,22): error TS2304: Cannot find name 'computed'.
+src/pages/settings.vue(82,8): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/pages/settings.vue(84,21): error TS2304: Cannot find name 'computed'.
+src/pages/settings.vue(86,8): error TS7006: Parameter 'v' implicitly has an 'any' type.
+src/pages/settings.vue(90,27): error TS2304: Cannot find name 'ref'.
+src/pages/settings.vue(119,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/song.vue(21,16): error TS2304: Cannot find name 'computed'.
+src/pages/song.vue(25,22): error TS2304: Cannot find name 'ref'.
+src/pages/song.vue(27,15): error TS2304: Cannot find name 'reactive'.
+src/pages/song.vue(34,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/song.vue(35,1): error TS2304: Cannot find name 'watch'.
+src/pages/song.vue(37,3): error TS7006: Parameter 'id' implicitly has an 'any' type.
+src/pages/song.vue(40,20): error TS2304: Cannot find name 'computed'.
+src/pages/song.vue(47,19): error TS2304: Cannot find name 'computed'.
+src/pages/song.vue(48,20): error TS2304: Cannot find name 'computed'.
+src/pages/song.vue(49,18): error TS2304: Cannot find name 'computed'.
+src/pages/song.vue(74,19): error TS2304: Cannot find name 'computed'.
+src/pages/song.vue(154,1): error TS2304: Cannot find name 'onMounted'.
+src/pages/song.vue(155,1): error TS2304: Cannot find name 'watch'.
+src/stores/modules/global.ts(8,31): error TS2304: Cannot find name 'defineStore'.
+src/stores/modules/global.ts(19,12): error TS2339: Property '$patch' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'.
+src/stores/modules/global.ts(19,19): error TS7006: Parameter 'state' implicitly has an 'any' type.
+src/stores/modules/global.ts(26,12): error TS2339: Property 'theme' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'.
+src/stores/modules/global.ts(31,12): error TS2339: Property 'theme' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'.
+src/stores/modules/global.ts(31,25): error TS2339: Property 'theme' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'.
+src/stores/modules/global.ts(36,12): error TS2339: Property 'lang' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'.
+src/stores/modules/global.ts(43,24): error TS2551: Property 'searchHistory' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'. Did you mean 'addSearchHistory'?
+src/stores/modules/global.ts(44,28): error TS2551: Property 'searchHistory' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'. Did you mean 'addSearchHistory'?
+src/stores/modules/global.ts(45,12): error TS2551: Property 'searchHistory' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'. Did you mean 'addSearchHistory'?
+src/stores/modules/global.ts(46,16): error TS2551: Property 'searchHistory' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'. Did you mean 'addSearchHistory'?
+src/stores/modules/global.ts(46,48): error TS2551: Property 'searchHistory' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'. Did you mean 'addSearchHistory'?
+src/stores/modules/global.ts(46,69): error TS2551: Property 'searchHistory' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'. Did you mean 'addSearchHistory'?
+src/stores/modules/global.ts(53,24): error TS2551: Property 'searchHistory' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'. Did you mean 'addSearchHistory'?
+src/stores/modules/global.ts(54,28): error TS2551: Property 'searchHistory' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'. Did you mean 'addSearchHistory'?
+src/stores/modules/global.ts(59,12): error TS2551: Property 'searchHistory' does not exist on type '{ setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]): void; setTheme(theme: "light" | "dark" | "system"): void; toggleTheme(): void; setLang(lang: "zh" | ... 1 more ... | "ja"): void; addSearchHistory(q: string): void; removeSearchHistory(q: string): void; clearSearchHistory(): void; }'. Did you mean 'addSearchHistory'?
+ ELIFECYCLE  Command failed with exit code 2.

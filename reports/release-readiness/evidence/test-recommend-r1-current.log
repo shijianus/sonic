@@ -1,0 +1,19 @@
+
+> sonic@2.2.0 test:recommend
+> pnpm --dir player exec vitest run --root .. tests/recommendation-and-search.test.ts
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90mD:/Users/Smart Kevin/OneDrive/Desktop/sonic[39m
+
+(node:59796) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/recommendation-and-search.test.ts[2m > [22m[2m推荐存储持久化 fail-closed[2m > [22m[2m开发/测试环境在数据库不可写时回退内存并保留告警
+[22m[39m[Sonic Recommend] Failed to open SQLite store at C:\Users\SMARTK~1\AppData\Local\Temp\sonic-db-pq4pmC\not-a-directory\store.sqlite (EEXIST: file already exists, mkdir 'C:\Users\SMARTK~1\AppData\Local\Temp\sonic-db-pq4pmC\not-a-directory'); falling back to MemoryRecommendStore
+
+ [32m✓[39m tests/recommendation-and-search.test.ts [2m([22m[2m25 tests[22m[2m)[22m[32m 237[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m1 passed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[32m25 passed[39m[22m[90m (25)[39m
+[2m   Start at [22m 20:30:36
+[2m   Duration [22m 1.06s[2m (transform 43%, tests 33%, import 23%, worker 1%)[22m
+

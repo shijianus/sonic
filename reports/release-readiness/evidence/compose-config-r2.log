@@ -1,0 +1,74 @@
+name: sonic
+services:
+  ncm-api:
+    build:
+      context: D:\Users\Smart Kevin\OneDrive\Desktop\sonic
+      dockerfile: Dockerfile.ncm
+    cap_drop:
+      - ALL
+    container_name: sonic-ncm-api
+    environment:
+      ENABLE_UNBLOCK: "0"
+      HOST: 0.0.0.0
+      PORT: "3000"
+    init: true
+    networks:
+      sonic-internal: null
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+  sonic-engine:
+    build:
+      context: D:\Users\Smart Kevin\OneDrive\Desktop\sonic
+      dockerfile: Dockerfile
+    cap_drop:
+      - ALL
+    container_name: sonic-local-engine
+    depends_on:
+      ncm-api:
+        condition: service_healthy
+        required: true
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8080"
+      SONIC_BIND_PORT: "18082"
+      SONIC_ENABLE_GDSTUDIO: "0"
+      SONIC_ENABLE_LISTENBRAINZ: "0"
+      SONIC_ENABLE_LYRIVA: "0"
+      SONIC_ENABLE_UNBLOCK: "0"
+      SONIC_ENGINE_SECRET: release_smoke_engine_secret_at_least_32_chars
+      SONIC_GORSE_API_KEY: ""
+      SONIC_GORSE_URL: ""
+      SONIC_MEILISEARCH_KEY: ""
+      SONIC_MEILISEARCH_URL: ""
+      SONIC_NCM_API_URL: http://ncm-api:3000
+      SONIC_REAL_IP: 203.0.113.10
+      SONIC_RECOMMEND_DB_PATH: /app/data/sonic-recommend.sqlite
+      SONIC_RECOMMEND_RETENTION_DAYS: "90"
+      SONIC_RUNTIME: linux-engine
+      SONIC_SECRET: release_smoke_auth_secret_at_least_32_chars_ok
+    init: true
+    networks:
+      sonic-internal: null
+    ports:
+      - mode: ingress
+        host_ip: 127.0.0.1
+        target: 8080
+        published: "18082"
+        protocol: tcp
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    volumes:
+      - type: volume
+        source: sonic-data
+        target: /app/data
+        volume: {}
+networks:
+  sonic-internal:
+    name: sonic_sonic-internal
+    driver: bridge
+volumes:
+  sonic-data:
+    name: sonic_sonic-data

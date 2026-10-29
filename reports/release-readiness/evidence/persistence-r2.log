@@ -1,0 +1,13 @@
+boot#1: health=200 storageKind=sqlite eventCount=0
+event POST: status=200 accepted=1 dedup=0 storageKind=sqlite
+boot#1: exited code=null signal=SIGTERM
+boot#2: health=200 storageKind=sqlite eventCount=1
+boot#2: exited code=null signal=SIGTERM
+backup: exit=0 stdout={"ok":true,"source":"C:\\Users\\SMARTK~1\\AppData\\Local\\Temp\\sonic-persist-CxyKQN\\data\\sonic-recommend.sqlite","destination":"C:\\Users\\SMARTK~1\\AppData\\Local\\Temp\\sonic-persist-CxyKQN\\backup\\sonic-recommend.backup.sqlite","sizeBytes":184320,"tracks":58,"events":1} stderr=(node:140308) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+boot#3-restored: health=200 storageKind=sqlite eventCount=1
+boot#3-restored: exited code=null signal=SIGTERM
+fail-closed: exit=1 (no listener)
+opt-in fallback: health=503 ok=false storageKind=memory
+boot#4-fallback: exited code=null signal=SIGTERM
+SUMMARY {"eventCountBeforeRestart":1,"tracksBeforeRestart":58,"eventCountAfterRestart":1,"backupEvents":1,"backupBytes":184320,"eventCountAfterRestore":1,"failClosedExit":1,"degradedHealthStatus":503,"degradedStorageKind":"memory","degradedOk":false,"ok":true}
