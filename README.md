@@ -381,7 +381,9 @@ Sonic 平台的研發與多源聚合實踐借鑑並致謝以下優秀的開源�
 Copyright © 2026 **epocanvas & CFSolara Contributors**. The root `LICENSE` file is the authoritative license text.
 
 > [!IMPORTANT]
-> **許可證聲明不一致（待維護者裁決）**：本倉庫根目錄的 [`LICENSE`](LICENSE) 文件目前為 **MIT License**；而本 README 歷史版本與 `player/package.json` 曾聲明 **CC BY-NC-SA 4.0**。兩者不能同時成立。在維護者明確裁決並統一之前，請以倉庫根目錄的 `LICENSE` 文件為準；本次整改不會擅自變更專案許可證。詳細核驗記錄與待辦見 [docs/COMPLIANCE.md](docs/COMPLIANCE.md)。
+> **許可證聲明不一致（待維護者裁決）**：本倉庫根目錄的 [`LICENSE`](LICENSE) 文件目前為 **MIT License**；而本 README 歷史版本（含本次整合前的 main 版本）與 `player/package.json` 曾聲明 **CC BY-NC-SA 4.0**。兩者不能同時成立。在維護者明確裁決並統一之前，請以倉庫根目錄的 `LICENSE` 文件為準；本次整合不會擅自變更專案許可證。詳細核驗記錄與待辦見 [docs/COMPLIANCE.md](docs/COMPLIANCE.md)。
+
+**非商業授權意圖**：本專案定位為非商業開源專案。歷史 README 所聲明的 CC BY-NC-SA 4.0 條款——非商業用途、署名保留、相同方式共享、禁止封閉式商業轉售——仍是本專案的授權意圖；若維護者最終確認採用該協議，衍生作品須遵守上述條款。
 
 無論最終採用何種開源許可證，以下限制均適用：
 - **第三方內容**：音樂錄音、歌詞、封面、藝人圖片等內容的權利歸屬於各自權利人；本專案不授予任何音樂內容的再授權；
