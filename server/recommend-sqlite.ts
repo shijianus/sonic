@@ -1,6 +1,7 @@
 // Sonic Local Engine — Native SQLite (WAL + FTS5) Persistent Recommendation & Search Store
 // Runs on Linux VPS Node.js 22 (`node:sqlite` built-in, zero native C++ npm dependencies).
-// Automatically falls back to `MemoryRecommendStore` if filesystem is read-only.
+// Falls back to `MemoryRecommendStore` only in development/tests or with an explicit opt-in;
+// production startup fails closed instead of pretending persistence works.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -522,6 +523,31 @@ export class SqliteRecommendStore implements RecommendStore {
   }
 }
 
+export class RecommendStorePersistenceError extends Error {
+  constructor(
+    public readonly dbPath: string,
+    cause: unknown,
+  ) {
+    super(
+      `Failed to open the persistent recommendation store at ${dbPath}: ${
+        (cause as any)?.message || String(cause)
+      }`,
+    );
+    this.name = 'RecommendStorePersistenceError';
+  }
+}
+
+// Persistence failures must never be silently downgraded to an in-memory store in
+// production: the service would look healthy while losing all behavioural data on
+// restart. Development and tests keep the fallback, and an explicit opt-in exists
+// for constrained environments.
+function allowMemoryFallback(): boolean {
+  return (
+    process.env.SONIC_RECOMMEND_ALLOW_MEMORY_FALLBACK === '1' ||
+    process.env.NODE_ENV !== 'production'
+  );
+}
+
 export function createServerRecommendStore(dbPath?: string): RecommendStore {
   const effectivePath =
     (dbPath ?? process.env.SONIC_RECOMMEND_DB_PATH ?? '').trim() ||
@@ -538,6 +564,9 @@ export function createServerRecommendStore(dbPath?: string): RecommendStore {
     );
     return store;
   } catch (err: any) {
+    if (!allowMemoryFallback()) {
+      throw new RecommendStorePersistenceError(effectivePath, err);
+    }
     console.warn(
       `[Sonic Recommend] Failed to open SQLite store at ${effectivePath} (${err?.message || 'error'}); falling back to MemoryRecommendStore`,
     );

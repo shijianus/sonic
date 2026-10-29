@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { createSonicServer } from '../server/index';
+import { MemoryRecommendStore } from '../functions/_lib/sonic/recommend/memory-store';
 
 const cleanup: Array<() => Promise<void>> = [];
 
@@ -94,5 +95,29 @@ describe('Node static server hardening', () => {
     expect(cookies).toHaveLength(2);
     expect(cookies.some((c: string) => c.startsWith('sonic_oauth_state='))).toBe(true);
     expect(cookies.some((c: string) => c.startsWith('sonic_oauth_verifier='))).toBe(true);
+  });
+
+  it('reports not-ready when a persistent DB path is configured but the store is in memory', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sonic-health-'));
+    fs.writeFileSync(path.join(root, 'index.html'), 'ok');
+    const store = new MemoryRecommendStore();
+    const { port, close } = await startServer(root, {
+      SONIC_RECOMMEND_DB_PATH: '/app/data/sonic-recommend.sqlite',
+      RECOMMEND_STORE: store,
+    });
+    cleanup.push(async () => {
+      await close();
+      fs.rmSync(root, { recursive: true, force: true });
+    });
+
+    const res = await fetch(`http://127.0.0.1:${port}/api/sonic/engine/health`, {
+      headers: { 'X-Sonic-Engine-Key': 'engine_secret_must_be_32_characters_long_minimum!' },
+    });
+    const body = await res.json();
+    expect(res.status).toBe(503);
+    expect(body.ok).toBe(false);
+    expect(body.recommendEngine.storageKind).toBe('memory');
+    expect(body.recommendEngine.persistenceExpected).toBe(true);
+    expect(body.recommendEngine.storageHealthy).toBe(false);
   });
 });

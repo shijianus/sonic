@@ -31,10 +31,27 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     }
   }
 
+  // Readiness must reflect the recommendation store actually in use. A persistent
+  // deployment that fell back to memory is not ready: reporting ok would hide data loss.
+  const store = getRecommendStore(env);
+  let recommendStats: Record<string, any> = {};
+  let storageError: string | undefined;
+  try {
+    recommendStats = store.getStats();
+  } catch {
+    storageError = 'read_failed';
+  }
+  const configuredDbPath = String(env?.SONIC_RECOMMEND_DB_PATH || '').trim();
+  const persistenceExpected =
+    configuredDbPath !== '' && configuredDbPath !== 'memory' && configuredDbPath !== 'off';
+  const storageHealthy =
+    !storageError && (!persistenceExpected || recommendStats.storageKind === 'sqlite');
+  const ok = storageHealthy;
+
   return jsonResponse(
     {
       brand: 'Sonic',
-      ok: true,
+      ok,
       runtime: cfg.runtime,
       timestamp: new Date().toISOString(),
       ncmSidecar: {
@@ -54,7 +71,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         enableFreeCrossMatch: cfg.enableFreeCrossMatch,
       },
       recommendEngine: {
-        ...getRecommendStore(env).getStats(),
+        ...recommendStats,
+        storageHealthy,
+        persistenceExpected,
+        storageError,
         gorseConfigured: isGorseEnabled(env),
         meilisearchConfigured: isMeilisearchEnabled(env),
       },
@@ -68,6 +88,6 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           : undefined,
       circuit: getLocalEngineCircuitSnapshot(env),
     },
-    { status: 200, headers: { 'Cache-Control': 'no-store' } },
+    { status: ok ? 200 : 503, headers: { 'Cache-Control': 'no-store' } },
   );
 }

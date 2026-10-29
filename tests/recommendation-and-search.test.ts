@@ -1,4 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import {
   toSimplifiedChinese,
   toPinyinInfo,
@@ -26,7 +29,7 @@ import {
   executeSmartSuggest,
   type UserIdentityContext,
 } from '../functions/_lib/sonic/recommend'
-import { SqliteRecommendStore } from '../server/recommend-sqlite'
+import { SqliteRecommendStore, createServerRecommendStore, RecommendStorePersistenceError } from '../server/recommend-sqlite'
 import { onRequest as onForYouRequest } from '../functions/api/sonic/recommend/for-you'
 import { onRequest as onTrendingRequest } from '../functions/api/sonic/recommend/trending'
 import { onRequest as onSimilarRequest } from '../functions/api/sonic/recommend/similar'
@@ -747,5 +750,46 @@ describe('CFSolara 智能音乐推荐与混合搜索引擎全链路测试', () =
       const delJson = await delResp.json()
       expect(delJson.data.removedEvents).toBe(1)
     })
+  })
+})
+
+describe('推荐存储持久化 fail-closed', () => {
+  function brokenDbPath(): { parent: string; dbPath: string } {
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'sonic-db-'))
+    const blocker = path.join(parent, 'not-a-directory')
+    fs.writeFileSync(blocker, 'blocker')
+    return { parent, dbPath: path.join(blocker, 'store.sqlite') }
+  }
+
+  it('开发/测试环境在数据库不可写时回退内存并保留告警', () => {
+    const { parent, dbPath } = brokenDbPath()
+    try {
+      expect(createServerRecommendStore(dbPath).getStats().storageKind).toBe('memory')
+    } finally {
+      fs.rmSync(parent, { recursive: true, force: true })
+    }
+  })
+
+  it('生产环境拒绝静默回退并抛出明确错误', () => {
+    const { parent, dbPath } = brokenDbPath()
+    const previousNodeEnv = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+      expect(() => createServerRecommendStore(dbPath)).toThrow(RecommendStorePersistenceError)
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv
+      fs.rmSync(parent, { recursive: true, force: true })
+    }
+  })
+
+  it('生产环境仍允许显式 memory/off 配置', () => {
+    const previousNodeEnv = process.env.NODE_ENV
+    process.env.NODE_ENV = 'production'
+    try {
+      expect(createServerRecommendStore('memory').getStats().storageKind).toBe('memory')
+      expect(createServerRecommendStore('off').getStats().storageKind).toBe('memory')
+    } finally {
+      process.env.NODE_ENV = previousNodeEnv
+    }
   })
 })

@@ -394,6 +394,15 @@ const isMain =
     process.argv[1].endsWith('index.mjs'));
 
 if (isMain) {
+  // Fail fast when the production database cannot be opened: binding the port while
+  // silently using an in-memory store would report healthy and lose data on restart.
+  try {
+    getOrInitServerRecommendStore();
+  } catch (err: any) {
+    console.error(`[Sonic Local Engine] Fatal: ${err?.message || err}`);
+    process.exit(1);
+  }
+
   const port = parseInt(process.env.PORT || '8080', 10) || 8080;
   const host = process.env.HOST || '127.0.0.1';
   const staticDir = process.env.SONIC_STATIC_DIR || path.resolve(process.cwd(), 'dist');
