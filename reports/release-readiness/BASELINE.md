@@ -4,7 +4,7 @@
 - 仓库：`shijianus/sonic`
 - 工作分支：`fix/release-readiness-20261029`
 - 起始 HEAD：`81d8886`（integration/main-work-recovery-20261029-141918）
-- 整改后 HEAD：`ccd63e5`（R0–R2 代码提交，报告提交另计）
+- 整改后 HEAD：`bd1a97f`（代码与 CI 验证提交；报告提交在其后）
 - `origin/main`：`3eb34dd`
 - 本地 `main`：`a5e7695`
 - `security/audit-round-2026-10`：`dc23084`
@@ -20,7 +20,7 @@
 |---|---|---|---|
 | SONIC-P0-01 | `httpGet` 未定义，CI #2 10 errors | 在干净检出（移除被 gitignore 的 `player/src/auto-import`）下复现 **741 个 TS 错误**，其中 `Cannot find name 'httpGet'` **61 处**；范围比审计快照更大 | **确认存在**，已修复 |
 | SONIC-P0-02 | main Dockerfile 依赖预制 `dist` | 当前候选 `Dockerfile` 已是三阶段构建：frontend（pnpm frozen lockfile 构建）→ engine（esbuild）→ runtime（仅复制产物、非 root）；`.dockerignore` 排除 `dist` | **候选分支已改造**；CI Docker 作业在 `ccd63e5` 成功 |
-| SONIC-P0-03 | main Compose 无数据库卷 | `docker-compose.yml` 已配置 `sonic-data:/app/data`，`SONIC_RECOMMEND_DB_PATH` 默认 `/app/data/sonic-recommend.sqlite`；`docker compose config` 退出码 0，卷映射确认 | **配置已存在**；容器重建级验证见 DATA-RECOVERY |
+| SONIC-P0-03 | main Compose 无数据库卷 | `docker-compose.yml` 已配置 `sonic-data:/app/data`，`SONIC_RECOMMEND_DB_PATH` 默认 `/app/data/sonic-recommend.sqlite`；`docker compose config` 退出码 0；CI Docker 作业新增“容器重建后数据保留”步骤并成功（run 40877176265） | **已验证**；应用层恢复演练见 DATA-RECOVERY |
 | SONIC-P0-04 | SQLite 不可用可能静默回退内存、就绪探针失真 | `createServerRecommendStore` 原先无条件 catch 后返回 `MemoryRecommendStore`；健康端点固定 `ok:true` | **确认存在**，已修复 |
 | SONIC-P0-05 | OAuth state/PKCE/重放/会话 | `login.ts` 生成 256-bit state + S256 PKCE，HttpOnly 事务 Cookie；`callback.ts` 校验 state、PKCE、一次性消费；`tests/oauth-security.test.ts` 18 例 | **机制已实现**；真实账号闭环 **NOT RUN** |
 | SONIC-P0-06 | SSRF/重定向/缓存/Range | `safeFetch` 已用于 `stream.ts`、`sonic/forward.ts`、`music/cover.ts`、`proxy.ts`、`palette.ts`、`native-protocols.ts`；Node 侧注入 DNS 解析结果；审计指出的 `Cache-Control: public` 会覆盖上游 `private/no-store` | **部分存在**；缓存策略已修复，Range/CDN 实流 **NOT RUN** |

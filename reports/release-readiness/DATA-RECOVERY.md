@@ -1,6 +1,6 @@
 # Sonic 上线整改 — 数据持久化与恢复（DATA-RECOVERY）
 
-- 核验 SHA：`ccd63e5`
+- 核验 SHA：`bd1a97f`
 - 数据库：Node 22 `node:sqlite`（WAL + FTS5）
 - 生产路径：`SONIC_RECOMMEND_DB_PATH=/app/data/sonic-recommend.sqlite`（Dockerfile 默认）
 - 卷映射：`sonic-data:/app/data`（`docker compose config` 已确认）
@@ -60,16 +60,22 @@
 
 **结论**：不会以内存状态伪报就绪。
 
-## 4. 未执行项（NOT RUN）
+## 4. 容器级验证（CI）
+
+本机 Docker Desktop 引擎无法启动（WSL 无发行版），因此容器级验证在 CI 完成：
+
+- 新增步骤 `Verify SQLite data survives container recreation on a named volume`（`.github/workflows/ci.yml`）。
+- 流程：创建命名卷 → 启动容器 → 健康检查 `ok:true`/`storageKind:sqlite` → POST 行为事件（`accepted:1`）→ 删除容器（保留卷）→ 同卷重建 → 健康检查断言 `eventCount:1`。
+- 结果：run [40877176265](https://github.com/shijianus/sonic/actions/runs/40877176265) Docker 作业 **success**。
+
+## 5. 未执行项（NOT RUN）
 
 | 项目 | 原因 | 建议执行位置 |
 |---|---|---|
-| 容器 `up → restart → down（不带 -v）→ up` 数据保留 | 本机 Docker Desktop 引擎无法启动（WSL 无发行版） | staging/CI 主机 |
-| 容器重建（重新 build 后 `up`）数据保留 | 同上 | staging |
 | 生产卷备份定时任务与异地保存 | 未获准触碰生产 | 运维窗口 |
 | 磁盘满/只读文件系统故障注入 | 需要容器或可挂载只读卷 | staging |
 
-## 5. RPO / RTO
+## 6. RPO / RTO
 
 本次未能由项目负责人确认生产指标。建议值（**待批准**）：
 
@@ -78,8 +84,8 @@
 
 备份保存要求：加密、限制访问、与数据卷分离存放；保留至少 7 个日备份。实际数值须由发布负责人写入 `GO-NO-GO.md` 并签字。
 
-## 6. 残余风险
+## 7. 残余风险
 
 - 运行中磁盘变为只读时，写入错误会在请求路径暴露；当前无主动磁盘告警。
 - WAL 文件与主库需一起管理；恢复时必须先停服务，避免混用旧 WAL。
-- 容器级卷保留尚未本机演练，发布前必须在 staging 补做。
+- 生产备份频率、异地保存与保留策略尚未由运维确认。

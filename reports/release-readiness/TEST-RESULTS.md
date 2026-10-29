@@ -4,7 +4,7 @@
 - Node：v24.14.0（CI 使用 Node 22）
 - npm：11.9.0；pnpm：10.34.5
 - 工作分支：`fix/release-readiness-20261029`
-- 代码 SHA：`ccd63e5`（CI 运行 SHA 相同）
+- 代码 SHA：`bd1a97f`（CI 验证提交；报告提交在其后）
 - 日志目录：`reports/release-readiness/evidence/`
 - 说明：所有结果均为本机真实执行；未执行项明确标 `NOT RUN`。
 
@@ -59,6 +59,7 @@
 | `docker compose config` | 0 | 配置有效；`sonic-data:/app/data` 映射确认 | `evidence/compose-config.log` |
 | `docker compose build --no-cache sonic-engine` | 1 | **NOT RUN（环境阻断）**：Docker Desktop 引擎 stopped；`wsl -l -v` 无发行版，Linux 引擎无法启动 | `evidence/docker-build.log` |
 | CI `docker build` + 容器启动 + 鉴权健康检查 | 0 | **PASS（远端）**：run 40874656070 / job 123450881570 | <https://github.com/shijianus/sonic/actions/runs/40874656070> |
+| CI 容器重建持久化（同名卷，删除容器后重建） | 0 | **PASS（远端）**：run 40877176265，Docker 作业步骤 success，`eventCount=1` | <https://github.com/shijianus/sonic/actions/runs/40877176265> |
 
 ## 7. 持久化与恢复（P0-03/04）
 
@@ -78,14 +79,16 @@
 
 | 项目 | 值 |
 |---|---|
-| Run | [40874656070](https://github.com/shijianus/sonic/actions/runs/40874656070) |
-| Branch / SHA | `security/release-readiness-20261029` / `ccd63e5` |
+| 最新 Run | [40877176265](https://github.com/shijianus/sonic/actions/runs/40877176265) |
+| Branch / SHA | `security/release-readiness-20261029` / `bd1a97f` |
 | Event | push |
 | 结论 | **success** |
 | Typecheck, lint, tests and build | success，0 failed steps |
 | Docker build and runtime smoke test | success，0 failed steps |
+| 容器重建持久化步骤 | success（写入事件 → 删除容器 → 同名卷重建 → `eventCount=1`） |
+| 首次 CI | run 40874656070 / `ccd63e5` / success（无持久化步骤） |
 
-> 说明：远端分支由环境中已发生的推送创建；本会话未显式执行 `git push`。本地与远端 SHA 一致，CI 结果可直接引用。
+> 说明：远端分支由环境中已发生的推送创建；本会话另推送了候选提交。本地与远端 SHA 一致，CI 结果可直接引用。
 
 ## 9. 未执行项（NOT RUN）
 

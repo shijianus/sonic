@@ -2,10 +2,11 @@
 
 - 评估时间：2026-10-29
 - Candidate branch：`fix/release-readiness-20261029`
-- Candidate SHA：`ccd63e5`
-- CI：[run 40874656070](https://github.com/shijianus/sonic/actions/runs/40874656070) — **success**
+- Candidate SHA：`bd1a97f`（报告提交后以最终 SHA 为准）
+- CI：[run 40877176265](https://github.com/shijianus/sonic/actions/runs/40877176265) — **success**
   - Typecheck, lint, tests and build：success
   - Docker build and runtime smoke test：success
+  - 容器重建持久化步骤：success
 - Docker image digest：CI 运行时生成，本次未导出；发布前需在 staging 记录
 - Cloudflare Pages artifact / deployment id：**无**（未部署）
 - **Recommendation：NO-GO**
@@ -14,10 +15,10 @@
 
 | Gate | 结果 | 说明 |
 |---|---|---|
-| P0 全部关闭 | **否** | 4 项未完全闭环（见下） |
-| CI 全绿 | **是** | 质量与 Docker 作业均 success（`ccd63e5`） |
+| P0 全部关闭 | **否** | 3 项未完全闭环（见下） |
+| CI 全绿 | **是** | 质量、Docker 与容器持久化步骤均 success |
 | 类型检查/构建 | **是** | 本地与 CI 均通过 |
-| 数据可持久化 | **部分** | 应用层重启/备份恢复通过；容器卷重建未演练 |
+| 数据可持久化 | **是** | 应用层重启/备份恢复 + CI 容器重建保留均通过 |
 | 凭证无泄漏 | **是（本次范围）** | 无生产凭据使用；测试 `.env` 已删除；日志无 query/header |
 | 内容授权确认 | **否** | 音源/歌词/封面 ToS 未确认 |
 | 可回滚 | **未验证** | 仅文档，未演练 |
@@ -29,13 +30,13 @@
 |---|---|---|---|
 | SONIC-P0-01 `httpGet`/CI | **CLOSED** | 干净检出 741→0 errors；CI success；`c44bd02` | 代码验证完成 |
 | SONIC-P0-02 干净构建 | **CLOSED（CI）** | Docker job success；多阶段无预置 dist | CI runner |
-| SONIC-P0-03 数据卷/持久化 | **OPEN（容器级）** | Compose 卷映射 + 应用层重启/恢复通过；容器重建保留未执行 | 待 staging/运维 |
+| SONIC-P0-03 数据卷/持久化 | **CLOSED** | Compose 卷映射 + CI 同名卷容器重建 `eventCount=1`（run 40877176265） | CI runner |
 | SONIC-P0-04 持久化故障模式 | **CLOSED** | fail-closed 退出码 1；健康 503；`418f63c` | 代码+测试完成 |
 | SONIC-P0-05 OAuth 真实闭环 | **OPEN** | 18 例自动化通过；无真实账号 | 待项目负责人提供账号 |
 | SONIC-P0-06 SSRF/缓存/Range | **OPEN（实流）** | 缓存修复 `ccd63e5`；SSRF 测试通过；真实 CDN Range/206 未验证 | 待 staging/测试音源 |
 | SONIC-P0-07 内容授权 | **OPEN** | 无逐源授权证据 | 项目负责人/法务 |
 
-**P0 未完全关闭：4 项（P0-03、P0-05、P0-06、P0-07）。**
+**P0 未完全关闭：3 项（P0-05、P0-06、P0-07）。**
 
 ## 3. P1 状态
 
@@ -54,16 +55,16 @@
 - 修复干净检出 `typecheck` 失败（CI P0-01），并在本地复现 741 个错误作为前后对比。
 - 生产 SQLite 持久化 fail-closed，健康检查不再伪报；新增 4 个回归用例。
 - 音频代理缓存策略修正：尊重上游 `private/no-store`，签名 URL 不进入共享缓存。
-- 本机真实引擎进程完成“写入 → 重启 → 备份 → 模拟丢失 → 恢复”演练。
+- 本机真实引擎进程完成“写入 → 重启 → 备份 → 模拟丢失 → 恢复”演练；CI 完成同名卷容器删除/重建后 `eventCount=1` 验证。
 - 全部本地质量门禁通过：typecheck、lint、98 security、43 auth、49 engine、25 recommend、33 player、build、双端依赖审计、SBOM。
-- 远端 CI 质量与 Docker 作业在 `ccd63e5` 全部成功。
+- 远端 CI 质量、Docker 与容器持久化步骤在 `bd1a97f` 全部成功。
 
 ## 5. 阻断 GO 的事项（必须人工完成）
 
-1. 在 staging 完成容器卷 `up → restart → rebuild → up` 数据保留演练。
+1. 在 staging 完成完整部署与 Pages/引擎双向回滚演练，记录 RTO/RPO。
 2. 使用真实测试账号完成 OAuth 登录/刷新/退出/撤销闭环。
 3. 使用授权测试音源验证 Range/206 拖动、切歌竞态、403/429/断网降级。
-4. 完成 Pages 与引擎回滚演练，记录 RTO/RPO。
+4. 确认生产备份频率、异地保存、磁盘告警与值班响应。
 5. 逐源确认音源、歌词、封面授权/ToS，未确认源默认关闭。
 6. 接入 5xx/P95/健康/存储错误告警。
 7. 桌面三浏览器 + 移动真机 + 无障碍人工验收。
@@ -73,14 +74,14 @@
 ```markdown
 # Sonic Release Gate
 - Candidate branch: fix/release-readiness-20261029
-- Candidate SHA: ccd63e5
-- CI URL and conclusion: https://github.com/shijianus/sonic/actions/runs/40874656070 — success
+- Candidate SHA: bd1a97f (code+CI verified; report commit follows)
+- CI URL and conclusion: https://github.com/shijianus/sonic/actions/runs/40877176265 — success (bd1a97f)
 - Docker image digest: PENDING (record at staging)
 - Cloudflare Pages artifact / deployment id: NONE (not deployed)
-- P0 open count: 4
+- P0 open count: 3 (P0-05 real account, P0-06 live stream, P0-07 licensing)
 - P1 open count and exceptions: 5
 - Security regression: PASS (98 security tests; cache fix verified)
-- Data backup/restore result: PASS at application level; container-level pending
+- Data backup/restore result: PASS (app-level restart/backup/restore; CI container recreation)
 - Cross-browser / mobile smoke: NOT RUN
 - Source/lyrics licensing review: NOT DONE
 - Monitoring and rollback drill: NOT DONE
