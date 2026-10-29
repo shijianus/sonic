@@ -1,0 +1,2 @@
+# unplugin 生成类型声明时始终写入 LF；固定换行策略，避免 Windows 检出/build 后工作区变脏。
+player/src/auto-import/*.d.ts text eol=lf

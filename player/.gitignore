@@ -23,8 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 
-# 自动引入配置
-/src/auto-import
+# 自动引入配置：声明文件由 unplugin 生成，但 typecheck 早于 build 运行，
+# 干净检出必须自带这两份声明，否则 vue-tsc 无法解析自动导入的符号。
+/src/auto-import/*
+!/src/auto-import/imports.d.ts
+!/src/auto-import/components.d.ts
 
 .trae
 .claude
