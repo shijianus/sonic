@@ -39,6 +39,7 @@ export const kugouProvider: SonicProviderAdapter = {
         artist: params.artist || '',
         q,
         duration: params.duration,
+        signal: options?.signal,
       });
 
       if (!uResult || !uResult.lines || uResult.lines.length === 0) return null;

@@ -33,7 +33,7 @@ export const qqProvider: SonicProviderAdapter = {
     let resolvedMid = songmid || '';
 
     if (songmid) {
-      rawLyric = await fetchDirectQQLyrics(songmid);
+      rawLyric = await fetchDirectQQLyrics(songmid, options?.signal);
     }
 
     // Fallback: search QQ if no lyrics by ID
@@ -53,7 +53,7 @@ export const qqProvider: SonicProviderAdapter = {
           const list = sJson.data?.song?.list;
           if (Array.isArray(list) && list.length > 0 && list[0].songmid) {
             resolvedMid = list[0].songmid;
-            rawLyric = await fetchDirectQQLyrics(resolvedMid);
+            rawLyric = await fetchDirectQQLyrics(resolvedMid, options?.signal);
           }
         }
       } catch {}

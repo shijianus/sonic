@@ -17,18 +17,18 @@ const instance: AxiosInstance = axios.create({
     withCredentials: true,
 })
 
-/** 请求拦截器：启动进度条、添加时间戳防缓存 */
+let pendingRequests = 0
+
+const finishProgress = () => {
+    pendingRequests = Math.max(0, pendingRequests - 1)
+    if (pendingRequests === 0) NProgress.done()
+}
+
+/** 请求拦截器：启动进度条 */
 instance.interceptors.request.use(
     (config: InternalAxiosRequestConfig) => {
-        // 开启进度条
-        NProgress.start()
-        if (config.params === undefined) {
-            config.params = {}
-        }
-        // 添加或修改params
-        Object.assign(config.params, {
-            timestamp: Date.now(),
-        })
+        pendingRequests += 1
+        if (pendingRequests === 1) NProgress.start()
         return config
     },
     (error) => Promise.reject(error)
@@ -40,8 +40,7 @@ instance.interceptors.response.use(
         const { data, headers } = response
         inspectGatewayHeaders(headers as any, data)
 
-        // 进度条结束
-        NProgress.done()
+        finishProgress()
         return data
     },
     (error) => {
@@ -56,7 +55,7 @@ instance.interceptors.response.use(
             }
         }
         // 响应错误时也结束进度条
-        NProgress.done()
+        finishProgress()
         return Promise.reject(error)
     }
 )

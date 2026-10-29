@@ -132,6 +132,7 @@ export interface LyricFetchOptions {
   artist?: string;
   q?: string;
   duration?: number;
+  signal?: AbortSignal;
 }
 
 export interface UserSession {

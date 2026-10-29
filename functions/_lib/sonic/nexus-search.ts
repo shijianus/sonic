@@ -174,25 +174,25 @@ export async function searchNexus(
           platform: options.platform,
         });
 
-        attempts.push({
+        const attempt: SonicAttempt = {
           provider: pLabel,
           via,
           source: via,
           ok: tracks.length > 0,
           ms: Date.now() - pStart,
           error: tracks.length === 0 ? 'Empty result set' : undefined,
-        });
-        return { provider: String(provider.name), tracks };
+        };
+        return { provider: String(provider.name), tracks, attempt };
       } catch (err: any) {
-        attempts.push({
+        const attempt: SonicAttempt = {
           provider: pLabel,
           via,
           source: via,
           ok: false,
           ms: Date.now() - pStart,
           error: err?.message || 'Search timeout or network error',
-        });
-        return { provider: String(provider.name), tracks: [] };
+        };
+        return { provider: String(provider.name), tracks: [], attempt };
       }
     }),
   );
@@ -206,6 +206,7 @@ export async function searchNexus(
   const allRankedTracks: RankedTrack[] = [];
   for (const r of results) {
     if (r.status === 'fulfilled' && Array.isArray(r.value.tracks)) {
+      attempts.push(r.value.attempt);
       r.value.tracks.forEach((t, idx) => {
         if (t && t.title) {
           allRankedTracks.push({ track: t, rank: idx, provider: r.value.provider });
@@ -259,19 +260,25 @@ export async function searchNexus(
     cleanArtist: string;
     cleanAlbum: string;
   }> = [];
+  const clusterBySha = new Map<string, (typeof trackClusters)[number]>();
+  const clustersByTitleArtist = new Map<string, (typeof trackClusters)[number][]>();
 
-  for (const { track, rank } of allRankedTracks) {
+  const tracksWithSha = await Promise.all(
+    allRankedTracks.map(async (item) => ({ ...item, sha: await computeSongSha(item.track.title, item.track.artist) })),
+  );
+
+  for (const { track, rank, sha } of tracksWithSha) {
     if (!track.title) continue;
-    const sha = await computeSongSha(track.title, track.artist);
     const cleanT = cleanTitleForMatching(track.title);
     const cleanAr = cleanArtistForMatching(track.artist);
     const cleanAl = normalizeText(track.album || '');
     const trackDur = track.duration || 0;
 
     // Comprehensive cluster finder: check SHA, title + artist + album/duration
-    let existingCluster = trackClusters.find((c) => {
-      if (c.sha === sha) return true;
-      if (c.cleanTitle && cleanT && c.cleanTitle === cleanT && c.cleanArtist === cleanAr) {
+    const titleArtistKey = `${cleanT}:::${cleanAr}`;
+    let existingCluster = clusterBySha.get(sha);
+    if (!existingCluster) {
+      existingCluster = clustersByTitleArtist.get(titleArtistKey)?.find((c) => {
         // If albums both exist and match, or one is empty
         if (!c.cleanAlbum || !cleanAl || c.cleanAlbum === cleanAl || c.cleanAlbum.includes(cleanAl) || cleanAl.includes(c.cleanAlbum)) {
           return true;
@@ -280,9 +287,9 @@ export async function searchNexus(
         if (c.track.duration && trackDur && Math.abs(c.track.duration - trackDur) <= 6) {
           return true;
         }
-      }
-      return false;
-    });
+        return false;
+      });
+    }
 
     const origPlat = track.platform || track.source || 'netease';
     const canonicalId = track.platformId || track.id;
@@ -430,7 +437,7 @@ export async function searchNexus(
       };
 
       trackClusters.push({
-        key: `${cleanT}:::${cleanAr}`,
+        key: titleArtistKey,
         sha,
         track: mergedTrack,
         occurrenceCount: 1,
@@ -439,6 +446,11 @@ export async function searchNexus(
         cleanArtist: cleanAr,
         cleanAlbum: cleanAl,
       });
+      const created = trackClusters[trackClusters.length - 1];
+      clusterBySha.set(sha, created);
+      const titleClusters = clustersByTitleArtist.get(titleArtistKey) || [];
+      titleClusters.push(created);
+      clustersByTitleArtist.set(titleArtistKey, titleClusters);
     }
   }
 

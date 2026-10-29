@@ -166,6 +166,8 @@ const syncQueryToUrl = (term: string) => {
 }
 
 let suppressPagingFetch = false
+let searchAbort: AbortController | null = null
+let searchGeneration = 0
 const resetResults = () => {
   suppressPagingFetch = true
   state.songs = []
@@ -195,19 +197,23 @@ const runSearch = async (keyword: string) => {
   await searchAll()
 }
 
-const fetchSongs = async () => {
+const fetchSongs = async (signal: AbortSignal, generation: number) => {
   const term = state.q.trim()
   if (!term) {
-    state.songs = []
-    state.songTotal = 0
+    if (generation === searchGeneration) {
+      state.songs = []
+      state.songTotal = 0
+    }
     return
   }
 
   // 1. 优先调用 Sonic 统一多源 SHA 聚合与音质分级搜索网关
   try {
     const sonicRes = await fetch(
-      `/api/sonic/search/nexus?q=${encodeURIComponent(term)}&page=${state.songPage}&count=${state.songPageSize}`
+      `/api/sonic/search/nexus?q=${encodeURIComponent(term)}&page=${state.songPage}&count=${state.songPageSize}`,
+      { signal }
     ).then((r) => r.json())
+    if (signal.aborted || generation !== searchGeneration) return
     const tracks = sonicRes?.data?.tracks || []
     if (tracks.length > 0) {
       state.songs = tracks.map((t: any) => ({
@@ -232,6 +238,7 @@ const fetchSongs = async () => {
       return
     }
   } catch (err) {
+    if (signal.aborted || generation !== searchGeneration) return
     console.warn('[Sonic Mobile Search] Nexus gateway warning:', err)
   }
 
@@ -242,17 +249,19 @@ const fetchSongs = async () => {
       type: 1,
       limit: state.songPageSize,
       offset: (state.songPage - 1) * state.songPageSize,
-    })
+    }, signal)
+    if (signal.aborted || generation !== searchGeneration) return
     const { songs, total } = transformSearchSongs(res as Record<string, unknown>)
     state.songs = songs
     state.songTotal = total
   } catch {
+    if (signal.aborted || generation !== searchGeneration) return
     state.songs = []
     state.songTotal = 0
   }
 }
 
-const fetchPlaylists = async () => {
+const fetchPlaylists = async (signal: AbortSignal, generation: number) => {
   if (!state.q.trim()) return
   try {
     const res = await cloudSearch({
@@ -260,17 +269,19 @@ const fetchPlaylists = async () => {
       type: 1000,
       limit: state.playlistPageSize,
       offset: (state.playlistPage - 1) * state.playlistPageSize,
-    })
+    }, signal)
+    if (signal.aborted || generation !== searchGeneration) return
     const { playlists, total } = transformSearchPlaylists(res as Record<string, unknown>)
     state.playlists = playlists
     state.playlistTotal = total
   } catch {
+    if (signal.aborted || generation !== searchGeneration) return
     state.playlists = []
     state.playlistTotal = 0
   }
 }
 
-const fetchMVs = async () => {
+const fetchMVs = async (signal: AbortSignal, generation: number) => {
   if (!state.q.trim()) return
   try {
     const res = await cloudSearch({
@@ -278,24 +289,39 @@ const fetchMVs = async () => {
       type: 1004,
       limit: state.mvPageSize,
       offset: (state.mvPage - 1) * state.mvPageSize,
-    })
+    }, signal)
+    if (signal.aborted || generation !== searchGeneration) return
     const { mvs, total } = transformSearchMVs(res as Record<string, unknown>)
     state.mvs = mvs
     state.mvTotal = total
   } catch {
+    if (signal.aborted || generation !== searchGeneration) return
     state.mvs = []
     state.mvTotal = 0
   }
 }
 
 const searchAll = async () => {
-  if (!state.q.trim()) return
+  if (!state.q.trim()) {
+    searchAbort?.abort()
+    searchGeneration += 1
+    state.loading = false
+    return
+  }
+  searchAbort?.abort()
+  const controller = new AbortController()
+  searchAbort = controller
+  const generation = ++searchGeneration
   state.hasSearched = true
   state.loading = true
   try {
-    await Promise.all([fetchSongs(), fetchPlaylists(), fetchMVs()])
+    await Promise.all([
+      fetchSongs(controller.signal, generation),
+      fetchPlaylists(controller.signal, generation),
+      fetchMVs(controller.signal, generation),
+    ])
   } finally {
-    state.loading = false
+    if (generation === searchGeneration) state.loading = false
   }
 }
 
@@ -348,19 +374,19 @@ watch(
 watch(
   () => state.songPage,
   () => {
-    if (state.hasSearched && !suppressPagingFetch) fetchSongs()
+    if (state.hasSearched && !suppressPagingFetch) searchAll()
   }
 )
 watch(
   () => state.playlistPage,
   () => {
-    if (state.hasSearched && !suppressPagingFetch) fetchPlaylists()
+    if (state.hasSearched && !suppressPagingFetch) searchAll()
   }
 )
 watch(
   () => state.mvPage,
   () => {
-    if (state.hasSearched && !suppressPagingFetch) fetchMVs()
+    if (state.hasSearched && !suppressPagingFetch) searchAll()
   }
 )
 
@@ -369,6 +395,8 @@ const handleSuggestClick = (s: string) => {
 }
 
 const clearQuery = () => {
+  searchAbort?.abort()
+  searchGeneration += 1
   state.q = ''
   state.suggest = []
   state.suggestVisible = false
@@ -398,6 +426,7 @@ const handleDocClick = (e: MouseEvent) => {
 }
 onUnmounted(() => {
   suggestAbort?.abort()
+  searchAbort?.abort()
   document.removeEventListener('click', handleDocClick)
 })
 

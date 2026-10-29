@@ -23,11 +23,18 @@ interface PLResult {
 }
 const state = reactive<{ loading: boolean; results: PLResult[] }>({ loading: false, results: [] })
 const { results } = toRefs(state)
+let requestController: AbortController | null = null
+let requestGeneration = 0
 
 const fetchPlaylists = async () => {
+  const generation = ++requestGeneration
+  requestController?.abort()
+  const controller = new AbortController()
+  requestController = controller
   const term = props.keywords?.trim()
   if (!term) {
     state.results = []
+    state.loading = false
     return
   }
   try {
@@ -37,7 +44,8 @@ const fetchPlaylists = async () => {
       type: 1000,
       limit: props.limit ?? 30,
       offset: props.offset ?? 0,
-    })
+    }, controller.signal)
+    if (controller.signal.aborted || generation !== requestGeneration) return
     const list: any[] = res?.result?.playlists || []
     state.results = list.map(pl => ({
       id: pl?.id,
@@ -49,8 +57,15 @@ const fetchPlaylists = async () => {
     }))
     emit('loaded', state.results.length)
     emit('total', Number(res?.result?.playlistCount ?? state.results.length))
+  } catch (error) {
+    if (!controller.signal.aborted && generation === requestGeneration) {
+      console.warn('[Search] playlist request failed:', error)
+      state.results = []
+      emit('loaded', 0)
+      emit('total', 0)
+    }
   } finally {
-    state.loading = false
+    if (generation === requestGeneration) state.loading = false
   }
 }
 watch(

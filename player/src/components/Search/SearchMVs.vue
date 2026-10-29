@@ -23,14 +23,21 @@ interface MVResult {
 }
 const state = reactive<{ loading: boolean; results: MVResult[] }>({ loading: false, results: [] })
 const { results } = toRefs(state)
+let requestController: AbortController | null = null
+let requestGeneration = 0
 
 const formatSec = (seconds: number) =>
   `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`
 
 const fetchMVs = async () => {
+  const generation = ++requestGeneration
+  requestController?.abort()
+  const controller = new AbortController()
+  requestController = controller
   const term = props.keywords?.trim()
   if (!term) {
     state.results = []
+    state.loading = false
     return
   }
   try {
@@ -40,7 +47,8 @@ const fetchMVs = async () => {
       type: 1004,
       limit: props.limit ?? 24,
       offset: props.offset ?? 0,
-    })
+    }, controller.signal)
+    if (controller.signal.aborted || generation !== requestGeneration) return
     const list: any[] = res?.result?.mvs || []
     state.results = list.map(it => ({
       id: Number(it?.id),
@@ -52,8 +60,15 @@ const fetchMVs = async () => {
     }))
     emit('loaded', state.results.length)
     emit('total', Number(res?.result?.mvCount ?? res?.result?.songCount ?? state.results.length))
+  } catch (error) {
+    if (!controller.signal.aborted && generation === requestGeneration) {
+      console.warn('[Search] MV request failed:', error)
+      state.results = []
+      emit('loaded', 0)
+      emit('total', 0)
+    }
   } finally {
-    state.loading = false
+    if (generation === requestGeneration) state.loading = false
   }
 }
 watch(

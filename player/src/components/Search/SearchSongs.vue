@@ -42,6 +42,8 @@ const state = reactive<SongsState>({
 const { results, fallbackTracks, suggestions, fallbackUsed, isLoading } = toRefs(state)
 
 const { setPlaylist, play } = useAudio()
+let requestController: AbortController | null = null
+let requestGeneration = 0
 
 // 仅在用户真实点击搜索结果(或点"播放全部"的第一首)时上报 search_click;
 // 此前通过 watch(currentSong) 上报会把自动连播的后续曲目误记为点击,污染推荐信号。
@@ -87,12 +89,17 @@ const applySuggestion = (text: string) => {
 }
 
 const fetchSongs = async () => {
+  const generation = ++requestGeneration
+  requestController?.abort()
+  const controller = new AbortController()
+  requestController = controller
   const term = props.keywords?.trim()
   if (!term) {
     state.results = []
     state.fallbackTracks = []
     state.suggestions = []
     state.fallbackUsed = false
+    state.isLoading = false
     return
   }
   state.isLoading = true
@@ -116,8 +123,10 @@ const fetchSongs = async () => {
           count,
           personalize: recommendStore.personalizationEnabled,
         },
-        recommendStore.buildRequestHeaders(true)
+        recommendStore.buildRequestHeaders(true),
+        controller.signal
       )
+      if (controller.signal.aborted || generation !== requestGeneration) return
       state.suggestions = smartRes.suggestions || []
       if (smartRes.tracks.length > 0) {
         state.results = smartRes.tracks
@@ -136,14 +145,17 @@ const fetchSongs = async () => {
         return
       }
     } catch (smartErr) {
+      if (controller.signal.aborted || generation !== requestGeneration) return
       console.warn('[Sonic Search] Smart search fallback to nexus:', smartErr)
     }
 
     // 1. 备用调用 Sonic 统一多源 SHA 聚合与音质分级搜索网关
     try {
       const sonicRes = await fetch(
-        `/api/sonic/search/nexus?q=${encodeURIComponent(term)}&page=${page}&count=${count}`
+        `/api/sonic/search/nexus?q=${encodeURIComponent(term)}&page=${page}&count=${count}`,
+        { signal: controller.signal },
       ).then(r => r.json())
+      if (controller.signal.aborted || generation !== requestGeneration) return
       const tracks = sonicRes?.data?.tracks || []
       if (tracks.length > 0) {
         state.results = tracks.map((t: any) => ({
@@ -173,6 +185,7 @@ const fetchSongs = async () => {
         return
       }
     } catch (err) {
+      if (controller.signal.aborted || generation !== requestGeneration) return
       console.warn('[Sonic Search] Nexus gateway warning:', err)
     }
 
@@ -183,7 +196,8 @@ const fetchSongs = async () => {
         type: 1,
         limit: props.limit ?? 40,
         offset: props.offset ?? 0,
-      })
+      }, controller.signal)
+      if (controller.signal.aborted || generation !== requestGeneration) return
       const { songs, total } = transformSearchSongs(res as Record<string, unknown>)
       if (songs && songs.length > 0) {
         state.results = songs
@@ -194,6 +208,7 @@ const fetchSongs = async () => {
         return
       }
     } catch (err) {
+      if (controller.signal.aborted || generation !== requestGeneration) return
       console.warn('[Sonic Search] CloudSearch fallback warning:', err)
     }
 
@@ -201,7 +216,7 @@ const fetchSongs = async () => {
     emit('loaded', 0)
     emit('total', 0)
   } finally {
-    state.isLoading = false
+    if (generation === requestGeneration) state.isLoading = false
   }
 }
 

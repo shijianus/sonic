@@ -232,6 +232,8 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       {
         method: request.method,
         headers: requestHeaders,
+        // 客户端断开时同步取消上游请求；safeFetch 会将其与自身 15s 超时组合。
+        signal: request.signal,
       },
       {
         allowHttp: false,

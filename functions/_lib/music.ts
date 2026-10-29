@@ -11,9 +11,10 @@ const DEFAULT_API_BASE = 'https://music-api.gdstudio.xyz/api.php';
 const KUWO_HOST_PATTERN = /(^|\.)kuwo\.cn$/i;
 
 function timedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const timeoutSignal = AbortSignal.timeout(8000);
   return fetch(input, {
     ...init,
-    signal: init?.signal ?? AbortSignal.timeout(8000),
+    signal: init?.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal,
   });
 }
 
@@ -963,7 +964,7 @@ export function hasWordSyncTags(raw: string): boolean {
   return false;
 }
 
-export async function fetchDirectNetEaseLyrics(id: string): Promise<string> {
+export async function fetchDirectNetEaseLyrics(id: string, signal?: AbortSignal): Promise<string> {
   try {
     const url = `https://music.163.com/api/song/lyric/v1?id=${encodeURIComponent(id)}&cp=false&tv=0&lv=0&rv=0&kv=0&yv=-1&ytv=0&yrv=0`;
     const resp = await timedFetch(url, {
@@ -971,6 +972,7 @@ export async function fetchDirectNetEaseLyrics(id: string): Promise<string> {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         Referer: 'https://music.163.com/',
       },
+      signal,
     });
     if (resp.ok) {
       const json = (await resp.json()) as any;
@@ -985,7 +987,7 @@ export async function fetchDirectNetEaseLyrics(id: string): Promise<string> {
   return '';
 }
 
-export async function fetchDirectQQLyrics(songmid: string): Promise<string> {
+export async function fetchDirectQQLyrics(songmid: string, signal?: AbortSignal): Promise<string> {
   try {
     const url = `https://c.y.qq.com/lyric/fcgi-bin/fcg_query_lyric_new.fcg?songmid=${encodeURIComponent(songmid)}&format=json&nobase64=1`;
     const resp = await timedFetch(url, {
@@ -993,6 +995,7 @@ export async function fetchDirectQQLyrics(songmid: string): Promise<string> {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         Referer: 'https://y.qq.com/',
       },
+      signal,
     });
     if (resp.ok) {
       const json = (await resp.json()) as any;
@@ -1590,7 +1593,7 @@ ${paragraphs}
  * 支持通过 ID 直接获取，或通过 title / artist / q 在全网主流平台进行瀑布爬取
  */
 export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions): Promise<HighPrecisionLyricPayload> {
-  const { id = '', source = 'netease', title = '', artist = '', q = '', duration } = options;
+  const { id = '', source = 'netease', title = '', artist = '', q = '', duration, signal } = options;
 
   let rawLyric = '';
   let finalSource = source;
@@ -1601,13 +1604,13 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
   // 1. 直连 ID 优先提取
   if (id && id !== 'undefined' && id !== 'null') {
     if (source === 'netease' || (/^\d+$/.test(id) && source !== 'tencent' && source !== 'qq')) {
-      const directNetease = await fetchDirectNetEaseLyrics(id);
+      const directNetease = await fetchDirectNetEaseLyrics(id, signal);
       if (directNetease && isValidLyric(directNetease)) {
         rawLyric = directNetease;
         finalSource = 'netease';
       }
     } else if (source === 'tencent' || source === 'qq') {
-      const directQQ = await fetchDirectQQLyrics(id);
+      const directQQ = await fetchDirectQQLyrics(id, signal);
       if (directQQ && isValidLyric(directQQ)) {
         rawLyric = directQQ;
         finalSource = 'tencent';

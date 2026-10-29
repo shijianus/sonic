@@ -38,7 +38,7 @@ async function fetchNeteaseLyricWithLocalFirst(songId: string, env?: AppEnv, sig
       }
     } catch {}
   }
-  return fetchDirectNetEaseLyrics(songId);
+  return fetchDirectNetEaseLyrics(songId, signal);
 }
 
 export const neteaseProvider: SonicProviderAdapter = {

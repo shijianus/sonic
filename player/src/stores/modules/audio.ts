@@ -65,6 +65,10 @@ let lastPlaybackToastAt = 0
 let switchingQuality = false
 /** 本次页面会话内已重新生成的 Blob URL，避免重复读取 IndexedDB */
 const restoredBlobUrls = new Set<string>()
+/** 播放操作代次：新的切歌/重试会使旧的异步结果失效 */
+let playbackGeneration = 0
+/** 同一首歌曲的播放地址请求共享结果，避免切歌预加载重复请求 */
+const pendingUrlRequests = new Map<string, Promise<string>>()
 
 /** 获取 Audio 单例（懒初始化） */
 const getAudioSingleton = (): HTMLAudioElement => {
@@ -433,12 +437,15 @@ export const useAudioStore = defineStore('audio', {
         console.error('Audio error:', e)
 
         const failedSrc = audio.currentSrc || audio.src || ''
+        const failedSongId = this.audio.currentSong?.id ?? null
         if (failedSrc && failedSrc.includes('/api/music/stream')) {
           try {
             const diagRes = await fetch(failedSrc, {
               method: 'GET',
               headers: { Range: 'bytes=0-0' },
             })
+            // 诊断请求可能在用户切歌后才返回，禁止旧歌曲覆盖当前状态。
+            if (this.audio.currentSong?.id !== failedSongId) return
             inspectGatewayHeaders(diagRes.headers)
             if (diagRes.status === 503 || diagRes.headers.get('x-sonic-degraded') === '1') {
               let errBody: any = null
@@ -477,11 +484,12 @@ export const useAudioStore = defineStore('audio', {
     /** 播放歌曲（自动获取缺失的播放地址） */
     async playSong(song?: Song, index?: number, force = false) {
       this.initAudio()
+      const generation = ++playbackGeneration
 
       const targetSong = song || this.audio.currentSong
       if (targetSong && targetSong.url?.startsWith('blob:')) {
         const restored = await this._restoreBlobUrlForSong(targetSong)
-        if (!restored) return
+        if (!restored || generation !== playbackGeneration) return
       }
 
       const prevSong = this.audio.currentSong
@@ -503,6 +511,7 @@ export const useAudioStore = defineStore('audio', {
       }
 
       if (!this.audio.currentSong || !this.audio.audio) return
+      const targetSongId = this.audio.currentSong.id
 
       const audio = this.audio.audio
       const currentAudioSrc = audio.getAttribute('src') || audio.src
@@ -538,6 +547,7 @@ export const useAudioStore = defineStore('audio', {
           try {
             this.audio.error = null
             await audio.play()
+            if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
             if (audio.error || audio.readyState === 0 || audio.networkState === 3) {
               shouldFallbackReload = true
             } else {
@@ -567,6 +577,7 @@ export const useAudioStore = defineStore('audio', {
             }
             this._loadAudioSrc(this.audio.currentSong.url || '', true)
             await audio.play()
+            if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
             this.audio.error = null
             return
           } catch (reloadErr) {
@@ -575,6 +586,7 @@ export const useAudioStore = defineStore('audio', {
               audio.currentTime = 0
               this.audio.currentTime = 0
               await audio.play()
+              if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
               this.audio.error = null
               return
             } catch (finalErr) {
@@ -595,8 +607,10 @@ export const useAudioStore = defineStore('audio', {
 
         // 若无 URL 则拉取（本地音乐除外）
         if (!this.audio.currentSong.url && !this.audio.currentSong.isLocal) {
-          await this._fetchAndApplyUrl()
+          await this._fetchAndApplyUrl(this.audio.currentSong)
         }
+
+        if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
 
         if (!this.audio.currentSong.url) {
           throw new Error('无法获取播放地址')
@@ -613,6 +627,8 @@ export const useAudioStore = defineStore('audio', {
         this._loadAudioSrc(this.audio.currentSong.url || '', isSwitchingSong)
         await this.audio.audio.play()
 
+        if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
+
         // 添加到播放历史
         this.addToHistory(this.audio.currentSong)
       } catch (error: any) {
@@ -622,10 +638,12 @@ export const useAudioStore = defineStore('audio', {
         // 播放失败时也尝试刷新 URL 后重试
         const id = this.audio.currentSong?.id ?? null
         if (id && !this.audio.currentSong.isLocal) {
-          await this.refreshAndReplay()
+          if (generation === playbackGeneration && this.audio.currentSong?.id === targetSongId) {
+            await this.refreshAndReplay()
+          }
         }
       } finally {
-        this.audio.isLoading = false
+        if (generation === playbackGeneration) this.audio.isLoading = false
       }
     },
 
@@ -637,18 +655,21 @@ export const useAudioStore = defineStore('audio', {
       if (!this.audio.currentSong || !this.audio.audio) return
       if (this.audio.currentSong.isLocal) return
 
+      const generation = ++playbackGeneration
+      const targetSongId = this.audio.currentSong.id
       this.audio.isLoading = true
       try {
-        await this._fetchAndApplyUrl()
-        if (!this.audio.currentSong.url) return
+        await this._fetchAndApplyUrl(this.audio.currentSong)
+        if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId || !this.audio.currentSong.url) return
         this._loadAudioSrc(this.audio.currentSong!.url || '')
         await this.audio.audio!.play()
+        if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
         this.audio.error = null
       } catch (e) {
         console.error('Refresh url failed:', e)
         this._reportPlaybackError(e as Error)
       } finally {
-        this.audio.isLoading = false
+        if (generation === playbackGeneration) this.audio.isLoading = false
       }
     },
 
@@ -704,22 +725,36 @@ export const useAudioStore = defineStore('audio', {
       const song = targetSong || this.audio.currentSong
       if (!song) return
       const settingsStore = useSettingsStore()
-      let url = ''
-      try {
-        const res: any = await songUrlV1({
-          id: String(song.id),
-          level: settingsStore.audioQuality,
-        })
-        url = res?.data?.[0]?.url || res?.data?.data?.[0]?.url || res?.url || ''
-      } catch {}
+      const requestKey = `${String(song.id)}:${settingsStore.audioQuality}`
+      let request = pendingUrlRequests.get(requestKey)
+      if (!request) {
+        request = (async () => {
+          let url = ''
+          try {
+            const res: any = await songUrlV1({
+              id: String(song.id),
+              level: settingsStore.audioQuality,
+            })
+            url = res?.data?.[0]?.url || res?.data?.data?.[0]?.url || res?.url || ''
+          } catch {}
 
-      // Sonic 多源聚合网关智能兜底
-      if (!url) {
-        const titleParam = song.name ? `&title=${encodeURIComponent(song.name)}` : ''
-        const artistParam = song.artist ? `&artist=${encodeURIComponent(song.artist)}` : ''
-        const durSec = song.duration ? `&duration=${Math.round(song.duration / 1000)}` : ''
-        url = `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=netease${titleParam}${artistParam}${durSec}`
+          // Sonic 多源聚合网关智能兜底
+          if (!url) {
+            const titleParam = song.name ? `&title=${encodeURIComponent(song.name)}` : ''
+            const artistParam = song.artist ? `&artist=${encodeURIComponent(song.artist)}` : ''
+            const durSec = song.duration ? `&duration=${Math.round(song.duration / 1000)}` : ''
+            url = `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=netease${titleParam}${artistParam}${durSec}`
+          }
+          return url
+        })()
+        pendingUrlRequests.set(requestKey, request)
+        void request.then(() => {
+          if (pendingUrlRequests.get(requestKey) === request) pendingUrlRequests.delete(requestKey)
+        }, () => {
+          if (pendingUrlRequests.get(requestKey) === request) pendingUrlRequests.delete(requestKey)
+        })
       }
+      const url = await request
 
       song.url = url
       // 同步到播放列表对应项
@@ -1452,6 +1487,7 @@ export const useAudioStore = defineStore('audio', {
 
     // 销毁音频播放器
     destroy() {
+      playbackGeneration += 1
       if (this.audio.audio) {
         this.audio.audio.pause()
         this.audio.audio.src = ''
