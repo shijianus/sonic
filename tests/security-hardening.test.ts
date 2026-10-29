@@ -302,6 +302,42 @@ describe('Asset proxies: active content is never served from the Sonic origin', 
     expect(await res.text()).toBe('ID3-audio-bytes');
   });
 
+  it('never upgrades an upstream private cache directive to public', async () => {
+    vi.stubGlobal('fetch', async () =>
+      new Response('ID3-audio-bytes', {
+        status: 200,
+        headers: { 'content-type': 'audio/mpeg', 'cache-control': 'private, max-age=60' },
+      }),
+    );
+
+    const res = await handleMusicStream({
+      request: cfRequest('https://sonic.epocanvas.tech/api/music/stream?target=https%3A%2F%2Fm701.music.126.net%2Fa.mp3'),
+      env: {} as any,
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, max-age=60');
+  });
+
+  it('marks signed stream URLs as non-cacheable', async () => {
+    vi.stubGlobal('fetch', async () =>
+      new Response('ID3-audio-bytes', {
+        status: 200,
+        headers: { 'content-type': 'audio/mpeg' },
+      }),
+    );
+
+    const res = await handleMusicStream({
+      request: cfRequest(
+        'https://sonic.epocanvas.tech/api/music/stream?target=https%3A%2F%2Fm701.music.126.net%2Fa.mp3%3Fauth%3Dsecret',
+      ),
+      env: {} as any,
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
+  });
+
   it('never relays third-party SVG from the cover proxy', async () => {
     vi.stubGlobal('fetch', async () =>
       new Response('<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>', {

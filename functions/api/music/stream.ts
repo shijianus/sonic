@@ -40,6 +40,22 @@ function isPlayableMediaType(contentType: string | null): boolean {
   );
 }
 
+// Signed / credentialed provider URLs (auth, vkey, token, expiry, ...) must not enter a
+// shared cache, and an upstream `private`/`no-store` directive must never be upgraded.
+const SENSITIVE_STREAM_QUERY = /^(?:auth|authorization|token|access[_-]?token|refresh[_-]?token|key|api[_-]?key|apikey|sign|signature|sig|vkey|guid|wmid|expires?|expiry|nonce|session|cookie|uid|userid|user[_-]?id)$/i;
+
+function streamCacheControl(target: URL, upstreamHeaders: Headers): string {
+  const upstreamCacheControl = (upstreamHeaders.get('cache-control') || '').trim();
+  const normalized = upstreamCacheControl.toLowerCase();
+  if (normalized.includes('no-store')) return 'no-store';
+  if (normalized.includes('private')) return upstreamCacheControl;
+  const credentialBearing = Array.from(target.searchParams.keys()).some((name) =>
+    SENSITIVE_STREAM_QUERY.test(name),
+  );
+  if (credentialBearing) return 'private, no-store';
+  return 'public, max-age=600';
+}
+
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
   if (request.method !== 'GET' && request.method !== 'HEAD') {
@@ -261,7 +277,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     if (!headers.has('Content-Type')) {
       headers.set('Content-Type', 'audio/mpeg');
     }
-    headers.set('Cache-Control', 'public, max-age=600');
+    headers.set('Cache-Control', streamCacheControl(targetUrl, upstream.headers));
     headers.set('X-Sonic-Provider', resolvedProvider);
     headers.set('X-Sonic-Via', resolvedVia);
     headers.set('X-Sonic-Stream-Type', resolvedStreamType);
