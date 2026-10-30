@@ -86,3 +86,21 @@
 `0a1b0e6b1dc8dbe0c380975f417cc4bfb6f4a5ca`，其 CI（quality / Docker / Browser E2E）
 已 success（run 40979982255）。文档提交后的分支 HEAD 最新 CI 见：
 https://github.com/shijianus/sonic/actions?query=branch%3Arc%2Fsonic-20261031
+
+---
+
+## 8. 2026-10-30 09:35 +0800 更新（ZCode 追加）
+
+- 分支 HEAD：`d29a32f`（`rc/sonic-20261031`），CI run
+  https://github.com/shijianus/sonic/actions/runs/40986077957 — **success**
+  （quality / Docker smoke / Browser E2E 三作业）。
+- 新增修复：`45b9a5e` 收紧音乐代理白名单（移除 `qq.com`/`163.com` 顶点域，新增
+  `qqmusic.qq.com`，补负向测试）；`d29a32f` 修复 `SONIC_ENABLE_FREE_MATCH` 环境变量漂移，
+  统一版本/UA 到 2.2.0，补 `config-parity` 测试与 README 内测范围。
+- 本地复跑：typecheck/lint PASS；根测试 129 Vitest + 4 jiti；Player 38；E2E 24/24；
+  build/build:engine PASS；引擎鉴权冒烟 200/401/401/200/401。
+- 真实上游取流在本环境对 NetEase/QQ/Kugou/Kuwo 均返回 unavailable，搜索正常；
+  P0-06 仍需授权音源与 Staging 验证。
+- 发布判断不变：**NO-GO**。详细交接见 `docs/release/RC-SUMMARY.md`、
+  `docs/release/HANDOFF-WINDOWS.md`、`docs/release/RELEASE-CHECKLIST.md`、`docs/release/DECISIONS.md`。
+- `main` 分支保护状态无法通过未认证 API 确认；需管理员人工开启/核实。
