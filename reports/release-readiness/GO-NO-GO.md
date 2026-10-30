@@ -91,3 +91,39 @@
 ```
 
 > 本结论由自动化整改过程给出，**未经人工批准不得部署生产**。只有上述阻断项全部关闭并由负责人签字后，才可重新评估 GO。
+
+---
+
+# 2026-10-30 RC 更新（rc/sonic-20261031）
+
+- 基线：`1d45e4c`（承接 2026-10-29 NO-GO）
+- Windows 工作分支：`work/zcode-20261031` @ `5f97383`
+- CI：https://github.com/shijianus/sonic/actions/runs/40977983806 — **success**
+  - quality（typecheck/lint/tests/build）：success
+  - Docker build + runtime smoke：success
+  - Browser E2E（新增）：success
+- 本地：typecheck/lint PASS；player 38 tests PASS；root 123 tests PASS；E2E 22 PASS。
+
+## 新增闭环
+
+| ID | 旧状态 | 新状态 | 证据 |
+|---|---|---|---|
+| SONIC-P1-01 搜索/切歌竞态 | PARTIAL | **CLOSED（Mock 浏览器层）** | `player/e2e/specs/resilience.spec.ts`、`core.spec.ts` |
+| SONIC-P1-02 异常降级 | PARTIAL | **CLOSED（Mock 浏览器层）** | 403/429/断网/异常 JSON/空结果用例 |
+| SONIC-P1-05 无障碍 | NOT RUN | **PARTIAL（自动化）** | `a11y.spec.ts`、移动端可访问名称 |
+
+本轮修复的真实缺陷：暂停后迟到取流恢复播放、过期请求覆盖新状态、切歌中断误报、
+网络中断误判为音源错误、搜索上游失败伪装为空结果、加载中无法取消、歌词过期回调。
+
+## 仍未闭环（维持 NO-GO）
+
+- P0-05 真实 OAuth：无真实账号与 Staging。
+- P0-06 真实 CDN Range/206：只有 Mock WAV。
+- P0-07 音源/歌词/封面授权：无逐源证据。
+- P1-03 指标与告警：未接入。
+- P1-04 Staging 与回滚演练：未部署、未演练。
+- P1-05 真机/跨浏览器人工验收：未执行。
+- 运行版本追踪：健康端点尚未暴露 release SHA/version。
+
+**Recommendation：NO-GO（维持）。** 本 RC 的可发布性取决于 §1 阻断项；
+在上述真实环境证据关闭前，不得对公众发布，也不得宣称受控内测已完成。

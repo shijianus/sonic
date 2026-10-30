@@ -37,3 +37,6 @@ data/
 *.sqlite-shm
 *.db
 *.db-*
+
+# 发布证据日志需要入库（仅限交接目录）
+!reports/handoff/evidence/*.log

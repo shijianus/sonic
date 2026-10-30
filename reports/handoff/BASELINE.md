@@ -91,3 +91,16 @@
 3. agy：以本基线创建 `work/agy-20261031`，按所有权推进服务端/部署项，并在
    `reports/handoff/AGY.md` 提供可复核证据。
 4. 集成：仅接受带 CI/运行证据的 agy 分支；合并后对合并 SHA 重跑全部门禁。
+
+---
+
+## 2026-10-30 08:20 +0800 更新
+
+- Windows 已完成第一轮前端修复与浏览器 E2E：`work/zcode-20261031` @ `5f97383`。
+- 远端 CI（`5f97383`）：https://github.com/shijianus/sonic/actions/runs/40977983806 — **success**
+  （quality / Docker smoke / Browser E2E 三个作业全部通过）。
+- CI 触发范围已扩展至 `rc/**` 与 `work/**`，两类分支的推送都会得到独立 CI 结果。
+- agy `origin/feat/linux-backend` 的两个提交经 `git cherry -v` 判定为 patch-equivalent，
+  RC 中已有相同内容（`scripts/rollback-production.sh`、`scripts/test-20-sample-songs.mjs`），
+  本轮不重复合并；仓库仍无 `reports/handoff/AGY.md`。
+- 合并进 RC 后的 SHA 与对应 CI 将在 `RELEASE-STATUS.md` 更新。

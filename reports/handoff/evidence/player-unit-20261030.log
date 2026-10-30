@@ -1,0 +1,33 @@
+
+> sonic-music-player@2.1.0 test D:\Users\Smart Kevin\OneDrive\Desktop\sonic\player
+> vitest run
+
+
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90mD:/Users/Smart Kevin/OneDrive/Desktop/sonic/player[39m
+
+ [32m✓[39m tests/transformers.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/playbackErrors.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/libraryStore.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 67[2mms[22m[39m
+ [32m✓[39m tests/audioQuality.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 33[2mms[22m[39m
+Not implemented: HTMLMediaElement's load() method
+ [32m✓[39m tests/playbackRace.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 101[2mms[22m[39m
+ [32m✓[39m tests/recommendStore.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 90[2mms[22m[39m
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+ [32m✓[39m tests/queueIntegration.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 98[2mms[22m[39m
+ [32m✓[39m tests/localMusicUndo.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 22[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m8 passed[39m[22m[90m (8)[39m
+[2m      Tests [22m [1m[32m38 passed[39m[22m[90m (38)[39m
+[2m   Start at [22m 08:12:55
+[2m   Duration [22m 4.12s[2m (environment 81%, import 14%, transform 2%, tests 2%)[22m
+
