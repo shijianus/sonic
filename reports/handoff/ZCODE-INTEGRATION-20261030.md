@@ -31,7 +31,28 @@ agy 两个提交：`4fb8e79`（后端 P0/P1 加固，46 文件）与 `e0adb20`�
 | 前端构建 | `npm run build` | `player/dist` → `dist/` 成功 | 0 |
 | 浏览器 E2E | `E2E_CHANNEL=chrome pnpm --dir player exec playwright test` | **24/24 PASS**（桌面 20 + 移动 4，4.8 分钟） | 0 |
 
-未执行（NOT RUN）：`npm run build:engine`（本轮未改动 server 构建输入，CI 覆盖）、Docker 本地构建（本机未验证）、真机与真实 OAuth。
+补充执行（同一工作树）：
+
+| 检查 | 命令 | 结果 | exit |
+|---|---|---|---|
+| 引擎构建 | `npm run build:engine` | `dist-server/index.mjs` 816.3kb | 0 |
+| 可观测性自检 | `npm run test:observability` | `ok:true`，`redactionVerified:true`，`alertDelivered:true` | 0 |
+| 引擎鉴权冒烟 | 本地 `dist-server` + curl | 无 Key 401；带 Key 200 且 `releaseCommit` 回显；匿名 `/api` 401；伪造 Host 401；静态首页 200 | — |
+| 默认/演示凭据扫描 | grep `functions`/`server`/`.env.example` | 无默认管理员或演示口令；未提交 `.env`/`.dev.vars` | — |
+
+唯一命中的硬编码常量是 `NETEASE_EAPI_KEY`（网易公开协议常量，非本项目机密，且 NetEase 源已被授权策略关闭）。
+
+未执行（NOT RUN）：Docker 本地构建（本机未运行）、真机与真实 OAuth 联调。
+
+## 2.1 远端 CI
+
+- 代码 SHA `4bf253a`（集成 + 文档）：[run 41060939932](https://github.com/shijianus/sonic/actions/runs/41060939932) — **success**
+  - Typecheck, lint, tests and build：success
+  - Docker build and runtime smoke test：success
+  - Browser E2E (mocked gateway, real media element)：success
+- 上一成功：`40986753701`（`20e399f`）、`40986077957`（`d29a32f`）。
+
+> 本文件若在 `4bf253a` 之后有追加提交，均为纯文档变更，不改变上述代码门禁结论。
 
 ## 3. 对 agy 证据的核验（非复跑）
 
