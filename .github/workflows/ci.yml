@@ -5,6 +5,8 @@ on:
     branches:
       - main
       - 'security/**'
+      - 'rc/**'
+      - 'work/**'
   pull_request:
   workflow_dispatch:
 
@@ -184,3 +186,49 @@ jobs:
           wait_ready
           grep -q '"eventCount":1' /tmp/sonic-health.json
           docker logs "$NAME"
+
+  browser-e2e:
+    name: Browser E2E (mocked gateway, real media element)
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Enable pinned pnpm
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.34.5 --activate
+          pnpm --version
+
+      - name: Install root dependencies (lockfile)
+        run: npm ci
+
+      - name: Install player dependencies (lockfile)
+        run: pnpm --dir player install --frozen-lockfile
+
+      - name: Build frontend for E2E
+        run: pnpm --dir player build
+
+      - name: Install Playwright Chromium
+        run: pnpm --dir player exec playwright install --with-deps chromium
+
+      # e2e/mock-server.mjs 提供确定性 /api Mock 与本地生成的 20s WAV；
+      # 本作业验证前端行为，不代表真实 CDN/OAuth/上游音源已验收。
+      - name: Run browser E2E
+        run: pnpm --dir player exec playwright test
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            player/e2e-report
+            player/e2e-results
+          retention-days: 7
