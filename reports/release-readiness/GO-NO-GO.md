@@ -127,3 +127,32 @@
 
 **Recommendation：NO-GO（维持）。** 本 RC 的可发布性取决于 §1 阻断项；
 在上述真实环境证据关闭前，不得对公众发布，也不得宣称受控内测已完成。
+
+---
+
+# 2026-10-30 集成交叉验证（`rc/sonic-20261031` @ `e0adb20`）
+
+- 集成动作：`git merge --ff-only origin/work/agy-release-20261031`，零冲突，未覆盖任何一方提交。
+- 集成内容：agy 后端加固 `4fb8e79`（46 文件）与回滚手册/演练证据 `e0adb20`。
+- Windows 环境独立复跑：`tsc --noEmit` 0 错误；`npm test` **142 例通过**；`npm run lint` 0；
+  `npm run build` 成功；Playwright **24/24 PASS**。
+- 详细交接：`reports/handoff/ZCODE-INTEGRATION-20261030.md`。
+
+## 状态变更
+
+| ID | 旧状态 | 新状态 | 依据 |
+|---|---|---|---|
+| P1-03 可观测性与告警 | OPEN | **CLOSED（agy 环境）** | metrics 端点 + 脱敏 + Webhook 实测送达 |
+| P1-04 Staging 与回滚 | OPEN | **CLOSED（agy 环境）** | 回滚 RTO 2,406 ms / RPO 0 / 前向恢复 1,756 ms |
+| P0-06 真实 Range/206 | OPEN | **PARTIAL** | 第一方 CC0 音源经真实 Pages→Tunnel→Engine 链路 200/206/416 PASS；商业 CDN 仍 BLOCKED |
+| 运行版本追踪 | OPEN | **CLOSED** | `X-Sonic-Release` 与 `/api` `releaseCommit` 等于部署 SHA |
+| P0-05 真实 OAuth | OPEN | **BLOCKED（未变）** | 缺真实凭据与账号；Staging 以 403 服务端拒绝 |
+| P0-07 内容授权 | OPEN | **BLOCKED（未变）** | 缺法务书面确认；已 `strict-allowlist` 强制关闭 |
+
+## 结论不变的部分
+
+- 对公众发布：**NO-GO**。P0-05、P0-07 为外部人工依赖。
+- 前端不存在登录页与 OAuth 调用入口，受控内测为匿名 + 限流模式（`SONIC_REQUIRE_AUTH=0`）；
+  关闭 OAuth 时无“点击必失败的登录按钮”，降级干净，但产品当前**没有账号会话 UI**。
+- 受控内测（仅第一方合成音源）：服务端与前端均就绪，可作为 **CONDITIONAL GO** 候选，
+  必须保持访问令牌、`noindex`、`strict-allowlist`、`SONIC_ENABLE_OAUTH=0`。

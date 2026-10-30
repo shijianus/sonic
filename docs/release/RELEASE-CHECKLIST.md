@@ -40,12 +40,12 @@
 | # | 检查项 | 结果 | 所需输入 |
 |---|---|---|---|
 | C1 | 真实 OAuth 登录/回调/刷新/退出/撤销 | NOT RUN | 测试账号 + Staging |
-| C2 | 真实 CDN Range/206、Seek、暂停恢复 | NOT RUN | 授权音源 + Staging |
-| C3 | 真实 403/429/断网降级 | NOT RUN | 授权音源/可控故障注入 |
-| C4 | 逐源音源/歌词/封面授权 | NOT RUN | 负责人/法务 |
-| C5 | Staging 部署与版本 SHA 一致 | NOT RUN | 部署凭据 |
-| C6 | 应用版本回滚演练（RTO/RPO） | NOT RUN | 变更授权 |
-| C7 | 监控/告警（5xx/P95/健康/存储） | NOT RUN | 监控方案 |
+| C2 | 真实 CDN Range/206、Seek、暂停恢复 | PARTIAL | 第一方 CC0 合成源经真实 Pages→Tunnel→Engine 200/206/416 逐字节 PASS；商业 CDN BLOCKED（待授权） |
+| C3 | 真实 403/429/断网降级 | PASS（合成故障注入） | `syn-fault-403/429/500/timeout` 实测 403/429/502/504 |
+| C4 | 逐源音源/歌词/封面授权 | BLOCKED | 负责人/法务书面确认未到位；已 `strict-allowlist` 服务端强制关闭 |
+| C5 | Staging 部署与版本 SHA 一致 | PASS（agy 环境） | `sonic-staging.pages.dev`；`X-Sonic-Release`/`releaseCommit` 等于部署 SHA |
+| C6 | 应用版本回滚演练（RTO/RPO） | PASS（agy 环境） | 回滚 RTO 2,406 ms、前向恢复 1,756 ms、RPO 0 |
+| C7 | 监控/告警（5xx/P95/健康/存储） | PASS（agy 环境） | metrics 端点 + 脱敏 + Webhook 实测送达 |
 | C8 | iOS Safari / Android Chrome 真机 | NOT RUN | 实机 |
 | C9 | 桌面跨浏览器人工验收 | NOT RUN | 浏览器矩阵 |
 | C10 | 无障碍人工验收 | PARTIAL | 自动化 a11y 已跑；人工未做 |
@@ -74,9 +74,18 @@
 - [ ] 版本：线上健康端点 SHA 与发布 SHA 一致。
 - [ ] 回滚：按预案回滚到上一 SHA 并复测健康/首页/搜索。
 
-## F. 当前 P0 / P1 计数
+## F. 当前 P0 / P1 计数（2026-10-30 集成后）
 
+- 集成 SHA：`e0adb20755f0fe38494c517addb0ce9d273fb6a6`
+- Windows 复跑：`tsc` 0 错误、`npm test` 142 例通过、`npm run lint` 0、`npm run build` 成功、Playwright 24/24。
 - P0 代码层未闭环：0
-- P0 环境/合规未闭环：3（P0-05 OAuth、P0-06 真实流、P0-07 授权）
-- P1 未完成：5（竞态真实网络、异常真实链路、metrics/告警、Staging/回滚、真机/OAuth/无障碍）
-- 发布判断：**NO-GO**
+- P0 环境/合规未闭环：2 BLOCKED + 1 PARTIAL
+  - P0-05 真实 OAuth：BLOCKED（缺凭据与测试账号）
+  - P0-06 真实流：PARTIAL（第一方合成源已 PASS；商业 CDN BLOCKED）
+  - P0-07 内容授权：BLOCKED（缺法务书面确认）
+- P1 未完成：1（P1-05 真机与人工无障碍；自动化 a11y 已过）
+- 受控内测（仅第一方合成音源）：**CONDITIONAL GO** 候选
+- 对公众发布：**NO-GO**
+
+> 「agy 环境」表示证据来自 Linux 侧一次性实测，Windows 环境未复跑；详见
+> `reports/handoff/ZCODE-INTEGRATION-20261030.md` §3。

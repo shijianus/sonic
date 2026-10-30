@@ -3,6 +3,7 @@
 - 更新时间：2026-10-30T01:31:03Z
 - 集成分支：`rc/sonic-20261031`
 - 本轮代码 SHA：`d29a32ff61caef96507176325f9b5e296360e3f4`
+- **当前集成 SHA：`e0adb20755f0fe38494c517addb0ce9d273fb6a6`**（2026-10-30T13:07:44Z 快进合并 agy 后端加固，见 `reports/handoff/ZCODE-INTEGRATION-20261030.md`）
 - 基线：`1d45e4cb38f6346f9a964d31fdba421c01d5e28b`（`release/rc-20261031` / `security/release-readiness-20261029` 内容）
 - 远端 CI：run `40986077957` — **success**（quality / Docker smoke / Browser E2E 三作业）
 - 发布判断：**NO-GO（不可对公众发布；受控内测亦未获准部署）**

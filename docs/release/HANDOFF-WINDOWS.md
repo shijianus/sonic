@@ -1,8 +1,8 @@
 # Windows / ZCode 交接 — Sonic RC 2026-10-31
 
-- UTC 更新时间：2026-10-30T01:31:03Z
+- UTC 更新时间：2026-10-30T13:07:44Z
 - 当前分支：`rc/sonic-20261031`
-- 当前代码 SHA：`d29a32ff61caef96507176325f9b5e296360e3f4`
+- 当前代码 SHA：`e0adb20755f0fe38494c517addb0ce9d273fb6a6`（已快进合并 agy 后端加固）
 - 基线 SHA：`1d45e4cb38f6346f9a964d31fdba421c01d5e28b`
 - 上一验收 SHA：`bb5183c`（CI run 40980948598 success）
 - 本轮新增代码 SHA：`45b9a5e`、`d29a32f`
@@ -95,8 +95,17 @@ docs/release/DECISIONS.md (新增)
 - 不要在未获书面授权与访问控制前部署 Preview/生产。
 - 发布判断保持 **NO-GO**，直到 `RELEASE-CHECKLIST.md` 全部硬门禁 PASS。
 
-## 8. 计划但未完成
+## 8. 2026-10-30 集成更新
 
-- 真实 OAuth 联调、真实 CDN Range/206、Staging 部署、回滚演练、真机验收、metrics/告警、
-  健康端点 release SHA 字段。
+agy 侧 `4fb8e79` + `e0adb20` 已快进合入本分支，原 §8 中「Staging 部署、回滚演练、metrics/告警、
+健康端点 release SHA」四项已由 agy 闭环并有实测证据；本环境复跑 `tsc`/`test`/`lint`/`build`/E2E 全通过。
+
+仍未完成：真实 OAuth 联调（P0-05 BLOCKED）、商业 CDN 真实流（P0-06 PARTIAL）、
+逐源授权（P0-07 BLOCKED）、真机与人工无障碍（P1-05）。
+
+详细交接与证据边界见 `reports/handoff/ZCODE-INTEGRATION-20261030.md`。
+
+## 9. 计划但未完成（原始记录）
+
+- 真实 OAuth 联调、真实 CDN Range/206、真机验收。
 - 错误 Toast 合并、hash 路由直链策略评估（当前 `/#/search` 可用，裸 `/search` 回落首页）。
