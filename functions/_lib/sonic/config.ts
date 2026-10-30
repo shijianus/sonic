@@ -3,7 +3,7 @@
 
 import type { AppEnv } from '../types';
 
-export const SONIC_UA = 'Sonic/2.0 (Sonic-Gateway; CF Pages Functions)';
+export const SONIC_UA = 'Sonic/2.2.0 (Sonic-Gateway; CF Pages Functions)';
 
 export interface SonicConfig {
   runtime: 'cf-pages' | 'linux-engine';
@@ -41,6 +41,13 @@ export function isEnvEnabled(val: unknown, defaultValue = true): boolean {
   if (val === undefined || val === null || val === '') return defaultValue;
   const str = String(val).trim().toLowerCase();
   return str === '1' || str === 'true' || str === 'yes' || str === 'on';
+}
+
+// Accepts the pre-2.2 name for cross-source matching while the canonical name is deployed
+// everywhere. The canonical value wins whenever it is non-empty.
+function envWithLegacyAlias(primary: unknown, legacy: unknown): unknown {
+  const hasValue = primary !== undefined && primary !== null && String(primary).trim() !== '';
+  return hasValue ? primary : legacy;
 }
 
 function normalizeUpstream(raw: unknown, fallback: string): string {
@@ -109,7 +116,10 @@ export function getSonicConfig(env?: AppEnv): SonicConfig {
     enableLocalEngine: Boolean(localEngineUrl && runtime !== 'linux-engine' && isEnvEnabled(e.SONIC_ENABLE_LOCAL_ENGINE, true)),
     // Per compliance & architecture requirements: VIP unblock & third-party free aggregation APIs are OFF by default
     enableUnblock: isEnvEnabled(e.SONIC_ENABLE_UNBLOCK, false),
-    enableFreeCrossMatch: isEnvEnabled(e.SONIC_ENABLE_FREE_CROSS_MATCH, true),
+    enableFreeCrossMatch: isEnvEnabled(
+      envWithLegacyAlias(e.SONIC_ENABLE_FREE_CROSS_MATCH, e.SONIC_ENABLE_FREE_MATCH),
+      true,
+    ),
     enableLyriva: isEnvEnabled(e.SONIC_ENABLE_LYRIVA, false),
     enableNetease: isEnvEnabled(e.SONIC_ENABLE_NETEASE, true),
     enableQq: isEnvEnabled(e.SONIC_ENABLE_QQ, true),

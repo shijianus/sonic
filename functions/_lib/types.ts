@@ -38,6 +38,8 @@ export interface AppEnv {
   // Compliance & Feature Flags (VIP unblock & third-party aggregators OFF by default)
   SONIC_ENABLE_UNBLOCK?: string;
   SONIC_ENABLE_FREE_CROSS_MATCH?: string;
+  /** @deprecated Pre-2.2 alias; read only when SONIC_ENABLE_FREE_CROSS_MATCH is empty. */
+  SONIC_ENABLE_FREE_MATCH?: string;
   SONIC_UPSTREAM_LYRIVA?: string;
   SONIC_UPSTREAM_GDSTUDIO?: string;
   SONIC_UPSTREAM_AMLL?: string;

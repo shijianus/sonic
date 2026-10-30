@@ -1076,7 +1076,7 @@ async function crawlLrclibBySearch(query: string, title?: string, artist?: strin
       url = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
     }
     const res = await timedFetch(url, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
     });
     if (!res.ok) return null;
     const json = (await res.json()) as any;
@@ -1155,7 +1155,7 @@ async function crawlKugouBySearch(
       for (const sUrl of searchApis) {
         try {
           const sRes = await timedFetch(sUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
           });
           if (sRes.ok) {
             const sJson = (await sRes.json()) as any;
@@ -1169,7 +1169,7 @@ async function crawlKugouBySearch(
 
               const lUrl = `http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(sSong)}&hash=${hash}&timelength=${sDur * 1000}`;
               const lRes = await timedFetch(lUrl, {
-                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
               });
               if (lRes.ok) {
                 const lJson = (await lRes.json()) as any;
@@ -1201,7 +1201,7 @@ async function crawlKugouBySearch(
       const durParam = targetDuration ? `&timelength=${Math.round(targetDuration * 1000)}` : '';
       const dUrl = `http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(dq)}${durParam}`;
       try {
-        const dRes = await timedFetch(dUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' } });
+        const dRes = await timedFetch(dUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' } });
         if (dRes.ok) {
           const dJson = (await dRes.json()) as any;
           for (const c of dJson.candidates || []) {
@@ -1300,7 +1300,7 @@ async function crawlKugouBySearch(
         try {
           const krcUrl = `http://lyrics.kugou.com/download?ver=1&client=pc&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=krc&charset=utf8`;
           const krcRes = await timedFetch(krcUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
           });
           if (krcRes.ok) {
             const krcJson = (await krcRes.json()) as any;
@@ -1441,7 +1441,7 @@ async function crawlKugouBySearch(
         try {
           const lrcUrl = `http://lyrics.kugou.com/download?ver=1&client=pc&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=lrc&charset=utf8`;
           const lrcRes = await timedFetch(lrcUrl, {
-            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
           });
           if (lrcRes.ok) {
             const lrcJson = (await lrcRes.json()) as any;
@@ -1644,7 +1644,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
   if (!finalTitle && id && id !== 'undefined' && id !== 'null' && (source === 'netease' || /^\d+$/.test(id))) {
     try {
       const dRes = await timedFetch(`https://music.163.com/api/song/detail/?id=${encodeURIComponent(id)}&ids=[${encodeURIComponent(id)}]`, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.1.0' },
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
       });
       if (dRes.ok) {
         const dJson = (await dRes.json()) as any;
