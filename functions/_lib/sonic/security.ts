@@ -10,12 +10,14 @@ import { isEnvEnabled } from './config';
 import { jsonResponse } from '../http';
 import { sha256Bytes, sha256Hex } from './crypto';
 
+// Provider-specific media boundaries. Apex domains such as qq.com / 163.com are deliberately
+// absent: they also host mail and other unrelated user content, which would widen the proxy
+// surface far beyond music assets. The hosts below cover every upstream referenced in this tree.
 export const SONIC_ALLOWED_MUSIC_DOMAINS = [
   'music.126.net',
-  '163.com',
   'music.163.com',
-  'qq.com',
   'y.qq.com',
+  'qqmusic.qq.com',
   'gtimg.cn',
   'qpic.cn',
   'kugou.com',

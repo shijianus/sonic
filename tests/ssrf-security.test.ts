@@ -4,6 +4,7 @@ import {
   resetSafeFetchStateForTest,
   safeFetch,
   setSafeFetchHostResolver,
+  SONIC_ALLOWED_MUSIC_DOMAINS,
   validateSafeUrl,
 } from '../functions/_lib/sonic/security';
 
@@ -172,5 +173,23 @@ describe('safeFetch: DNS and redirect boundaries', () => {
       bodyIdleTimeoutMs: 25,
     });
     await expect(res.text()).rejects.toThrow('idle timeout');
+  });
+});
+
+describe('SSRF: provider allowlist boundaries', () => {
+  const check = (url: string) =>
+    validateSafeUrl(url, { allowHttp: false, allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS });
+
+  it('accepts the music CDN hosts actually used by the gateway', () => {
+    expect(check('https://ws.stream.qqmusic.qq.com/a.mp3').valid).toBe(true);
+    expect(check('https://y.qq.com/a.mp3').valid).toBe(true);
+    expect(check('https://p1.music.126.net/a.jpg').valid).toBe(true);
+    expect(check('https://interface3.music.163.com/api').valid).toBe(true);
+  });
+
+  it('does not widen to unrelated apex-domain services', () => {
+    expect(check('https://mail.qq.com/').valid).toBe(false);
+    expect(check('https://mail.163.com/').valid).toBe(false);
+    expect(check('https://evil.qq.com.example.org/').valid).toBe(false);
   });
 });
