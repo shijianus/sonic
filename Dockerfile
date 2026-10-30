@@ -29,16 +29,23 @@ RUN ./node_modules/.bin/esbuild server/index.ts \
   --banner:js="import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
 
 FROM node:22-alpine AS runtime
+ARG SONIC_RELEASE_COMMIT=unknown
+ARG SONIC_BUILD_TIME=
+LABEL org.opencontainers.image.title="Sonic Local Engine" \
+      org.opencontainers.image.revision="${SONIC_RELEASE_COMMIT}" \
+      org.opencontainers.image.created="${SONIC_BUILD_TIME}"
 WORKDIR /app
 ENV NODE_ENV=production
 ENV SONIC_RUNTIME=linux-engine
+ENV SONIC_RELEASE_COMMIT=${SONIC_RELEASE_COMMIT}
+ENV SONIC_BUILD_TIME=${SONIC_BUILD_TIME}
 ENV PORT=8080
 ENV HOST=0.0.0.0
 ENV SONIC_RECOMMEND_DB_PATH=/app/data/sonic-recommend.sqlite
 
 COPY --from=frontend /app/player/dist ./dist
 COPY --from=engine /app/dist-server ./dist-server
-COPY scripts/backup-recommend-db.mjs ./scripts/
+COPY scripts/backup-recommend-db.mjs scripts/restore-recommend-db.mjs scripts/verify-observability-and-alerts.mjs ./scripts/
 COPY favicon.png favicon.svg ./dist/
 COPY LICENSE THIRD_PARTY_NOTICES.md package.json ./
 RUN mkdir -p /app/data \

@@ -6,6 +6,8 @@ import { jsonResponse, handleOptions } from '../http';
 import { getSonicConfig } from './config';
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse, isSameOriginRequest } from './security';
+import { isSourceEnabledByPolicy } from './licensing';
+import { recordLicensingBlockMetric, redactSensitiveString } from './observability';
 import { extractAuthCredentials } from '../auth';
 import { callLocalEngineJson } from './local-engine';
 
@@ -78,7 +80,7 @@ export function buildGatewayHeaders(extra: Record<string, string> = {}, degraded
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, HEAD, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Engine-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, Range',
-    'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, X-Sonic-Cache, X-Sonic-Provider, X-Sonic-Degraded, X-Sonic-Circuit, X-Sonic-Stream-Trial, X-RateLimit-Limit, X-RateLimit-Remaining',
+    'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, X-Sonic-Cache, X-Sonic-Provider, X-Sonic-Degraded, X-Sonic-Circuit, X-Sonic-Stream-Trial, X-Sonic-Release, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Backend, X-RateLimit-Degraded',
     'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
     'Referrer-Policy': 'no-referrer',
@@ -236,8 +238,11 @@ export async function handleSingleProviderLyricsRequest(
     });
   }
 
-  // Disabled-by-default third-party providers (`lyriva` / `gdstudio`) return honest empty response without calling upstream
-  if ((p === 'lyriva' && !config.enableLyriva) || (p === 'gdstudio' && !config.enableGdstudio)) {
+  // Disabled-by-default third-party providers (`lyriva` / `gdstudio`) return honest empty response in default mode without calling upstream
+  if (
+    config.contentPolicy !== 'strict-allowlist' &&
+    ((p === 'lyriva' && !config.enableLyriva) || (p === 'gdstudio' && !config.enableGdstudio))
+  ) {
     return jsonResponse(
       {
         brand: 'Sonic',
@@ -273,6 +278,21 @@ export async function handleSingleProviderLyricsRequest(
       },
       { status: 200, headers: buildGatewayHeaders({ 'Cache-Control': 'no-store' }) },
     );
+  }
+
+  const { getProvider } = await import('./providers');
+  const adapter = getProvider(p);
+  if (!adapter || !adapter.getLyrics) {
+    return sonicError('UNSUPPORTED_PROVIDER', `Provider '${providerName}' is not supported`, 404, {
+      provider: p,
+    });
+  }
+
+  if (!isSourceEnabledByPolicy(p, env)) {
+    recordLicensingBlockMetric(p);
+    return sonicError('SOURCE_DISABLED_BY_POLICY', `Lyrics provider '${p}' is disabled by server content policy`, 403, {
+      provider: p,
+    });
   }
 
   const sortedQuery = new URLSearchParams(url.searchParams);
@@ -334,22 +354,14 @@ export async function handleSingleProviderLyricsRequest(
     }
     degraded = true;
     degradedReason = engineRes.error || 'local_engine_unavailable';
-    attemptsPrefix.push({
-      provider: 'local-engine',
-      via: 'local-engine',
-      ok: false,
-      ms: engineRes.latencyMs,
-      error: degradedReason,
-    });
-  }
-
-  const { getProvider } = await import('./providers');
-  const adapter = getProvider(p);
-  if (!adapter || !adapter.getLyrics) {
-    return sonicError('UNSUPPORTED_PROVIDER', `Provider '${providerName}' is not supported`, 404, {
-      provider: p,
-    });
-  }
+      attemptsPrefix.push({
+        provider: 'local-engine',
+        via: 'local-engine',
+        ok: false,
+        ms: engineRes.latencyMs,
+        error: degradedReason,
+      });
+    }
 
   const startTime = Date.now();
   try {
@@ -578,8 +590,8 @@ export async function handleSingleProviderSearchRequest(
     });
   }
 
-  // Disabled-by-default third-party provider (`gdstudio`) returns honest empty result without hitting upstream
-  if (p === 'gdstudio' && !config.enableGdstudio) {
+  // Disabled-by-default third-party provider (`gdstudio`) returns honest empty result in default mode without hitting upstream
+  if (config.contentPolicy !== 'strict-allowlist' && p === 'gdstudio' && !config.enableGdstudio) {
     return jsonResponse(
       {
         brand: 'Sonic',
@@ -603,6 +615,21 @@ export async function handleSingleProviderSearchRequest(
       },
       { status: 200, headers: buildGatewayHeaders({ 'Cache-Control': 'no-store' }) },
     );
+  }
+
+  const { getProvider } = await import('./providers');
+  const adapter = getProvider(p);
+  if (!adapter || !adapter.search) {
+    return sonicError('UNSUPPORTED_PROVIDER', `Search provider '${providerName}' is not supported`, 404, {
+      provider: p,
+    });
+  }
+
+  if (!isSourceEnabledByPolicy(p, env)) {
+    recordLicensingBlockMetric(p);
+    return sonicError('SOURCE_DISABLED_BY_POLICY', `Search provider '${p}' is disabled by server content policy`, 403, {
+      provider: p,
+    });
   }
 
   const cacheIdentifier = `${p}:q=${query.toLowerCase()}:p=${page}:c=${count}`;
@@ -666,14 +693,6 @@ export async function handleSingleProviderSearchRequest(
       ok: false,
       ms: engineRes.latencyMs,
       error: degradedReason,
-    });
-  }
-
-  const { getProvider } = await import('./providers');
-  const adapter = getProvider(p);
-  if (!adapter || !adapter.search) {
-    return sonicError('UNSUPPORTED_PROVIDER', `Search provider '${providerName}' is not supported`, 404, {
-      provider: p,
     });
   }
 

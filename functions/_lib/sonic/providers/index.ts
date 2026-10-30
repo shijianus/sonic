@@ -26,6 +26,57 @@ import { getSonicConfig } from '../config';
 import { fetchKuwoLyricsNative, searchKuwoNative } from '../native-protocols';
 import { interpolateWordTimestamps, isValidLyric, parseHighPrecisionLyrics } from '../../music';
 import { computeQualityScore, extractPlainLyrics, internalLinesToSonicLines } from '../utils';
+import { getSyntheticTrackSpec, searchSyntheticCatalog } from '../synthetic-media';
+
+export const syntheticProvider: SonicProviderAdapter = {
+  name: 'synthetic',
+  isEnabled(env?: AppEnv): boolean {
+    return getSonicConfig(env).enableSynthetic;
+  },
+  async getLyrics(params, options) {
+    if (!this.isEnabled(options?.env)) return null;
+    const spec =
+      getSyntheticTrackSpec(params.platformId) ||
+      (params.title ? searchSyntheticCatalog(params.title, 1)[0] && getSyntheticTrackSpec(searchSyntheticCatalog(params.title, 1)[0].id) : null);
+    if (!spec) return null;
+    const { lines } = parseHighPrecisionLyrics(spec.lrc, spec.title, spec.artist);
+    for (const line of lines) {
+      if (!line.words || line.words.length === 0) {
+        line.words = interpolateWordTimestamps(line.text, line.time, line.duration || 2500);
+      }
+    }
+    const sonicLines = internalLinesToSonicLines(lines);
+    const avgWords = sonicLines.reduce((s, l) => s + l.words.length, 0) / Math.max(1, sonicLines.length);
+    return {
+      data: {
+        provider: 'synthetic',
+        level: 'word',
+        sourceQuality: 'interpolated',
+        track: {
+          title: spec.title,
+          artist: spec.artist,
+          album: spec.album,
+          isrc: '',
+        },
+        plainLyrics: extractPlainLyrics(sonicLines),
+        syncedLyrics: sonicLines,
+        rawTtml: '',
+        ttmlMetadata: {},
+        instrumental: false,
+        sourceId: spec.id,
+        sourceUrl: '',
+      },
+      matchLevel: 'HIGH_CONFIDENCE',
+      matchScore: 95,
+      provider: 'synthetic',
+      qualityScore: computeQualityScore('word', sonicLines.length, avgWords),
+    };
+  },
+  async search(query, options) {
+    if (!this.isEnabled(options?.env)) return [];
+    return searchSyntheticCatalog(query, options?.count || 20);
+  },
+};
 
 export const kuwoProvider: SonicProviderAdapter = {
   name: 'kuwo',
@@ -98,6 +149,7 @@ export const jooxProvider: SonicProviderAdapter = {
 };
 
 export const SONIC_PROVIDERS: Record<string, SonicProviderAdapter> = {
+  synthetic: syntheticProvider,
   lyriva: lyrivaProvider,
   amll: amllProvider,
   lrclib: lrclibProvider,

@@ -1,5 +1,7 @@
 import type { AppEnv, HighPrecisionLyricPayload, LyricFetchOptions, LyricLine, LyricSyncType, LyricWord, SongItem } from './types';
 import { getSonicConfig } from './sonic/config';
+import { isSourceEnabledByPolicy } from './sonic/licensing';
+import { getSyntheticTrackSpec, searchSyntheticCatalog } from './sonic/synthetic-media';
 import {
   resolvePlayableStream,
   searchKuwoNative,
@@ -117,22 +119,33 @@ export async function searchTracks(env: AppEnv, query: string, source = 'netease
   const cleanSource = (source || 'netease').toLowerCase().trim();
   const cfg = getSonicConfig(env);
 
+  if (cleanSource === 'synthetic') {
+    if (!cfg.enableSynthetic) return [];
+    return searchSyntheticCatalog(query, count).map(sonicTrackToLegacySongItem);
+  }
+
   // 1. Primary: Native / Local Engine protocols (no third-party free API reliance)
   try {
     if (cleanSource === 'netease' || cleanSource === 'ncm' || cleanSource === 'sonic') {
-      const ne = await searchNeteaseNative(query, count, page, env);
-      if (ne.tracks.length > 0) {
-        return ne.tracks.map(sonicTrackToLegacySongItem);
+      if (cfg.enableNetease) {
+        const ne = await searchNeteaseNative(query, count, page, env);
+        if (ne.tracks.length > 0) {
+          return ne.tracks.map(sonicTrackToLegacySongItem);
+        }
+      } else if (cleanSource === 'sonic' && cfg.enableSynthetic) {
+        return searchSyntheticCatalog(query, count).map(sonicTrackToLegacySongItem);
       }
     } else if (cleanSource === 'kuwo') {
-      const kw = await searchKuwoNative(query, count, page);
-      if (kw.length > 0) {
-        return kw.map(sonicTrackToLegacySongItem);
+      if (cfg.enableKuwo) {
+        const kw = await searchKuwoNative(query, count, page);
+        if (kw.length > 0) {
+          return kw.map(sonicTrackToLegacySongItem);
+        }
       }
     } else if (cleanSource === 'qq' || cleanSource === 'tencent' || cleanSource === 'kugou') {
       const { getProvider } = await import('./sonic/providers');
       const p = getProvider(cleanSource);
-      if (p?.search) {
+      if (p?.search && p.isEnabled(env)) {
         const list = await p.search(query, { count, page, env });
         if (list.length > 0) {
           return list.map(sonicTrackToLegacySongItem);
@@ -142,7 +155,7 @@ export async function searchTracks(env: AppEnv, query: string, source = 'netease
   } catch {}
 
   // 2. Optional Last-Resort Fallback: Third-party GDStudio (ONLY when SONIC_ENABLE_GDSTUDIO=1)
-  if (!cfg.enableGdstudio) {
+  if (!cfg.enableGdstudio || !isSourceEnabledByPolicy(cleanSource, env)) {
     return [];
   }
 
@@ -1594,6 +1607,28 @@ ${paragraphs}
  */
 export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions): Promise<HighPrecisionLyricPayload> {
   const { id = '', source = 'netease', title = '', artist = '', q = '', duration, signal } = options;
+  const cfg = getSonicConfig(env);
+
+  if (source === 'synthetic') {
+    const spec = cfg.enableSynthetic ? getSyntheticTrackSpec(id) : null;
+    const rawSynthetic = spec?.lrc || '';
+    const { syncType, offset, lines } = parseHighPrecisionLyrics(rawSynthetic, spec?.title || title, spec?.artist || artist);
+    return {
+      ok: Boolean(spec),
+      id: spec?.id || id,
+      source: 'synthetic',
+      syncType,
+      offset,
+      title: spec?.title || title || undefined,
+      artist: spec?.artist || artist || undefined,
+      lines,
+      lineCount: lines.length,
+      rawLyric: rawSynthetic,
+      elrc: lines.length > 0 ? generateEnhancedLrc(lines) : rawSynthetic,
+      ttml: lines.length > 0 ? generateTtml(lines, spec?.title || title, spec?.artist || artist) : '',
+      isPureMusic: lines.length === 0,
+    };
+  }
 
   let rawLyric = '';
   let finalSource = source;
@@ -1603,13 +1638,13 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
 
   // 1. 直连 ID 优先提取
   if (id && id !== 'undefined' && id !== 'null') {
-    if (source === 'netease' || (/^\d+$/.test(id) && source !== 'tencent' && source !== 'qq')) {
+    if (cfg.enableNetease && (source === 'netease' || (/^\d+$/.test(id) && source !== 'tencent' && source !== 'qq'))) {
       const directNetease = await fetchDirectNetEaseLyrics(id, signal);
       if (directNetease && isValidLyric(directNetease)) {
         rawLyric = directNetease;
         finalSource = 'netease';
       }
-    } else if (source === 'tencent' || source === 'qq') {
+    } else if (cfg.enableQq && (source === 'tencent' || source === 'qq')) {
       const directQQ = await fetchDirectQQLyrics(id, signal);
       if (directQQ && isValidLyric(directQQ)) {
         rawLyric = directQQ;
@@ -1618,7 +1653,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
     }
 
     // 第三方上游 Provider 备选（默认关闭，仅当显式开启 SONIC_ENABLE_GDSTUDIO=1 时启用）
-    if (!rawLyric && getSonicConfig(env).enableGdstudio) {
+    if (!rawLyric && cfg.enableGdstudio && isSourceEnabledByPolicy(source, env)) {
       try {
         const data = await fetchMusicProvider(env, { types: 'lyric', id, source });
         if (typeof data === 'object' && data !== null && typeof data.lyric === 'string' && isValidLyric(data.lyric)) {
@@ -1641,7 +1676,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
   }
 
   // 若缺失歌曲标题但提供了网易云 ID，自动解析曲名与歌手以便进行全网高精逐字匹配
-  if (!finalTitle && id && id !== 'undefined' && id !== 'null' && (source === 'netease' || /^\d+$/.test(id))) {
+  if (cfg.enableNetease && !finalTitle && id && id !== 'undefined' && id !== 'null' && (source === 'netease' || /^\d+$/.test(id))) {
     try {
       const dRes = await timedFetch(`https://music.163.com/api/song/detail/?id=${encodeURIComponent(id)}&ids=[${encodeURIComponent(id)}]`, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
@@ -1666,7 +1701,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
   const searchQuery = (q || `${finalTitle || title} ${finalArtist || artist}`).trim();
 
   // 若未获取到原始歌词但提供了搜索线索，优先尝试从网易云获取录音室官方参考 LRC（用于获取权威时间轴与时长）
-  if (!rawLyric && searchQuery) {
+  if (cfg.enableNetease && !rawLyric && searchQuery) {
     try {
       const netRef = await crawlNetEaseBySearch(searchQuery, env);
       if (netRef?.raw && isValidLyric(netRef.raw)) {
@@ -1690,7 +1725,9 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
 
   if (searchQuery && (!rawLyric || !hasWordSyncTags(rawLyric))) {
     // 2.1 酷狗音乐高精逐字 KRC 检索（严守歌名、歌手、时长一致与内容相似度校验法则）
-    const kugouResult = await crawlKugouBySearch(searchQuery, estimatedDurationSec, finalArtist || artist, finalTitle || title, referenceRawLyric);
+    const kugouResult = cfg.enableKugou
+      ? await crawlKugouBySearch(searchQuery, estimatedDurationSec, finalArtist || artist, finalTitle || title, referenceRawLyric)
+      : null;
     if (kugouResult?.raw && isValidLyric(kugouResult.raw) && hasWordSyncTags(kugouResult.raw)) {
       rawLyric = kugouResult.raw;
       finalSource = 'kugou';
@@ -1700,7 +1737,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
     }
 
     // 2.2 Musixmatch 字级 rich-sync 与行级 subtitles 检索（欧美及国际歌曲优先字级源）
-    if (!rawLyric || !hasWordSyncTags(rawLyric)) {
+    if (isSourceEnabledByPolicy('musixmatch', env) && (!rawLyric || !hasWordSyncTags(rawLyric))) {
       const mmResult = await crawlMusixmatchBySearch(finalTitle || title || searchQuery, finalArtist || artist);
       if (mmResult?.raw && isValidLyric(mmResult.raw) && (hasWordSyncTags(mmResult.raw) || !rawLyric)) {
         rawLyric = mmResult.raw;
@@ -1712,7 +1749,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
     }
 
     // 2.3 若当前依然没有任何有效歌词，继续依次尝试网易云、QQ、LRCLIB 与酷狗普通 LRC
-    if (!rawLyric) {
+    if (!rawLyric && cfg.enableNetease) {
       const neteaseResult = await crawlNetEaseBySearch(searchQuery, env);
       if (neteaseResult?.raw && isValidLyric(neteaseResult.raw)) {
         rawLyric = neteaseResult.raw;
@@ -1723,7 +1760,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
       }
     }
 
-    if (!rawLyric) {
+    if (!rawLyric && cfg.enableQq) {
       const qqResult = await crawlQQBySearch(searchQuery);
       if (qqResult?.raw && isValidLyric(qqResult.raw)) {
         rawLyric = qqResult.raw;
@@ -1734,7 +1771,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
       }
     }
 
-    if (!rawLyric) {
+    if (!rawLyric && cfg.enableLrclib) {
       const lrclibResult = await crawlLrclibBySearch(searchQuery, finalTitle || title, finalArtist || artist);
       if (lrclibResult?.raw && isValidLyric(lrclibResult.raw)) {
         rawLyric = lrclibResult.raw;
@@ -1784,6 +1821,10 @@ export async function getTrackLyrics(env: AppEnv, id: string, source = 'netease'
 }
 
 export async function getRandomTracks(env: AppEnv, count = 10, genre?: string): Promise<SongItem[]> {
+  const cfg = getSonicConfig(env);
+  if (!cfg.enableNetease && cfg.enableSynthetic) {
+    return searchTracks(env, genre || 'sonic', 'synthetic', count, 1);
+  }
   const GENRES = ['流行', '古典', '民谣', '摇滚', '爵士', '纯音乐', 'ACG', '轻音乐'];
   const targetGenre = genre || GENRES[Math.floor(Math.random() * GENRES.length)];
   const page = Math.floor(Math.random() * 3) + 1;

@@ -2,11 +2,13 @@
 // Prefix: SONIC_
 
 import type { AppEnv } from '../types';
+import { evaluateContentFlags, type ContentPolicyMode } from './licensing';
 
 export const SONIC_UA = 'Sonic/2.2.0 (Sonic-Gateway; CF Pages Functions)';
 
 export interface SonicConfig {
   runtime: 'cf-pages' | 'linux-engine';
+  contentPolicy: ContentPolicyMode;
   localEngineUrl?: string;
   engineSecret?: string;
   ncmApiUrl?: string;
@@ -16,7 +18,9 @@ export interface SonicConfig {
   upstreamAmll: string;
   upstreamLrclib: string;
   upstreamMeting?: string;
+  enableOAuth: boolean;
   enableLocalEngine: boolean;
+  enableSynthetic: boolean;
   enableUnblock: boolean;
   enableFreeCrossMatch: boolean;
   enableLyriva: boolean;
@@ -98,12 +102,15 @@ export function getSonicConfig(env?: AppEnv): SonicConfig {
       ? rawLocalEngineUrl
       : undefined;
   const ncmApiUrl = normalizeServiceUrl(e.SONIC_NCM_API_URL);
+  const contentFlags = evaluateContentFlags(env);
 
   return {
     runtime,
+    contentPolicy: contentFlags.policyMode,
     localEngineUrl,
     engineSecret: e.SONIC_ENGINE_SECRET ? String(e.SONIC_ENGINE_SECRET) : undefined,
-    ncmApiUrl,
+    // Do not allow sidecar NCM calls when NetEase source is disabled by licensing policy
+    ncmApiUrl: contentFlags.enableNetease ? ncmApiUrl : undefined,
     realIp: e.SONIC_REAL_IP ? String(e.SONIC_REAL_IP).trim() : '203.0.113.10',
     upstreamLyriva: normalizeUpstream(e.SONIC_UPSTREAM_LYRIVA, 'https://api.lyriva.xyz'),
     upstreamGdstudio: normalizeUpstream(
@@ -113,23 +120,25 @@ export function getSonicConfig(env?: AppEnv): SonicConfig {
     upstreamAmll: normalizeUpstream(e.SONIC_UPSTREAM_AMLL, 'https://api.amll.dev'),
     upstreamLrclib: normalizeUpstream(e.SONIC_UPSTREAM_LRCLIB, 'https://lrclib.net'),
     upstreamMeting: normalizeServiceUrl(e.SONIC_UPSTREAM_METING),
+    enableOAuth: isEnvEnabled(e.SONIC_ENABLE_OAUTH, true),
     enableLocalEngine: Boolean(localEngineUrl && runtime !== 'linux-engine' && isEnvEnabled(e.SONIC_ENABLE_LOCAL_ENGINE, true)),
+    enableSynthetic: contentFlags.enableSynthetic,
     // Per compliance & architecture requirements: VIP unblock & third-party free aggregation APIs are OFF by default
-    enableUnblock: isEnvEnabled(e.SONIC_ENABLE_UNBLOCK, false),
+    enableUnblock: contentFlags.enableUnblock,
     enableFreeCrossMatch: isEnvEnabled(
       envWithLegacyAlias(e.SONIC_ENABLE_FREE_CROSS_MATCH, e.SONIC_ENABLE_FREE_MATCH),
       true,
     ),
-    enableLyriva: isEnvEnabled(e.SONIC_ENABLE_LYRIVA, false),
-    enableNetease: isEnvEnabled(e.SONIC_ENABLE_NETEASE, true),
-    enableQq: isEnvEnabled(e.SONIC_ENABLE_QQ, true),
-    enableKugou: isEnvEnabled(e.SONIC_ENABLE_KUGOU, true),
-    enableKuwo: isEnvEnabled(e.SONIC_ENABLE_KUWO, true),
-    enableAmll: isEnvEnabled(e.SONIC_ENABLE_AMLL, true),
-    enableLrclib: isEnvEnabled(e.SONIC_ENABLE_LRCLIB, true),
-    enableGdstudio: isEnvEnabled(e.SONIC_ENABLE_GDSTUDIO, false),
-    enableApple: isEnvEnabled(e.SONIC_ENABLE_APPLE, false),
-    enableYtmusic: isEnvEnabled(e.SONIC_ENABLE_YTMUSIC, false),
+    enableLyriva: contentFlags.enableLyriva,
+    enableNetease: contentFlags.enableNetease,
+    enableQq: contentFlags.enableQq,
+    enableKugou: contentFlags.enableKugou,
+    enableKuwo: contentFlags.enableKuwo,
+    enableAmll: contentFlags.enableAmll,
+    enableLrclib: contentFlags.enableLrclib,
+    enableGdstudio: contentFlags.enableGdstudio,
+    enableApple: contentFlags.enableApple,
+    enableYtmusic: contentFlags.enableYtmusic,
     timeoutMs: Math.min(60_000, Math.max(500, parseInt(String(e.SONIC_TIMEOUT_MS || '8000'), 10) || 8000)),
     engineTimeoutMs: Math.min(
       30_000,

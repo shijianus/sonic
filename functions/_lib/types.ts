@@ -4,6 +4,8 @@ export interface AppEnv {
   EPOMAIL_CLIENT_SECRET?: string;
   EPOMAIL_REDIRECT_URI?: string;
   EPOMAIL_HTTP_TIMEOUT_MS?: string;
+  EPOMAIL_TOKEN_CONTENT_TYPE?: 'json' | 'form' | string;
+  SONIC_ENABLE_OAUTH?: string;
   MUSIC_API_BASE?: string;
   SOLARA_SECRET?: string;
   SONIC_SECRET?: string;
@@ -60,6 +62,34 @@ export interface AppEnv {
   SONIC_TIMEOUT_MS?: string;
   SONIC_RATE_LIMIT_ANON_RPM?: string;
   SONIC_RATE_LIMIT_AUTH_RPM?: string;
+  SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT?: string;
+  SONIC_RATE_LIMIT_FAIL_CLOSED?: string;
+  // Content Licensing Policy & Controlled Beta Isolation
+  SONIC_CONTENT_POLICY?: 'default' | 'strict-allowlist' | string;
+  SONIC_ALLOWED_SOURCES?: string;
+  SONIC_ENABLE_SYNTHETIC_TEST_SOURCE?: string;
+  SONIC_AUTHORIZED_TEST_DOMAINS?: string;
+  // Release Metadata, Staging Gate & Observability / Alerting
+  SONIC_ENV?: 'production' | 'staging' | 'development' | 'test' | string;
+  SONIC_RELEASE_COMMIT?: string;
+  SONIC_BUILD_TIME?: string;
+  SONIC_STAGING_ACCESS_TOKEN?: string;
+  SONIC_ALERT_WEBHOOK_URL?: string;
+  SONIC_ALERT_COOLDOWN_SEC?: string;
+  SONIC_ALERT_5XX_THRESHOLD?: string;
+  SONIC_ALERT_ALLOW_LOCALHOST?: string;
+  SONIC_MIN_FREE_DISK_MB?: string;
+  SONIC_DISK_HEALTH_PROVIDER?: () => {
+    ok: boolean;
+    writable: boolean;
+    path: string;
+    freeBytes?: number;
+    totalBytes?: number;
+    freeMb?: number;
+    freeRatio?: number;
+    lowSpace?: boolean;
+    error?: string;
+  };
   // Intelligent Recommendation & Smart Search Engine
   RECOMMEND_STORE?: any;
   SONIC_RECOMMEND_DB_PATH?: string;

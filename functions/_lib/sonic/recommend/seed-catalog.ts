@@ -4,8 +4,11 @@
 // NOTE: Seed tracks have ZERO fabricated station plays (`internalScore = 0`); their `externalPopularity`
 // is strictly tagged as `external-chart` / `cold-start-curated`.
 
+import type { AppEnv } from '../../types';
 import type { CanonicalTrack, RecommendStore } from './types';
 import { toCanonicalTrack } from './track-canonical';
+import { getSonicConfig } from '../config';
+import { SYNTHETIC_TRACK_CATALOG } from '../synthetic-media';
 
 interface RawSeedEntry {
   id: string;
@@ -91,9 +94,45 @@ const CURATED_SEEDS: RawSeedEntry[] = [
 
 const seededStores = new WeakSet<RecommendStore>();
 
-export function ensureCatalogSeeded(store: RecommendStore): number {
+export function ensureCatalogSeeded(store: RecommendStore, env?: AppEnv): number {
   if (seededStores.has(store)) return 0;
+  const cfg = getSonicConfig(env);
   const stats = store.getStats();
+
+  // In strict-allowlist mode without NetEase authorization, never seed commercial NetEase metadata;
+  // seed only first-party CC0 synthetic test tracks when synthetic test media is enabled.
+  if (!cfg.enableNetease) {
+    if (!cfg.enableSynthetic || stats.trackCount >= SYNTHETIC_TRACK_CATALOG.length) {
+      seededStores.add(store);
+      return 0;
+    }
+    const nowMs = Date.now();
+    const syntheticSeeds: CanonicalTrack[] = [];
+    for (const spec of SYNTHETIC_TRACK_CATALOG) {
+      const ct = toCanonicalTrack(
+        {
+          id: spec.id,
+          platform: 'synthetic',
+          title: spec.title,
+          artist: spec.artist,
+          album: spec.album,
+          duration: spec.durationSec,
+        },
+        {
+          externalPopularity: 85,
+          explicitGenres: spec.genres,
+          nowMs,
+        },
+      );
+      if (ct) syntheticSeeds.push(ct);
+    }
+    if (syntheticSeeds.length > 0) {
+      store.upsertTracks(syntheticSeeds);
+    }
+    seededStores.add(store);
+    return syntheticSeeds.length;
+  }
+
   if (stats.trackCount >= 40) {
     seededStores.add(store);
     return 0;

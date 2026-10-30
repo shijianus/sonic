@@ -8,6 +8,8 @@ import { searchNexus } from '../../_lib/sonic/nexus-search';
 import { jsonResponse } from '../../_lib/http';
 import { sonicLinesToLrc, sonicLinesToTtml } from '../../_lib/sonic/utils';
 import { SONIC_UA } from '../../_lib/sonic/config';
+import { getAllowedMediaDomains } from '../../_lib/sonic/licensing';
+import { recordLicensingBlockMetric, redactSensitiveString } from '../../_lib/sonic/observability';
 import {
   checkEngineAccess,
   evaluateGatewayRateLimit,
@@ -15,8 +17,9 @@ import {
   buildSafeUpstreamResponseHeaders,
   validateSafeUrl,
   safeFetch,
-  SONIC_ALLOWED_MUSIC_DOMAINS,
 } from '../../_lib/sonic/security';
+
+const SENSITIVE_FORWARD_QUERY = /[?&](auth|auth_key|vkey|guid|sign|signature|token|access_token|secret|key|wssecret|wstime|vuutv|dis_k)=/i;
 
 // Everything relayed here is served from the Sonic origin. Reject document-capable types
 // (HTML, XHTML, SVG) so an allowlisted host cannot become a same-origin script vector.
@@ -61,9 +64,20 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
   // Case 1: External URL Proxy / Forwarding (e.g. lyrics URL, audio stream, covers)
   if (targetUrl) {
     try {
+      const allowedDomains = getAllowedMediaDomains(env);
+      if (allowedDomains.length === 0) {
+        recordLicensingBlockMetric('forward-url');
+        return sonicError(
+          'SOURCE_DISABLED_BY_POLICY',
+          'External asset forwarding is disabled by strict server content policy',
+          403,
+          { provider: 'forward' },
+        );
+      }
+
       const valResult = validateSafeUrl(targetUrl, {
         allowHttp: false,
-        allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
+        allowedDomains,
       });
       if (!valResult.valid || !valResult.url) {
         return sonicError(
@@ -102,12 +116,22 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
         },
         {
           allowHttp: false,
-          allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
+          allowedDomains,
           maxRedirects: 3,
           timeoutMs: 15000,
           maxBytes: 128 * 1024 * 1024,
         },
       );
+
+      if (!upstreamResp.ok && upstreamResp.status !== 206) {
+        upstreamResp.body?.cancel().catch(() => {});
+        return sonicError(
+          'UPSTREAM_ASSET_UNAVAILABLE',
+          `Upstream asset returned HTTP ${upstreamResp.status}`,
+          upstreamResp.status >= 400 && upstreamResp.status < 500 ? upstreamResp.status : 502,
+          { provider: 'forward' },
+        );
+      }
 
       // Relay only asset-safe headers: upstream Set-Cookie must never be planted on the Sonic
       // origin, and Content-Encoding must not be forwarded for an already-decoded body.
@@ -128,6 +152,14 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
         'X-Content-Type-Options': 'nosniff',
         'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
       });
+      const upstreamCc = (upstreamResp.headers.get('cache-control') || '').toLowerCase();
+      if (
+        SENSITIVE_FORWARD_QUERY.test(valResult.url.search) ||
+        upstreamCc.includes('private') ||
+        upstreamCc.includes('no-store')
+      ) {
+        responseHeaders.set('Cache-Control', 'private, no-store');
+      }
 
       return new Response(upstreamResp.body, {
         status: upstreamResp.status,
@@ -135,7 +167,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
         headers: responseHeaders,
       });
     } catch (err: any) {
-      return sonicError('FORWARD_ERROR', err?.message || 'Failed to forward request to target', 502, {
+      return sonicError('FORWARD_ERROR', redactSensitiveString(err?.message || 'Failed to forward request to target'), 502, {
         provider: 'forward',
       });
     }

@@ -4,6 +4,8 @@
 
 import { handleOptions, jsonResponse } from '../../../_lib/http';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from '../../../_lib/sonic/security';
+import { isSourceEnabledByPolicy } from '../../../_lib/sonic/licensing';
+import { recordLicensingBlockMetric } from '../../../_lib/sonic/observability';
 import { resolvePlayableStream } from '../../../_lib/sonic/native-protocols';
 import type { AppEnv } from '../../../_lib/types';
 
@@ -35,6 +37,22 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     return jsonResponse(
       { brand: 'Sonic', ok: false, error: { code: 'MISSING_PARAMS', message: 'id or title is required' } },
       { status: 400 },
+    );
+  }
+
+  const normSource = source.trim().toLowerCase();
+  if (normSource !== 'sonic' && !isSourceEnabledByPolicy(normSource, env)) {
+    recordLicensingBlockMetric(normSource);
+    return jsonResponse(
+      {
+        brand: 'Sonic',
+        ok: false,
+        error: {
+          code: 'SOURCE_DISABLED_BY_POLICY',
+          message: `Source '${normSource}' is disabled by server content policy`,
+        },
+      },
+      { status: 403, headers: { 'Cache-Control': 'no-store' } },
     );
   }
 

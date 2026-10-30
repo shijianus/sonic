@@ -22,6 +22,7 @@ import {
 } from '../functions/_lib/sonic/recommend/text-norm';
 import { canMergeCanonicalTracks, mergeCanonicalTracks } from '../functions/_lib/sonic/recommend/track-canonical';
 import { MemoryRecommendStore } from '../functions/_lib/sonic/recommend/memory-store';
+import { recordSqliteMetric, redactSensitiveString } from '../functions/_lib/sonic/observability';
 
 export class SqliteRecommendStore implements RecommendStore {
   public readonly kind = 'sqlite' as const;
@@ -492,6 +493,27 @@ export class SqliteRecommendStore implements RecommendStore {
     } catch {}
   }
 
+  verifyWritable(): { writable: boolean; error?: string } {
+    if (this.dbPath === ':memory:') {
+      return { writable: true };
+    }
+    try {
+      this.db.exec('SAVEPOINT sonic_health_write_check; RELEASE sonic_health_write_check;');
+      const dir = path.dirname(path.resolve(this.dbPath));
+      fs.accessSync(dir, fs.constants.W_OK);
+      if (fs.existsSync(this.dbPath)) {
+        fs.accessSync(this.dbPath, fs.constants.W_OK);
+      }
+      return { writable: true };
+    } catch (err: any) {
+      recordSqliteMetric('write_error');
+      return {
+        writable: false,
+        error: redactSensitiveString(err?.code || err?.message || 'sqlite_unwritable'),
+      };
+    }
+  }
+
   private safeParseTrack(jsonStr: string): CanonicalTrack | null {
     try {
       return JSON.parse(jsonStr) as CanonicalTrack;
@@ -564,12 +586,103 @@ export function createServerRecommendStore(dbPath?: string): RecommendStore {
     );
     return store;
   } catch (err: any) {
+    recordSqliteMetric('memory_fallback');
     if (!allowMemoryFallback()) {
       throw new RecommendStorePersistenceError(effectivePath, err);
     }
     console.warn(
-      `[Sonic Recommend] Failed to open SQLite store at ${effectivePath} (${err?.message || 'error'}); falling back to MemoryRecommendStore`,
+      `[Sonic Recommend] Failed to open SQLite store at ${effectivePath} (${redactSensitiveString(err?.message || 'error')}); falling back to MemoryRecommendStore`,
     );
     return new MemoryRecommendStore();
   }
+}
+
+export function probeDiskHealth(
+  dbPath?: string,
+  minFreeMb = 64,
+  store?: RecommendStore | null,
+): {
+  ok: boolean;
+  writable: boolean;
+  path: string;
+  freeBytes?: number;
+  totalBytes?: number;
+  freeMb?: number;
+  freeRatio?: number;
+  lowSpace?: boolean;
+  error?: string;
+} {
+  const effectivePath =
+    (dbPath ?? process.env.SONIC_RECOMMEND_DB_PATH ?? '').trim() ||
+    path.resolve(process.cwd(), 'data', 'sonic-recommend.sqlite');
+
+  if (effectivePath === 'memory' || effectivePath === 'off' || effectivePath === ':memory:') {
+    return {
+      ok: true,
+      writable: true,
+      path: effectivePath,
+      lowSpace: false,
+    };
+  }
+
+  const resolvedDbPath = path.resolve(effectivePath);
+  const dir = path.dirname(resolvedDbPath);
+  let writable = true;
+  let error: string | undefined;
+
+  try {
+    fs.accessSync(dir, fs.constants.R_OK | fs.constants.W_OK);
+    if (fs.existsSync(resolvedDbPath)) {
+      fs.accessSync(resolvedDbPath, fs.constants.R_OK | fs.constants.W_OK);
+    }
+  } catch (err: any) {
+    writable = false;
+    error = redactSensitiveString(err?.code || err?.message || 'dir_not_writable');
+  }
+
+  if (writable && store && typeof (store as any).verifyWritable === 'function') {
+    const dbCheck = (store as SqliteRecommendStore).verifyWritable();
+    if (!dbCheck.writable) {
+      writable = false;
+      error = dbCheck.error || 'sqlite_readonly';
+    }
+  }
+
+  let freeBytes: number | undefined;
+  let totalBytes: number | undefined;
+  let freeMb: number | undefined;
+  let freeRatio: number | undefined;
+  let lowSpace = false;
+
+  try {
+    if (typeof fs.statfsSync === 'function' && fs.existsSync(dir)) {
+      const stat = fs.statfsSync(dir);
+      const bsize = Number(stat.bsize || 4096);
+      freeBytes = Number(stat.bavail) * bsize;
+      totalBytes = Number(stat.blocks) * bsize;
+      freeMb = Math.round((freeBytes / (1024 * 1024)) * 10) / 10;
+      freeRatio = totalBytes > 0 ? Number((freeBytes / totalBytes).toFixed(4)) : undefined;
+      const thresholdBytes = Math.max(1, minFreeMb) * 1024 * 1024;
+      if (freeBytes < thresholdBytes) {
+        lowSpace = true;
+        error = error || `low_disk_space (${freeMb}MB < ${minFreeMb}MB)`;
+      }
+    }
+  } catch (err: any) {
+    if (!error) {
+      error = redactSensitiveString(err?.code || err?.message || 'statfs_failed');
+    }
+  }
+
+  return {
+    ok: writable && !lowSpace,
+    writable,
+    path: resolvedDbPath,
+    freeBytes,
+    totalBytes,
+    freeMb,
+    freeRatio,
+    lowSpace,
+    ...(error ? { error } : {}),
+  };
 }

@@ -1,11 +1,12 @@
 import decodeJpeg from "./lib/vendor/jpeg-decoder.js";
+import { getAllowedMediaDomains } from "./_lib/sonic/licensing";
+import { recordLicensingBlockMetric } from "./_lib/sonic/observability";
 import {
   buildRateLimitErrorResponse,
   checkEngineAccess,
   evaluateGatewayRateLimit,
   safeFetch,
   validateSafeUrl,
-  SONIC_ALLOWED_MUSIC_DOMAINS,
 } from "./_lib/sonic/security";
 import type { AppEnv } from "./_lib/types";
 
@@ -443,9 +444,24 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
     });
   }
 
+  const allowedDomains = getAllowedMediaDomains(env);
+  if (allowedDomains.length === 0) {
+    recordLicensingBlockMetric("palette-url");
+    return new Response(
+      JSON.stringify({
+        code: "SOURCE_DISABLED_BY_POLICY",
+        error: "External image palette analysis is disabled by strict server content policy",
+      }),
+      {
+        status: 403,
+        headers: createJsonHeaders(403),
+      },
+    );
+  }
+
   const valResult = validateSafeUrl(imageParam, {
     allowHttp: false,
-    allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
+    allowedDomains,
   });
 
   if (!valResult.valid || !valResult.url) {
@@ -490,7 +506,7 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
   };
   const fetchOptions = {
     allowHttp: false,
-    allowedDomains: SONIC_ALLOWED_MUSIC_DOMAINS,
+    allowedDomains,
     maxRedirects: 2,
     timeoutMs: 6000,
     // readBoundedArrayBuffer enforces the image cap and returns 413 itself.

@@ -1,17 +1,20 @@
-export function corsHeaders(): Headers {
+export function corsHeaders(extra?: HeadersInit): Headers {
   const headers = new Headers();
   headers.set('Access-Control-Allow-Origin', '*');
   headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, HEAD, OPTIONS');
   headers.set(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, X-Shijianus-Device-Id, Range',
+    'Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Engine-Key, X-Sonic-Staging-Token, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, X-Shijianus-Device-Id, Range',
   );
-  headers.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
+  headers.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, X-Sonic-Release, X-RateLimit-Backend, X-RateLimit-Degraded');
   // API payloads are JSON/text only; never let a browser treat one as an active document.
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; sandbox");
   headers.set('Referrer-Policy', 'no-referrer');
   headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  if (extra) {
+    applyHeaders(headers, extra);
+  }
   return headers;
 }
 

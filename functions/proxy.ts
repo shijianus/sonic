@@ -1,5 +1,7 @@
 import { getUniversalLyrics, searchTracks } from "./_lib/music";
 import { getSonicConfig } from "./_lib/sonic/config";
+import { isSourceEnabledByPolicy } from "./_lib/sonic/licensing";
+import { recordLicensingBlockMetric, redactSensitiveString } from "./_lib/sonic/observability";
 import {
   buildRateLimitErrorResponse,
   checkEngineAccess,
@@ -11,6 +13,7 @@ import {
 import type { AppEnv } from "./_lib/types";
 
 const KUWO_HOST_PATTERN = /(^|\.)kuwo\.cn$/i;
+const SENSITIVE_PROXY_QUERY = /[?&](auth|auth_key|vkey|guid|sign|signature|token|access_token|secret|key|wssecret|wstime|vuutv|dis_k)=/i;
 const SAFE_RESPONSE_HEADERS = [
   "content-type",
   "cache-control",
@@ -24,9 +27,12 @@ const SAFE_RESPONSE_HEADERS = [
 
 function createCorsHeaders(init?: Headers): Headers {
   const headers = new Headers();
+  const hasContentEncoding = Boolean(init?.has("content-encoding"));
   if (init) {
     init.forEach((value, key) => {
-      if (SAFE_RESPONSE_HEADERS.includes(key.toLowerCase())) {
+      const lower = key.toLowerCase();
+      if (lower === "content-length" && hasContentEncoding) return;
+      if (SAFE_RESPONSE_HEADERS.includes(lower)) {
         headers.set(key, value);
       }
     });
@@ -77,10 +83,21 @@ function normalizeKuwoUrl(rawUrl: string): URL | null {
   }
 }
 
-async function proxyKuwoAudio(targetUrl: string, request: Request): Promise<Response> {
+async function proxyKuwoAudio(targetUrl: string, request: Request, env?: AppEnv): Promise<Response> {
+  if (!getSonicConfig(env).enableKuwo) {
+    recordLicensingBlockMetric("kuwo");
+    const deniedHeaders = createCorsHeaders();
+    deniedHeaders.set("Content-Type", "application/json; charset=utf-8");
+    deniedHeaders.set("Cache-Control", "no-store");
+    return new Response(
+      JSON.stringify({ code: "SOURCE_DISABLED_BY_POLICY", error: "Source 'kuwo' is disabled by server content policy" }),
+      { status: 403, headers: deniedHeaders },
+    );
+  }
+
   const normalized = normalizeKuwoUrl(targetUrl);
   if (!normalized) {
-    return new Response("Invalid target", { status: 400 });
+    return new Response("Invalid target", { status: 400, headers: createCorsHeaders() });
   }
 
   const init: RequestInit = {
@@ -103,6 +120,22 @@ async function proxyKuwoAudio(targetUrl: string, request: Request): Promise<Resp
     timeoutMs: 15000,
     maxBytes: 256 * 1024 * 1024,
   });
+
+  if (!upstream.ok && upstream.status !== 206) {
+    upstream.body?.cancel().catch(() => {});
+    const errHeaders = createCorsHeaders();
+    errHeaders.set("Cache-Control", "no-store");
+    if (upstream.status === 416) {
+      const cr = upstream.headers.get("content-range");
+      if (cr) errHeaders.set("Content-Range", cr);
+      return new Response(null, { status: 416, headers: errHeaders });
+    }
+    return new Response("Upstream media unavailable", {
+      status: upstream.status >= 400 && upstream.status < 500 ? upstream.status : 502,
+      headers: errHeaders,
+    });
+  }
+
   const upstreamType = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
   if (
     upstreamType &&
@@ -116,7 +149,14 @@ async function proxyKuwoAudio(targetUrl: string, request: Request): Promise<Resp
   const headers = createCorsHeaders(upstream.headers);
   headers.set('X-Content-Type-Options', 'nosniff');
   headers.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; sandbox");
-  if (!headers.has("Cache-Control")) {
+  const upstreamCc = (upstream.headers.get("cache-control") || "").toLowerCase();
+  if (
+    SENSITIVE_PROXY_QUERY.test(normalized.search) ||
+    upstreamCc.includes("private") ||
+    upstreamCc.includes("no-store")
+  ) {
+    headers.set("Cache-Control", "private, no-store");
+  } else if (!headers.has("Cache-Control")) {
     headers.set("Cache-Control", "public, max-age=3600");
   }
 
@@ -138,6 +178,18 @@ async function proxyApiRequest(url: URL, request: Request, env?: AppEnv): Promis
 
   const rawSource = (url.searchParams.get("source") || "netease").toLowerCase().trim();
   const rawId = (url.searchParams.get("id") || "").replace(/^[a-z0-9_-]+:/i, "").trim();
+
+  if (rawSource !== "sonic" && !isSourceEnabledByPolicy(rawSource, env)) {
+    recordLicensingBlockMetric(rawSource);
+    headers.set("Cache-Control", "no-store");
+    return new Response(
+      JSON.stringify({
+        code: "SOURCE_DISABLED_BY_POLICY",
+        error: `Source '${rawSource}' is disabled by server content policy`,
+      }),
+      { status: 403, headers },
+    );
+  }
 
   // 1. Native local-first handlers (zero third-party free aggregation dependency)
   if (types === "search") {
@@ -298,9 +350,9 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
 
   if (target) {
     try {
-      return await proxyKuwoAudio(target, request);
-    } catch (error) {
-      console.warn('[Sonic Proxy] Kuwo audio proxy rejected or failed', error);
+      return await proxyKuwoAudio(target, request, env);
+    } catch (error: any) {
+      console.warn('[Sonic Proxy] Kuwo audio proxy rejected or failed:', redactSensitiveString(String(error?.message || error)));
       return new Response("Upstream fetch rejected", {
         status: 502,
         headers: createCorsHeaders(),

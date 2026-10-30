@@ -8,6 +8,8 @@ import {
   SONIC_OAUTH_VERIFIER_COOKIE,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
+import { recordOAuthMetric } from '../../_lib/sonic/observability';
+import { isSameOriginRequest } from '../../_lib/sonic/security';
 import type { AppEnv } from '../../_lib/types';
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
@@ -17,11 +19,11 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   }
 
   const url = new URL(request.url);
-  const origin = request.headers.get('origin');
   const fetchSite = request.headers.get('sec-fetch-site');
-  if ((origin && origin !== url.origin) || (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none')) {
+  if (!isSameOriginRequest(request) || (fetchSite && fetchSite !== 'same-origin' && fetchSite !== 'none')) {
     return errorResponse('Cross-site logout request rejected', 403);
   }
+  recordOAuthMetric('logout');
 
   const headers = new Headers({
     'Cache-Control': 'no-store',

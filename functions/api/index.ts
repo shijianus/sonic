@@ -1,8 +1,10 @@
 import { handleOptions, jsonResponse } from '../_lib/http';
 import { API_DESCRIPTION, API_NAME, BRANDING, BRAND_COPYRIGHT } from '../_lib/brand';
 import { getSonicConfig } from '../_lib/sonic/config';
+import { getLicensingAuditSummary } from '../_lib/sonic/licensing';
 import { getLocalEngineCircuitSnapshot } from '../_lib/sonic/local-engine';
-import { checkEngineAccess } from '../_lib/sonic/security';
+import { getReleaseMetadata } from '../_lib/sonic/observability';
+import { checkEngineAccess, getRateLimitConfigStatus } from '../_lib/sonic/security';
 import type { AppEnv } from '../_lib/types';
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
@@ -14,11 +16,14 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   const base = url.origin;
   const cfg = getSonicConfig(env);
   const circuit = getLocalEngineCircuitSnapshot(env);
+  const release = getReleaseMetadata(env);
+  const licensing = getLicensingAuditSummary(env);
 
   return jsonResponse({
     brand: 'Sonic',
     name: API_NAME,
-    version: '2.2.0',
+    version: release.version,
+    release,
     copyright: BRAND_COPYRIGHT,
     description: API_DESCRIPTION,
     branding: BRANDING,
@@ -27,6 +32,12 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       localEngineConfigured: cfg.enableLocalEngine,
       circuitState: circuit.state,
       degraded: cfg.enableLocalEngine && circuit.state !== 'CLOSED',
+      rateLimit: getRateLimitConfigStatus(env),
+      contentPolicy: {
+        mode: licensing.policyMode,
+        allowedSources: licensing.allowedSources,
+        syntheticEnabled: cfg.enableSynthetic,
+      },
       thirdPartyFallbacks: {
         gdstudioEnabled: cfg.enableGdstudio,
         lyrivaEnabled: cfg.enableLyriva,
@@ -35,6 +46,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     },
     auth: {
       provider: 'Epomail OAuth 2.0',
+      oauthEnabled: cfg.enableOAuth,
       loginUrl: `${base}/api/auth/login`,
       callbackUrl: `${base}/api/auth/callback`,
       userUrl: `${base}/api/auth/user`,

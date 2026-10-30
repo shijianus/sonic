@@ -125,7 +125,7 @@ export async function ingestBehaviorEvents(
   storageKind: string;
 }> {
   const store = getRecommendStore(env);
-  ensureCatalogSeeded(store);
+  ensureCatalogSeeded(store, env);
 
   if (!identity.personalizationEnabled || !identity.subjectKey) {
     return {
@@ -655,7 +655,7 @@ export async function getRecommendationsForYou(
   };
 }> {
   const store = getRecommendStore(env);
-  ensureCatalogSeeded(store);
+  ensureCatalogSeeded(store, env);
 
   const mode = options.mode || 'for-you';
   const count = Math.min(50, Math.max(1, options.count || 18));
@@ -992,7 +992,7 @@ export async function getTrendingRecommendations(
   tracks: RecommendedTrack[];
 }> {
   const store = getRecommendStore(env);
-  ensureCatalogSeeded(store);
+  ensureCatalogSeeded(store, env);
 
   const window = options.window || '7d';
   const count = Math.min(50, Math.max(1, options.count || 20));
@@ -1159,7 +1159,7 @@ export async function getSimilarRecommendations(
   tracks: RecommendedTrack[];
 }> {
   const store = getRecommendStore(env);
-  ensureCatalogSeeded(store);
+  ensureCatalogSeeded(store, env);
 
   const count = Math.min(40, Math.max(1, options.count || 12));
   const includeSameArtist = options.includeSameArtist !== false;
@@ -1300,7 +1300,7 @@ export async function getDiscoverRecommendations(
   tracks: RecommendedTrack[];
 }> {
   const store = getRecommendStore(env);
-  ensureCatalogSeeded(store);
+  ensureCatalogSeeded(store, env);
 
   const count = Math.min(40, Math.max(1, options.count || 16));
   const temperature = Math.max(0.1, Math.min(1.5, options.temperature ?? 0.55));

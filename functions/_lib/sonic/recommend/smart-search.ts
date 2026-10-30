@@ -49,7 +49,7 @@ export function executeSmartSuggest(
   env?: AppEnv,
 ): SmartSearchSuggestion[] {
   const store = getRecommendStore(env);
-  ensureCatalogSeeded(store);
+  ensureCatalogSeeded(store, env);
 
   const trimmed = (rawQuery || '').trim();
   const maxItems = Math.min(15, Math.max(1, limit));
@@ -280,7 +280,7 @@ export async function executeSmartSearch(
   env?: AppEnv,
 ): Promise<SmartSearchExecutionResult> {
   const store = getRecommendStore(env);
-  ensureCatalogSeeded(store);
+  ensureCatalogSeeded(store, env);
 
   const page = Math.max(1, options.page || 1);
   const count = Math.min(50, Math.max(1, options.count || 20));

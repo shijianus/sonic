@@ -5,10 +5,15 @@
 // 3. SSRF Triple Validation: Protocol (https only), Port (80/443), Host canonicalization (IPv4/IPv6/domain whitelist)
 
 import type { AppEnv } from '../types';
-import { extractAuthCredentials, verifyAuth } from '../auth';
+import { extractAuthCredentials, readCookie, shouldUseSecureCookie, verifyAuth } from '../auth';
 import { isEnvEnabled } from './config';
 import { jsonResponse } from '../http';
 import { sha256Bytes, sha256Hex } from './crypto';
+import {
+  recordRateLimitMetric,
+  redactSensitiveString,
+  type RateLimitBackendKind,
+} from './observability';
 
 // Provider-specific media boundaries. Apex domains such as qq.com / 163.com are deliberately
 // absent: they also host mail and other unrelated user content, which would widen the proxy
@@ -116,6 +121,87 @@ export function checkEngineAccess(request: Request, env?: AppEnv): Response | nu
   }
 
   return null;
+}
+
+export const SONIC_STAGING_COOKIE = 'sonic_staging_access';
+
+/**
+ * Controlled Staging / Preview Access Gate.
+ * When `SONIC_STAGING_ACCESS_TOKEN` (>= 16 chars) is configured, anonymous public traffic
+ * is rejected with 401 before reaching SPA assets or API routes, and search indexing is blocked.
+ */
+export function checkStagingAccessGate(request: Request, env?: AppEnv): Response | null {
+  const rawToken = env?.SONIC_STAGING_ACCESS_TOKEN ? String(env.SONIC_STAGING_ACCESS_TOKEN).trim() : '';
+  if (!rawToken) return null;
+
+  if (rawToken.length < 16) {
+    return jsonResponse(
+      {
+        brand: 'Sonic',
+        error: {
+          code: 'STAGING_MISCONFIGURED',
+          message: 'SONIC_STAGING_ACCESS_TOKEN must be at least 16 characters when enabled',
+        },
+      },
+      {
+        status: 503,
+        headers: {
+          'Cache-Control': 'no-store',
+          'X-Robots-Tag': 'noindex, nofollow, noarchive',
+        },
+      },
+    );
+  }
+
+  if (hasValidEngineSecret(request, env)) {
+    return null;
+  }
+
+  const headerToken = request.headers.get('X-Sonic-Staging-Token')?.trim() || '';
+  if (headerToken && timingSafeEqualStr(headerToken, rawToken)) {
+    return null;
+  }
+
+  const cookieToken = readCookie(request, SONIC_STAGING_COOKIE) || '';
+  if (cookieToken && timingSafeEqualStr(cookieToken, rawToken)) {
+    return null;
+  }
+
+  // Browser bootstrap: `?staging_token=<token>` exchanges into an HttpOnly cookie and strips URL param
+  const url = new URL(request.url);
+  const queryToken = url.searchParams.get('staging_token')?.trim() || '';
+  if (queryToken && (request.method === 'GET' || request.method === 'HEAD') && timingSafeEqualStr(queryToken, rawToken)) {
+    url.searchParams.delete('staging_token');
+    const secure = shouldUseSecureCookie(url) ? '; Secure' : '';
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: url.pathname + (url.search || ''),
+        'Set-Cookie': `${SONIC_STAGING_COOKIE}=${encodeURIComponent(rawToken)}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=86400`,
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer',
+        'X-Robots-Tag': 'noindex, nofollow, noarchive',
+      },
+    });
+  }
+
+  return jsonResponse(
+    {
+      brand: 'Sonic',
+      error: {
+        code: 'STAGING_ACCESS_REQUIRED',
+        message: 'Staging environment is restricted to authorized beta testers (provide X-Sonic-Staging-Token)',
+      },
+    },
+    {
+      status: 401,
+      headers: {
+        'Cache-Control': 'no-store',
+        'WWW-Authenticate': 'SonicStagingToken realm="sonic-staging"',
+        'X-Robots-Tag': 'noindex, nofollow, noarchive',
+      },
+    },
+  );
 }
 
 // ── IP Extraction and Validation ──
@@ -231,6 +317,32 @@ export interface RateLimitDecision {
   limit: number;
   remaining: number;
   resetSec: number;
+  backend?: RateLimitBackendKind;
+  degraded?: boolean;
+}
+
+export function getRateLimitConfigStatus(env?: AppEnv): {
+  configuredBackend: 'native' | 'kv' | 'memory';
+  distributedAtomic: boolean;
+  requireDistributed: boolean;
+  failClosedOnDegrade: boolean;
+  productionCompliant: boolean;
+} {
+  const hasNative = Boolean((env as any)?.RATE_LIMITER && typeof (env as any).RATE_LIMITER.limit === 'function');
+  const kv = env?.RATE_LIMIT_KV || env?.KV;
+  const hasKv = Boolean(kv && typeof kv.get === 'function' && typeof kv.put === 'function');
+  const configuredBackend = hasNative ? 'native' : hasKv ? 'kv' : 'memory';
+  const isSingleNodeEngine = env?.SONIC_RUNTIME === 'linux-engine';
+  const distributedAtomic = hasNative || isSingleNodeEngine;
+  const requireDistributed = isEnvEnabled(env?.SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT, false);
+  const failClosedOnDegrade = isEnvEnabled(env?.SONIC_RATE_LIMIT_FAIL_CLOSED, true);
+  return {
+    configuredBackend,
+    distributedAtomic,
+    requireDistributed,
+    failClosedOnDegrade,
+    productionCompliant: distributedAtomic,
+  };
 }
 
 export async function evaluateGatewayRateLimit(
@@ -240,6 +352,7 @@ export async function evaluateGatewayRateLimit(
 ): Promise<RateLimitDecision> {
   const now = Date.now();
   const windowMs = 60_000;
+  const isSingleNodeEngine = env?.SONIC_RUNTIME === 'linux-engine';
 
   const isEngineCaller = hasValidEngineSecret(request, env);
   const ip = isEngineCaller ? getForwardedClientIp(request, env) : getPublicClientIp(request);
@@ -266,12 +379,22 @@ export async function evaluateGatewayRateLimit(
       );
       subject = `user:${sha256Hex(authResult.user.email.toLowerCase()).slice(0, 32)}`;
     } else if (isEnvEnabled(env?.SONIC_REQUIRE_AUTH, false)) {
+      recordRateLimitMetric({
+        allowed: false,
+        backend: 'auth-gate',
+        degraded: false,
+        isAuthRequired: true,
+        scope,
+        env,
+      });
       return {
         allowed: false,
         tier: 'anonymous',
         limit: 0,
         remaining: 0,
         resetSec: 60,
+        backend: 'auth-gate',
+        degraded: false,
       };
     }
   }
@@ -286,16 +409,53 @@ export async function evaluateGatewayRateLimit(
       if (!outcome || typeof outcome.success !== 'boolean') {
         throw new Error('RATE_LIMITER returned an invalid result');
       }
+      recordRateLimitMetric({
+        allowed: outcome.success,
+        backend: 'native',
+        degraded: false,
+        scope,
+        env,
+      });
       return {
         allowed: outcome.success,
         tier,
         limit,
         remaining: outcome.success ? Math.max(0, limit - 1) : 0,
         resetSec: 60,
+        backend: 'native',
+        degraded: false,
       };
-    } catch (nativeErr) {
-      console.warn('[Sonic RateLimit] Native RATE_LIMITER failed, falling back', nativeErr);
+    } catch (nativeErr: any) {
+      console.warn(
+        '[Sonic RateLimit] Native RATE_LIMITER failed, evaluating policy:',
+        redactSensitiveString(nativeErr?.message || nativeErr),
+      );
     }
+  }
+
+  // Strict production guard: never silently degrade on multi-isolate edge when native limiter is required
+  if (
+    !isSingleNodeEngine &&
+    isEnvEnabled(env?.SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT, false) &&
+    isEnvEnabled(env?.SONIC_RATE_LIMIT_FAIL_CLOSED, true)
+  ) {
+    recordRateLimitMetric({
+      allowed: false,
+      backend: 'fail-closed',
+      degraded: true,
+      isFailClosed: true,
+      scope,
+      env,
+    });
+    return {
+      allowed: false,
+      tier,
+      limit,
+      remaining: 0,
+      resetSec: 60,
+      backend: 'fail-closed',
+      degraded: true,
+    };
   }
 
   // Best-effort cross-isolate fallback: Cloudflare KV is not atomic under concurrency, so
@@ -309,23 +469,41 @@ export async function evaluateGatewayRateLimit(
       const nextCount = currentCount + 1;
       const resetSec = Math.max(1, 60 - (Math.floor(now / 1000) % 60));
       await kv.put(kvKey, String(nextCount), { expirationTtl: 120 });
+      const allowed = nextCount <= limit;
+      const degraded = !isSingleNodeEngine;
+      recordRateLimitMetric({ allowed, backend: 'kv', degraded, scope, env });
       return {
-        allowed: nextCount <= limit,
+        allowed,
         tier,
         limit,
         remaining: Math.max(0, limit - nextCount),
         resetSec,
+        backend: 'kv',
+        degraded,
       };
-    } catch (kvErr) {
-      console.warn('[Sonic RateLimit] KV rate limiter fallback to in-memory', kvErr);
+    } catch (kvErr: any) {
+      console.warn(
+        '[Sonic RateLimit] KV rate limiter fallback to in-memory:',
+        redactSensitiveString(kvErr?.message || kvErr),
+      );
     }
   }
 
-  // Fallback: In-memory sliding window
+  // Fallback: In-memory sliding window (atomic inside single-node Linux Engine; isolate-local on Edge)
   const windowResult = bumpInMemoryWindow(bucketKey, limit, now, windowMs);
+  const degraded = !isSingleNodeEngine;
+  recordRateLimitMetric({
+    allowed: windowResult.allowed,
+    backend: 'memory',
+    degraded,
+    scope,
+    env,
+  });
   return {
     ...windowResult,
     tier,
+    backend: 'memory',
+    degraded,
   };
 }
 
@@ -392,6 +570,7 @@ export async function evaluateAuthRateLimit(
   const limit = Math.min(1000, Math.max(1, Math.floor(limitPerMinute) || 30));
   const ip = getPublicClientIp(request);
   const bucketKey = `${scope}:ip:${ip}`;
+  const isSingleNodeEngine = env?.SONIC_RUNTIME === 'linux-engine';
 
   const nativeLimiter = (env as any)?.RATE_LIMITER;
   if (nativeLimiter && typeof nativeLimiter.limit === 'function') {
@@ -400,16 +579,52 @@ export async function evaluateAuthRateLimit(
       if (!outcome || typeof outcome.success !== 'boolean') {
         throw new Error('RATE_LIMITER returned an invalid result');
       }
+      recordRateLimitMetric({
+        allowed: outcome.success,
+        backend: 'native',
+        degraded: false,
+        scope,
+        env,
+      });
       return {
         allowed: outcome.success,
         tier: 'anonymous',
         limit,
         remaining: outcome.success ? Math.max(0, limit - 1) : 0,
         resetSec: 60,
+        backend: 'native',
+        degraded: false,
       };
-    } catch (nativeErr) {
-      console.warn('[Sonic RateLimit] Auth RATE_LIMITER failed, falling back', nativeErr);
+    } catch (nativeErr: any) {
+      console.warn(
+        '[Sonic RateLimit] Auth RATE_LIMITER failed, evaluating policy:',
+        redactSensitiveString(nativeErr?.message || nativeErr),
+      );
     }
+  }
+
+  if (
+    !isSingleNodeEngine &&
+    isEnvEnabled(env?.SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT, false) &&
+    isEnvEnabled(env?.SONIC_RATE_LIMIT_FAIL_CLOSED, true)
+  ) {
+    recordRateLimitMetric({
+      allowed: false,
+      backend: 'fail-closed',
+      degraded: true,
+      isFailClosed: true,
+      scope,
+      env,
+    });
+    return {
+      allowed: false,
+      tier: 'anonymous',
+      limit,
+      remaining: 0,
+      resetSec: 60,
+      backend: 'fail-closed',
+      degraded: true,
+    };
   }
 
   const kv = env?.RATE_LIMIT_KV || env?.KV;
@@ -420,42 +635,71 @@ export async function evaluateAuthRateLimit(
       const currentCount = parseInt((await kv.get(kvKey)) || '0', 10) || 0;
       const nextCount = currentCount + 1;
       await kv.put(kvKey, String(nextCount), { expirationTtl: 120 });
+      const allowed = nextCount <= limit;
+      const degraded = !isSingleNodeEngine;
+      recordRateLimitMetric({ allowed, backend: 'kv', degraded, scope, env });
       return {
-        allowed: nextCount <= limit,
+        allowed,
         tier: 'anonymous',
         limit,
         remaining: Math.max(0, limit - nextCount),
         resetSec: Math.max(1, 60 - (Math.floor(now / 1000) % 60)),
+        backend: 'kv',
+        degraded,
       };
-    } catch (kvErr) {
-      console.warn('[Sonic RateLimit] Auth KV rate limiter fallback to in-memory', kvErr);
+    } catch (kvErr: any) {
+      console.warn(
+        '[Sonic RateLimit] Auth KV rate limiter fallback to in-memory:',
+        redactSensitiveString(kvErr?.message || kvErr),
+      );
     }
   }
 
-  return { ...bumpInMemoryWindow(bucketKey, limit, now), tier: 'anonymous' };
+  const mem = bumpInMemoryWindow(bucketKey, limit, now);
+  const degraded = !isSingleNodeEngine;
+  recordRateLimitMetric({ allowed: mem.allowed, backend: 'memory', degraded, scope, env });
+  return { ...mem, tier: 'anonymous', backend: 'memory', degraded };
 }
 
 export function buildRateLimitErrorResponse(decision: RateLimitDecision): Response {
   const isAuthRequired = decision.limit === 0;
+  const isFailClosed = decision.backend === 'fail-closed';
+  const status = isFailClosed ? 503 : isAuthRequired ? 401 : 429;
+  const code = isFailClosed
+    ? 'RATE_LIMITER_NOT_BOUND'
+    : isAuthRequired
+      ? 'AUTH_REQUIRED'
+      : 'RATE_LIMITED';
+  const message = isFailClosed
+    ? 'Distributed Cloudflare RATE_LIMITER binding is required in strict mode (SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT=1)'
+    : isAuthRequired
+      ? 'API key is required (pass X-Sonic-Key or X-CFSolara-Key or Authorization: Bearer)'
+      : `Rate limit exceeded for tier '${decision.tier}' (${decision.limit} req/min)`;
+
+  const headers: Record<string, string> = {
+    'Cache-Control': 'no-store',
+    'Retry-After': String(decision.resetSec),
+    'X-RateLimit-Limit': String(decision.limit),
+    'X-RateLimit-Remaining': String(decision.remaining),
+    'X-RateLimit-Reset': String(decision.resetSec),
+    'X-RateLimit-Tier': decision.tier,
+    'X-RateLimit-Backend': decision.backend || 'memory',
+  };
+  if (decision.degraded) {
+    headers['X-RateLimit-Degraded'] = '1';
+  }
+
   return jsonResponse(
     {
       brand: 'Sonic',
       error: {
-        code: isAuthRequired ? 'AUTH_REQUIRED' : 'RATE_LIMITED',
-        message: isAuthRequired
-          ? 'API key is required (pass X-Sonic-Key or X-CFSolara-Key or Authorization: Bearer)'
-          : `Rate limit exceeded for tier '${decision.tier}' (${decision.limit} req/min)`,
+        code,
+        message,
       },
     },
     {
-      status: isAuthRequired ? 401 : 429,
-      headers: {
-        'Retry-After': String(decision.resetSec),
-        'X-RateLimit-Limit': String(decision.limit),
-        'X-RateLimit-Remaining': String(decision.remaining),
-        'X-RateLimit-Reset': String(decision.resetSec),
-        'X-RateLimit-Tier': decision.tier,
-      },
+      status,
+      headers,
     },
   );
 }
@@ -813,7 +1057,12 @@ function createUpstreamSignal(
   };
 }
 
-function enforceResponseSize(response: Response, maxBytes: number, idleTimeoutMs: number): Response {
+function enforceResponseSize(
+  response: Response,
+  maxBytes: number,
+  idleTimeoutMs: number,
+  externalSignal?: AbortSignal,
+): Response {
   const declared = Number(response.headers.get('content-length') || '');
   if (Number.isFinite(declared) && declared > maxBytes) {
     response.body?.cancel().catch(() => {});
@@ -823,6 +1072,24 @@ function enforceResponseSize(response: Response, maxBytes: number, idleTimeoutMs
 
   const reader = response.body.getReader();
   let totalBytes = 0;
+  let cleanedUp = false;
+  const onExternalAbort = () => {
+    if (!cleanedUp) {
+      cleanedUp = true;
+      reader.cancel('client_aborted').catch(() => {});
+    }
+  };
+  if (externalSignal) {
+    if (externalSignal.aborted) {
+      onExternalAbort();
+    } else {
+      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
+    }
+  }
+  const detachAbort = () => {
+    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+  };
+
   const stream = new ReadableStream<Uint8Array>({
     async pull(controller) {
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -837,11 +1104,15 @@ function enforceResponseSize(response: Response, maxBytes: number, idleTimeoutMs
         const { done, value } = await Promise.race([readPromise, idlePromise]);
         if (timer !== undefined) clearTimeout(timer);
         if (done) {
+          cleanedUp = true;
+          detachAbort();
           controller.close();
           return;
         }
         totalBytes += value.byteLength;
         if (totalBytes > maxBytes) {
+          cleanedUp = true;
+          detachAbort();
           await reader.cancel().catch(() => {});
           controller.error(new Error(`Upstream response exceeds ${maxBytes} bytes`));
           return;
@@ -849,11 +1120,15 @@ function enforceResponseSize(response: Response, maxBytes: number, idleTimeoutMs
         controller.enqueue(value);
       } catch (err) {
         if (timer !== undefined) clearTimeout(timer);
+        cleanedUp = true;
+        detachAbort();
         await reader.cancel().catch(() => {});
         controller.error(err);
       }
     },
     cancel(reason) {
+      cleanedUp = true;
+      detachAbort();
       return reader.cancel(reason);
     },
   });
@@ -966,7 +1241,7 @@ export async function safeFetch(
       if (isHead || !Number.isFinite(maxBytes) || maxBytes <= 0) {
         return resp;
       }
-      return enforceResponseSize(resp, maxBytes, bodyIdleTimeoutMs);
+      return enforceResponseSize(resp, maxBytes, bodyIdleTimeoutMs, init?.signal ?? undefined);
     }
   } finally {
     // Counts upstream header acquisition. Long response bodies are bounded by maxBytes and

@@ -9,7 +9,16 @@ import { Readable } from 'node:stream';
 
 import type { AppEnv } from '../functions/_lib/types';
 import dns from 'node:dns/promises';
-import { checkEngineAccess, setSafeFetchHostResolver } from '../functions/_lib/sonic/security';
+import {
+  checkEngineAccess,
+  checkStagingAccessGate,
+  setSafeFetchHostResolver,
+} from '../functions/_lib/sonic/security';
+import {
+  getReleaseMetadata,
+  recordHttpRequestMetric,
+  redactSensitiveString,
+} from '../functions/_lib/sonic/observability';
 import { handleOptions } from '../functions/_lib/http';
 import { toWebRequest } from './request-adapter';
 
@@ -30,6 +39,8 @@ import { onRequest as handleMusicRandom } from '../functions/api/music/random';
 import { onRequest as handleMusicSearch } from '../functions/api/music/search';
 import { onRequest as handleMusicStream } from '../functions/api/music/stream';
 import { onRequest as handleEngineHealth } from '../functions/api/sonic/engine/health';
+import { onRequest as handleEngineMetrics } from '../functions/api/sonic/engine/metrics';
+import { onRequest as handleTestAudio } from '../functions/api/sonic/test-audio';
 import { onRequest as handleResolveStream } from '../functions/api/sonic/resolve/stream';
 import { onRequest as handleSonicForward } from '../functions/api/sonic/forward';
 import { onRequest as handleSonicSearchNexus } from '../functions/api/sonic/search/nexus';
@@ -43,7 +54,7 @@ import { onRequest as handleSonicEvents } from '../functions/api/sonic/events';
 import { onRequest as handleSonicLyricsNexus } from '../functions/api/sonic/lyrics/nexus';
 import { onRequest as handleSonicLyricsSync } from '../functions/api/sonic/lyrics/sync';
 import { onRequest as handleSonicLyricsPlatform } from '../functions/api/sonic/lyrics/[platform]';
-import { createServerRecommendStore } from './recommend-sqlite';
+import { createServerRecommendStore, probeDiskHealth } from './recommend-sqlite';
 import type { RecommendStore } from '../functions/_lib/sonic/recommend/types';
 
 const MIME_TYPES: Record<string, string> = {
@@ -85,6 +96,11 @@ function buildRuntimeEnv(overrides?: Partial<AppEnv>): AppEnv {
   env.SONIC_RUNTIME = 'linux-engine';
   if (!env.RECOMMEND_STORE) {
     env.RECOMMEND_STORE = getOrInitServerRecommendStore(env.SONIC_RECOMMEND_DB_PATH);
+  }
+  if (!env.SONIC_DISK_HEALTH_PROVIDER) {
+    const minFreeMb = Math.max(1, parseInt(String(env.SONIC_MIN_FREE_DISK_MB || '64'), 10) || 64);
+    env.SONIC_DISK_HEALTH_PROVIDER = () =>
+      probeDiskHealth(env.SONIC_RECOMMEND_DB_PATH, minFreeMb, env.RECOMMEND_STORE);
   }
   return env as AppEnv;
 }
@@ -178,6 +194,8 @@ async function dispatchFunctionRoute(request: Request, env: AppEnv): Promise<Res
 
   // Sonic Gateway & Engine routes
   if (pathname === '/api/sonic/engine/health') return handleEngineHealth({ request, env });
+  if (pathname === '/api/sonic/engine/metrics') return handleEngineMetrics({ request, env });
+  if (pathname === '/api/sonic/test-audio') return handleTestAudio({ request, env });
   if (pathname === '/api/sonic/resolve/stream') return handleResolveStream({ request, env });
   if (pathname === '/api/sonic/forward') return handleSonicForward({ request, env, waitUntil });
 
@@ -313,12 +331,15 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
     const startedAt = Date.now();
     const requestId = crypto.randomUUID();
     res.setHeader('X-Request-Id', requestId);
+    let activeEnv: AppEnv | undefined;
     res.on('finish', () => {
       // Structured access log: path only, never query strings or headers.
       let pathname = '/';
       try {
         pathname = new URL(req.url || '/', 'http://engine.internal').pathname;
       } catch {}
+      const durationMs = Date.now() - startedAt;
+      recordHttpRequestMetric(pathname, res.statusCode, durationMs, activeEnv);
       console.log(
         JSON.stringify({
           type: 'access',
@@ -326,7 +347,7 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
           method: req.method || 'GET',
           path: pathname,
           status: res.statusCode,
-          durationMs: Date.now() - startedAt,
+          durationMs,
         }),
       );
     });
@@ -334,9 +355,27 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
     try {
       const webReq = toWebRequest(req);
       const env = buildRuntimeEnv(envOverrides);
+      activeEnv = env;
+      const release = getReleaseMetadata(env);
+      if (release.releaseCommit !== 'unknown') {
+        res.setHeader('X-Sonic-Release', release.releaseCommit.slice(0, 12));
+      }
+      if (
+        release.environment === 'staging' ||
+        release.environment === 'preview' ||
+        Boolean(env.SONIC_STAGING_ACCESS_TOKEN && String(env.SONIC_STAGING_ACCESS_TOKEN).trim())
+      ) {
+        res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+      }
 
       if (webReq.method === 'OPTIONS') {
         await sendWebResponse(res, handleOptions(), false);
+        return;
+      }
+
+      const stagingDenied = checkStagingAccessGate(webReq, env);
+      if (stagingDenied) {
+        await sendWebResponse(res, stagingDenied, webReq.method === 'HEAD');
         return;
       }
 
@@ -362,7 +401,7 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
           type: 'unhandled_error',
           requestId,
           name: String(err?.name || 'Error'),
-          message: String(err?.message || '').slice(0, 200),
+          message: redactSensitiveString(String(err?.message || '')).slice(0, 200),
         }),
       );
       if (!res.headersSent) {

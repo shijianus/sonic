@@ -7,6 +7,7 @@ import { BRAND_PRODUCT } from '../brand';
 import { getSonicConfig, SONIC_UA } from './config';
 import { callLocalEngineJson } from './local-engine';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from './security';
+import { recordLicensingBlockMetric } from './observability';
 import type { AppEnv } from '../types';
 
 function timedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -112,8 +113,26 @@ export async function handleUpstreamEndpoint(
       brand: 'Sonic',
       data: { code: 200, account: null, profile: null },
       authProvider: 'epomail-oauth2',
+      oauthEnabled: cfg.enableOAuth,
       loginUrl: '/api/auth/login',
     });
+  }
+
+  // Server-side content authorization gate: commercial NetEase catalog routes are blocked
+  // whenever `netease` is disabled by policy (e.g. SONIC_CONTENT_POLICY=strict-allowlist).
+  if (!cfg.enableNetease) {
+    recordLicensingBlockMetric('netease');
+    return jsonResponse(
+      {
+        brand: 'Sonic',
+        code: 403,
+        error: {
+          code: 'SOURCE_DISABLED_BY_POLICY',
+          message: "Commercial catalog source 'netease' is disabled by server content policy.",
+        },
+      },
+      { status: 403, headers: { 'Cache-Control': 'no-store' } },
+    );
   }
 
   // Primary Hop (when running on Cloudflare Pages): forward commercial catalog queries to Linux Local Engine

@@ -1,5 +1,6 @@
 import { buildClearSessionCookie, revokeJtiInKv, verifyAuth } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
+import { recordOAuthMetric } from '../../_lib/sonic/observability';
 import {
   buildRateLimitErrorResponse,
   evaluateGatewayRateLimit,
@@ -61,6 +62,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     Vary: 'Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, Cookie',
   });
   headers.append('Set-Cookie', buildClearSessionCookie(new URL(request.url)));
+  recordOAuthMetric('revoke');
 
   return jsonResponse(
     {

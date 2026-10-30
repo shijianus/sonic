@@ -21,6 +21,9 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        SONIC_RELEASE_COMMIT: "${SONIC_RELEASE_COMMIT:-unknown}"
+        SONIC_BUILD_TIME: "${SONIC_BUILD_TIME:-}"
     container_name: sonic-local-engine
     restart: unless-stopped
     init: true
@@ -32,14 +35,23 @@ services:
       - .env
     environment:
       SONIC_RUNTIME: "linux-engine"
+      SONIC_ENV: "${SONIC_ENV:-production}"
+      SONIC_RELEASE_COMMIT: "${SONIC_RELEASE_COMMIT:-unknown}"
       PORT: "8080"
       HOST: "0.0.0.0"
       SONIC_NCM_API_URL: "http://ncm-api:3000"
+      SONIC_CONTENT_POLICY: "${SONIC_CONTENT_POLICY:-default}"
+      SONIC_ALLOWED_SOURCES: "${SONIC_ALLOWED_SOURCES:-}"
+      SONIC_ENABLE_OAUTH: "${SONIC_ENABLE_OAUTH:-1}"
+      SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "${SONIC_ENABLE_SYNTHETIC_TEST_SOURCE:-0}"
       SONIC_ENABLE_GDSTUDIO: "${SONIC_ENABLE_GDSTUDIO:-0}"
       SONIC_ENABLE_LYRIVA: "${SONIC_ENABLE_LYRIVA:-0}"
       SONIC_ENABLE_UNBLOCK: "${SONIC_ENABLE_UNBLOCK:-0}"
       SONIC_RECOMMEND_DB_PATH: "${SONIC_RECOMMEND_DB_PATH:-/app/data/sonic-recommend.sqlite}"
       SONIC_RECOMMEND_RETENTION_DAYS: "${SONIC_RECOMMEND_RETENTION_DAYS:-90}"
+      SONIC_MIN_FREE_DISK_MB: "${SONIC_MIN_FREE_DISK_MB:-64}"
+      SONIC_ALERT_WEBHOOK_URL: "${SONIC_ALERT_WEBHOOK_URL:-}"
+      SONIC_ALERT_COOLDOWN_SEC: "${SONIC_ALERT_COOLDOWN_SEC:-300}"
       SONIC_ENABLE_LISTENBRAINZ: "${SONIC_ENABLE_LISTENBRAINZ:-0}"
       SONIC_GORSE_URL: "${SONIC_GORSE_URL:-}"
       SONIC_GORSE_API_KEY: "${SONIC_GORSE_API_KEY:-}"

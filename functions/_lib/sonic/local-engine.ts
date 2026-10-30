@@ -285,3 +285,151 @@ export async function callLocalEngineJson<T = any>(
     };
   }
 }
+
+export interface LocalEngineStreamResult {
+  ok: boolean;
+  response?: Response;
+  status?: number;
+  latencyMs: number;
+  skippedByCircuit: boolean;
+  circuitState: CircuitState;
+  error?: string;
+}
+
+/**
+ * Streams binary media responses (200 / 206 Partial Content / 416) from Linux Engine over Cloudflare Tunnel
+ * while enforcing X-Sonic-Engine-Key and 3-state circuit breaker protection.
+ */
+export async function callLocalEngineStream(
+  pathWithQuery: string,
+  env?: AppEnv,
+  options?: {
+    request?: Request;
+    method?: 'GET' | 'HEAD';
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  },
+): Promise<LocalEngineStreamResult> {
+  const cfg = getSonicConfig(env);
+  if (!cfg.enableLocalEngine || !cfg.localEngineUrl) {
+    return {
+      ok: false,
+      latencyMs: 0,
+      skippedByCircuit: true,
+      circuitState: 'CLOSED',
+      error: 'Local engine not configured',
+    };
+  }
+
+  const c = getOrCreateCircuit(cfg.localEngineUrl);
+  const threshold = Math.max(1, parseInt(String(env?.SONIC_CB_FAILURE_THRESHOLD || '3'), 10) || 3);
+  const cooldownMs = Math.max(100, parseInt(String(env?.SONIC_CB_COOLDOWN_MS || '30000'), 10) || 30_000);
+  const now = Date.now();
+
+  if (c.state === 'OPEN') {
+    if (now - c.openedAt < cooldownMs || c.probeInFlight) {
+      return {
+        ok: false,
+        latencyMs: 0,
+        skippedByCircuit: true,
+        circuitState: 'OPEN',
+        error: `Circuit OPEN (${c.lastError || 'engine unreachable'})`,
+      };
+    }
+    c.state = 'HALF_OPEN';
+    c.probeInFlight = true;
+  } else if (c.state === 'HALF_OPEN' && c.probeInFlight) {
+    return {
+      ok: false,
+      latencyMs: 0,
+      skippedByCircuit: true,
+      circuitState: 'HALF_OPEN',
+      error: 'Circuit HALF_OPEN (probe already in flight)',
+    };
+  }
+
+  const start = Date.now();
+  const effectiveTimeout = options?.timeoutMs ?? Math.max(cfg.engineTimeoutMs, 8000);
+  const targetUrl = `${cfg.localEngineUrl}${pathWithQuery.startsWith('/') ? '' : '/'}${pathWithQuery}`;
+  const headers: Record<string, string> = {
+    'User-Agent': 'Sonic-Edge-Gateway/2.2',
+  };
+  if (cfg.engineSecret) {
+    headers['X-Sonic-Engine-Key'] = cfg.engineSecret;
+  }
+  if (options?.request) {
+    headers['X-Sonic-Client-IP'] = getPublicClientIp(options.request);
+    const range = options.request.headers.get('range');
+    if (range) headers.Range = range;
+  }
+
+  const signals: AbortSignal[] = [AbortSignal.timeout(effectiveTimeout)];
+  if (options?.signal) signals.push(options.signal);
+  const combinedSignal =
+    typeof (AbortSignal as any).any === 'function' ? (AbortSignal as any).any(signals) : signals[0];
+
+  try {
+    const resp = await fetch(targetUrl, {
+      method: options?.method || 'GET',
+      headers,
+      signal: combinedSignal,
+    });
+    const latencyMs = Date.now() - start;
+
+    if (INSTANT_TRIP_HTTP_STATUSES.has(resp.status) || resp.status === 503) {
+      const errMsg = `Engine HTTP ${resp.status}`;
+      c.consecutiveFailures += 1;
+      c.lastError = errMsg;
+      c.lastErrorAt = Date.now();
+      c.probeInFlight = false;
+      if (INSTANT_TRIP_HTTP_STATUSES.has(resp.status) || c.state === 'HALF_OPEN' || c.consecutiveFailures >= threshold) {
+        c.state = 'OPEN';
+        c.openedAt = Date.now();
+      }
+      resp.body?.cancel().catch(() => {});
+      return {
+        ok: false,
+        status: resp.status,
+        latencyMs,
+        skippedByCircuit: false,
+        circuitState: c.state,
+        error: errMsg,
+      };
+    }
+
+    c.state = 'CLOSED';
+    c.consecutiveFailures = 0;
+    c.probeInFlight = false;
+    c.lastSuccessAt = Date.now();
+    c.lastError = '';
+    return {
+      ok: true,
+      response: resp,
+      status: resp.status,
+      latencyMs,
+      skippedByCircuit: false,
+      circuitState: 'CLOSED',
+    };
+  } catch (err: any) {
+    const latencyMs = Date.now() - start;
+    const errMsg =
+      err?.name === 'TimeoutError' || err?.name === 'AbortError'
+        ? `Engine stream timeout (${effectiveTimeout}ms)`
+        : err?.message || 'Engine stream network error';
+    c.consecutiveFailures += 1;
+    c.lastError = errMsg;
+    c.lastErrorAt = Date.now();
+    c.probeInFlight = false;
+    if (c.state === 'HALF_OPEN' || c.consecutiveFailures >= threshold) {
+      c.state = 'OPEN';
+      c.openedAt = Date.now();
+    }
+    return {
+      ok: false,
+      latencyMs,
+      skippedByCircuit: false,
+      circuitState: c.state,
+      error: errMsg,
+    };
+  }
+}

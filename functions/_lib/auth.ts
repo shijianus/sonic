@@ -1,6 +1,11 @@
 import type { AppEnv, UserSession } from './types';
 import { sha256Hex } from './sonic/crypto';
 import { isEnvEnabled } from './sonic/config';
+import { redactSensitiveString } from './sonic/observability';
+
+export function isOAuthEnabled(env?: AppEnv): boolean {
+  return isEnvEnabled(env?.SONIC_ENABLE_OAUTH, true);
+}
 
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -279,14 +284,23 @@ export async function exchangeCode(
     bodyPayload.code_verifier = codeVerifier;
   }
 
+  const useFormEncoding =
+    String(env.EPOMAIL_TOKEN_CONTENT_TYPE || 'json').trim().toLowerCase() === 'form';
+  const requestBody = useFormEncoding
+    ? new URLSearchParams(bodyPayload).toString()
+    : JSON.stringify(bodyPayload);
+  const contentType = useFormEncoding
+    ? 'application/x-www-form-urlencoded;charset=UTF-8'
+    : 'application/json';
+
   const response = await fetch(config.tokenUrl, {
     method: 'POST',
     cache: 'no-store',
     headers: {
-      'Content-Type': 'application/json',
+      'Content-Type': contentType,
       Accept: 'application/json',
     },
-    body: JSON.stringify(bodyPayload),
+    body: requestBody,
     signal: AbortSignal.timeout(config.timeoutMs),
   });
 
@@ -294,9 +308,9 @@ export async function exchangeCode(
     const errorText = await response.text().catch(() => '');
     // Never log the authorization code, client secret or full provider response.
     console.error(
-      `[Sonic OAuth Error] Epomail token exchange failed (${response.status}): ${errorText
-        .replace(/[\r\n]+/g, ' ')
-        .slice(0, 160)}`,
+      `[Sonic OAuth Error] Epomail token exchange failed (${response.status}): ${redactSensitiveString(
+        errorText.replace(/[\r\n]+/g, ' ').slice(0, 160),
+      )}`,
     );
     throw new Error('Epomail token exchange failed');
   }

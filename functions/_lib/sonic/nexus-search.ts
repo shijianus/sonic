@@ -12,7 +12,7 @@ import type {
 } from './types';
 import type { SonicProviderAdapter } from './providers/adapter';
 import { getSonicConfig } from './config';
-import { getProvider } from './providers';
+import { getProvider, syntheticProvider } from './providers';
 import { gdstudioProvider } from './providers/gdstudio';
 import { neteaseProvider } from './providers/netease';
 import { qqProvider } from './providers/qq';
@@ -150,6 +150,7 @@ export async function searchNexus(
       activeProviders = [single];
     }
   } else {
+    if (config.enableSynthetic && syntheticProvider.search) activeProviders.push(syntheticProvider);
     if (config.enableNetease && neteaseProvider.search) activeProviders.push(neteaseProvider);
     if (config.enableQq && qqProvider.search) activeProviders.push(qqProvider);
     if (config.enableKugou && kugouProvider.search) activeProviders.push(kugouProvider);

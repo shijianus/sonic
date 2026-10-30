@@ -10,6 +10,7 @@ import { normalizeArtistString, normalizeText, normalizeCjkText, calcLevenshtein
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
 import { safeFetch } from './security';
 import { callLocalEngineJson, getLocalEngineCircuitSnapshot, type CircuitState } from './local-engine';
+import { getSyntheticTrackSpec, getSyntheticWavTotalBytes } from './synthetic-media';
 
 const DESKTOP_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -807,7 +808,10 @@ export async function resolvePlayableStream(
     cleanId = parts.slice(1).join(':');
   }
   if (cleanSource === 'tencent') cleanSource = 'qq';
-  if (cleanSource === 'ncm' || cleanSource === 'sonic') cleanSource = 'netease';
+  if (cleanSource === 'syn' || cleanSource === 'test') cleanSource = 'synthetic';
+  if (cleanSource === 'ncm' || cleanSource === 'sonic') {
+    cleanSource = !cfg.enableNetease && cfg.enableSynthetic ? 'synthetic' : 'netease';
+  }
 
   const quality = String(opts.quality || '320').toLowerCase();
   const nominalBr = quality === '128' ? 128 : quality === 'flac' ? 800 : 320;
@@ -911,7 +915,40 @@ export async function resolvePlayableStream(
     const pStart = Date.now();
     const pLabel = providerLabel(cleanSource, env);
     try {
-      if (cleanSource === 'netease' && cfg.enableNetease) {
+      if (cleanSource === 'synthetic' && cfg.enableSynthetic) {
+        const isFaultId = /^syn-fault-(403|429|500|timeout)$/.test(cleanId);
+        const spec = isFaultId ? null : getSyntheticTrackSpec(cleanId);
+        if (spec || isFaultId) {
+          let origin = 'https://sonic.internal';
+          try {
+            if (opts.request) origin = new URL(opts.request.url).origin;
+          } catch {}
+          const totalBytes = spec ? getSyntheticWavTotalBytes(spec) : 0;
+          attempts.push({ provider: pLabel, via: viaLabel(env, 'synthetic-pcm'), ok: true, ms: Date.now() - pStart });
+          return {
+            url: `${origin}/api/sonic/test-audio?id=${encodeURIComponent(spec ? spec.id : cleanId)}`,
+            provider: pLabel,
+            via: viaLabel(env, 'synthetic-pcm'),
+            isTrial: false,
+            streamType: 'full',
+            br: 128,
+            size: totalBytes,
+            contentType: 'audio/wav',
+            corsSafe: true,
+            degraded,
+            degradedReason,
+            circuitState,
+            attempts,
+          };
+        }
+        attempts.push({
+          provider: pLabel,
+          via: viaLabel(env, 'synthetic-pcm'),
+          ok: false,
+          ms: Date.now() - pStart,
+          error: 'Synthetic track ID not found',
+        });
+      } else if (cleanSource === 'netease' && cfg.enableNetease) {
         const ne = await resolveNeteaseSingleStream(cleanId, quality, env);
         if (ne?.url && !ne.isTrial) {
           attempts.push({ provider: pLabel, via: ne.via, ok: true, ms: Date.now() - pStart });

@@ -2,12 +2,14 @@ import {
   base64UrlEncode,
   buildAuthorizeUrl,
   getEpomailConfig,
+  isOAuthEnabled,
   OAUTH_TRANSACTION_MAX_AGE_SEC,
   shouldUseSecureCookie,
   SONIC_OAUTH_STATE_COOKIE,
   SONIC_OAUTH_VERIFIER_COOKIE,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
+import { recordOAuthMetric } from '../../_lib/sonic/observability';
 import {
   buildRateLimitErrorResponse,
   evaluateAuthRateLimit,
@@ -23,8 +25,31 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   const rl = await evaluateAuthRateLimit(request, env, 'auth-login');
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
+  if (!isOAuthEnabled(env)) {
+    recordOAuthMetric('error', 'OAUTH_DISABLED_BY_POLICY');
+    return jsonResponse(
+      {
+        brand: 'Sonic',
+        ok: false,
+        error: {
+          code: 'OAUTH_DISABLED_BY_POLICY',
+          message: '当前受控环境已通过服务端策略关闭 OAuth 登录入口 (SONIC_ENABLE_OAUTH=0)',
+        },
+      },
+      {
+        status: 403,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Referrer-Policy': 'no-referrer',
+          Pragma: 'no-cache',
+        },
+      },
+    );
+  }
+
   // Fail closed if OAuth credentials are not configured
   if (!env.EPOMAIL_CLIENT_ID || !env.EPOMAIL_CLIENT_SECRET) {
+    recordOAuthMetric('error', 'OAUTH_MISCONFIGURED');
     return errorResponse(
       'OAuth 服务未正确配置 (EPOMAIL_CLIENT_ID 或 EPOMAIL_CLIENT_SECRET 缺失)',
       503,
@@ -37,6 +62,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   // Validate redirect URI origin against config or allowed origins whitelist
   const config = getEpomailConfig(env, url.origin);
   if (!config.baseUrl || !config.redirectUri) {
+    recordOAuthMetric('error', 'OAUTH_REDIRECT_INVALID');
     return errorResponse(
       '未配置合法重定向地址 (EPOMAIL_REDIRECT_URI 缺失/非 HTTPS 且请求来源不在 SONIC_ALLOWED_ORIGINS 白名单)',
       400,
@@ -72,6 +98,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   });
   headers.append('Set-Cookie', `${SONIC_OAUTH_STATE_COOKIE}=${state}${cookieSuffix}`);
   headers.append('Set-Cookie', `${SONIC_OAUTH_VERIFIER_COOKIE}=${codeVerifier}${cookieSuffix}`);
+  recordOAuthMetric('login_started');
 
   if (redirectMode === 'json') {
     return jsonResponse({ ok: true, authorizeUrl }, { headers });

@@ -1,6 +1,8 @@
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import { searchTracks } from '../../_lib/music';
 import { getSonicConfig } from '../../_lib/sonic/config';
+import { isSourceEnabledByPolicy } from '../../_lib/sonic/licensing';
+import { recordLicensingBlockMetric } from '../../_lib/sonic/observability';
 import { callLocalEngineJson, getLocalEngineCircuitSnapshot } from '../../_lib/sonic/local-engine';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse, extractClientIp } from '../../_lib/sonic/security';
 import type { AppEnv } from '../../_lib/types';
@@ -29,6 +31,22 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   }
 
   const cfg = getSonicConfig(env);
+  const normSource = source.trim().toLowerCase();
+  const isSonicAlias = normSource === 'sonic';
+  if (!isSonicAlias && !isSourceEnabledByPolicy(normSource, env)) {
+    recordLicensingBlockMetric(normSource);
+    return jsonResponse(
+      {
+        brand: 'Sonic',
+        ok: false,
+        error: {
+          code: 'SOURCE_DISABLED_BY_POLICY',
+          message: `Source '${normSource}' is disabled by server content policy`,
+        },
+      },
+      { status: 403, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
   let degraded = false;
 
   // 1. Primary: Local Linux Engine when running on Cloudflare Edge

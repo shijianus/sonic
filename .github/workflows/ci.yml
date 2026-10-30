@@ -64,6 +64,9 @@ jobs:
       - name: Recommendation and smart-search tests
         run: npm run test:recommend
 
+      - name: Observability and alerting self-check
+        run: npm run test:observability
+
       - name: Player unit tests
         run: pnpm --dir player test
 

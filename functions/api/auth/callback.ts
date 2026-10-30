@@ -6,6 +6,7 @@ import {
   exchangeCode,
   fetchUserInfo,
   getEpomailConfig,
+  isOAuthEnabled,
   OAUTH_STATE_REGEX,
   PKCE_VERIFIER_REGEX,
   readCookie,
@@ -14,6 +15,7 @@ import {
   SONIC_OAUTH_VERIFIER_COOKIE,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
+import { recordOAuthMetric, redactSensitiveString } from '../../_lib/sonic/observability';
 import {
   buildRateLimitErrorResponse,
   evaluateAuthRateLimit,
@@ -40,6 +42,7 @@ function oauthFailure(
   headers: Headers,
   code = 'OAUTH_FAILED',
 ): Response {
+  recordOAuthMetric('error', code);
   return jsonResponse(
     { brand: 'Sonic', ok: false, error: { code, message } },
     { status, headers },
@@ -56,16 +59,27 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   const rl = await evaluateAuthRateLimit(request, env, 'auth-callback');
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
+  const url = new URL(request.url);
+  const clearHeaders = clearOAuthCookies(url);
+
+  if (!isOAuthEnabled(env)) {
+    return oauthFailure(
+      '当前受控环境已通过服务端策略关闭 OAuth 登录回调 (SONIC_ENABLE_OAUTH=0)',
+      403,
+      clearHeaders,
+      'OAUTH_DISABLED_BY_POLICY',
+    );
+  }
+
   // Fail closed if OAuth credentials are not configured
   if (!env.EPOMAIL_CLIENT_ID || !env.EPOMAIL_CLIENT_SECRET) {
+    recordOAuthMetric('error', 'OAUTH_MISCONFIGURED');
     return errorResponse(
       'OAuth 服务未正确配置 (EPOMAIL_CLIENT_ID 或 EPOMAIL_CLIENT_SECRET 缺失)',
       503,
     );
   }
 
-  const url = new URL(request.url);
-  const clearHeaders = clearOAuthCookies(url);
   const code = url.searchParams.get('code');
   const rawError = url.searchParams.get('error');
   const state = url.searchParams.get('state');
@@ -140,6 +154,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
     // Session is carried by an HttpOnly cookie; it is never placed in the redirect URL.
     clearHeaders.append('Set-Cookie', buildSessionCookie(session.apiKey, session.expiresAt, url));
+    recordOAuthMetric('callback_success');
 
     const acceptsJson =
       request.headers.get('Accept')?.includes('application/json') ||
@@ -167,7 +182,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     console.error(
       '[Sonic Auth Callback Error]',
       String(err?.name || 'Error'),
-      String(err?.message || '').slice(0, 200),
+      redactSensitiveString(String(err?.message || '').slice(0, 200)),
     );
     const isMisconfig = String(err?.message || '').includes('SONIC_SECRET');
     return oauthFailure(

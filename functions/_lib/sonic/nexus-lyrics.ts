@@ -21,7 +21,7 @@ import type {
 } from './types';
 import type { ProviderLyricResult } from './providers/adapter';
 import { getSonicConfig } from './config';
-import { getProvider } from './providers';
+import { getProvider, syntheticProvider } from './providers';
 import { lyrivaProvider } from './providers/lyriva';
 import { kugouProvider } from './providers/kugou';
 import { fetchAmllByIds, fetchAmllBySearch } from './providers/amll';
@@ -78,7 +78,9 @@ export async function resolveNexusLyrics(
 
   // Derive platform/platformId if not explicitly set
   if (!params.platform) {
-    if (params.ncmMusicId) {
+    if (params.platformId && params.platformId.startsWith('syn-')) {
+      params.platform = 'synthetic';
+    } else if (params.ncmMusicId) {
       params.platform = 'netease';
       params.platformId = params.ncmMusicId;
     } else if (params.qqMusicId) {
@@ -277,6 +279,18 @@ export async function resolveNexusLyrics(
         recordAttempt(String(adapter.name), false, pStart, err?.message || 'Platform native error');
       }
     }
+  }
+
+  // ①b First-Party Synthetic Test Media Lyrics (when enabled and title matches synthetic catalog)
+  if (!interpolatedFallback && config.enableSynthetic && params.title && syntheticProvider.getLyrics) {
+    const synStart = Date.now();
+    try {
+      const synRes = await syntheticProvider.getLyrics(params, { env });
+      if (synRes && synRes.data.syncedLyrics.length > 0) {
+        recordAttempt('synthetic', true, synStart);
+        interpolatedFallback = synRes;
+      }
+    } catch {}
   }
 
   // ② AMLL TTML by Platform ID (High Confidence)
