@@ -98,6 +98,19 @@ test.describe('异常与降级', () => {
     await expect(panel).toContainText(/network error/i)
   })
 
+  test('快速改搜索词：旧慢请求晚到不覆盖新结果', async ({ page }) => {
+    await page.goto('/#/search?q=slow')
+    const input = page.getByTestId('nav-search-input')
+    await input.fill('empty')
+    await input.press('Enter')
+
+    await expect(page.getByText('No results found')).toBeVisible()
+    // 旧请求约 1.2s 后返回；等待并确认没有覆盖空结果
+    await page.waitForTimeout(1700)
+    await expect(page.getByText('No results found')).toBeVisible()
+    await expect(page.locator('[data-testid^="song-row-"]')).toHaveCount(0)
+  })
+
   test('搜索空结果与异常 JSON：明确空态，不崩溃', async ({ page }) => {
     await page.goto('/#/search?q=empty')
     await expect(page.getByText('No results found')).toBeVisible()

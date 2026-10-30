@@ -145,6 +145,8 @@ async function handleApi(req, res, url) {
     if (term === 'malformed') {
       return sendJson(res, { data: { tracks: 'not-an-array', total: 'NaN' }, meta: null })
     }
+    // slow 用于验证“旧搜索请求晚到不覆盖新结果”
+    if (term === 'slow') await sleep(1200)
     const ids = SEARCH_FIXTURES[term] || (term === 'empty' ? [] : [9001, 9002, 9003, 9004])
     return sendJson(res, {
       data: {

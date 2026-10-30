@@ -100,6 +100,19 @@ test.describe('核心播放路径', () => {
     await expect(lyrics).not.toContainText('Test Song One line')
   })
 
+  test('收藏：喜欢后进入收藏页可见，刷新后保持', async ({ page }) => {
+    await page.goto('/#/search?q=sonic')
+    const row = page.getByTestId('song-row-9001')
+    await expect(row).toBeVisible()
+    await row.hover()
+    await row.getByRole('button', { name: 'Like', exact: true }).click()
+
+    await page.goto('/#/likes')
+    await expect(page.getByText('Test Song One', { exact: true })).toBeVisible()
+    await page.reload()
+    await expect(page.getByText('Test Song One', { exact: true })).toBeVisible()
+  })
+
   test('歌词降级：纯音乐与无歌词返回明确提示而不是崩溃', async ({ page }) => {
     await page.goto('/#/playlist/123')
     await expect(page.getByTestId('song-row-9200')).toBeVisible()
