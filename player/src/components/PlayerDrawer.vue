@@ -457,8 +457,11 @@ watch(currentTime, () => {
 watch(
   currentSong,
   async (s, oldSong) => {
+    const targetSongId = s?.id
     lastWordSyncLine.value = -1
     await fetchLyrics(s)
+    // 取歌词期间用户可能已切歌：过期回调不得重置新歌的歌词视图
+    if (currentSong.value?.id !== targetSongId) return
     resetLyrics()
     await nextTick()
     updateCurrentLyric(true)
@@ -995,6 +998,7 @@ onUnmounted(() => {
     >
       <div
         ref="lyricsContainerRef"
+        data-testid="lyrics-container"
         class="lyrics-container relative h-full flex-1 overflow-hidden"
         :class="{ 'cursor-grabbing': lyricsDragging, 'cursor-grab': !lyricsDragging }"
       >

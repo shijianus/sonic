@@ -189,6 +189,10 @@ export default {
     hotSearches: 'Hot Searches',
     removeHistory: 'Remove search history: {keyword}',
     foundResults: 'Found {count} results',
+    loadFailed: 'Search is temporarily unavailable',
+    loadFailedNetwork: 'Network error. Check your connection and retry.',
+    loadFailedRateLimited: 'Too many requests. Please wait a moment and retry.',
+    loadFailedUpstream: 'The music service returned an error. Please retry later.',
   },
   charts: {
     types: { all: 'All', mandarin: 'Mandarin', west: 'Western', japan: 'Japan', korea: 'Korea' },
@@ -420,6 +424,7 @@ export default {
       network: 'Network error. Check your connection and try again.',
       source: 'This audio source is unavailable. Try another track.',
       copyright: 'This track is unavailable due to copyright restrictions.',
+      rateLimited: 'The music service is busy (rate limited). Please retry in a moment.',
     },
     play: 'Play',
     pause: 'Pause',

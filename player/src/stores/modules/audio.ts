@@ -69,6 +69,13 @@ const restoredBlobUrls = new Set<string>()
 let playbackGeneration = 0
 /** 同一首歌曲的播放地址请求共享结果，避免切歌预加载重复请求 */
 const pendingUrlRequests = new Map<string, Promise<string>>()
+/** 媒体错误监听器最近一次上报的歌曲与时间，避免 play() 拒绝后重复上报、互相覆盖 */
+let lastMediaErrorReport: { songId: string | number | null; at: number } | null = null
+
+const mediaErrorAlreadyReported = (songId: string | number | null): boolean =>
+  !!lastMediaErrorReport &&
+  String(lastMediaErrorReport.songId) === String(songId) &&
+  Date.now() - lastMediaErrorReport.at < 2000
 
 /** 获取 Audio 单例（懒初始化） */
 const getAudioSingleton = (): HTMLAudioElement => {
@@ -431,6 +438,8 @@ export const useAudioStore = defineStore('audio', {
 
       // 错误处理（区分“本地引擎降级导致的流不可用 503”与“单曲版权/普通播放失败”）
       audio.addEventListener('error', async (e: any) => {
+        // 切歌时浏览器会中断上一音源加载并上报 abort，不代表当前歌曲失败
+        if (audio.error?.code === 1 /* MEDIA_ERR_ABORTED */) return
         this.audio.isLoading = false
         this.audio.isPlaying = false
         if (switchingQuality) return
@@ -438,6 +447,9 @@ export const useAudioStore = defineStore('audio', {
 
         const failedSrc = audio.currentSrc || audio.src || ''
         const failedSongId = this.audio.currentSong?.id ?? null
+        // 诊断请求本身失败（连接被断开/DNS/超时）时按网络错误归类，
+        // 避免把“网络中断”误报成“版权受限”。
+        let diagnosticNetworkFailure = false
         if (failedSrc && failedSrc.includes('/api/music/stream')) {
           try {
             const diagRes = await fetch(failedSrc, {
@@ -455,19 +467,38 @@ export const useAudioStore = defineStore('audio', {
               if (diagRes.status === 503 || errBody?.error?.code === 'STREAM_UNAVAILABLE_DEGRADED') {
                 this.audio.error = '服务降级运行：本地引擎离线，边缘节点暂无法获取该曲音频流'
                 markStreamFailure('stream-degraded-fail', this.audio.error)
+                lastMediaErrorReport = { songId: failedSongId, at: Date.now() }
                 this._reportPlaybackError(e, this.audio.error)
                 return
               }
             } else if (diagRes.status === 404) {
               this.audio.error = '当前曲目暂无可用音源或受版权限制'
               markStreamFailure('track-fail', this.audio.error)
+              lastMediaErrorReport = { songId: failedSongId, at: Date.now() }
               this._reportPlaybackError(e, this.audio.error)
               return
+            } else if (diagRes.status === 429) {
+              const message = i18n.global.t('player.playbackError.rateLimited')
+              this.audio.error = message
+              lastMediaErrorReport = { songId: failedSongId, at: Date.now() }
+              this._reportPlaybackError(e, message)
+              return
+            } else if (diagRes.status === 403) {
+              const message = i18n.global.t('player.playbackError.copyright')
+              this.audio.error = message
+              lastMediaErrorReport = { songId: failedSongId, at: Date.now() }
+              this._reportPlaybackError(e, message)
+              return
             }
-          } catch {}
+          } catch {
+            diagnosticNetworkFailure = true
+          }
         }
 
-        this._reportPlaybackError(audio.error || e)
+        lastMediaErrorReport = { songId: failedSongId, at: Date.now() }
+        this._reportPlaybackError(
+          diagnosticNetworkFailure ? new Error('network fetch failed') : audio.error || e
+        )
 
         // 触发一次刷新播放地址并重试，10秒内同一歌曲仅重试一次
         const now = Date.now()
@@ -632,8 +663,11 @@ export const useAudioStore = defineStore('audio', {
         // 添加到播放历史
         this.addToHistory(this.audio.currentSong)
       } catch (error: any) {
+        // 过期请求（用户已切歌/暂停/停止）的失败不得覆盖新播放状态或弹出错误
+        if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
         this.audio.isPlaying = false
-        this._reportPlaybackError(error)
+        // 媒体错误监听器若已给出更准确的诊断（如网络中断），不重复弹出泛化错误
+        if (!mediaErrorAlreadyReported(targetSongId)) this._reportPlaybackError(error)
         console.error('Play error:', error)
         // 播放失败时也尝试刷新 URL 后重试
         const id = this.audio.currentSong?.id ?? null
@@ -666,8 +700,10 @@ export const useAudioStore = defineStore('audio', {
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
         this.audio.error = null
       } catch (e) {
+        // 已切歌/暂停导致的取消失败不提示，由新播放代次负责状态
+        if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
         console.error('Refresh url failed:', e)
-        this._reportPlaybackError(e as Error)
+        if (!mediaErrorAlreadyReported(targetSongId)) this._reportPlaybackError(e as Error)
       } finally {
         if (generation === playbackGeneration) this.audio.isLoading = false
       }
@@ -798,7 +834,14 @@ export const useAudioStore = defineStore('audio', {
 
     // 暂停播放
     pause() {
-      if (this.audio.audio && this.audio.isPlaying) {
+      if (!this.audio.audio) return
+      // 用户在异步取流/起播期间暂停时，必须让在途的 playSong/refreshAndReplay 失效，
+      // 否则迟到的 audio.play() 会在用户已暂停后重新起播。
+      if (this.audio.isPlaying || this.audio.isLoading) {
+        playbackGeneration += 1
+        this.audio.isLoading = false
+      }
+      if (this.audio.isPlaying) {
         this.audio.audio.pause()
       }
     },
@@ -806,7 +849,9 @@ export const useAudioStore = defineStore('audio', {
     // 继续播放
     resume() {
       if (this.audio.audio) {
-        this.audio.audio.play()
+        void this.audio.audio.play().catch(() => {
+          // 浏览器自动播放策略或空音源导致的拒绝由 error/pause 事件与 UI 状态兜底，避免未处理 Promise 拒绝
+        })
       }
     },
 
@@ -815,7 +860,8 @@ export const useAudioStore = defineStore('audio', {
       this.initAudio()
       if (!this.audio.audio) return
 
-      if (this.audio.isPlaying) {
+      // 加载中再次点击视为取消本次起播，避免用户点了暂停却仍在后台起播
+      if (this.audio.isPlaying || this.audio.isLoading) {
         this.pause()
       } else {
         if (!this.audio.currentSong && this.audio.playlist.length > 0) {
@@ -1390,6 +1436,9 @@ export const useAudioStore = defineStore('audio', {
 
     // 停止播放
     stop() {
+      // 停止同样需要让在途的异步起播失效，避免取流完成后自动恢复播放
+      playbackGeneration += 1
+      this.audio.isLoading = false
       if (this.audio.audio) {
         this.audio.audio.pause()
         this.audio.audio.currentTime = 0

@@ -189,6 +189,10 @@ export default {
     hotSearches: '人気の検索',
     removeHistory: '検索履歴を削除：{keyword}',
     foundResults: '{count} 件見つかりました',
+    loadFailed: '検索サービスは一時的に利用できません',
+    loadFailedNetwork: 'ネットワークエラーです。接続を確認して再試行してください。',
+    loadFailedRateLimited: 'リクエストが多すぎます。しばらく待ってから再試行してください。',
+    loadFailedUpstream: '音楽サービスでエラーが発生しました。後でもう一度お試しください。',
   },
   charts: {
     types: { all: '全部', mandarin: '華語', west: '洋楽', japan: '日本', korea: '韓国' },
@@ -422,9 +426,10 @@ export default {
     trialEnded: 'この楽曲は試聴クリップのため、再生が終了しました',
     switchedToFull: '{source} のフル音源に自動切り替えました',
     playbackError: {
-      network: 'ネットワークに接続できません。通信状況を確認して再試行してください。',
-      source: '音源が利用できません。別の曲をお試しください。',
+      network: 'ネットワークエラーです。接続を確認して再試行してください。',
+      source: 'この音源は一時的に利用できません。別の曲をお試しください。',
       copyright: 'この曲は著作権の制限により再生できません。',
+      rateLimited: '音楽サービスが混み合っています（レート制限）。しばらくしてから再試行してください。',
     },
     play: '再生',
     pause: '一時停止',

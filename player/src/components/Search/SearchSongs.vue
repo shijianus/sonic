@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { useI18n } from 'vue-i18n'
 import { cloudSearch } from '@/api'
 import {
   fetchSmartSearch,
@@ -28,9 +29,11 @@ interface SongsState {
   suggestions: SmartSuggestionItem[]
   fallbackUsed: boolean
   isLoading: boolean
+  errorKind: '' | 'network' | 'rateLimited' | 'upstream'
 }
 
 const router = useRouter()
+const { t } = useI18n()
 const recommendStore = useRecommendStore()
 const state = reactive<SongsState>({
   results: [],
@@ -38,8 +41,35 @@ const state = reactive<SongsState>({
   suggestions: [],
   fallbackUsed: false,
   isLoading: false,
+  errorKind: '',
 })
-const { results, fallbackTracks, suggestions, fallbackUsed, isLoading } = toRefs(state)
+const { results, fallbackTracks, suggestions, fallbackUsed, isLoading, errorKind } = toRefs(state)
+
+/** 区分“真的没有结果”与“上游失败”，避免把 403/429/断网伪装成空搜索 */
+const classifySearchError = (error: unknown): SongsState['errorKind'] => {
+  const err = error as any
+  const status = Number(err?.response?.status ?? err?.status ?? 0)
+  if (status === 429) return 'rateLimited'
+  if (status === 403 || status >= 500) return 'upstream'
+  const msg = String(err?.message || '')
+  const httpMatch = msg.match(/Sonic HTTP (\d{3})/)
+  if (httpMatch) return Number(httpMatch[1]) === 429 ? 'rateLimited' : 'upstream'
+  if (err?.name === 'TypeError' || /failed to fetch|network|offline|timeout/i.test(msg)) return 'network'
+  return 'upstream'
+}
+
+const errorMessage = computed(() => {
+  switch (state.errorKind) {
+    case 'network':
+      return t('search.loadFailedNetwork')
+    case 'rateLimited':
+      return t('search.loadFailedRateLimited')
+    case 'upstream':
+      return t('search.loadFailedUpstream')
+    default:
+      return ''
+  }
+})
 
 const { setPlaylist, play } = useAudio()
 let requestController: AbortController | null = null
@@ -94,6 +124,7 @@ const fetchSongs = async () => {
   const controller = new AbortController()
   requestController = controller
   const term = props.keywords?.trim()
+  state.errorKind = ''
   if (!term) {
     state.results = []
     state.fallbackTracks = []
@@ -103,6 +134,7 @@ const fetchSongs = async () => {
     return
   }
   state.isLoading = true
+  let lastError: unknown = null
   const page = Math.floor((props.offset ?? 0) / (props.limit ?? 40)) + 1
   const count = props.limit ?? 40
 
@@ -146,6 +178,7 @@ const fetchSongs = async () => {
       }
     } catch (smartErr) {
       if (controller.signal.aborted || generation !== requestGeneration) return
+      lastError = smartErr
       console.warn('[Sonic Search] Smart search fallback to nexus:', smartErr)
     }
 
@@ -186,6 +219,7 @@ const fetchSongs = async () => {
       }
     } catch (err) {
       if (controller.signal.aborted || generation !== requestGeneration) return
+      lastError = err
       console.warn('[Sonic Search] Nexus gateway warning:', err)
     }
 
@@ -209,10 +243,12 @@ const fetchSongs = async () => {
       }
     } catch (err) {
       if (controller.signal.aborted || generation !== requestGeneration) return
+      lastError = err
       console.warn('[Sonic Search] CloudSearch fallback warning:', err)
     }
 
     state.results = []
+    if (lastError) state.errorKind = classifySearchError(lastError)
     emit('loaded', 0)
     emit('total', 0)
   } finally {
@@ -251,8 +287,26 @@ defineExpose({
       </button>
     </div>
 
+    <!-- 上游失败（403/429/断网/5xx）与真实空结果的区分反馈 -->
+    <template v-if="!isLoading && errorKind && results.length === 0 && fallbackTracks.length === 0">
+      <div
+        data-testid="search-error"
+        role="alert"
+        class="glass-card border-glass mx-1 mt-2 flex shrink-0 flex-col items-start gap-3 rounded-xl border px-4 py-4"
+      >
+        <div class="text-primary flex items-center gap-2 text-sm font-semibold">
+          <span class="icon-[mdi--cloud-alert] h-5 w-5 text-amber-400" />
+          <span>{{ $t('search.loadFailed') }}</span>
+        </div>
+        <p class="text-primary/60 text-xs">{{ errorMessage }}</p>
+        <Button size="sm" variant="soft" data-testid="search-retry" @click="fetchSongs">
+          {{ $t('common.retry') }}
+        </Button>
+      </div>
+    </template>
+
     <!-- 零结果时的智能可播放兜底面板 -->
-    <template v-if="!isLoading && results.length === 0 && fallbackTracks.length > 0">
+    <template v-else-if="!isLoading && results.length === 0 && fallbackTracks.length > 0">
       <div class="glass-card border-glass mb-3 shrink-0 rounded-xl border px-4 py-3">
         <div class="text-primary flex items-center gap-2 text-sm font-semibold">
           <span class="icon-[mdi--compass-rose] h-4 w-4 text-sky-400" />
@@ -267,7 +321,7 @@ defineExpose({
         :loading="false"
         :showHeader="true"
         :showControls="false"
-        :emptyMessage="$t('components.songList.empty')"
+        :emptyMessage="$t('search.empty')"
         @play="onSongPlayed"
       />
     </template>
@@ -278,7 +332,7 @@ defineExpose({
       :loading="isLoading"
       :showHeader="true"
       :showControls="false"
-      :emptyMessage="$t('components.songList.empty')"
+      :emptyMessage="$t('search.empty')"
       @play="onSongPlayed"
     />
   </div>

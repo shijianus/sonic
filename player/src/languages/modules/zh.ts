@@ -185,6 +185,10 @@ export default {
     hotSearches: '热门搜索',
     removeHistory: '删除搜索历史：{keyword}',
     foundResults: '共找到 {count} 条结果',
+    loadFailed: '搜索服务暂时不可用',
+    loadFailedNetwork: '网络异常，请检查网络后重试。',
+    loadFailedRateLimited: '请求过于频繁，请稍后再试。',
+    loadFailedUpstream: '上游音乐服务返回错误，请稍后重试。',
   },
   charts: {
     types: { all: '全部', mandarin: '华语', west: '欧美', japan: '日本', korea: '韩国' },
@@ -410,6 +414,7 @@ export default {
       network: '网络连接异常，请检查网络后重试',
       source: '音源不可用，换一首试试',
       copyright: '该歌曲受版权限制，暂时无法播放',
+      rateLimited: '音乐服务繁忙（请求过于频繁），请稍后重试',
     },
     play: '播放',
     pause: '暂停',

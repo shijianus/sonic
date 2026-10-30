@@ -21,7 +21,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:fix": "eslint \"src/**/*.{js,mjs,ts,vue}\" \"scripts/**/*.{js,mjs}\" --fix",
-    "typecheck": "vue-tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit",
+    "e2e": "playwright test",
+    "e2e:install": "playwright install chromium"
   },
   "dependencies": {
     "@vueuse/core": "^13.9.0",
@@ -46,6 +48,7 @@
     "@iconify-json/ic": "^1.2.4",
     "@iconify/json": "^2.2.398",
     "@iconify/tailwind4": "^1.0.6",
+    "@playwright/test": "1.56.1",
     "@tailwindcss/postcss": "^4.1.15",
     "@types/node": "^24.9.1",
     "@types/nprogress": "^0.2.3",

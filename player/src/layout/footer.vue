@@ -666,7 +666,7 @@ const emit = defineEmits(['show'])
         </div>
         <div id="footer-song-info" class="footer-song-info flex min-w-0 flex-col justify-center gap-0.5">
           <div class="flex items-center gap-1.5 min-w-0">
-            <p :title="currentSong?.name" class="text-primary truncate text-sm font-medium">
+            <p data-testid="now-playing-title" :title="currentSong?.name" class="text-primary truncate text-sm font-medium">
               {{ currentSong ? currentSong.name : t('player.selectSongToStart') }}
             </p>
             <span
@@ -705,6 +705,7 @@ const emit = defineEmits(['show'])
           variant="text"
           size="none"
           class="flex h-11 w-11 items-center justify-center"
+          data-testid="player-previous"
           :disabled="!hasQueue"
           :aria-disabled="!hasQueue"
           :aria-label="t('player.previous')"
@@ -718,17 +719,21 @@ const emit = defineEmits(['show'])
           size="icon-lg"
           rounded="full"
           class="play-btn-glow"
+          data-testid="player-toggle"
           :disabled="!hasQueue"
           :aria-disabled="!hasQueue"
           @click="togglePlay"
-          :title="isPlaying ? t('player.pause') : t('player.play')"
-          :aria-label="isPlaying ? t('player.pause') : t('player.play')"
-          :loading="isLoading"
+          :title="isLoading ? t('common.cancel') : isPlaying ? t('player.pause') : t('player.play')"
+          :aria-label="isLoading ? t('common.cancel') : isPlaying ? t('player.pause') : t('player.play')"
           :pulse="true"
           :press3d="true"
         >
           <span
-            v-if="!isLoading"
+            v-if="isLoading"
+            class="icon-[mdi--loading] text-primary h-6 w-6 animate-spin"
+          ></span>
+          <span
+            v-else
             :class="isPlaying ? 'icon-[mdi--pause]' : 'icon-[mdi--play]'"
             class="text-primary h-6 w-6"
           ></span>
@@ -737,6 +742,7 @@ const emit = defineEmits(['show'])
           variant="text"
           size="none"
           class="flex h-11 w-11 items-center justify-center"
+          data-testid="player-next"
           :disabled="!hasQueue"
           :aria-disabled="!hasQueue"
           :aria-label="t('player.next')"

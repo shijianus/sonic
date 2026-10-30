@@ -311,6 +311,7 @@ const getQualityBadgeInfo = (song: Song) => {
         <div
           v-for="(song, index) in songs"
           :key="song.id || index"
+          :data-testid="`song-row-${song.id ?? index}`"
           class="song-item group relative flex cursor-pointer items-center rounded-xl p-2 border transition-colors duration-150 overflow-hidden"
           :class="[
             isCurrent(song)

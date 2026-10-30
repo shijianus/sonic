@@ -260,6 +260,8 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
               v-model="searchQuery"
               @keyup.enter="handleSearch"
               type="text"
+              data-testid="nav-search-input"
+              :aria-label="$t('common.search.label')"
               :placeholder="$t('common.search.placeholder')"
               class="w-full bg-transparent text-[11px] font-medium outline-none placeholder:text-primary/35"
             />

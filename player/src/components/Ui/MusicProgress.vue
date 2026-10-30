@@ -185,6 +185,7 @@ const previewPositionPercent = computed(() => {
   <div
     ref="progressBarRef"
     role="slider"
+    data-testid="player-progress"
     tabindex="0"
     aria-orientation="horizontal"
     :aria-label="t('player.progress')"
