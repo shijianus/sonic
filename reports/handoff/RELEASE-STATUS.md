@@ -3,9 +3,11 @@
 - 更新时间：2026-10-30 08:18 +0800 (UTC+8)
 - 目标发布分支：`rc/sonic-20261031`
 - RC 基线 SHA：`1d45e4cb38f6346f9a964d31fdba421c01d5e28b`
-- Windows 工作分支：`work/zcode-20261031` @ `500e748`（代码/测试）
+- Windows 工作分支：`work/zcode-20261031` @ `0a1b0e6`
 - Linux 工作分支：`work/agy-20261031` — **不存在**；`feat/linux-backend` 已全部在 RC
-- 合并到 RC 的 SHA：**PENDING（本轮稍后更新）**
+- 合并到 RC 的 SHA：`0a1b0e6b1dc8dbe0c380975f417cc4bfb6f4a5ca`
+- 最终 CI：https://github.com/shijianus/sonic/actions/runs/40979982255 — **success**
+  （quality / Docker smoke / Browser E2E 全部通过，24 条 E2E）
 
 ## 1. 当前结论
 
@@ -29,7 +31,8 @@
 - 前端播放/搜索/歌词竞态修复：`3b0eb4e`
 - 浏览器 E2E 基础设施与 24 条用例：`player/e2e/**`，本地 24/24 PASS
 - CI 覆盖 `rc/**`、`work/**` 并新增 Browser E2E：`5f97383`
-- 远端 CI（`5f97383`）：https://github.com/shijianus/sonic/actions/runs/40977983806 — **success**
+- 远端 CI（`e74f376`）：https://github.com/shijianus/sonic/actions/runs/40978908684 — **success**
+- 远端 CI（最终 RC `0a1b0e6`）：https://github.com/shijianus/sonic/actions/runs/40979982255 — **success**
   - Typecheck, lint, tests and build：success
   - Docker build and runtime smoke test：success
   - Browser E2E（mocked gateway, real media element）：success
@@ -62,7 +65,11 @@
 - Staging URL：**无**
 - Cloudflare Pages deployment id：**无**
 - Docker image digest：**无**（本轮未构建/推送镜像；CI 仅本地构建）
-- 说明：本环境没有部署凭据，且未获得生产/预览环境变更授权，因此未执行任何部署。
+- 说明：环境中存在 `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`，但**主动未部署**：
+  1) 内测环境尚未配置访问控制（Access/Basic Auth/IP 白名单）；
+  2) P0-07 音源/歌词/封面授权未确认，公开 Preview 可能构成未授权分发；
+  3) 真实流代理/引擎未在 Staging 验证，前端单独部署无法形成可验收闭环。
+  在负责人提供书面授权并完成访问控制与授权源隔离前，不执行任何对外部署。
 
 ## 6. 下一步（最短修复路径）
 
@@ -70,3 +77,12 @@
 2. agy：健康端点返回 release SHA/version；接入 5xx/P95/健康/存储告警；完成回滚演练。
 3. Windows：在 Staging 复跑 `player/e2e` 同款用例（真实网络）+ 真机/跨浏览器人工验收。
 4. 全部通过后重新评估 GO；在此之前保持 NO-GO。
+
+---
+
+## 7. 文档提交说明
+
+本次状态更新提交仅修改 `reports/**`，不改变应用代码。代码与合并 SHA 仍为
+`0a1b0e6b1dc8dbe0c380975f417cc4bfb6f4a5ca`，其 CI（quality / Docker / Browser E2E）
+已 success（run 40979982255）。文档提交后的分支 HEAD 最新 CI 见：
+https://github.com/shijianus/sonic/actions?query=branch%3Arc%2Fsonic-20261031

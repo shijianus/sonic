@@ -3,8 +3,8 @@
 - 更新时间：2026-10-30 08:17 +0800 (UTC+8)
 - 工作分支：`work/zcode-20261031`
 - 基线：`rc/sonic-20261031`，base SHA `1d45e4cb38f6346f9a964d31fdba421c01d5e28b`
-- 本轮 HEAD：`500e748`（代码/测试）；文档更新提交在其后
-- 已合并到 RC 的代码 SHA：`e74f376`（CI run 40978908684 success）
+- 本轮 HEAD：`0a1b0e6`（已合并到 RC）
+- 最终 CI：https://github.com/shijianus/sonic/actions/runs/40979982255 — success
 
 ## 1. 本轮完成
 
