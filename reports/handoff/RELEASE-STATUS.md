@@ -3,7 +3,7 @@
 - 更新时间：2026-10-30 08:18 +0800 (UTC+8)
 - 目标发布分支：`rc/sonic-20261031`
 - RC 基线 SHA：`1d45e4cb38f6346f9a964d31fdba421c01d5e28b`
-- Windows 工作分支：`work/zcode-20261031` @ `5f97383`
+- Windows 工作分支：`work/zcode-20261031` @ `500e748`（代码/测试）
 - Linux 工作分支：`work/agy-20261031` — **不存在**；`feat/linux-backend` 已全部在 RC
 - 合并到 RC 的 SHA：**PENDING（本轮稍后更新）**
 
@@ -27,7 +27,7 @@
 
 - RC 基线、所有权与交接：`reports/handoff/BASELINE.md`（`ccf2469`）
 - 前端播放/搜索/歌词竞态修复：`3b0eb4e`
-- 浏览器 E2E 基础设施与 22 条用例：`player/e2e/**`，本地 22/22 PASS
+- 浏览器 E2E 基础设施与 24 条用例：`player/e2e/**`，本地 24/24 PASS
 - CI 覆盖 `rc/**`、`work/**` 并新增 Browser E2E：`5f97383`
 - 远端 CI（`5f97383`）：https://github.com/shijianus/sonic/actions/runs/40977983806 — **success**
   - Typecheck, lint, tests and build：success

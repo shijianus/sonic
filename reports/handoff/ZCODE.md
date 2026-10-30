@@ -3,7 +3,8 @@
 - 更新时间：2026-10-30 08:17 +0800 (UTC+8)
 - 工作分支：`work/zcode-20261031`
 - 基线：`rc/sonic-20261031`，base SHA `1d45e4cb38f6346f9a964d31fdba421c01d5e28b`
-- 本轮 HEAD：`5f97383a12a7e7455d70ef6d36c1163c8a91ab8e`
+- 本轮 HEAD：`500e748`（代码/测试）；文档更新提交在其后
+- 已合并到 RC 的代码 SHA：`e74f376`（CI run 40978908684 success）
 
 ## 1. 本轮完成
 
@@ -13,7 +14,7 @@
 | 播放竞态修复（暂停/停止/切歌） | 完成 | commit `3b0eb4e`，`player/tests/playbackRace.test.ts` |
 | 搜索异常态与 403/429/断网反馈 | 完成 | commit `3b0eb4e`，`SearchSongs.vue` + i18n |
 | 歌词过期回调保护 | 完成 | commit `3b0eb4e`，`PlayerDrawer.vue`、`PlayerDrawerMobile.vue` |
-| 浏览器 E2E（桌面 18 + 移动 4） | 完成 | commit `3b0eb4e`，`player/e2e/**` |
+| 浏览器 E2E（桌面 20 + 移动 4） | 完成 | commit `3b0eb4e`、`500e748`，`player/e2e/**` |
 | CI 覆盖 rc/work 分支 + E2E 作业 | 完成 | commit `5f97383`，`.github/workflows/ci.yml` |
 | agy `feat/linux-backend` 审查 | 完成（无需合并） | 两个提交均为 patch-equivalent，见 §4 |
 
@@ -39,7 +40,7 @@
 | `npm run lint` | PASS（theme 基线 430 项为既有） | `evidence/lint-20261030.log` |
 | `pnpm --dir player test` | PASS：8 文件 / 38 用例 | `evidence/player-unit-20261030.log` |
 | `npm run test` | PASS：gateway/auth/cover/engine + 8 文件 / 123 用例 | `evidence/root-tests-20261030.log` |
-| `E2E_CHANNEL=chrome pnpm exec playwright test` | PASS：22 用例（18 桌面 + 4 移动） | `evidence/browser-e2e-20261030.log` |
+| `E2E_CHANNEL=chrome pnpm exec playwright test` | PASS：24 用例（20 桌面 + 4 移动） | `evidence/browser-e2e-20261030.log` |
 | `npm run build` | PASS（player/dist + dist） | 见 CI quality job 重新构建 |
 
 环境：Windows 11 10.0.26200、Node v24.14.0、npm 11.9.0、pnpm 10.34.5、系统 Chrome（E2E）。
@@ -64,6 +65,8 @@
 - 取流中暂停取消、旧慢请求晚到不覆盖新歌；
 - 播放 403/429/连接中断的错误反馈；
 - 搜索 429/403/断网/异常 JSON/空结果；
+- 快速改搜索词时旧慢请求不覆盖新结果；
+- 本地收藏：喜欢 → 收藏页可见 → 刷新后保持；
 - 移动端（Pixel 7）搜索、播放、暂停、可访问名称、无横向溢出；
 - 基础可访问性：控件可读名称、进度条 ARIA、键盘搜索。
 

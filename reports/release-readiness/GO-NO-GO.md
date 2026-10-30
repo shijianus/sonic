@@ -102,13 +102,13 @@
   - quality（typecheck/lint/tests/build）：success
   - Docker build + runtime smoke：success
   - Browser E2E（新增）：success
-- 本地：typecheck/lint PASS；player 38 tests PASS；root 123 tests PASS；E2E 22 PASS。
+- 本地：typecheck/lint PASS；player 38 tests PASS；root 123 tests PASS；E2E 24 PASS。
 
 ## 新增闭环
 
 | ID | 旧状态 | 新状态 | 证据 |
 |---|---|---|---|
-| SONIC-P1-01 搜索/切歌竞态 | PARTIAL | **CLOSED（Mock 浏览器层）** | `player/e2e/specs/resilience.spec.ts`、`core.spec.ts` |
+| SONIC-P1-01 搜索/切歌竞态 | PARTIAL | **CLOSED（Mock 浏览器层）** | `player/e2e/specs/resilience.spec.ts`、`core.spec.ts`（含快速改搜索词） |
 | SONIC-P1-02 异常降级 | PARTIAL | **CLOSED（Mock 浏览器层）** | 403/429/断网/异常 JSON/空结果用例 |
 | SONIC-P1-05 无障碍 | NOT RUN | **PARTIAL（自动化）** | `a11y.spec.ts`、移动端可访问名称 |
 
