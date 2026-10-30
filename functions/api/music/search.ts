@@ -19,7 +19,13 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   const url = new URL(request.url);
-  const query = (url.searchParams.get('q') || url.searchParams.get('keyword') || url.searchParams.get('name') || '')
+  const query = (
+    url.searchParams.get('q') ||
+    url.searchParams.get('s') ||
+    url.searchParams.get('keyword') ||
+    url.searchParams.get('name') ||
+    ''
+  )
     .trim()
     .slice(0, 256);
   const source = url.searchParams.get('source') || 'netease';

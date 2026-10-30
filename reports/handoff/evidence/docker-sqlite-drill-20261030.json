@@ -1,0 +1,56 @@
+{
+  "timestampUtc": "2026-10-30T06:36:26.987Z",
+  "rcImage": "sonic-engine:rc-4fb8e79",
+  "rcImageDigest": "sha256:4ad3a85bf064c1cc8891f2c6136eb47511408d4712d3129f8f36e1dbe328a600",
+  "rcCommitExpected": "4fb8e7917b2032db1b43ee638652ac00f2b6eafe",
+  "steps": {
+    "initialBootAndAuth": {
+      "status": "PASS",
+      "anonymousStatus": 401,
+      "forgedHostStatus": 401,
+      "authenticatedStatus": 200,
+      "releaseCommitReported": "4fb8e7917b2032db1b43ee638652ac00f2b6eafe",
+      "storageKind": "sqlite",
+      "storageHealthy": true,
+      "diskWritable": true,
+      "diskFreeMb": 57519.9,
+      "containerUser": "node",
+      "volumePermissions": "node:node 755"
+    },
+    "containerRestartPersistence": {
+      "status": "PASS",
+      "acceptedEvents": 3,
+      "eventCountAfterRestart": 3,
+      "trackCountAfterRestart": 4
+    },
+    "onlineBackupVacuumInto": {
+      "status": "PASS",
+      "sizeBytes": 94208,
+      "tracksBackedUp": 4,
+      "eventsBackedUp": 3
+    },
+    "containerRecreatePersistence": {
+      "status": "PASS",
+      "eventCountAfterRecreate": 3,
+      "trackCountAfterRecreate": 4
+    },
+    "nonDestructiveRestore": {
+      "status": "PASS",
+      "eventsBeforeRestore": 4,
+      "eventsAfterRestore": 3,
+      "preRestoreSafetySnapshotsCount": 1,
+      "restoredSizeBytes": 94208
+    },
+    "storageFailClosedAndWebhookAlert": {
+      "status": "PASS",
+      "lowDiskHealthStatus": 503,
+      "lowDiskReportedHealthy": false,
+      "lowDiskReason": "low_disk_space (57519.7MB < 999999999MB)",
+      "readOnlyVolumeStartupExitCode": 1,
+      "webhookAlertReceived": true,
+      "webhookAlertCode": "ENGINE_STORAGE_UNHEALTHY",
+      "webhookAlertSeverity": "critical"
+    }
+  },
+  "overall": "PASS"
+}

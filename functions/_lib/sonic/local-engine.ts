@@ -98,7 +98,7 @@ export interface LocalEngineCallResult<T> {
   error?: string;
 }
 
-const INSTANT_TRIP_HTTP_STATUSES = new Set([521, 522, 523, 524, 530]);
+const INSTANT_TRIP_HTTP_STATUSES = new Set([502, 521, 522, 523, 524, 530]);
 
 export async function callLocalEngineJson<T = any>(
   pathWithQuery: string,
@@ -376,7 +376,7 @@ export async function callLocalEngineStream(
     });
     const latencyMs = Date.now() - start;
 
-    if (INSTANT_TRIP_HTTP_STATUSES.has(resp.status) || resp.status === 503) {
+    if (resp.status >= 500 || INSTANT_TRIP_HTTP_STATUSES.has(resp.status)) {
       const errMsg = `Engine HTTP ${resp.status}`;
       c.consecutiveFailures += 1;
       c.lastError = errMsg;

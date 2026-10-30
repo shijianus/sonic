@@ -1,0 +1,182 @@
+{
+  "startedAtUtc": "2026-10-30T06:52:05.150Z",
+  "isolationGuarantees": {
+    "pagesProject": "sonic-staging",
+    "productionProjectTouched": false,
+    "tunnelName": "sonic-staging-engine-20261030",
+    "engineHostname": "engine-sonic-staging.epocanvas.tech",
+    "hostBindAddress": "127.0.0.1:18080"
+  },
+  "preDeployChecks": {
+    "rcCommitSha": "4fb8e7917b2032db1b43ee638652ac00f2b6eafe",
+    "baselineCommitSha": "20e399f846a7a306f5f28434d5809aa9fa4f5fb2",
+    "rcDockerDigest": "sha256:4ad3a85bf064c1cc8891f2c6136eb47511408d4712d3129f8f36e1dbe328a600",
+    "baselineDockerDigest": "sha256:4785f88d01684ea15fe2e349a39c9d10116b59610dd80b1c950d1ce75d55ffe7",
+    "cloudflareCredentialsVerified": true,
+    "stagingAccessControlConfigured": true,
+    "strictAllowlistPolicy": "SONIC_CONTENT_POLICY=strict-allowlist (SONIC_ALLOWED_SOURCES=synthetic)",
+    "oauthDisabledForStaging": true
+  },
+  "deployments": {
+    "stagingTunnel": {
+      "tunnelId": "65454bdb-f04a-41f4-8be6-9672fd434af9",
+      "tunnelName": "sonic-staging-engine-20261030",
+      "hostname": "engine-sonic-staging.epocanvas.tech",
+      "dnsRecordId": "0b4a0eb20da53e86cd42a461816473a0",
+      "status": "PASS"
+    },
+    "pages": {
+      "projectName": "sonic-staging",
+      "subdomain": "sonic-staging.pages.dev",
+      "stagingBaseUrl": "https://sonic-staging.pages.dev",
+      "baselineDeploymentA": {
+        "id": "e64dd74e-1091-4750-b6d8-43af4885e105",
+        "url": "https://e64dd74e.sonic-staging.pages.dev",
+        "commitHash": "20e399f846a7a306f5f28434d5809aa9fa4f5fb2"
+      },
+      "rcDeploymentB": {
+        "id": "48992d04-fd67-4d55-bff7-611489887585",
+        "url": "https://48992d04.sonic-staging.pages.dev",
+        "commitHash": "4fb8e7917b2032db1b43ee638652ac00f2b6eafe"
+      }
+    }
+  },
+  "verifications": {
+    "accessControlAndVersion": {
+      "status": "PASS",
+      "anonRootStatus": 401,
+      "anonApiStatus": 401,
+      "anonRobotsTag": "noindex, nofollow, noarchive",
+      "authedRootStatus": 200,
+      "authedRobotsTag": "noindex, nofollow, noarchive",
+      "xSonicReleaseHeader": "4fb8e7917b20",
+      "apiReleaseCommit": "4fb8e7917b2032db1b43ee638652ac00f2b6eafe",
+      "apiOauthEnabled": false,
+      "apiContentPolicy": "strict-allowlist"
+    },
+    "authorizedSearchOverTunnel": {
+      "status": "PASS",
+      "httpStatus": 200,
+      "trackCount": 1,
+      "matchedTrackIds": [
+        "syn-440hz"
+      ],
+      "attempts": [
+        {
+          "provider": "local-engine",
+          "via": "local-engine",
+          "source": "local-engine",
+          "ok": true,
+          "ms": 263
+        },
+        {
+          "provider": "local-synthetic",
+          "via": "local-engine",
+          "source": "local-engine",
+          "ok": true,
+          "ms": 0
+        }
+      ]
+    },
+    "realEdgeAudioRangeAndSeek": {
+      "status": "PASS",
+      "http200Status": 200,
+      "totalWavBytes": 192044,
+      "riffWaveHeaderValid": true,
+      "cacheControl200": "public, max-age=300",
+      "acceptRanges": "bytes",
+      "xSonicProvider": "local-synthetic",
+      "xSonicVia": "local-engine",
+      "http206Slices": [
+        {
+          "range": "bytes=0-4095",
+          "status": 206,
+          "contentRange": "bytes 0-4095/192044",
+          "contentLength": "4096",
+          "byteExactMatch": true
+        },
+        {
+          "range": "bytes=4096-16383",
+          "status": 206,
+          "contentRange": "bytes 4096-16383/192044",
+          "contentLength": "12288",
+          "byteExactMatch": true
+        },
+        {
+          "range": "bytes=132300-140000",
+          "status": 206,
+          "contentRange": "bytes 132300-140000/192044",
+          "contentLength": "7701",
+          "byteExactMatch": true
+        }
+      ],
+      "http416Status": 416,
+      "http416ContentRange": "bytes */192044",
+      "http416CacheControl": "no-store"
+    },
+    "policyAndSecurityGates": {
+      "status": "PASS",
+      "neteaseSearchStatus": 403,
+      "neteaseErrorCode": "SOURCE_DISABLED_BY_POLICY",
+      "qqStreamStatus": 403,
+      "qqErrorCode": "SOURCE_DISABLED_BY_POLICY",
+      "oauthLoginStatus": 403,
+      "oauthErrorCode": "OAUTH_DISABLED_BY_POLICY",
+      "ssrfMetadataStatus": 400
+    },
+    "faultScenariosAndEngineDegradation": {
+      "status": "PASS",
+      "fault403EdgeStatus": 403,
+      "fault429EdgeStatus": 429,
+      "fault500EdgeStatus": 502,
+      "engineStoppedDegradedStreamStatus": 206,
+      "engineStoppedDegradedHeader": "1",
+      "sqliteEventsAfterLiveRestart": 1
+    },
+    "observabilityAndAlerting": {
+      "status": "PASS",
+      "totalEngineRequestsObserved": 1,
+      "overallP95Ms": 33,
+      "errorRate5xx": 0,
+      "streamStats": {
+        "resolvedOk": 0,
+        "proxied200": 0,
+        "proxied206": 0,
+        "errors": {
+          "403": 0,
+          "404": 0,
+          "415": 0,
+          "416": 0,
+          "429": 0,
+          "5xx": 0,
+          "timeout": 0,
+          "degraded": 0
+        }
+      },
+      "webhookAlertsDeliveredCount": 1,
+      "webhookAlertCodes": [
+        "MANUAL_ALERT_SELF_CHECK"
+      ]
+    }
+  },
+  "rollbackDrill": {
+    "status": "PASS",
+    "preRollbackBackupOk": true,
+    "preRollbackBackupEvents": 1,
+    "pagesRolledBackToBaseline": true,
+    "baselineEngineSqliteEventsIntact": 1,
+    "rollbackRtoMs": 2406,
+    "pagesRecoveredToRc": true,
+    "finalActiveRcDeploymentId": "48992d04-fd67-4d55-bff7-611489887585",
+    "forwardRecoveryRtoMs": 1756,
+    "rpoTransactionsLost": 0,
+    "postRecoverySmoke": {
+      "anonGateStatus": 401,
+      "searchStatus": 200,
+      "range206StreamStatus": 206,
+      "viaHeader": "local-engine"
+    }
+  },
+  "completedAtUtc": "2026-10-30T06:54:29.048Z",
+  "overall": "PASS"
+}

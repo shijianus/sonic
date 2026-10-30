@@ -240,7 +240,8 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           normalizeSourceId(source) === 'synthetic')
       ) {
         const synId = id || 'syn-440hz';
-        if (cfg.enableLocalEngine) {
+        const isFaultId = /^syn-fault-/i.test(synId);
+        if (cfg.enableLocalEngine && !isFaultId) {
           const engineStream = await callLocalEngineStream(
             `/api/sonic/test-audio?id=${encodeURIComponent(synId)}`,
             env,
@@ -265,7 +266,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           request.headers.get('Range'),
           cfg.runtime === 'linux-engine' ? 'local-engine' : 'edge-degraded-synthetic',
         );
-        if (cfg.enableLocalEngine) {
+        if (cfg.enableLocalEngine && !isFaultId) {
           const h = new Headers(fallbackResp.headers);
           h.set('X-Sonic-Degraded', '1');
           return new Response(fallbackResp.body, { status: fallbackResp.status, headers: h });
