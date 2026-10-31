@@ -1,0 +1,226 @@
+{
+  "timestamp": "2026-10-31T04:12:05.140Z",
+  "targetCommit": "30b3602f52e9dc7e03f21f6f01b5eddd81491da3",
+  "stagingUrl": "https://sonic-staging.pages.dev",
+  "tests": {
+    "gate_anonymous_root_rejected_401": {
+      "pass": true,
+      "status": 401,
+      "robotsTag": "noindex, nofollow, noarchive",
+      "authHeader": "SonicStagingToken realm=\"sonic-staging\"",
+      "bodySnippet": "{\"brand\":\"Sonic\",\"error\":{\"code\":\"STAGING_ACCESS_REQUIRED\",\"message\":\"Staging environment is restricted to authorized be"
+    },
+    "gate_token_exchange_redirect_302": {
+      "pass": true,
+      "status": 302,
+      "location": "/",
+      "setCookie": "sonic_staging_access=(set)"
+    },
+    "gate_cookie_access_root_200": {
+      "pass": true,
+      "status": 200,
+      "isHtml": true,
+      "contentLength": 7676
+    },
+    "api_info_release_commit_matches": {
+      "pass": true,
+      "status": 200,
+      "releaseCommit": "30b3602f52e9dc7e03f21f6f01b5eddd81491da3",
+      "contentPolicy": "strict-allowlist",
+      "oauthEnabled": false
+    },
+    "engine_direct_no_key_401": {
+      "pass": true,
+      "status": 401
+    },
+    "engine_direct_wrong_key_401": {
+      "pass": true,
+      "status": 401
+    },
+    "engine_direct_valid_key_200": {
+      "pass": true,
+      "status": 200,
+      "ok": true,
+      "runtime": "linux-engine",
+      "releaseCommit": "30b3602f52e9dc7e03f21f6f01b5eddd81491da3",
+      "sqliteStorageHealthy": true
+    },
+    "staging_search_synthetic_track_200": {
+      "pass": true,
+      "status": 200,
+      "trackFound": "Sonic 基准测试音 A4 (440Hz)",
+      "trackId": "syn-440hz",
+      "attempts": [
+        {
+          "provider": "local-engine",
+          "via": "local-engine",
+          "source": "local-engine",
+          "ok": true,
+          "ms": 445
+        },
+        {
+          "provider": "local-synthetic",
+          "via": "local-engine",
+          "source": "local-engine",
+          "ok": true,
+          "ms": 2
+        }
+      ]
+    },
+    "staging_stream_full_200": {
+      "pass": true,
+      "status": 200,
+      "contentType": "audio/wav",
+      "acceptRanges": "bytes",
+      "contentLength": 192044,
+      "bytesReceived": 192044,
+      "isWavRiff": true
+    },
+    "staging_stream_range_0_1023_206": {
+      "pass": true,
+      "status": 206,
+      "contentRange": "bytes 0-1023/192044",
+      "contentLength": 1024,
+      "bytesReceived": 1024,
+      "exactBytesMatch": true
+    },
+    "staging_stream_range_mid_slice_206": {
+      "pass": true,
+      "status": 206,
+      "contentRange": "bytes 4096-16383/192044",
+      "contentLength": 12288,
+      "bytesReceived": 12288,
+      "exactBytesMatch": true
+    },
+    "staging_stream_out_of_range_416": {
+      "pass": true,
+      "status": 416,
+      "contentRange": "bytes */192044"
+    },
+    "policy_netease_search_blocked_403": {
+      "pass": true,
+      "status": 403,
+      "error": {
+        "code": "SOURCE_DISABLED_BY_POLICY",
+        "message": "Source 'netease' is disabled by server content policy"
+      }
+    },
+    "policy_qq_stream_blocked_403": {
+      "pass": true,
+      "status": 403
+    },
+    "policy_kugou_stream_blocked_403": {
+      "pass": true,
+      "status": 403
+    },
+    "policy_kuwo_stream_blocked_403": {
+      "pass": true,
+      "status": 403
+    },
+    "policy_unblock_stream_blocked_403": {
+      "pass": true,
+      "status": 403
+    },
+    "policy_gdstudio_stream_blocked_403": {
+      "pass": true,
+      "status": 403
+    },
+    "policy_lyriva_stream_blocked_403": {
+      "pass": true,
+      "status": 403
+    },
+    "policy_oauth_login_disabled_403": {
+      "pass": true,
+      "status": 403
+    },
+    "policy_ssrf_metadata_blocked_400": {
+      "pass": true,
+      "status": 400
+    },
+    "browser_invitation_token_stripped_from_url": {
+      "pass": true,
+      "initialUrl": "https://sonic-staging.pages.dev/?staging_token=stg_beta_pass_20261031_0123456789",
+      "finalUrl": "https://sonic-staging.pages.dev/"
+    },
+    "browser_invitation_cookie_stored": {
+      "pass": true,
+      "cookieName": "sonic_staging_access",
+      "cookiePath": "/",
+      "httpOnly": true
+    },
+    "browser_page_loaded_successfully": {
+      "pass": true,
+      "title": "首页 - epocanvas sonic",
+      "bodyTextLength": 2997
+    },
+    "browser_audio_play_pause_seek_resume": {
+      "pass": true,
+      "audioPlaybackResult": {
+        "ok": true,
+        "duration": 12,
+        "currentTime": 2.856724,
+        "logs": [
+          "playing at 0.00s",
+          "triggering pause at 0.26s",
+          "paused at 0.26s",
+          "seeking to 2.5s",
+          "seeked to 2.50s",
+          "resuming playback",
+          "playing at 2.50s"
+        ]
+      }
+    }
+  },
+  "passed": 25,
+  "failed": 0,
+  "rollbackMetadata": {
+    "current": {
+      "releaseSha": "30b3602f52e9dc7e03f21f6f01b5eddd81491da3",
+      "pagesDeploymentId": "941be968-4fec-41cf-b712-0cc6063d3ec0",
+      "pagesDeploymentUrl": "https://941be968.sonic-staging.pages.dev",
+      "pagesActiveUrl": "https://sonic-staging.pages.dev",
+      "dockerImageTag": "sonic-engine:rc-30b3602",
+      "dockerImageDigest": "sha256:8d73edd88854025105a60bddc9f162232e7b623b6c8e91650dcc658e664005eb",
+      "sqliteVolume": "sonic-staging-data",
+      "deployedAt": "2026-10-31T04:03:37Z"
+    },
+    "previous": {
+      "releaseSha": "4fb8e7917b2032db1b43ee638652ac00f2b6eafe",
+      "pagesDeploymentId": "48992d04-fd67-4d55-bff7-611489887585",
+      "pagesDeploymentUrl": "https://48992d04.sonic-staging.pages.dev",
+      "dockerImageTag": "sonic-engine:rc-4fb8e79",
+      "dockerImageDigest": "sha256:4ad3a85bf064c1cc8891f2c6136eb47511408d4712d3129f8f36e1dbe328a600",
+      "deployedAt": "2026-10-30T06:53:45Z"
+    },
+    "baseline": {
+      "releaseSha": "20e399f846a7a306f5f28434d5809aa9fa4f5fb2",
+      "pagesDeploymentId": "e64dd74e-1091-4750-b6d8-43af4885e105",
+      "pagesDeploymentUrl": "https://e64dd74e.sonic-staging.pages.dev",
+      "dockerImageTag": "sonic-engine:baseline-20e399f",
+      "dockerImageDigest": "sha256:4785f88d01684ea15fe2e349a39c9d10116b59610dd80b1c950d1ce75d55ffe7"
+    },
+    "sqliteBackupVerification": {
+      "evidenceFile": "reports/handoff/evidence/docker-sqlite-drill-20261031.json",
+      "backupSize": 94208,
+      "vacuumMethod": "VACUUM INTO online backup",
+      "persistenceVerified": true,
+      "atomicRestoreVerified": true,
+      "readOnlyFailClosedVerified": true,
+      "lowDiskAlertVerified": true
+    },
+    "rollbackSequence": [
+      "Step 1: Rollback Engine Layer - Run docker stop sonic-staging-engine && docker rm sonic-staging-engine, then start container with image tag sonic-engine:rc-4fb8e79 (digest sha256:4ad3a85bf064c1cc8891f2c6136eb47511408d4712d3129f8f36e1dbe328a600) mounting existing volume sonic-staging-data.",
+      "Step 2: Rollback Pages Layer - Roll back Pages project sonic-staging to deployment ID 48992d04-fd67-4d55-bff7-611489887585 via Cloudflare Pages API or wrangler pages deployment rollback.",
+      "Step 3: Verification - Check GET /api on sonic-staging.pages.dev for releaseCommit 4fb8e7917b2032db1b43ee638652ac00f2b6eafe, search nexus synthetic track, and verify 200/206 stream."
+    ],
+    "metrics": {
+      "testedRTOSeconds": {
+        "pagesRollbackSec": 12,
+        "dockerContainerSwapSec": 4,
+        "totalRTOSec": 16
+      },
+      "rpoSeconds": 0,
+      "rpoExplanation": "SQLite WAL on persistent Docker volume sonic-staging-data preserves transactions across container recreation; RPO = 0s."
+    }
+  }
+}
