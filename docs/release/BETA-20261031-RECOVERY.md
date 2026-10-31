@@ -74,8 +74,8 @@ secret 重名冲突，先后产生两个失败部署（静态站、门禁短时�
 
 | 层级 | 标识 | 资源 |
 |---|---|---|
-| **当前发布** | 本提交 SHA（见 git log） | Pages 部署（本次推送后重建）+ Engine `sonic-staging-engine:rc-<sha>` |
-| 上一稳定 | `404998c` | Pages `3ab48ecd-0c96-4a27-9bac-04ceea796222` + Engine `sha256:2d1a145a1a8720d667d8149dda09bf48b38e0893107bd47816430c93b851ea26` |
+| **当前发布** | `a0da6cf` | Pages 部署 `6e4d6f3c` + Engine `sonic-staging-engine:rc-a0da6cf`（三端 `X-Sonic-Release`/releaseCommit 一致） |
+| 上一稳定 | `404998c` | Pages `3ab48ecd-0c96-4a27-9bac-04ceea796222` + Engine `sonic-staging-engine:rc-404998c`（`sha256:2d1a145a…`） |
 | 断网前基线 | `30b3602` | Pages `941be968-4fec-41cf-b712-0cc6063d3ec0` + Engine `sonic-engine:rc-30b3602`（位于原 AGY 机，暂不可达） |
 
 - **部署机**：instabox 沙箱 `sonic`（`instabox-sonic`，4 vCPU/8G，/data 20G）。容器均 `--restart unless-stopped`。

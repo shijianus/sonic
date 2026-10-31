@@ -12,11 +12,11 @@
   },
   "redeployment": {
     "machine": "instabox-sonic (deployment-only; no code modified on machine)",
-    "deployedSha": "404998caf9d858bfd3a89d741ad2f04754f9ccf5",
-    "ciRun": { "id": 41185605071, "conclusion": "success" },
+    "deployedSha": "a0da6cf3f1ea60f1881fb569bffc1e4010b98cf6",
+    "shaConsistency": "Pages X-Sonic-Release == Pages /api releaseCommit == Engine health releaseCommit == a0da6cf3f1ea",
+    "ciRun": { "id": 41185605071, "conclusion": "success", "note": "run for 404998c; a0da6cf run recorded in GitHub Actions" },
     "engineImage": {
-      "tag": "sonic-staging-engine:rc-404998c",
-      "digest": "sha256:2d1a145a1a8720d667d8149dda09bf48b38e0893107bd47816430c93b851ea26",
+      "tag": "sonic-staging-engine:rc-a0da6cf",
       "container": "sonic-staging-engine",
       "port": "127.0.0.1:18080:8080",
       "volume": "/data/sonic-staging-data:/app/data",
@@ -31,7 +31,7 @@
     },
     "pages": {
       "project": "sonic-staging",
-      "deployment": "3ab48ecd-0c96-4a27-9bac-04ceea796222",
+      "deployment": "6e4d6f3c (final; 3ab48ecd carried 404998c)",
       "envVars": 21,
       "secretsRotated": ["SONIC_ENGINE_SECRET", "SONIC_SECRET", "SONIC_STAGING_ACCESS_TOKEN"],
       "oldPublicTokenRevoked": true
