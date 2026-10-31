@@ -218,7 +218,7 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
     >
       <div class="flex flex-col min-h-0 flex-1 w-full">
         <!-- 顶部：展开模式下的招牌 Logo + 品牌排版 + 前进后退导航按钮 -->
-        <div v-if="!sidebarCollapsed" class="flex items-center justify-between pb-2.5 border-b border-glass shrink-0 gap-2">
+        <div v-if="!sidebarCollapsed" class="flex items-center pb-2.5 border-b border-glass shrink-0 gap-2">
           <!-- 放大招牌 Logo 作为左侧交互招牌，承担收起侧边栏的交互 button -->
           <button
             type="button"
@@ -244,7 +244,7 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
           </button>
 
           <!-- 品牌名称：epocanvas 作为副标题在上方，Sonic 为绝对主标题在正中心，STUDIO 标志在 Sonic 同水平后上方 -->
-          <div class="flex flex-1 flex-col justify-center min-w-0 leading-tight">
+          <div class="flex flex-col justify-center min-w-0 leading-tight shrink-0">
             <span class="text-[9.5px] xl:text-[10.5px] font-bold tracking-[0.15em] text-primary/50 uppercase truncate select-none">
               {{ BRAND_PARENT }}
             </span>
@@ -261,7 +261,7 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
           </div>
 
           <!-- 前进 / 后退操作 button 直接放在标题logo右侧 -->
-          <div class="flex items-center gap-0.5 rounded-full bg-button-glass border border-glass p-0.5 shrink-0">
+          <div class="flex items-center gap-0.5 rounded-full bg-button-glass border border-glass p-0.5 shrink-0 -ml-0.5">
             <button
               @click="router.back()"
               :title="$t('common.back')"
