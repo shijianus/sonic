@@ -67,6 +67,24 @@ let switchingQuality = false
 const restoredBlobUrls = new Set<string>()
 /** 播放操作代次：新的切歌/重试会使旧的异步结果失效 */
 let playbackGeneration = 0
+/** 起播看门狗：上游返回响应头后挂起不发送音频时，媒体元素不会触发 error，需主动收敛错误态 */
+let startupWatchdog: ReturnType<typeof setTimeout> | null = null
+const STARTUP_WATCHDOG_MS = 15000
+
+const clearStartupWatchdog = () => {
+  if (startupWatchdog !== null) {
+    clearTimeout(startupWatchdog)
+    startupWatchdog = null
+  }
+}
+
+const armStartupWatchdog = (onTimeout: () => void) => {
+  clearStartupWatchdog()
+  startupWatchdog = setTimeout(() => {
+    startupWatchdog = null
+    onTimeout()
+  }, STARTUP_WATCHDOG_MS)
+}
 /** 同一首歌曲的播放地址请求共享结果，避免切歌预加载重复请求 */
 const pendingUrlRequests = new Map<string, Promise<string>>()
 /** 媒体错误监听器最近一次上报的歌曲与时间，避免 play() 拒绝后重复上报、互相覆盖 */
@@ -332,6 +350,7 @@ export const useAudioStore = defineStore('audio', {
         if (!this.audio._isWaiting) {
           this.audio.isPlaying = false
           this.audio.isPaused = true
+          clearStartupWatchdog()
         }
       })
 
@@ -339,6 +358,7 @@ export const useAudioStore = defineStore('audio', {
       audio.addEventListener('ended', () => {
         this.audio.isPlaying = false
         this.audio._isWaiting = false
+        clearStartupWatchdog()
         this.handleSongEnd()
       })
 
@@ -349,6 +369,7 @@ export const useAudioStore = defineStore('audio', {
 
       // 可以播放
       audio.addEventListener('canplay', () => {
+        clearStartupWatchdog()
         this.audio.isLoading = false
         this.audio.duration = audio.duration || 0
       })
@@ -361,6 +382,7 @@ export const useAudioStore = defineStore('audio', {
 
       // 实际开始播放（缓冲恢复后也会触发）
       audio.addEventListener('playing', () => {
+        clearStartupWatchdog()
         this.audio._isWaiting = false
         this.audio.isLoading = false
         this.audio.isPlaying = true
@@ -635,6 +657,7 @@ export const useAudioStore = defineStore('audio', {
       try {
         this.audio.error = null
         this.audio.isLoading = true
+        this._armStartupWatchdog(generation, targetSongId)
 
         // 若无 URL 则拉取（本地音乐除外）
         if (!this.audio.currentSong.url && !this.audio.currentSong.isLocal) {
@@ -657,6 +680,7 @@ export const useAudioStore = defineStore('audio', {
         }
         this._loadAudioSrc(this.audio.currentSong.url || '', isSwitchingSong)
         await this.audio.audio.play()
+        clearStartupWatchdog()
 
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
 
@@ -665,6 +689,7 @@ export const useAudioStore = defineStore('audio', {
       } catch (error: any) {
         // 过期请求（用户已切歌/暂停/停止）的失败不得覆盖新播放状态或弹出错误
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
+        clearStartupWatchdog()
         this.audio.isPlaying = false
         // 媒体错误监听器若已给出更准确的诊断（如网络中断），不重复弹出泛化错误
         if (!mediaErrorAlreadyReported(targetSongId)) this._reportPlaybackError(error)
@@ -697,11 +722,13 @@ export const useAudioStore = defineStore('audio', {
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId || !this.audio.currentSong.url) return
         this._loadAudioSrc(this.audio.currentSong!.url || '')
         await this.audio.audio!.play()
+        clearStartupWatchdog()
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
         this.audio.error = null
       } catch (e) {
         // 已切歌/暂停导致的取消失败不提示，由新播放代次负责状态
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
+        clearStartupWatchdog()
         console.error('Refresh url failed:', e)
         if (!mediaErrorAlreadyReported(targetSongId)) this._reportPlaybackError(e as Error)
       } finally {
@@ -829,7 +856,33 @@ export const useAudioStore = defineStore('audio', {
       if (force || (currentSrc !== resolved && this.audio.audio.getAttribute('src') !== url)) {
         this.audio.audio.src = url
         this.audio.audio.load()
+        if (!switchingQuality) {
+          this._armStartupWatchdog(playbackGeneration, this.audio.currentSong?.id ?? null)
+        }
       }
+    },
+
+    /**
+     * 起播看门狗：媒体元素收到响应头后若长期无数据，不会触发 error 或 canplay，
+     * 必须在有限时间内收敛为可重试的网络错误，避免页面无限加载。
+     */
+    _armStartupWatchdog(generation: number, songId: string | number | null) {
+      if (switchingQuality) return
+      armStartupWatchdog(() => {
+        if (generation !== playbackGeneration) return
+        if (this.audio.currentSong?.id !== songId) return
+        const audio = this.audio.audio
+        if (!audio || this.audio.error || this.audio.isPaused) return
+        if (!this.audio.isLoading || audio.readyState >= 3) return
+        this.audio.isLoading = false
+        this.audio.isPlaying = false
+        // 放弃本次起播：使在途 playSong 失效并停止媒体元素，避免迟到的数据自动起播。
+        playbackGeneration += 1
+        try {
+          audio.pause()
+        } catch {}
+        this._reportPlaybackError(new Error('playback startup timeout'))
+      })
     },
 
     // 暂停播放
@@ -1475,13 +1528,14 @@ export const useAudioStore = defineStore('audio', {
 
     /** 播放失败：写入 audio.error 并弹出全局 Toast（重试/下一首），同类错误节流 10 秒；messageOverride 用于网关降级等已探明的具体原因 */
     _reportPlaybackError(error?: MediaError | Error | null, messageOverride?: string) {
+      clearStartupWatchdog()
       const kind = classifyPlaybackError(error)
       const message = messageOverride || i18n.global.t(`player.playbackError.${kind}`)
       this.audio.error = message
       this.audio.isLoading = false
 
       const songId = this.audio.currentSong?.id ?? ''
-      const key = `${songId}:${kind}`
+      const key = `${songId}:${kind}:${message}`
       const now = Date.now()
       if (lastPlaybackToastId !== null && key === lastPlaybackToastKey && now - lastPlaybackToastAt < 10000) {
         return
@@ -1537,6 +1591,7 @@ export const useAudioStore = defineStore('audio', {
     // 销毁音频播放器
     destroy() {
       playbackGeneration += 1
+      clearStartupWatchdog()
       if (this.audio.audio) {
         this.audio.audio.pause()
         this.audio.audio.src = ''

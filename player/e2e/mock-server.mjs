@@ -53,6 +53,9 @@ const SONG_META = {
   9303: { name: 'Forbidden Track', artist: 'Tester G' },
   9304: { name: 'Rate Limited Track', artist: 'Tester H' },
   9305: { name: 'Network Drop Track', artist: 'Tester I' },
+  9306: { name: 'Hanging Stream Track', artist: 'Tester J' },
+  9307: { name: 'Missing Stream Track', artist: 'Tester K' },
+  9308: { name: 'Degraded Stream Track', artist: 'Tester L' },
 }
 
 const track = id => ({
@@ -76,6 +79,7 @@ const neteaseSong = id => ({
 const SEARCH_FIXTURES = {
   sonic: [9001, 9002, 9003, 9004],
   restricted: [9303, 9304, 9305],
+  errors: [9306, 9307, 9308],
 }
 
 const sleep = ms => new Promise(r => setTimeout(r, ms))
@@ -201,6 +205,24 @@ async function handleApi(req, res, url) {
     if (id === '9305') {
       res.destroy()
       return
+    }
+    // 9306：返回合法响应头后永不发送音频数据，模拟上游“挂起不响应”。
+    if (id === '9306') {
+      res.writeHead(200, {
+        'Content-Type': 'audio/wav',
+        'Content-Length': wav.length,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'no-store',
+      })
+      return
+    }
+    if (id === '9307') {
+      return sendJson(res, { error: { code: 'TRACK_NOT_FOUND' } }, 404)
+    }
+    if (id === '9308') {
+      return sendJson(res, { error: { code: 'STREAM_UNAVAILABLE_DEGRADED' }, degraded: true }, 503, {
+        'X-Sonic-Degraded': '1',
+      })
     }
     if (id === '9001') await sleep(600)
     return sendAudio(req, res)

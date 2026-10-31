@@ -2,7 +2,7 @@ import { test, expect, getAudio, expectPlaying, expectPaused } from '../fixtures
 
 /**
  * 异常与降级 E2E（SONIC-P1-02）。
- * Mock 明确覆盖：403、429、连接中断、异常 JSON、空结果。
+ * Mock 明确覆盖：403、404、429、503、连接中断、挂起超时、异常 JSON、空结果。
  * 这不代表真实上游/CDN 行为已验证。
  */
 test.describe('异常与降级', () => {
@@ -65,6 +65,36 @@ test.describe('异常与降级', () => {
     await expect(alert).toBeVisible()
     await expect(alert).toContainText(/rate limited|too many/i)
     await expect(page.getByTestId('now-playing-title')).toHaveText('Rate Limited Track')
+  })
+
+  test('播放 404：提示曲目无可用音源，页面保持可用', async ({ page }) => {
+    await page.goto('/#/search?q=errors')
+    await page.getByTestId('song-row-9307').click()
+    const alert = page.getByRole('alert').last()
+    await expect(alert).toBeVisible()
+    await expect(alert).toContainText(/暂无可用音源|unavailable|copyright/i)
+    await expect(page.getByTestId('nav-search-input')).toBeVisible()
+  })
+
+  test('播放 503：提示服务降级，不静默卡死', async ({ page }) => {
+    await page.goto('/#/search?q=errors')
+    await page.getByTestId('song-row-9308').click()
+    const alert = page.getByRole('alert').last()
+    await expect(alert).toBeVisible()
+    await expect(alert).toContainText(/降级|degraded/i)
+    await expectPaused(page)
+  })
+
+  test('播放挂起超时：不得无限加载，需给出网络错误提示', async ({ page }) => {
+    await page.goto('/#/search?q=errors')
+    await page.getByTestId('song-row-9306').click()
+
+    // 9306 返回 200 响应头后不再发送音频数据；前端启动看门狗须在 15s 内收敛错误态。
+    const alert = page.getByRole('alert').last()
+    await expect(alert).toBeVisible({ timeout: 25_000 })
+    await expect(alert).toContainText(/network|timeout|网络/i)
+    await expect(page.getByTestId('nav-search-input')).toBeVisible()
+    await expectPaused(page)
   })
 
   test('播放连接中断：提示网络错误而不是静默卡死', async ({ page }) => {
