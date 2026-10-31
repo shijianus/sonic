@@ -49,28 +49,28 @@ export const useAuthStore = defineStore('auth', {
   },
 
   actions: {
-    /** 获取 EpoMail 宿主基址 (自适应本地开发 3001 端口与同源生产环境) */
+    /** 获取 EpoMail 宿主基址 (自适应本地开发 3001 端口与生产环境) */
     getEpomailBaseUrl(): string {
-      if (typeof window === 'undefined') return ''
+      if (typeof window === 'undefined') return 'https://mail.epocanvas.com'
       const isLocalDev =
         window.location.hostname === 'localhost' ||
         window.location.hostname === '127.0.0.1'
       if (isLocalDev && (window.location.port === '5089' || window.location.port === '5173')) {
         return `http://${window.location.hostname}:3001`
       }
-      return window.location.origin
+      return 'https://mail.epocanvas.com'
     },
 
     /** 获取 EpoMail 个人中心与账号设置 URL */
     getEpomailProfileUrl(): string {
       const base = this.getEpomailBaseUrl()
-      return `${base}/mail/#/settings/profile`
+      return `${base}/#/settings/profile`
     },
 
     /** 获取 EpoMail 邮箱收件箱 URL */
     getEpomailInboxUrl(): string {
       const base = this.getEpomailBaseUrl()
-      return `${base}/mail/`
+      return `${base}/#/inbox`
     },
 
     /** 检查当前登录状态，从 /api/auth/user 或 EpoMail 本地会话同步 */
