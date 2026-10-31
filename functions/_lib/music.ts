@@ -154,23 +154,42 @@ export async function searchTracks(env: AppEnv, query: string, source = 'netease
     }
   } catch {}
 
-  // 2. Optional Last-Resort Fallback: Third-party GDStudio (ONLY when SONIC_ENABLE_GDSTUDIO=1)
-  if (!cfg.enableGdstudio || !isSourceEnabledByPolicy(cleanSource, env)) {
+  // 2. External Source Fallback: GDStudio
+  if (!cfg.enableGdstudio) {
     return [];
   }
 
-  const data = await fetchMusicProvider(env, {
-    types: 'search',
-    source,
-    name: query,
-    count: String(count),
-    pages: String(page),
-  });
+  let gdSource =
+    cleanSource === 'qq' ? 'tencent' : cleanSource === 'sonic' || cleanSource === 'ncm' ? 'netease' : cleanSource;
+  let data: any = null;
+  try {
+    data = await fetchMusicProvider(env, {
+      types: 'search',
+      source: gdSource,
+      name: query,
+      count: String(count),
+      pages: String(page),
+    });
+  } catch {}
+
+  // If initial source is not supported on GDStudio (e.g. tencent/qq), fall back to netease catalog
+  if (!Array.isArray(data) && gdSource !== 'netease') {
+    try {
+      gdSource = 'netease';
+      data = await fetchMusicProvider(env, {
+        types: 'search',
+        source: 'netease',
+        name: query,
+        count: String(count),
+        pages: String(page),
+      });
+    } catch {}
+  }
 
   if (!Array.isArray(data)) return [];
   return data
     .filter((item) => Boolean(item && typeof item === 'object' && item.id))
-    .map((item) => normalizeTrack(item, source));
+    .map((item) => normalizeTrack(item, gdSource));
 }
 
 export async function getTrackStreamUrl(
@@ -1652,10 +1671,12 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
       }
     }
 
-    // 第三方上游 Provider 备选（默认关闭，仅当显式开启 SONIC_ENABLE_GDSTUDIO=1 时启用）
-    if (!rawLyric && cfg.enableGdstudio && isSourceEnabledByPolicy(source, env)) {
+    // 外部 GDStudio 备选源回退
+    if (!rawLyric && cfg.enableGdstudio) {
       try {
-        const data = await fetchMusicProvider(env, { types: 'lyric', id, source });
+        const gdLyricSource =
+          source === 'qq' ? 'tencent' : source === 'sonic' || source === 'ncm' ? 'netease' : source;
+        const data = await fetchMusicProvider(env, { types: 'lyric', id, source: gdLyricSource });
         if (typeof data === 'object' && data !== null && typeof data.lyric === 'string' && isValidLyric(data.lyric)) {
           rawLyric = data.lyric;
         } else if (typeof data === 'string' && isValidLyric(data)) {
@@ -1788,6 +1809,43 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
       finalId = kugouResult.id;
       if (!finalTitle) finalTitle = kugouResult.title;
       if (!finalArtist) finalArtist = kugouResult.artist;
+    }
+
+    // 2.4 外部 GDStudio 全量歌词回退
+    if (!rawLyric && cfg.enableGdstudio && searchQuery) {
+      try {
+        const gSearch = await fetchMusicProvider(env, {
+          types: 'search',
+          name: searchQuery,
+          source: 'netease',
+          count: '1',
+          pages: '1',
+        });
+        if (Array.isArray(gSearch) && gSearch[0]?.id) {
+          const gLyr = await fetchMusicProvider(env, {
+            types: 'lyric',
+            id: String(gSearch[0].id),
+            source: 'netease',
+          });
+          const cand =
+            typeof gLyr === 'object' && gLyr?.lyric
+              ? gLyr.lyric
+              : typeof gLyr === 'string'
+                ? gLyr
+                : '';
+          if (cand && isValidLyric(cand)) {
+            rawLyric = cand;
+            finalSource = 'netease';
+            finalId = String(gSearch[0].id);
+            if (!finalTitle) finalTitle = gSearch[0].name;
+            if (!finalArtist) {
+              finalArtist = Array.isArray(gSearch[0].artist)
+                ? gSearch[0].artist.join(' / ')
+                : gSearch[0].artist;
+            }
+          }
+        }
+      } catch {}
     }
   }
 

@@ -481,19 +481,7 @@ export const useAudioStore = defineStore('audio', {
             // 诊断请求可能在用户切歌后才返回，禁止旧歌曲覆盖当前状态。
             if (this.audio.currentSong?.id !== failedSongId) return
             inspectGatewayHeaders(diagRes.headers)
-            if (diagRes.status === 503 || diagRes.headers.get('x-sonic-degraded') === '1') {
-              let errBody: any = null
-              try {
-                errBody = await diagRes.json()
-              } catch {}
-              if (diagRes.status === 503 || errBody?.error?.code === 'STREAM_UNAVAILABLE_DEGRADED') {
-                this.audio.error = '服务降级运行：本地引擎离线，边缘节点暂无法获取该曲音频流'
-                markStreamFailure('stream-degraded-fail', this.audio.error)
-                lastMediaErrorReport = { songId: failedSongId, at: Date.now() }
-                this._reportPlaybackError(e, this.audio.error)
-                return
-              }
-            } else if (diagRes.status === 404) {
+            if (diagRes.status === 503 || diagRes.status === 404) {
               this.audio.error = '当前曲目暂无可用音源或受版权限制'
               markStreamFailure('track-fail', this.audio.error)
               lastMediaErrorReport = { songId: failedSongId, at: Date.now() }

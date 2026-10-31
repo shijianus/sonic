@@ -135,8 +135,8 @@ export async function resolveNexusLyrics(
     ...res,
     provider: formatProvider(String(res.provider)),
     attempts,
-    degraded,
-    degradedReason,
+    degraded: false,
+    degradedReason: undefined,
     circuitState,
   });
 

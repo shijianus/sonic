@@ -590,8 +590,8 @@ export async function handleSingleProviderSearchRequest(
     });
   }
 
-  // Disabled-by-default third-party provider (`gdstudio`) returns honest empty result in default mode without hitting upstream
-  if (config.contentPolicy !== 'strict-allowlist' && p === 'gdstudio' && !config.enableGdstudio) {
+  // Disabled-by-default standalone direct search (`gdstudio`) returns honest empty result in default mode without hitting upstream
+  if (config.contentPolicy !== 'strict-allowlist' && p === 'gdstudio' && env?.SONIC_ENABLE_GDSTUDIO_STANDALONE !== '1') {
     return jsonResponse(
       {
         brand: 'Sonic',

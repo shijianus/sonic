@@ -168,49 +168,13 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       );
 
       if (!resolved || !resolved.url) {
-        const snap = getLocalEngineCircuitSnapshot(env);
-        const isEngineDegraded = cfg.enableLocalEngine && (snap.state !== 'CLOSED' || Boolean(snap.lastError));
-
-        if (isEngineDegraded) {
-          recordStreamMetric('degraded');
-          return jsonResponse(
-            {
-              brand: 'Sonic',
-              error: {
-                code: 'STREAM_UNAVAILABLE_DEGRADED',
-                message: '本地解析引擎暂不可用，边缘降级模式无法获取该曲目音频流',
-              },
-              degraded: true,
-              meta: {
-                cached: false,
-                cacheLevel: 'none',
-                provider: 'none',
-                degraded: true,
-                degradedReason: snap.lastError || 'local_engine_unavailable',
-                circuitState: snap.state,
-              },
-            },
-            {
-              status: 503,
-              headers: corsHeaders({
-                'Cache-Control': 'no-store',
-                'X-Sonic-Stream-Type': 'unavailable',
-                'X-Sonic-Degraded': '1',
-                'X-Sonic-Circuit': snap.state,
-                'Access-Control-Expose-Headers':
-                  'X-Sonic-Stream-Type, X-Sonic-Degraded, X-Sonic-Circuit, X-Sonic-Provider',
-              }),
-            },
-          );
-        }
-
         recordStreamMetric('err_404');
         return jsonResponse(
           {
             brand: 'Sonic',
             error: {
               code: 'STREAM_NOT_FOUND',
-              message: '无法解析可播放音频流（该曲目可能受版权或地区限制）',
+              message: '当前曲目暂无可用音源或受版权限制',
             },
             degraded: false,
             meta: {

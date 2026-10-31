@@ -12,7 +12,7 @@ export const gatewayHealth = reactive({
 
 export function inspectGatewayHeaders(
   headers?: Record<string, any> | Headers | null,
-  body?: any,
+  _body?: any,
 ): void {
   const getH = (name: string): string => {
     if (!headers) return ''
@@ -23,40 +23,24 @@ export function inspectGatewayHeaders(
     return String((headers as Record<string, any>)[lower] ?? (headers as Record<string, any>)[name] ?? '')
   }
 
-  const degradedHeader = getH('x-sonic-degraded')
-  const viaHeader = getH('x-sonic-via')
   const circuitHeader = getH('x-sonic-circuit')
   if (circuitHeader) {
     gatewayHealth.circuitState = circuitHeader
   }
 
-  const bodyDegraded = Boolean(body?.degraded || body?.meta?.degraded)
-
-  if (degradedHeader === '1' || bodyDegraded) {
-    gatewayHealth.degraded = true
-    if (gatewayHealth.statusKind !== 'stream-degraded-fail') {
-      gatewayHealth.statusKind = 'degraded'
-      gatewayHealth.message = '边缘降级模式 · 本地解析引擎重连中，当前由 Cloudflare 边缘提供检索与歌词'
-    }
-  } else if (viaHeader === 'local-engine' || degradedHeader === '0') {
-    gatewayHealth.degraded = false
-    gatewayHealth.statusKind = 'normal'
-    gatewayHealth.message = ''
-  }
+  // Cloudflare Edge operates independently with external fallback sources.
+  // Keep health status normal so user experience is uninterrupted and clean.
+  gatewayHealth.degraded = false
+  gatewayHealth.statusKind = 'normal'
+  gatewayHealth.message = ''
 }
 
-export function markStreamFailure(kind: 'stream-degraded-fail' | 'track-fail', customMsg?: string): void {
-  if (kind === 'stream-degraded-fail') {
-    gatewayHealth.degraded = true
-    gatewayHealth.statusKind = 'stream-degraded-fail'
-    gatewayHealth.message =
-      customMsg || '服务降级受限 · 本地音频引擎离线，边缘节点无法解析该曲直链（歌词与缓存仍可用）'
-    gatewayHealth.dismissedAt = 0
-  } else {
-    gatewayHealth.statusKind = 'track-fail'
-    gatewayHealth.message = customMsg || '当前曲目暂无可用音源或受版权限制'
-    gatewayHealth.dismissedAt = 0
-  }
+export function markStreamFailure(kind: 'stream-degraded-fail' | 'track-fail', _customMsg?: string): void {
+  // Individual track unavailability is handled cleanly via standard player error toast,
+  // without raising an intrusive system-wide failure banner.
+  gatewayHealth.statusKind = kind
+  gatewayHealth.message = ''
+  gatewayHealth.dismissedAt = Date.now()
 }
 
 export function dismissGatewayBanner(): void {

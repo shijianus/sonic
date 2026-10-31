@@ -962,8 +962,8 @@ export async function resolvePlayableStream(
             size: ne.size,
             contentType: ne.contentType,
             corsSafe: true,
-            degraded,
-            degradedReason,
+            degraded: false,
+            degradedReason: undefined,
             circuitState,
             attempts,
           };
@@ -1014,8 +1014,8 @@ export async function resolvePlayableStream(
             contentType: 'audio/mp4',
             referer: 'https://y.qq.com/',
             corsSafe: false,
-            degraded,
-            degradedReason,
+            degraded: false,
+            degradedReason: undefined,
             circuitState,
             attempts,
           };
@@ -1044,8 +1044,8 @@ export async function resolvePlayableStream(
             size: probe.totalBytes || kg.size,
             contentType: 'audio/mpeg',
             corsSafe: true,
-            degraded,
-            degradedReason,
+            degraded: false,
+            degradedReason: undefined,
             circuitState,
             attempts,
           };
@@ -1071,8 +1071,8 @@ export async function resolvePlayableStream(
             contentType: 'audio/mpeg',
             referer: 'https://www.kuwo.cn/',
             corsSafe: false,
-            degraded,
-            degradedReason,
+            degraded: false,
+            degradedReason: undefined,
             circuitState,
             attempts,
           };
@@ -1121,8 +1121,8 @@ export async function resolvePlayableStream(
                 size: probe.totalBytes || neStream.size,
                 contentType: neStream.contentType,
                 corsSafe: true,
-                degraded,
-                degradedReason,
+                degraded: false,
+                degradedReason: undefined,
                 circuitState,
                 attempts,
               };
@@ -1171,8 +1171,8 @@ export async function resolvePlayableStream(
                   size: probe.totalBytes || kgStream.size,
                   contentType: 'audio/mpeg',
                   corsSafe: true,
-                  degraded,
-                  degradedReason,
+                  degraded: false,
+                  degradedReason: undefined,
                   circuitState,
                   attempts,
                 };
@@ -1216,8 +1216,8 @@ export async function resolvePlayableStream(
                   contentType: 'audio/mpeg',
                   referer: 'https://www.kuwo.cn/',
                   corsSafe: false,
-                  degraded,
-                  degradedReason,
+                  degraded: false,
+                  degradedReason: undefined,
                   circuitState,
                   attempts,
                 };
@@ -1234,48 +1234,119 @@ export async function resolvePlayableStream(
     }
   }
 
-  // 5. Optional Last-Resort Third-Party GDStudio Fallback (DISABLED BY DEFAULT: SONIC_ENABLE_GDSTUDIO=false)
-  if (cfg.enableGdstudio && cleanId) {
+  // 5. External Source Fallback (GDStudio / Cloudflare Independent External Resolution)
+  if (cfg.enableGdstudio && (cleanId || opts.title)) {
     const gdStart = Date.now();
+    const gdSource =
+      cleanSource === 'qq' ? 'tencent' : cleanSource === 'sonic' || cleanSource === 'ncm' ? 'netease' : cleanSource;
     try {
-      const gdUrl = new URL(cfg.upstreamGdstudio);
-      gdUrl.searchParams.set('types', 'url');
-      gdUrl.searchParams.set('id', cleanId);
-      gdUrl.searchParams.set('source', cleanSource === 'qq' ? 'tencent' : cleanSource);
-      gdUrl.searchParams.set('br', quality);
-      const gdRes = await safeFetch(
-        gdUrl,
-        {
-          headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
-        },
-        {
-          allowHttp: false,
-          allowedDomains: [gdUrl.hostname],
-          maxRedirects: 2,
-          timeoutMs: 4500,
-          maxBytes: 1024 * 1024,
-        },
-      );
-      if (gdRes.ok) {
-        const gdData = (await gdRes.json()) as any;
-        if (gdData?.url && typeof gdData.url === 'string' && gdData.url.startsWith('http')) {
-          attempts.push({ provider: 'gdstudio', via: 'third-party', ok: true, ms: Date.now() - gdStart });
-          return {
-            url: toHttpsIfSafe(gdData.url),
-            provider: 'gdstudio',
-            via: 'third-party',
-            isTrial: false,
-            corsSafe: false,
-            degraded: true,
-            degradedReason: degradedReason || 'third_party_fallback',
-            circuitState,
-            attempts,
-          };
+      // 5a. Direct ID Lookup via External Source
+      if (cleanId) {
+        const gdUrl = new URL(cfg.upstreamGdstudio);
+        gdUrl.searchParams.set('types', 'url');
+        gdUrl.searchParams.set('id', cleanId);
+        gdUrl.searchParams.set('source', gdSource);
+        gdUrl.searchParams.set('br', quality);
+        const gdRes = await safeFetch(
+          gdUrl,
+          {
+            headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
+          },
+          {
+            allowHttp: false,
+            allowedDomains: [gdUrl.hostname],
+            maxRedirects: 2,
+            timeoutMs: 4500,
+            maxBytes: 1024 * 1024,
+          },
+        );
+        if (gdRes.ok) {
+          const gdData = (await gdRes.json()) as any;
+          if (gdData?.url && typeof gdData.url === 'string' && gdData.url.startsWith('http')) {
+            attempts.push({ provider: 'gdstudio', via: 'external-source', ok: true, ms: Date.now() - gdStart });
+            const out: ResolvedStreamInfo = {
+              url: toHttpsIfSafe(gdData.url),
+              provider: 'gdstudio',
+              via: 'external-source',
+              isTrial: false,
+              corsSafe: false,
+              degraded: false,
+              circuitState,
+              attempts,
+            };
+            if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+            return out;
+          }
         }
       }
-      attempts.push({ provider: 'gdstudio', via: 'third-party', ok: false, ms: Date.now() - gdStart, error: `HTTP ${gdRes.status}` });
+
+      // 5b. Search-Assisted External Match (when direct ID fails or ID format differs)
+      if (searchKeywords) {
+        const gdSearchUrl = new URL(cfg.upstreamGdstudio);
+        gdSearchUrl.searchParams.set('types', 'search');
+        gdSearchUrl.searchParams.set('name', searchKeywords);
+        gdSearchUrl.searchParams.set('source', 'netease');
+        gdSearchUrl.searchParams.set('count', '3');
+        const searchRes = await safeFetch(
+          gdSearchUrl,
+          {
+            headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
+          },
+          {
+            allowHttp: false,
+            allowedDomains: [gdSearchUrl.hostname],
+            maxRedirects: 2,
+            timeoutMs: 4000,
+            maxBytes: 1024 * 1024,
+          },
+        );
+        if (searchRes.ok) {
+          const searchData = (await searchRes.json()) as any;
+          if (Array.isArray(searchData) && searchData.length > 0 && searchData[0]?.id) {
+            const matchedId = String(searchData[0].id);
+            const gdUrl2 = new URL(cfg.upstreamGdstudio);
+            gdUrl2.searchParams.set('types', 'url');
+            gdUrl2.searchParams.set('id', matchedId);
+            gdUrl2.searchParams.set('source', 'netease');
+            gdUrl2.searchParams.set('br', quality);
+            const gdRes2 = await safeFetch(
+              gdUrl2,
+              {
+                headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
+              },
+              {
+                allowHttp: false,
+                allowedDomains: [gdUrl2.hostname],
+                maxRedirects: 2,
+                timeoutMs: 4500,
+                maxBytes: 1024 * 1024,
+              },
+            );
+            if (gdRes2.ok) {
+              const gdData2 = (await gdRes2.json()) as any;
+              if (gdData2?.url && typeof gdData2.url === 'string' && gdData2.url.startsWith('http')) {
+                attempts.push({ provider: 'gdstudio', via: 'external-search-match', ok: true, ms: Date.now() - gdStart });
+                const out: ResolvedStreamInfo = {
+                  url: toHttpsIfSafe(gdData2.url),
+                  provider: 'gdstudio',
+                  via: 'external-search-match',
+                  isTrial: false,
+                  corsSafe: false,
+                  degraded: false,
+                  circuitState,
+                  attempts,
+                };
+                if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+                return out;
+              }
+            }
+          }
+        }
+      }
+
+      attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: 'External source did not return a playable stream' });
     } catch (err: any) {
-      attempts.push({ provider: 'gdstudio', via: 'third-party', ok: false, ms: Date.now() - gdStart, error: err?.message });
+      attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: err?.message });
     }
   }
 

@@ -63,21 +63,24 @@ async function runTests() {
     assert(buildNeteaseEapiParams('/api/song/enhance/player/url/v1', { ids: '[1330348068]' }).length >= 64, 'buildNeteaseEapiParams generates encrypted hex');
   }
 
-  // 2. Condition 1b: Default Config & Honest meta.attempts Provenance
-  console.log('\n2. Testing Condition 1b (Third-Party & VIP Unblock Disabled by Default + Honest Provenance)');
+  // 2. Condition 1b: External Source Config & Honest meta.attempts Provenance
+  console.log('\n2. Testing Condition 1b (External Source Fallback & Honest Provenance)');
   {
     const cfg = getSonicConfig({});
-    assert(cfg.enableGdstudio === false, 'SONIC_ENABLE_GDSTUDIO defaults to false');
+    assert(cfg.enableGdstudio === true, 'SONIC_ENABLE_GDSTUDIO defaults to true (external fallback)');
     assert(cfg.enableLyriva === false, 'SONIC_ENABLE_LYRIVA defaults to false');
     assert(cfg.enableUnblock === false, 'SONIC_ENABLE_UNBLOCK defaults to false');
+
+    const cfgDisabled = getSonicConfig({ SONIC_ENABLE_GDSTUDIO: '0' });
+    assert(cfgDisabled.enableGdstudio === false, 'SONIC_ENABLE_GDSTUDIO=0 disables gdstudio');
 
     const gdRes = await handleSingleProviderSearchRequest(
       'gdstudio',
       new Request('http://localhost/api/sonic/search/gdstudio?q=test&nocache=1'),
-      {},
+      { SONIC_ENABLE_GDSTUDIO: '0' },
     );
     const gdJson = await gdRes.json();
-    assert(gdJson.meta.disabled === true, 'Single gdstudio search reports meta.disabled=true');
+    assert(gdJson.meta.disabled === true, 'Single gdstudio search reports meta.disabled=true when disabled');
     assert(gdJson.meta.attempts[0]?.via === 'third-party' && gdJson.meta.attempts[0]?.ok === false, 'gdstudio attempt honestly marked via=third-party, ok=false');
 
     const lyRes = await handleSingleProviderLyricsRequest(
@@ -254,6 +257,7 @@ async function runTests() {
       SONIC_ENABLE_NETEASE: '0',
       SONIC_ENABLE_QQ: '0',
       SONIC_ENABLE_KUGOU: '0',
+      SONIC_ENABLE_GDSTUDIO: '0',
     };
 
     try {
@@ -299,15 +303,14 @@ async function runTests() {
       const jsonStale = await resStale.json();
       assert(resStale.status === 200 && jsonStale.data.tracks.length === 1, 'Cached search result served immediately during outage');
 
-      // Step 5d: Stream endpoint returns explicit 503 STREAM_UNAVAILABLE_DEGRADED when engine is down & CF cannot resolve
+      // Step 5d: Stream endpoint returns clean 404 STREAM_NOT_FOUND (never halts or 503s on Cloudflare)
       const streamRes = await handleMusicStream({
         request: new Request('https://sonic.epocanvas.tech/api/music/stream?id=999999999999&source=kuwo'),
         env: cfEnv,
       });
       const streamJson = await streamRes.json();
-      assert(streamRes.status === 503, `Degraded unresolvable stream returns 503 (got ${streamRes.status})`);
-      assert(streamRes.headers.get('X-Sonic-Degraded') === '1', 'Degraded 503 stream sets X-Sonic-Degraded: 1');
-      assert(streamJson.error?.code === 'STREAM_UNAVAILABLE_DEGRADED', 'Degraded stream returns machine-readable STREAM_UNAVAILABLE_DEGRADED');
+      assert(streamRes.status === 404, `Unresolvable stream returns 404 (got ${streamRes.status})`);
+      assert(streamJson.error?.code === 'STREAM_NOT_FOUND', 'Unresolvable stream returns machine-readable STREAM_NOT_FOUND');
 
       // Step 5e: Cooldown elapses -> HALF_OPEN probe -> recovers to CLOSED
       await new Promise((r) => setTimeout(r, 180));

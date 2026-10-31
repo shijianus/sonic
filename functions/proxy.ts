@@ -267,6 +267,8 @@ async function proxyApiRequest(url: URL, request: Request, env?: AppEnv): Promis
   url.searchParams.forEach((value, key) => {
     if (forwardedParams.has(key)) apiUrl.searchParams.set(key, value);
   });
+  if (apiUrl.searchParams.get('source') === 'qq') apiUrl.searchParams.set('source', 'tencent');
+  if (apiUrl.searchParams.get('source') === 'sonic') apiUrl.searchParams.set('source', 'netease');
 
   const upstreamCheck = validateSafeUrl(apiUrl, {
     allowHttp: false,

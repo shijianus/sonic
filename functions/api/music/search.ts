@@ -82,11 +82,12 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   try {
     const tracks = await searchTracks(env, query.trim(), source, count, page);
     const circuit = getLocalEngineCircuitSnapshot(env);
+    const isDegraded = tracks.length === 0 && degraded;
     const headers: Record<string, string> = {
       'X-Sonic-Via': cfg.runtime === 'linux-engine' ? 'local-engine' : 'cf-direct',
       'X-Sonic-Circuit': circuit.state,
     };
-    if (degraded) headers['X-Sonic-Degraded'] = '1';
+    if (isDegraded) headers['X-Sonic-Degraded'] = '1';
 
     return jsonResponse(
       {
@@ -96,7 +97,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         page,
         count: tracks.length,
         tracks,
-        degraded,
+        degraded: isDegraded,
       },
       200,
       headers,

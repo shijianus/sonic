@@ -216,13 +216,14 @@ export async function searchNexus(
     }
   }
 
-  // 3. Optional Last-Resort Fallback: Third-Party GDStudio (DISABLED BY DEFAULT)
-  if (allRankedTracks.length === 0 && !isSinglePlatform && config.enableGdstudio && gdstudioProvider.search) {
+  // 3. External Source Fallback: GDStudio
+  if (allRankedTracks.length === 0 && config.enableGdstudio && gdstudioProvider.search) {
     const gStart = Date.now();
     try {
       const gTracks = await gdstudioProvider.search(query, {
         page,
         count,
+        platform: options.platform,
         env,
         signal: AbortSignal.timeout(config.timeoutMs),
       });
@@ -537,8 +538,8 @@ export async function searchNexus(
       tracks: finalTracks,
     },
     attempts,
-    degraded,
-    degradedReason,
+    degraded: finalTracks.length === 0 && degraded,
+    degradedReason: finalTracks.length === 0 ? degradedReason : undefined,
     circuitState,
   };
 }
