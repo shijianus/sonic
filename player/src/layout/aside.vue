@@ -218,77 +218,70 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
     >
       <div class="flex flex-col min-h-0 flex-1 w-full">
         <!-- 顶部：展开模式下的招牌 Logo + 品牌排版 + 前进后退导航按钮 -->
-        <div v-if="!sidebarCollapsed" class="flex flex-col pb-2.5 border-b border-glass shrink-0 gap-2">
-          <div class="flex items-center gap-3">
-            <!-- 放大招牌 Logo 作为左侧交互招牌，承担收起侧边栏的交互 button -->
-            <button
-              type="button"
-              @click="globalStore.toggleSidebarCollapsed()"
-              class="group relative flex items-center justify-center p-0.5 rounded-2xl bg-button-glass hover:bg-hover-button-glass border border-glass transition-all duration-300 hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 shrink-0 cursor-pointer"
-              :title="$t('layout.aside.collapseSidebar') || '收起侧边栏'"
-              :aria-label="$t('layout.aside.collapseSidebar') || '收起侧边栏'"
+        <div v-if="!sidebarCollapsed" class="flex items-center justify-between pb-2.5 border-b border-glass shrink-0 gap-2">
+          <!-- 放大招牌 Logo 作为左侧交互招牌，承担收起侧边栏的交互 button -->
+          <button
+            type="button"
+            @click="globalStore.toggleSidebarCollapsed()"
+            class="group relative flex items-center justify-center p-0.5 rounded-2xl bg-button-glass hover:bg-hover-button-glass border border-glass transition-all duration-300 hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 shrink-0 cursor-pointer"
+            :title="$t('layout.aside.collapseSidebar') || '收起侧边栏'"
+            :aria-label="$t('layout.aside.collapseSidebar') || '收起侧边栏'"
+          >
+            <img
+              src="/logo.svg"
+              :alt="BRAND_PRODUCT"
+              width="38"
+              height="38"
+              loading="eager"
+              decoding="async"
+              class="h-9 w-9 xl:h-10 xl:w-10 rounded-xl shadow-[0_0_18px_rgba(37,99,235,0.45)] transition-transform duration-300 group-hover:scale-105 shrink-0 object-contain"
+            />
+            <span
+              class="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-sky-50 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
             >
-              <img
-                src="/logo.svg"
-                :alt="BRAND_PRODUCT"
-                width="42"
-                height="42"
-                loading="eager"
-                decoding="async"
-                class="h-10 w-10 xl:h-11 xl:w-11 rounded-xl shadow-[0_0_18px_rgba(37,99,235,0.45)] transition-transform duration-300 group-hover:scale-105 shrink-0 object-contain"
-              />
-              <span
-                class="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-sky-50 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
-              >
-                <span class="icon-[mdi--chevron-left] h-3 w-3"></span>
-              </span>
-            </button>
+              <span class="icon-[mdi--chevron-left] h-3 w-3"></span>
+            </span>
+          </button>
 
-            <!-- 品牌名称：epocanvas 作为副标题在上方，Sonic 为绝对主标题在正中心，STUDIO 标志在 Sonic 同水平后上方 -->
-            <div class="flex flex-1 flex-col justify-center min-w-0 leading-tight">
-              <span class="text-[10px] xl:text-[11px] font-bold tracking-[0.18em] text-primary/50 uppercase truncate select-none">
-                {{ BRAND_PARENT }}
+          <!-- 品牌名称：epocanvas 作为副标题在上方，Sonic 为绝对主标题在正中心，STUDIO 标志在 Sonic 同水平后上方 -->
+          <div class="flex flex-1 flex-col justify-center min-w-0 leading-tight">
+            <span class="text-[9.5px] xl:text-[10.5px] font-bold tracking-[0.15em] text-primary/50 uppercase truncate select-none">
+              {{ BRAND_PARENT }}
+            </span>
+            <div class="flex items-baseline gap-1 min-w-0">
+              <span class="text-primary text-lg xl:text-xl font-black tracking-tight leading-none select-none shrink-0">
+                {{ BRAND_PRODUCT.charAt(0).toUpperCase() + BRAND_PRODUCT.slice(1) }}
               </span>
-              <div class="flex items-baseline gap-1.5 min-w-0">
-                <span class="text-primary text-xl xl:text-2xl font-black tracking-tight leading-none select-none">
-                  {{ BRAND_PRODUCT.charAt(0).toUpperCase() + BRAND_PRODUCT.slice(1) }}
-                </span>
-                <span
-                  class="inline-flex items-center -translate-y-1.5 px-1.5 py-0.2 text-[9px] font-extrabold uppercase tracking-wider rounded-md bg-linear-to-r from-blue-500/25 to-sky-400/25 border border-blue-400/30 text-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.2)] select-none"
-                >
-                  {{ BRAND_STUDIO }}
-                </span>
-              </div>
+              <span
+                class="inline-flex items-center -translate-y-1 px-1 py-0.2 text-[8px] xl:text-[8.5px] font-extrabold uppercase tracking-wide rounded-md bg-linear-to-r from-blue-500/25 to-sky-400/25 border border-blue-400/30 text-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.2)] select-none shrink-0"
+              >
+                {{ BRAND_STUDIO }}
+              </span>
             </div>
           </div>
 
-          <!-- 给下面的前进、后退留下充裕空间 -->
-          <div class="flex items-center justify-between pt-0.5">
-            <span class="text-[10px] font-bold tracking-[0.16em] uppercase text-primary/40 select-none">
-              {{ $t('layout.aside.navigation') || 'NAVIGATE' }}
-            </span>
-            <div class="flex items-center gap-0.5 rounded-full bg-button-glass border border-glass p-0.5">
-              <button
-                @click="router.back()"
-                :title="$t('common.back')"
-                :aria-label="$t('common.back')"
-                :disabled="!canGoBack"
-                :aria-disabled="!canGoBack"
-                class="flex h-7 w-7 items-center justify-center rounded-full text-primary/60 hover:text-primary hover:bg-hover-button-glass transition-colors disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
-              >
-                <span class="icon-[mdi--chevron-left] h-3.5 w-3.5"></span>
-              </button>
-              <button
-                @click="router.forward()"
-                :title="$t('common.forward')"
-                :aria-label="$t('common.forward')"
-                :disabled="!canGoForward"
-                :aria-disabled="!canGoForward"
-                class="flex h-7 w-7 items-center justify-center rounded-full text-primary/60 hover:text-primary hover:bg-hover-button-glass transition-colors disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
-              >
-                <span class="icon-[mdi--chevron-right] h-3.5 w-3.5"></span>
-              </button>
-            </div>
+          <!-- 前进 / 后退操作 button 直接放在标题logo右侧 -->
+          <div class="flex items-center gap-0.5 rounded-full bg-button-glass border border-glass p-0.5 shrink-0">
+            <button
+              @click="router.back()"
+              :title="$t('common.back')"
+              :aria-label="$t('common.back')"
+              :disabled="!canGoBack"
+              :aria-disabled="!canGoBack"
+              class="flex h-6.5 w-6.5 xl:h-7 xl:w-7 items-center justify-center rounded-full text-primary/60 hover:text-primary hover:bg-hover-button-glass transition-colors disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+            >
+              <span class="icon-[mdi--chevron-left] h-3.5 w-3.5"></span>
+            </button>
+            <button
+              @click="router.forward()"
+              :title="$t('common.forward')"
+              :aria-label="$t('common.forward')"
+              :disabled="!canGoForward"
+              :aria-disabled="!canGoForward"
+              class="flex h-6.5 w-6.5 xl:h-7 xl:w-7 items-center justify-center rounded-full text-primary/60 hover:text-primary hover:bg-hover-button-glass transition-colors disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent cursor-pointer"
+            >
+              <span class="icon-[mdi--chevron-right] h-3.5 w-3.5"></span>
+            </button>
           </div>
         </div>
 
