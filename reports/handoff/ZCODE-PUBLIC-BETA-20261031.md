@@ -99,9 +99,13 @@ E2E 使用确定性 Mock 网关与本地 WAV，**不代表真实 CDN/OAuth/真�
 - 工作分支：`work/zcode-beta-20261031-20261031T013704Z`
 - 分支页面：https://github.com/shijianus/sonic/tree/work/zcode-beta-20261031-20261031T013704Z
 - 与 RC 对比：https://github.com/shijianus/sonic/compare/rc/sonic-20261031...work/zcode-beta-20261031-20261031T013704Z
-- 远端 CI：run [41161277751](https://github.com/shijianus/sonic/actions/runs/41161277751)（`205171e`）—
+- 远端 CI：run [41163651090](https://github.com/shijianus/sonic/actions/runs/41163651090)（`24ac86a`，`rc/sonic-20261031`）—
   **success**：Typecheck/lint/tests/build、Docker build + runtime smoke、Browser E2E 三作业全部 success。
+  同一 SHA 的工作分支 run [41163644030](https://github.com/shijianus/sonic/actions/runs/41163644030) 亦为 success。
+  前一轮 `205171e` 的 run [41161277751](https://github.com/shijianus/sonic/actions/runs/41161277751) 同样 success。
   后续 docs-only 提交不改变上述代码门禁结论。
+- RC 集成：`24ac86a` 已由 `git merge --ff-only` 合入 `rc/sonic-20261031` 并推送；
+  `main` 未改动。
 - 建议合并顺序：
   1. 评审本分支 4 个代码/E2E 文件（无冲突面，未触碰 Linux 负责目录）。
   2. `git merge --ff-only` 或 PR 合入 `rc/sonic-20261031`，在 RC 上复跑 CI 三作业。
