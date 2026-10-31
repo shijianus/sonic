@@ -330,7 +330,9 @@ export function evaluateContentFlags(env?: AppEnv): EffectiveContentFlags {
       'listenbrainz',
       parseBoolFlag(e.SONIC_ENABLE_LISTENBRAINZ, false),
     ),
-    enableGdstudio: filterByOptionalAllowSet('gdstudio', parseBoolFlag(e.SONIC_ENABLE_GDSTUDIO, true)),
+    enableGdstudio:
+      parseBoolFlag(e.SONIC_ENABLE_GDSTUDIO, true) &&
+      (allowSet.size === 0 || allowSet.has('gdstudio') || allowSet.has('netease') || allowSet.has('qq')),
     enableLyriva: filterByOptionalAllowSet('lyriva', parseBoolFlag(e.SONIC_ENABLE_LYRIVA, false)),
     enableUnblock: filterByOptionalAllowSet('unblock', parseBoolFlag(e.SONIC_ENABLE_UNBLOCK, false)),
     allowedSources: [],
