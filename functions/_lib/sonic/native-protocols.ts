@@ -1085,7 +1085,58 @@ export async function resolvePlayableStream(
     }
   }
 
-  // 4. Legitimate Free-Catalog Cross-Platform Match (ONLY matches genuinely free full songs; never bypasses VIP DRM)
+  // 4. Fast External Source Fallback (GDStudio Direct ID Lookup)
+  if (cfg.enableGdstudio && cleanId) {
+    const gdStart = Date.now();
+    const gdSource =
+      cleanSource === 'qq' ? 'tencent' : cleanSource === 'sonic' || cleanSource === 'ncm' ? 'netease' : cleanSource;
+    try {
+      const gdUrl = new URL(cfg.upstreamGdstudio);
+      gdUrl.searchParams.set('s', Math.random().toString(36).substring(2, 15));
+      gdUrl.searchParams.set('types', 'url');
+      gdUrl.searchParams.set('id', cleanId);
+      gdUrl.searchParams.set('source', gdSource);
+      gdUrl.searchParams.set('br', quality);
+      const gdRes = await safeFetch(
+        gdUrl,
+        {
+          headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
+        },
+        {
+          allowHttp: false,
+          allowedDomains: [gdUrl.hostname],
+          maxRedirects: 2,
+          timeoutMs: 10000,
+          maxBytes: 1024 * 1024,
+        },
+      );
+      if (gdRes.ok) {
+        const gdData = (await gdRes.json()) as any;
+        if (gdData?.url && typeof gdData.url === 'string' && gdData.url.startsWith('http')) {
+          attempts.push({ provider: 'gdstudio', via: 'external-source', ok: true, ms: Date.now() - gdStart });
+          const finalUrl = toHttpsIfSafe(gdData.url);
+          const isNeteaseCdn = finalUrl.includes('music.126.net');
+          const out: ResolvedStreamInfo = {
+            url: finalUrl,
+            provider: 'gdstudio',
+            via: 'external-source',
+            isTrial: false,
+            streamType: 'full',
+            corsSafe: isNeteaseCdn,
+            degraded: false,
+            circuitState,
+            attempts,
+          };
+          if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+          return out;
+        }
+      }
+    } catch (err: any) {
+      attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: err?.message });
+    }
+  }
+
+  // 5. Legitimate Free-Catalog Cross-Platform Match (ONLY matches genuinely free full songs; never bypasses VIP DRM)
   let trackTitle = opts.title || '';
   let trackArtist = opts.artist || '';
   if (!trackTitle && cleanId && cleanSource === 'netease') {
@@ -1392,7 +1443,18 @@ export async function resolvePlayableStream(
     };
   }
 
-  return null;
+  return {
+    url: '',
+    provider: 'none',
+    via: viaLabel(env),
+    isTrial: false,
+    streamType: 'unavailable',
+    corsSafe: false,
+    degraded,
+    degradedReason,
+    circuitState,
+    attempts,
+  };
 }
 
 export function sonicTrackToLegacySongItem(t: SonicSearchTrack): SongItem {

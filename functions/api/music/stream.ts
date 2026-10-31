@@ -181,6 +181,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
               cached: false,
               cacheLevel: 'none',
               provider: 'none',
+              attempts: resolved?.attempts || [],
             },
           },
           {
