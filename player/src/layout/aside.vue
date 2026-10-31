@@ -218,50 +218,53 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
     >
       <div class="flex flex-col min-h-0 flex-1 w-full">
         <!-- 顶部：展开模式下的招牌 Logo + 品牌排版 + 前进后退导航按钮 -->
-        <div v-if="!sidebarCollapsed" class="flex items-center pb-2.5 border-b border-glass shrink-0 gap-2">
-          <!-- 放大招牌 Logo 作为左侧交互招牌，承担收起侧边栏的交互 button -->
-          <button
-            type="button"
-            @click="globalStore.toggleSidebarCollapsed()"
-            class="group relative flex items-center justify-center p-0.5 rounded-2xl bg-button-glass hover:bg-hover-button-glass border border-glass transition-all duration-300 hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 shrink-0 cursor-pointer"
-            :title="$t('layout.aside.collapseSidebar') || '收起侧边栏'"
-            :aria-label="$t('layout.aside.collapseSidebar') || '收起侧边栏'"
-          >
-            <img
-              src="/logo.svg"
-              :alt="BRAND_PRODUCT"
-              width="38"
-              height="38"
-              loading="eager"
-              decoding="async"
-              class="h-9 w-9 xl:h-10 xl:w-10 rounded-xl shadow-[0_0_18px_rgba(37,99,235,0.45)] transition-transform duration-300 group-hover:scale-105 shrink-0 object-contain"
-            />
-            <span
-              class="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-sky-50 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
+        <div v-if="!sidebarCollapsed" class="flex items-center justify-between pb-2.5 border-b border-glass shrink-0 gap-2">
+          <!-- 左侧：放大招牌 Logo + 品牌主副标题（放大左边，自然紧凑缩减中间空隙） -->
+          <div class="flex items-center gap-2 xl:gap-2.5 min-w-0">
+            <!-- 放大招牌 Logo 作为左侧交互招牌，承担收起侧边栏的交互 button -->
+            <button
+              type="button"
+              @click="globalStore.toggleSidebarCollapsed()"
+              class="group relative flex items-center justify-center p-0.5 rounded-2xl bg-button-glass hover:bg-hover-button-glass border border-glass transition-all duration-300 hover:scale-105 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60 shrink-0 cursor-pointer"
+              :title="$t('layout.aside.collapseSidebar') || '收起侧边栏'"
+              :aria-label="$t('layout.aside.collapseSidebar') || '收起侧边栏'"
             >
-              <span class="icon-[mdi--chevron-left] h-3 w-3"></span>
-            </span>
-          </button>
-
-          <!-- 品牌名称：epocanvas 作为副标题在上方，Sonic 为绝对主标题在正中心，STUDIO 标志在 Sonic 同水平后上方 -->
-          <div class="flex flex-col justify-center min-w-0 leading-tight shrink-0">
-            <span class="text-[9.5px] xl:text-[10.5px] font-bold tracking-[0.15em] text-primary/50 uppercase truncate select-none">
-              {{ BRAND_PARENT }}
-            </span>
-            <div class="flex items-baseline gap-1 min-w-0">
-              <span class="text-primary text-lg xl:text-xl font-black tracking-tight leading-none select-none shrink-0">
-                {{ BRAND_PRODUCT.charAt(0).toUpperCase() + BRAND_PRODUCT.slice(1) }}
-              </span>
+              <img
+                src="/logo.svg"
+                :alt="BRAND_PRODUCT"
+                width="44"
+                height="44"
+                loading="eager"
+                decoding="async"
+                class="h-10.5 w-10.5 xl:h-12 xl:w-12 rounded-xl shadow-[0_0_18px_rgba(37,99,235,0.45)] transition-transform duration-300 group-hover:scale-105 shrink-0 object-contain"
+              />
               <span
-                class="inline-flex items-center -translate-y-1 px-1 py-0.2 text-[8px] xl:text-[8.5px] font-extrabold uppercase tracking-wide rounded-md bg-linear-to-r from-blue-500/25 to-sky-400/25 border border-blue-400/30 text-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.2)] select-none shrink-0"
+                class="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-blue-600 text-sky-50 opacity-0 group-hover:opacity-100 transition-opacity shadow-sm"
               >
-                {{ BRAND_STUDIO }}
+                <span class="icon-[mdi--chevron-left] h-3 w-3"></span>
               </span>
+            </button>
+
+            <!-- 品牌名称：epocanvas 作为副标题在上方，Sonic 为绝对主标题在正中心，STUDIO 标志在 Sonic 同水平后上方 -->
+            <div class="flex flex-col justify-center min-w-0 leading-tight">
+              <span class="text-[10px] xl:text-[11.5px] font-bold tracking-[0.16em] text-primary/55 uppercase select-none leading-tight">
+                {{ BRAND_PARENT }}
+              </span>
+              <div class="flex items-baseline gap-1.5 min-w-0">
+                <span class="text-primary text-xl xl:text-2xl font-black tracking-tight leading-none select-none shrink-0">
+                  {{ BRAND_PRODUCT.charAt(0).toUpperCase() + BRAND_PRODUCT.slice(1) }}
+                </span>
+                <span
+                  class="inline-flex items-center -translate-y-0.5 px-1.5 py-0.5 text-[8.5px] xl:text-[9.5px] font-extrabold uppercase tracking-wider rounded-md bg-blue-500/20 border border-blue-400/40 text-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.25)] select-none shrink-0"
+                >
+                  {{ BRAND_STUDIO }}
+                </span>
+              </div>
             </div>
           </div>
 
-          <!-- 前进 / 后退操作 button 直接放在标题logo右侧 -->
-          <div class="flex items-center gap-0.5 rounded-full bg-button-glass border border-glass p-0.5 shrink-0 -ml-0.5">
+          <!-- 右侧：前进 / 后退操作 button 保持右对齐 -->
+          <div class="flex items-center gap-0.5 rounded-full bg-button-glass border border-glass p-0.5 shrink-0">
             <button
               @click="router.back()"
               :title="$t('common.back')"
