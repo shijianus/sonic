@@ -64,7 +64,11 @@ const cycleTheme = () => {
         <img
           src="/logo.svg"
           :alt="BRAND_PRODUCT"
-          class="h-7 w-7 rounded-lg shadow-[0_0_12px_rgba(37,99,235,0.5)] shrink-0 object-contain"
+          width="28"
+          height="28"
+          loading="eager"
+          decoding="async"
+          class="h-7 w-7 rounded-lg shadow-[0_0_12px_rgba(37,99,235,0.4)] shrink-0 object-contain"
         />
         <div class="flex flex-col leading-none">
           <span class="text-[11px] font-semibold tracking-[0.16em] text-primary/70">{{ BRAND_PARENT }}</span>

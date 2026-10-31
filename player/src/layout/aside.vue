@@ -213,7 +213,11 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
             <img
               src="/logo.svg"
               :alt="BRAND_PRODUCT"
-              class="h-8.5 w-8.5 rounded-xl shadow-[0_0_16px_rgba(37,99,235,0.55)] transition-transform duration-300 group-hover:scale-105 shrink-0 object-contain"
+              width="34"
+              height="34"
+              loading="eager"
+              decoding="async"
+              class="h-8.5 w-8.5 rounded-xl shadow-[0_0_16px_rgba(37,99,235,0.4)] transition-transform duration-300 group-hover:scale-105 shrink-0 object-contain"
             />
             <div class="flex flex-col leading-none">
               <span class="text-[11px] font-semibold tracking-[0.16em] text-primary/55">{{ BRAND_PARENT }}</span>

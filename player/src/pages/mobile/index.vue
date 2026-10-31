@@ -73,7 +73,7 @@ const { banners, playlists, newSongs, mvs, artists, isLoading } = toRefs(state)
 const loadHomeData = async () => {
   state.isLoading = true
   try {
-    const [b, p, s, m, a] = await Promise.all([
+    const [bRes, pRes, sRes, mRes, aRes] = await Promise.allSettled([
       banner({ type: 2 }),
       personalized({ limit: 6 }),
       personalizedNewsong({ limit: 6 }),
@@ -81,11 +81,23 @@ const loadHomeData = async () => {
       topArtists({ limit: 10 }),
     ])
 
-    state.banners = transformBanners(b as Record<string, unknown>, 5)
-    state.playlists = transformPlaylists(p as Record<string, unknown>, 6, t('home.playlistFallback'))
-    state.newSongs = transformSongs(s as Record<string, unknown>, 6)
-    state.mvs = transformMVs(m as Record<string, unknown>, 4)
-    state.artists = transformArtists(a as Record<string, unknown>, 10)
+    if (bRes.status === 'fulfilled' && bRes.value) {
+      state.banners = transformBanners(bRes.value as Record<string, unknown>, 5)
+    }
+    if (pRes.status === 'fulfilled' && pRes.value) {
+      state.playlists = transformPlaylists(pRes.value as Record<string, unknown>, 6, t('home.playlistFallback'))
+    }
+    if (sRes.status === 'fulfilled' && sRes.value) {
+      state.newSongs = transformSongs(sRes.value as Record<string, unknown>, 6)
+    }
+    if (mRes.status === 'fulfilled' && mRes.value) {
+      state.mvs = transformMVs(mRes.value as Record<string, unknown>, 4)
+    }
+    if (aRes.status === 'fulfilled' && aRes.value) {
+      state.artists = transformArtists(aRes.value as Record<string, unknown>, 10)
+    }
+  } catch (err) {
+    console.error('Mobile home data loading error:', err)
   } finally {
     state.isLoading = false
   }
