@@ -41,6 +41,8 @@ export interface Song {
   cover?: string
   /** 音频播放地址（懒加载，播放时才获取） */
   url?: string
+  /** 直连流地址（聚合网关搜索结果自带的播放地址） */
+  streamUrl?: string
   /** 是否为本地音乐 */
   isLocal?: boolean
   /** 歌曲唯一 SHA 聚合指纹 */

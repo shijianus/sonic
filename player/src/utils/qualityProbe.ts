@@ -142,7 +142,11 @@ export function buildProbeUrl(song: any, level: QualityLevel): string {
   const songId = encodeURIComponent(String(song.id || ''))
   const title = encodeURIComponent(song.name || '')
   const artist = encodeURIComponent(song.artist || '')
-  return `/api/music/stream?id=${songId}&source=netease&br=${br}&title=${title}&artist=${artist}`
+  // 第一方聚合曲目回退到自身来源，避免命中网关策略禁用的商业源
+  const ownStreamUrl = song.streamUrl || song.url || ''
+  if (ownStreamUrl) return ownStreamUrl
+  const fallbackSource = song.sources?.[0]?.platform || 'netease'
+  return `/api/music/stream?id=${songId}&source=${encodeURIComponent(fallbackSource)}&br=${br}&title=${title}&artist=${artist}`
 }
 
 /**

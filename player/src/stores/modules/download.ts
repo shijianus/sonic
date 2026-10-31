@@ -232,7 +232,12 @@ export const useDownloadStore = defineStore('download', {
         if (found && found.streamUrl) {
           streamUrl = found.streamUrl
         } else {
-          streamUrl = `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=netease&br=${br}&title=${encodeURIComponent(song.name || '')}&artist=${encodeURIComponent(song.artist || '')}`
+          // 第一方聚合曲目回退到自身来源，避免命中网关策略禁用的商业源
+          const ownStreamUrl = song.streamUrl || song.url || ''
+          const fallbackSource = song.sources?.[0]?.platform || 'netease'
+          streamUrl =
+            ownStreamUrl ||
+            `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=${encodeURIComponent(fallbackSource)}&br=${br}&title=${encodeURIComponent(song.name || '')}&artist=${encodeURIComponent(song.artist || '')}`
         }
 
         // 1. 获取音频二进制 Blob（带进度，可取消）

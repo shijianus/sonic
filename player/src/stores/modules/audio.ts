@@ -806,7 +806,12 @@ export const useAudioStore = defineStore('audio', {
             const titleParam = song.name ? `&title=${encodeURIComponent(song.name)}` : ''
             const artistParam = song.artist ? `&artist=${encodeURIComponent(song.artist)}` : ''
             const durSec = song.duration ? `&duration=${Math.round(song.duration / 1000)}` : ''
-            url = `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=netease${titleParam}${artistParam}${durSec}`
+            // 第一方聚合曲目优先复用自带流地址/来源，禁止在网关禁用商业源时误落 netease 造成 403 静音
+            const ownStreamUrl = song.qualities?.find((q: { streamUrl?: string }) => q.streamUrl)?.streamUrl || song.url || ''
+            const fallbackSource = song.sources?.[0]?.platform || 'netease'
+            url =
+              ownStreamUrl ||
+              `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=${encodeURIComponent(fallbackSource)}${titleParam}${artistParam}${durSec}`
           }
           return url
         })()
@@ -1211,7 +1216,11 @@ export const useAudioStore = defineStore('audio', {
       const br = brMap[targetLevel] || '320'
 
       if (!newUrl) {
-        newUrl = `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=netease&br=${br}&title=${encodeURIComponent(song.name || '')}&artist=${encodeURIComponent(song.artist || '')}`
+        const ownStreamUrl = song.qualities?.find((q: { streamUrl?: string }) => q.streamUrl)?.streamUrl || song.url || ''
+        const fallbackSource = song.sources?.[0]?.platform || 'netease'
+        newUrl =
+          ownStreamUrl ||
+          `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=${encodeURIComponent(fallbackSource)}&br=${br}&title=${encodeURIComponent(song.name || '')}&artist=${encodeURIComponent(song.artist || '')}`
       }
 
       const badgeMap: Record<string, string> = {

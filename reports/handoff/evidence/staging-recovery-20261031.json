@@ -1,0 +1,58 @@
+{
+  "timestamp": "2026-10-31T09:50:00Z",
+  "event": "staging engine outage recovery and controlled beta redeployment",
+  "incident": {
+    "symptom": "engine-sonic-staging.epocanvas.tech HTTP 530 / CF error 1033 (tunnel without connector)",
+    "rootCause": "original engine host (AGY Linux) offline; staging tunnel 8275c237-56a2-4735-a751-6643af22883f lost all connectors",
+    "detectedBy": "live GO/NO-GO acceptance probes (not drill reports)",
+    "productionTunnel": {
+      "id": "af3cf7c1-a33a-4b74-99d2-e4e64bf72194",
+      "note": "brief 530 during instabox cloudflared service restart at 07:47Z; self-recovered; untouched by this operation"
+    }
+  },
+  "redeployment": {
+    "machine": "instabox-sonic (deployment-only; no code modified on machine)",
+    "deployedSha": "404998caf9d858bfd3a89d741ad2f04754f9ccf5",
+    "ciRun": { "id": 41185605071, "conclusion": "success" },
+    "engineImage": {
+      "tag": "sonic-staging-engine:rc-404998c",
+      "digest": "sha256:2d1a145a1a8720d667d8149dda09bf48b38e0893107bd47816430c93b851ea26",
+      "container": "sonic-staging-engine",
+      "port": "127.0.0.1:18080:8080",
+      "volume": "/data/sonic-staging-data:/app/data",
+      "healthcheck": "healthy"
+    },
+    "tunnelConnector": {
+      "container": "sonic-staging-tunnel",
+      "tunnelId": "8275c237-56a2-4735-a751-6643af22883f",
+      "networkMode": "host",
+      "connections": 4,
+      "ingressUnchanged": "engine-sonic-staging.epocanvas.tech -> http://127.0.0.1:18080"
+    },
+    "pages": {
+      "project": "sonic-staging",
+      "deployment": "3ab48ecd-0c96-4a27-9bac-04ceea796222",
+      "envVars": 21,
+      "secretsRotated": ["SONIC_ENGINE_SECRET", "SONIC_SECRET", "SONIC_STAGING_ACCESS_TOKEN"],
+      "oldPublicTokenRevoked": true
+    }
+  },
+  "verification": {
+    "anonymousGate": { "status": 401, "robotsTag": "noindex, nofollow, noarchive" },
+    "oldToken": { "status": 401, "revoked": true },
+    "newToken": { "status": 200, "cookieHttpOnly": true, "urlTokenStripped": true },
+    "engineSearch": { "via": "local-engine", "degraded": false, "stabilityOk": "6/6" },
+    "stream": { "full": "200 (192044 bytes RIFF)", "range": "206 bytes 0-1023/192044 exact", "viaHeader": "local-engine" },
+    "policy": { "neteaseSearch": 403, "qqStream": 403, "oauthLogin": 403, "ssrfMetadata": 400 },
+    "engineHealth": { "ok": true, "storageKind": "sqlite", "storageHealthy": true, "releaseCommit": "404998caf9d858bfd3a89d741ad2f04754f9ccf5" },
+    "backupDrill": { "ok": true, "method": "VACUUM INTO", "sizeBytes": 94208, "tracks": 3, "integrity": "pass", "walActive": true },
+    "apiRateLimitPatch": { "burst260": "240x200 + 20x429 (240 rpm anon)", "recoveryAfterWindow": 200 },
+    "browserFlow": { "engine": "real Chrome", "steps": "anon 401 -> invite exchange -> home (no degraded banner) -> search 1 hit -> play 206 -> pause -> seek 75% (10.21s) -> progressing -> pause", "result": "pass" },
+    "knownResidual": "gateway CF-Cache holds stale degraded entries from outage window; self-heals within s-maxage 3600s; nocache=1 bypasses"
+  },
+  "playerFix": {
+    "bug": "default quality jymaster absent from engine qualities -> songUrlV1 403 by policy -> hardcoded source=netease fallbacks 403 -> silent playback",
+    "fix": "fallback chain qualities[].streamUrl -> song.url -> sources[0].platform -> netease in audio.ts (x2), qualityProbe.ts, download.ts",
+    "gates": { "playerTests": "38/38", "rootTests": "142/142", "typecheck": "pass" }
+  }
+}
