@@ -1086,8 +1086,31 @@ export async function resolvePlayableStream(
   }
 
   // 4. Legitimate Free-Catalog Cross-Platform Match (ONLY matches genuinely free full songs; never bypasses VIP DRM)
-  const searchKeywords = [opts.title, opts.artist].filter(Boolean).join(' ').trim();
-  if (cfg.enableFreeCrossMatch && searchKeywords && opts.title) {
+  let trackTitle = opts.title || '';
+  let trackArtist = opts.artist || '';
+  if (!trackTitle && cleanId && cleanSource === 'netease') {
+    try {
+      const dRes = await fetch(
+        `https://music.163.com/api/song/detail/?id=${encodeURIComponent(cleanId)}&ids=%5B${encodeURIComponent(cleanId)}%5D`,
+        {
+          headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.163.com/' },
+          signal: AbortSignal.timeout(2000),
+        },
+      );
+      if (dRes.ok) {
+        const dJson = (await dRes.json()) as any;
+        const songObj = dJson?.songs?.[0];
+        if (songObj?.name) {
+          trackTitle = String(songObj.name);
+          if (Array.isArray(songObj.artists) && songObj.artists[0]?.name) {
+            trackArtist = String(songObj.artists[0].name);
+          }
+        }
+      }
+    } catch {}
+  }
+  const searchKeywords = [trackTitle, trackArtist].filter(Boolean).join(' ').trim();
+  if (cfg.enableFreeCrossMatch && searchKeywords && trackTitle) {
     const budgetMs = cfg.crossMatchBudgetMs;
     const matchStart = Date.now();
     const isBudgetExceeded = () => Date.now() - matchStart >= budgetMs;
@@ -1100,8 +1123,8 @@ export async function resolvePlayableStream(
         const neSearch = await searchNeteaseNative(searchKeywords, 5, 1, env);
         const match = neSearch.tracks.find(
           (t) =>
-            titlesMatchStrictly(opts.title!, t.title) &&
-            artistsMatchStrictly(opts.artist || '', t.artist, cfg.crossMatchArtistSimilarity) &&
+            titlesMatchStrictly(trackTitle, t.title) &&
+            artistsMatchStrictly(trackArtist, t.artist, cfg.crossMatchArtistSimilarity) &&
             (!opts.durationSec || !t.duration || Math.abs(t.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec),
         );
         if (match) {
@@ -1234,7 +1257,7 @@ export async function resolvePlayableStream(
   }
 
   // 5. External Source Fallback (GDStudio / Cloudflare Independent External Resolution)
-  if (cfg.enableGdstudio && (cleanId || opts.title)) {
+  if (cfg.enableGdstudio && (cleanId || trackTitle || searchKeywords)) {
     const gdStart = Date.now();
     const gdSource =
       cleanSource === 'qq' ? 'tencent' : cleanSource === 'sonic' || cleanSource === 'ncm' ? 'netease' : cleanSource;
@@ -1256,7 +1279,7 @@ export async function resolvePlayableStream(
             allowHttp: false,
             allowedDomains: [gdUrl.hostname],
             maxRedirects: 2,
-            timeoutMs: 4500,
+            timeoutMs: 12000,
             maxBytes: 1024 * 1024,
           },
         );
@@ -1264,12 +1287,15 @@ export async function resolvePlayableStream(
           const gdData = (await gdRes.json()) as any;
           if (gdData?.url && typeof gdData.url === 'string' && gdData.url.startsWith('http')) {
             attempts.push({ provider: 'gdstudio', via: 'external-source', ok: true, ms: Date.now() - gdStart });
+            const finalUrl = toHttpsIfSafe(gdData.url);
+            const isNeteaseCdn = finalUrl.includes('music.126.net');
             const out: ResolvedStreamInfo = {
-              url: toHttpsIfSafe(gdData.url),
+              url: finalUrl,
               provider: 'gdstudio',
               via: 'external-source',
               isTrial: false,
-              corsSafe: false,
+              streamType: 'full',
+              corsSafe: isNeteaseCdn,
               degraded: false,
               circuitState,
               attempts,
@@ -1297,7 +1323,7 @@ export async function resolvePlayableStream(
             allowHttp: false,
             allowedDomains: [gdSearchUrl.hostname],
             maxRedirects: 2,
-            timeoutMs: 4000,
+            timeoutMs: 8000,
             maxBytes: 1024 * 1024,
           },
         );
@@ -1320,7 +1346,7 @@ export async function resolvePlayableStream(
                 allowHttp: false,
                 allowedDomains: [gdUrl2.hostname],
                 maxRedirects: 2,
-                timeoutMs: 4500,
+                timeoutMs: 12000,
                 maxBytes: 1024 * 1024,
               },
             );
@@ -1328,12 +1354,15 @@ export async function resolvePlayableStream(
               const gdData2 = (await gdRes2.json()) as any;
               if (gdData2?.url && typeof gdData2.url === 'string' && gdData2.url.startsWith('http')) {
                 attempts.push({ provider: 'gdstudio', via: 'external-search-match', ok: true, ms: Date.now() - gdStart });
+                const finalUrl2 = toHttpsIfSafe(gdData2.url);
+                const isNeteaseCdn2 = finalUrl2.includes('music.126.net');
                 const out: ResolvedStreamInfo = {
-                  url: toHttpsIfSafe(gdData2.url),
+                  url: finalUrl2,
                   provider: 'gdstudio',
                   via: 'external-search-match',
                   isTrial: false,
-                  corsSafe: false,
+                  streamType: 'full',
+                  corsSafe: isNeteaseCdn2,
                   degraded: false,
                   circuitState,
                   attempts,

@@ -664,11 +664,15 @@ export async function handleUpstreamEndpoint(
   // 16. Song URL
   if (normEndpoint === 'song/url/v1' || normEndpoint === 'song/url') {
     const id = url.searchParams.get('id') || '';
+    const title = url.searchParams.get('title') || '';
+    const artist = url.searchParams.get('artist') || '';
+    const titlePart = title ? `&title=${encodeURIComponent(title)}` : '';
+    const artistPart = artist ? `&artist=${encodeURIComponent(artist)}` : '';
     return jsonResponse(
       {
         code: 200,
         brand: 'Sonic',
-        data: [{ id: String(id), url: `/api/music/stream?id=${encodeURIComponent(String(id))}` }],
+        data: [{ id: String(id), url: `/api/music/stream?id=${encodeURIComponent(String(id))}${titlePart}${artistPart}` }],
       },
       { headers: { 'Cache-Control': 'public, max-age=3600' } },
     );

@@ -142,7 +142,7 @@ export function getSonicConfig(env?: AppEnv): SonicConfig {
     timeoutMs: Math.min(60_000, Math.max(500, parseInt(String(e.SONIC_TIMEOUT_MS || '8000'), 10) || 8000)),
     engineTimeoutMs: Math.min(
       30_000,
-      Math.max(100, parseInt(String(e.SONIC_ENGINE_TIMEOUT_MS || '4500'), 10) || 4500),
+      Math.max(100, parseInt(String(e.SONIC_ENGINE_TIMEOUT_MS || '2500'), 10) || 2500),
     ),
     crossMatchDurationToleranceSec: Math.max(1, parseInt(String(e.SONIC_CROSS_DURATION_TOLERANCE_SEC || '6'), 10) || 6),
     crossMatchArtistSimilarity: Math.max(0.5, Math.min(1.0, parseFloat(String(e.SONIC_CROSS_ARTIST_SIMILARITY || '0.85')) || 0.85)),
