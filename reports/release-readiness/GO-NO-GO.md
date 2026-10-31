@@ -166,6 +166,8 @@
 - 新增：404/503/挂起超时 E2E；12 条主要路由 + 路由切换 + 404 + 无登录入口 E2E。
 - 复跑：`npm test` 167 jiti + 142 Vitest；player 38；typecheck/lint/build/build:engine 全过；
   Playwright **42/42 PASS**。详细证据：`reports/handoff/evidence/public-beta-windows-20261031.log`。
+- 远端 CI：[run 41161277751](https://github.com/shijianus/sonic/actions/runs/41161277751)（`205171e`）—
+  **success**（quality / Docker smoke / Browser E2E 三作业）。
 
 ## 状态更新
 
