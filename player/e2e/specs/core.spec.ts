@@ -113,6 +113,18 @@ test.describe('核心播放路径', () => {
     await expect(page.getByText('Test Song One', { exact: true })).toBeVisible()
   })
 
+  test('播放历史：播过的歌曲进入最近播放并刷新后保持', async ({ page }) => {
+    await page.goto('/#/search?q=sonic')
+    await page.getByTestId('song-row-9001').click()
+    await expectPlaying(page)
+
+    await page.goto('/#/recent')
+    await expect(page.getByTestId('song-row-9001')).toBeVisible()
+
+    await page.reload()
+    await expect(page.getByTestId('song-row-9001')).toBeVisible()
+  })
+
   test('歌词降级：纯音乐与无歌词返回明确提示而不是崩溃', async ({ page }) => {
     await page.goto('/#/playlist/123')
     await expect(page.getByTestId('song-row-9200')).toBeVisible()

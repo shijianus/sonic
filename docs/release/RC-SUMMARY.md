@@ -89,6 +89,6 @@ E2E 使用 Mock 网关与本地 WAV，**不代表真实 CDN/OAuth**。
   播放错误 Toast 节流键纳入具体文案（503 降级原因不再被泛化提示覆盖）。
 - 新增 E2E：404/503/挂起超时 3 例；主要路由、路由切换、404 页、无登录入口 15 例。
 - 复跑结果：`npm test` 167 jiti + 142 Vitest；player 38；`typecheck`/`lint`/`build`/`build:engine` 全过；
-  Playwright **42/42 PASS**（桌面 38 + 移动 4）。证据见 `reports/handoff/evidence/public-beta-windows-20261031.log`。
+  Playwright **43/43 PASS**（桌面 39 + 移动 4）。证据见 `reports/handoff/evidence/public-beta-windows-20261031.log`。
 - 结论不变：P0 代码层 0；OAuth、商业 CDN、逐源授权仍为外部阻断。
   受控公测（匿名 + 仅第一方/合成音源）**CONDITIONAL GO**；公众商业发布 **NO-GO**。

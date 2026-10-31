@@ -44,6 +44,9 @@ Result: 13 passed (includes 404, 503, hanging timeout).
 E2E_CHANNEL=chrome pnpm --dir player exec playwright test e2e/specs/routes.spec.ts
 Result: 15 passed.
 
+E2E_CHANNEL=chrome pnpm --dir player exec playwright test e2e/specs/core.spec.ts --grep "播放历史"
+Result: 1 passed (play -> /#/recent -> reload, song row still present).
+
 ## 3. Full gate on final tree
 
 npm ci                                                  exit 0 (39 packages, 0 vulnerabilities)
@@ -58,7 +61,7 @@ npm run build                                           exit 0
   dist/ 270 files; 32/32 static references in index.html exist
 npm run build:engine                                    exit 0 (dist-server/index.mjs 816.3 kb)
 E2E_CHANNEL=chrome pnpm --dir player exec playwright test exit 0
-  42/42 passed (9.5 min): desktop 38 + mobile 4
+  43/43 passed (6.8 min): desktop 39 + mobile 4
 
 ## 4. Scope boundary
 

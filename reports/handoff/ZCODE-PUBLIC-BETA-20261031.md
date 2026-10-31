@@ -40,7 +40,7 @@
 
 - `resilience.spec.ts`：13/13 PASS（含上述 3 例）。
 - `routes.spec.ts`：15/15 PASS。
-- 全量 E2E：42/42 PASS。
+- 全量 E2E：43/43 PASS。
 
 ## 4. 完整回归结果（最终工作树）
 
@@ -54,7 +54,7 @@
 | `pnpm --dir player test` | 8 文件 38 例 | 0 |
 | `npm run build` | `dist/` 270 文件；`index.html` 32 个静态引用全部存在 | 0 |
 | `npm run build:engine` | `dist-server/index.mjs` 816.3 kb | 0 |
-| `E2E_CHANNEL=chrome pnpm --dir player exec playwright test` | **42/42 PASS**（桌面 38 + 移动 4，9.5 分钟） | 0 |
+| `E2E_CHANNEL=chrome pnpm --dir player exec playwright test` | **43/43 PASS**（桌面 39 + 移动 4，6.8 分钟） | 0 |
 
 E2E 使用确定性 Mock 网关与本地 WAV，**不代表真实 CDN/OAuth/真机**。
 
@@ -68,7 +68,7 @@ E2E 使用确定性 Mock 网关与本地 WAV，**不代表真实 CDN/OAuth/真�
 | 4 | 播放进度与 Seek | PASS（WAV 206） | core Seek 例断言 currentTime 与 aria-valuenow |
 | 5 | 歌词同步 / 无歌词降级 | PASS | core 歌词 2 例 |
 | 6 | 队列顺序、当前索引、上下首 | PASS | `queueIntegration.test.ts`；E2E 连续下一首 |
-| 7 | 收藏与历史持久化 | PASS | 收藏刷新 E2E；历史在 audio persist 白名单 |
+| 7 | 收藏与历史持久化 | PASS | 收藏刷新 E2E；播放历史 E2E（播放 → 最近播放 → 刷新后仍在）；历史在 audio persist 白名单 |
 | 8 | 403/404/429/503/超时/断网提示 | PASS（Mock） | resilience 6 类错误态 |
 | 9 | 不白屏 / 不无限加载 / 不连环跳歌 | PASS | routes 冒烟；挂起看门狗；错误仅提供“重试/下一首”，不自动连跳 |
 | 10 | 桌面与移动端主要操作 | PASS（模拟器） | Pixel 7 4 例 + 桌面 38 例；真机 NOT RUN |
