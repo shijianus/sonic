@@ -902,9 +902,8 @@ export async function resolvePlayableStream(
         };
       }
     } else if (engineRes.data?.attempts) {
-      // Engine responded 404 (genuinely unplayable track even on VPS) — preserve its honest attempts!
+      // Local engine did not resolve a playable stream — record its attempts and proceed to Cloudflare native & external fallback
       attempts.push(...engineRes.data.attempts);
-      return null;
     }
   }
 
