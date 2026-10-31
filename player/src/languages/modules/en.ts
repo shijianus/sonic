@@ -199,6 +199,7 @@ export default {
     songs: 'songs',
     newSongs: 'New Songs',
     official: 'Official Charts',
+    trending: 'Trending',
   },
   components: {
     infiniteScroll: {
@@ -694,8 +695,12 @@ export default {
     searchQuery: 'Search: {query}',
   },
   recommend: {
-    sectionTitle: 'Smart Discovery & Music Radar',
-    sectionSubtitle: 'Evolving in real time with station-wide listening trends, content features & your taste',
+    musicRadar: 'Music Radar',
+    musicRadarSubtitle: 'Personalized recommendations tailored to your taste',
+    styleRadar: 'Style Radar',
+    styleRadarSubtitle: 'Discover fresh tracks by genre and curiosity level',
+    sectionTitle: 'Music Radar',
+    sectionSubtitle: 'Personalized recommendations tailored to your taste',
     tabs: {
       forYou: 'For You',
       trending: 'Station Trending',

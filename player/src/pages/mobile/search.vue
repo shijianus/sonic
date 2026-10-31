@@ -11,6 +11,7 @@ import { useI18n } from 'vue-i18n'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { EffectCreative } from 'swiper/modules'
 import Button from '@/components/Ui/Button.vue'
+import StyleRadarSection from '@/components/Recommend/StyleRadarSection.vue'
 import 'swiper/css'
 import 'swiper/css/effect-creative'
 import {
@@ -618,6 +619,11 @@ watch(
             </button>
           </div>
         </div>
+      </section>
+
+      <!-- 风格探索雷达 -->
+      <section class="mb-6">
+        <StyleRadarSection :compact="true" />
       </section>
 
       <section>

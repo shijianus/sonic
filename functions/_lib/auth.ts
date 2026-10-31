@@ -164,14 +164,41 @@ function normalizeOrigin(raw: string): string {
 }
 
 export function getAllowedOrigins(env: AppEnv): string[] {
-  return (env.SONIC_ALLOWED_ORIGINS || '')
+  const configured = (env.SONIC_ALLOWED_ORIGINS || '')
     .split(',')
     .map((origin) => normalizeOrigin(origin.trim()))
     .filter(Boolean);
+  const defaults = [
+    'https://sonic.epocanvas.com',
+    'https://cfsolara-dho.pages.dev',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:8788',
+    'http://127.0.0.1:8788',
+  ];
+  return Array.from(new Set([...defaults, ...configured]));
+}
+
+export function isAllowedOrigin(origin: string, env: AppEnv): boolean {
+  const normalized = normalizeOrigin(origin);
+  if (!normalized) return false;
+  if (getAllowedOrigins(env).includes(normalized)) return true;
+  try {
+    const u = new URL(normalized);
+    if (
+      u.protocol === 'https:' &&
+      (u.hostname === 'sonic.epocanvas.com' ||
+        u.hostname === 'cfsolara-dho.pages.dev' ||
+        u.hostname.endsWith('.cfsolara-dho.pages.dev'))
+    ) {
+      return true;
+    }
+  } catch {}
+  return false;
 }
 
 export function getEpomailConfig(env: AppEnv, requestOrigin?: string) {
-  const baseUrl = normalizeServiceBase(env.EPOMAIL_BASE_URL);
+  const baseUrl = normalizeServiceBase(env.EPOMAIL_BASE_URL || 'https://mail.epocanvas.com');
   const clientId = env.EPOMAIL_CLIENT_ID ? String(env.EPOMAIL_CLIENT_ID).trim() : '';
   const clientSecret = env.EPOMAIL_CLIENT_SECRET ? String(env.EPOMAIL_CLIENT_SECRET).trim() : '';
   const timeoutMs = Math.min(
@@ -183,7 +210,7 @@ export function getEpomailConfig(env: AppEnv, requestOrigin?: string) {
   let redirectUri = rawRedirectUri ? normalizeRedirectUri(rawRedirectUri) : '';
   if (!rawRedirectUri && requestOrigin) {
     const origin = normalizeOrigin(requestOrigin);
-    if (origin && getAllowedOrigins(env).includes(origin)) {
+    if (origin && isAllowedOrigin(origin, env)) {
       redirectUri = `${origin}/api/auth/callback`;
     }
   }

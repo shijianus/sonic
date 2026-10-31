@@ -199,6 +199,7 @@ export default {
     songs: '曲',
     newSongs: '新曲',
     official: '公式ランキング',
+    trending: 'トレンドランキング',
   },
   components: {
     infiniteScroll: {
@@ -692,8 +693,12 @@ export default {
     searchQuery: '検索：{query}',
   },
   recommend: {
-    sectionTitle: 'スマート推薦＆ミュージックレーダー',
-    sectionSubtitle: 'サイト内のリアル再生トレンド、楽曲特徴、あなたの好みに合わせて進化',
+    musicRadar: '音楽レーダー',
+    musicRadarSubtitle: '好みに合わせたあなたへのおすすめ',
+    styleRadar: 'ジャンル探索レーダー',
+    styleRadarSubtitle: 'ジャンルと探索度で新しい音楽を発見',
+    sectionTitle: '音楽レーダー',
+    sectionSubtitle: '好みに合わせたあなたへのおすすめ',
     tabs: {
       forYou: 'あなたへのおすすめ',
       trending: 'トレンドランキング',

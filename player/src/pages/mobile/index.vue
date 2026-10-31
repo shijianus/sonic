@@ -25,7 +25,7 @@ import {
 import { formatCoverUrl } from '@/utils/imageUrl'
 import { useAudio } from '@/composables/useAudio'
 import type { Song as StoreSong } from '@/stores/interface'
-import SmartDiscoverySection from '@/components/Recommend/SmartDiscoverySection.vue'
+import MusicRadarSection from '@/components/Recommend/MusicRadarSection.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -210,7 +210,7 @@ watch(prefersReduced, syncAutoplay)
         </section>
 
         <div class="mb-6 px-4">
-          <SmartDiscoverySection :compact="true" />
+          <MusicRadarSection :compact="true" />
         </div>
 
         <section class="mb-6 px-4">

@@ -3,6 +3,7 @@
 import SearchSongs from '@/components/Search/SearchSongs.vue'
 import SearchPlaylists from '@/components/Search/SearchPlaylists.vue'
 import SearchMVs from '@/components/Search/SearchMVs.vue'
+import StyleRadarSection from '@/components/Recommend/StyleRadarSection.vue'
 import PageSkeleton from '@/components/PageSkeleton.vue'
 import TabGroup from '@/components/Ui/TabGroup.vue'
 import Button from '@/components/Ui/Button.vue'
@@ -426,6 +427,11 @@ const maxScore = computed(() => {
               </button>
             </div>
           </div>
+        </div>
+
+        <!-- 风格探索雷达 -->
+        <div class="relative z-10 mb-8 shrink-0">
+          <StyleRadarSection />
         </div>
 
         <!-- 热门搜索 -->

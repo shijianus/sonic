@@ -195,6 +195,7 @@ export default {
     songs: '首歌曲',
     newSongs: '新歌速递',
     official: '官方榜单',
+    trending: '站内趋势榜',
   },
   components: {
     infiniteScroll: {
@@ -676,8 +677,12 @@ export default {
     searchQuery: '搜索：{query}',
   },
   recommend: {
-    sectionTitle: '智能推荐与音乐雷达',
-    sectionSubtitle: '结合全站真实听歌趋势、多源内容特征与你的收听偏好实时演化',
+    musicRadar: '音乐雷达',
+    musicRadarSubtitle: '根据你的收听口味为你量身定制',
+    styleRadar: '风格探索雷达',
+    styleRadarSubtitle: '按曲风流派与探索尺度发现新鲜音乐',
+    sectionTitle: '音乐雷达',
+    sectionSubtitle: '根据你的收听口味为你量身定制',
     tabs: {
       forYou: '猜你喜欢',
       trending: '站内趋势热榜',

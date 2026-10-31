@@ -1,7 +1,11 @@
 <script setup lang="ts">
+import { reactive, toRefs, computed, watch, onMounted } from 'vue'
 import SongList from '@/components/SongList.vue'
+import PageSkeleton from '@/components/PageSkeleton.vue'
 import { topSong, toplist, playlistTrackAll } from '@/api'
+import { fetchRecommendTrending } from '@/api/recommend'
 import { usePlayActions } from '@/composables/usePlayActions'
+import { useRecommendStore } from '@/stores/modules/recommend'
 import { useI18n } from 'vue-i18n'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import TabGroup from '@/components/Ui/TabGroup.vue'
@@ -11,9 +15,16 @@ import { formatCoverUrl } from '@/utils/imageUrl'
 
 const { t } = useI18n()
 const { playAll: playAllAction } = usePlayActions()
+const recommendStore = useRecommendStore()
+
+type MainTabKey = 'trending' | 'newSong' | 'official'
+type TrendingWindowKey = '7d' | '24h' | 'surging' | 'new'
 
 const state = reactive({
-  activeTab: 'newSong' as 'newSong' | 'official',
+  activeTab: 'trending' as MainTabKey,
+  trendingWindow: '7d' as TrendingWindowKey,
+  trendingSongs: [] as SongData[],
+  trendingLoading: false,
   activeType: 0 as 0 | 7 | 96 | 8 | 16,
   songs: [] as SongData[],
   isLoading: false,
@@ -23,12 +34,20 @@ const state = reactive({
   listLoading: false,
 })
 
-const { activeTab, activeType } = toRefs(state)
+const { activeTab, trendingWindow, activeType } = toRefs(state)
 
 const mainTabs = computed(() => [
+  { key: 'trending', labelKey: 'charts.trending', icon: 'icon-[mdi--chart-line-variant]' },
   { key: 'newSong', labelKey: 'charts.newSongs', icon: 'icon-[mdi--music-note-plus]' },
   { key: 'official', labelKey: 'charts.official', icon: 'icon-[mdi--trophy]' },
 ])
+
+const trendingWindows = [
+  { key: '7d', labelKey: 'recommend.windows.7d', icon: 'icon-[mdi--chart-timeline-variant]' },
+  { key: '24h', labelKey: 'recommend.windows.24h', icon: 'icon-[mdi--fire]' },
+  { key: 'surging', labelKey: 'recommend.windows.surging', icon: 'icon-[mdi--rocket-launch-outline]' },
+  { key: 'new', labelKey: 'recommend.windows.new', icon: 'icon-[mdi--sparkles]' },
+]
 
 const newSongTypes = [
   { key: 0, labelKey: 'charts.types.all', icon: 'icon-[mdi--fire]' },
@@ -37,6 +56,25 @@ const newSongTypes = [
   { key: 8, labelKey: 'charts.types.japan', icon: 'icon-[mdi--flower-tulip]' },
   { key: 16, labelKey: 'charts.types.korea', icon: 'icon-[mdi--star-four-points]' },
 ]
+
+const loadTrendingSongs = async () => {
+  try {
+    state.trendingLoading = true
+    const res = await fetchRecommendTrending(
+      {
+        window: state.trendingWindow,
+        count: 50,
+        personalized: recommendStore.personalizationEnabled,
+      },
+      recommendStore.buildRequestHeaders(true)
+    )
+    state.trendingSongs = res.tracks
+  } catch (err) {
+    console.warn('[Charts] loadTrendingSongs failed:', err)
+  } finally {
+    state.trendingLoading = false
+  }
+}
 
 const loadNewSongs = async () => {
   try {
@@ -82,21 +120,45 @@ const selectList = async (item: any) => {
 }
 
 const playAll = () => {
-  const songs = activeTab.value === 'newSong' ? state.songs : state.listSongs
+  const songs = currentSongs.value
   playAllAction(songs)
 }
 
-const currentSongs = computed(() => (activeTab.value === 'newSong' ? state.songs : state.listSongs))
-const currentLoading = computed(() =>
-  activeTab.value === 'newSong' ? state.isLoading : state.listLoading
-)
-
-watch(activeType, () => {
-  if (activeTab.value === 'newSong') loadNewSongs()
+const currentSongs = computed(() => {
+  if (state.activeTab === 'trending') return state.trendingSongs
+  if (state.activeTab === 'newSong') return state.songs
+  return state.listSongs
 })
 
-watch(activeTab, val => {
-  if (val === 'newSong' && !state.songs.length) {
+const currentLoading = computed(() => {
+  if (state.activeTab === 'trending') return state.trendingLoading
+  if (state.activeTab === 'newSong') return state.isLoading
+  return state.listLoading
+})
+
+const headerTitle = computed(() => {
+  if (state.activeTab === 'trending') {
+    const cur = trendingWindows.find((w) => w.key === state.trendingWindow)
+    return `${t('charts.trending')} · ${cur ? t(cur.labelKey) : ''}`
+  }
+  if (state.activeTab === 'newSong') {
+    return t('charts.newSongs')
+  }
+  return state.selectedList?.name || t('charts.official')
+})
+
+watch(trendingWindow, () => {
+  if (state.activeTab === 'trending') loadTrendingSongs()
+})
+
+watch(activeType, () => {
+  if (state.activeTab === 'newSong') loadNewSongs()
+})
+
+watch(activeTab, (val) => {
+  if (val === 'trending' && !state.trendingSongs.length) {
+    loadTrendingSongs()
+  } else if (val === 'newSong' && !state.songs.length) {
     loadNewSongs()
   } else if (val === 'official' && !state.officialLists.length) {
     loadOfficialLists()
@@ -104,6 +166,7 @@ watch(activeTab, val => {
 })
 
 onMounted(() => {
+  loadTrendingSongs()
   loadNewSongs()
   loadOfficialLists()
 })
@@ -118,8 +181,28 @@ onMounted(() => {
         <TabGroup v-model="state.activeTab" :tabs="mainTabs" variant="gradient" size="sm" :show-count="false" />
       </div>
 
+      <!-- 站内趋势榜时间窗 -->
+      <div v-if="activeTab === 'trending'" class="flex-1 space-y-1.5 overflow-auto p-4">
+        <Button
+          v-for="win in trendingWindows"
+          :key="win.key"
+          variant="ghost"
+          size="sm"
+          rounded="xl"
+          class="w-full justify-start gap-3"
+          :class="trendingWindow === win.key ? 'bg-hover-glass text-sky-400! shadow-sm' : ''"
+          @click="trendingWindow = win.key as any"
+        >
+          <span
+            :class="[win.icon, 'h-5 w-5']"
+            :style="trendingWindow === win.key ? 'filter: drop-shadow(0 0 4px rgb(56 189 248 / 0.5))' : ''"
+          ></span>
+          {{ t(win.labelKey) }}
+        </Button>
+      </div>
+
       <!-- 新歌榜类型 -->
-      <div v-if="activeTab === 'newSong'" class="flex-1 space-y-1.5 overflow-auto p-4">
+      <div v-else-if="activeTab === 'newSong'" class="flex-1 space-y-1.5 overflow-auto p-4">
         <Button
           v-for="type in newSongTypes"
           :key="type.key"
@@ -184,7 +267,7 @@ onMounted(() => {
       <header class="mb-6 flex shrink-0 items-center justify-between">
         <div class="flex items-center gap-4">
           <h1 class="text-primary text-2xl font-bold tracking-tight lg:text-3xl">
-            {{ activeTab === 'newSong' ? t('charts.newSongs') : state.selectedList?.name }}
+            {{ headerTitle }}
           </h1>
           <span class="text-primary/50 glass-card rounded-full px-3 py-1.5 text-sm font-medium">
             {{ currentSongs.length }} {{ t('charts.songs') }}
