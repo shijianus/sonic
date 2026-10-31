@@ -126,7 +126,7 @@
 
 | 版本层级 | 标识 / SHA | 部署资源 / Digest | 实测回滚时间 |
 |---|---|---|---|
-| **当前发布版本** | `c0fe1d3` | Pages `941be968` / Engine `sonic-engine:rc-30b3602` (`sha256:8d73edd...`) | 基线生效中 |
+| **当前发布版本** | `30b3602`（2026-10-31 线上实测：Pages `X-Sonic-Release` 与 `/api` releaseCommit 均为 `30b3602f52e9dc7e03f21f6f01b5eddd81491da3`；`c0fe1d3`/`f99f647` 仅含 docs 增量，代码内容与部署版本一致） | Pages `941be968` / Engine `sonic-engine:rc-30b3602` (`sha256:8d73edd...`) | 基线生效中 |
 | **上一可回滚版本** | `4fb8e79` | Pages `48992d04-fd67-4d55-bff7-611489887585` / Engine `sonic-engine:rc-4fb8e79` (`sha256:4ad3a85...`) | **实测 RTO: 16 秒** |
 | **基线版本** | `20e399f` | Pages `e64dd74e-1091-4750-b6d8-43af4885e105` / Engine `baseline-20e399f` (`sha256:4785f88...`) | 冷备保障 |
 
@@ -138,8 +138,7 @@
 ## 7. 公测实际访问范围与邀请方式
 
 - **访问地址**：`https://sonic-staging.pages.dev`
-- **专属邀请链接**：
-  `https://sonic-staging.pages.dev/?staging_token=stg_beta_pass_20261031_0123456789`
+- **专属邀请链接**：`https://sonic-staging.pages.dev/?staging_token=<受邀 Token 仅限私下渠道分发，禁止写入仓库>`（历史 Token 已于 2026-10-31 轮换作废；本仓库为公开仓库，任何凭据不得明文入库）
 - **受众范围**：仅限持有受邀 Token 的核心开发者、测试人员与指定受邀伙伴。
 - **保护机制**：无 Token 或无 Cookie 访问任何页面均直接拒绝为 401。
 

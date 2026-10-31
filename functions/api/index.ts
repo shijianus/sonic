@@ -4,13 +4,20 @@ import { getSonicConfig } from '../_lib/sonic/config';
 import { getLicensingAuditSummary } from '../_lib/sonic/licensing';
 import { getLocalEngineCircuitSnapshot } from '../_lib/sonic/local-engine';
 import { getReleaseMetadata } from '../_lib/sonic/observability';
-import { checkEngineAccess, getRateLimitConfigStatus } from '../_lib/sonic/security';
+import {
+  buildRateLimitErrorResponse,
+  checkEngineAccess,
+  evaluateGatewayRateLimit,
+  getRateLimitConfigStatus,
+} from '../_lib/sonic/security';
 import type { AppEnv } from '../_lib/types';
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
   const engineDenied = checkEngineAccess(request, env);
   if (engineDenied) return engineDenied;
+  const rl = await evaluateGatewayRateLimit(request, env, 'api-info');
+  if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   const url = new URL(request.url);
   const base = url.origin;
