@@ -16,6 +16,7 @@ import ArtistCard from '@/components/Ui/ArtistCard.vue'
 import MVCard from '@/components/Ui/MVCard.vue'
 import SongCard from '@/components/Ui/SongCard.vue'
 import MusicRadarSection from '@/components/Recommend/MusicRadarSection.vue'
+import { useGlobalStore } from '@/stores/modules/global'
 import {
   transformBanners,
   transformPlaylists,
@@ -35,6 +36,8 @@ import type { Song as StoreSong } from '@/stores/interface'
 const { t } = useI18n()
 const router = useRouter()
 const { play, setPlaylist } = useAudio()
+const globalStore = useGlobalStore()
+const hasSearchHistory = computed(() => (globalStore.searchHistory?.length || 0) > 0)
 
 const state = reactive({
   banners: [] as BannerData[],
@@ -220,8 +223,8 @@ onMounted(() => {
           <div class="home-pagination mt-4 flex justify-center gap-1.5"></div>
         </section>
 
-        <!-- ═══════ 音乐雷达 ═══════ -->
-        <MusicRadarSection />
+        <!-- ═══════ 音乐雷达 (用户真实检索后呈现，学习热门单曲排版) ═══════ -->
+        <MusicRadarSection v-if="hasSearchHistory" class="mb-10" />
 
         <!-- ═══════ 推荐歌单 ═══════ -->
         <section v-if="recommendPlaylists.length" v-scroll-in="{ direction: 'up', delay: 0.1 }">

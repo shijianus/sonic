@@ -25,11 +25,14 @@ import {
 import { formatCoverUrl } from '@/utils/imageUrl'
 import { useAudio } from '@/composables/useAudio'
 import type { Song as StoreSong } from '@/stores/interface'
+import { useGlobalStore } from '@/stores/modules/global'
 import MusicRadarSection from '@/components/Recommend/MusicRadarSection.vue'
 
 const { t } = useI18n()
 const router = useRouter()
 const { play, setPlaylist } = useAudio()
+const globalStore = useGlobalStore()
+const hasSearchHistory = computed(() => (globalStore.searchHistory?.length || 0) > 0)
 
 const handleBannerClick = (item: BannerData) => {
   if (item.targetType === 1 && item.targetId) {
@@ -209,7 +212,7 @@ watch(prefersReduced, syncAutoplay)
           </Swiper>
         </section>
 
-        <div class="mb-6 px-4">
+        <div v-if="hasSearchHistory" class="mb-6 px-4">
           <MusicRadarSection :compact="true" />
         </div>
 
