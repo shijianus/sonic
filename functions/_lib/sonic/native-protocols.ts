@@ -5,6 +5,7 @@
 import type { AppEnv, SongItem } from '../types';
 import type { SonicAttempt, SonicSearchTrack } from './types';
 import { getSonicConfig } from './config';
+import { isSourceEnabledByPolicy } from './licensing';
 import { buildNeteaseEapiParams, buildNeteaseLinuxApiParams } from './crypto';
 import { normalizeArtistString, normalizeText, normalizeCjkText, calcLevenshteinSimilarity } from './utils';
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
@@ -1086,7 +1087,12 @@ export async function resolvePlayableStream(
   }
 
   // 4. Fast External Source Fallback (GDStudio Direct ID Lookup)
-  if (cfg.enableGdstudio && cleanId) {
+  const isCommercialSource = cleanSource === 'netease' || cleanSource === 'qq' || cleanSource === 'sonic';
+  const allowExternal =
+    cfg.enableGdstudio ||
+    (isCommercialSource && isSourceEnabledByPolicy(cleanSource, env) && (degraded || Boolean(engineRes?.skippedByCircuit) || !engineRes?.ok));
+
+  if (allowExternal && cleanId) {
     const gdStart = Date.now();
     const gdSource =
       cleanSource === 'qq' ? 'tencent' : cleanSource === 'sonic' || cleanSource === 'ncm' ? 'netease' : cleanSource;
@@ -1308,7 +1314,7 @@ export async function resolvePlayableStream(
   }
 
   // 5. External Source Fallback (GDStudio / Cloudflare Independent External Resolution)
-  if (cfg.enableGdstudio && (cleanId || trackTitle || searchKeywords)) {
+  if (allowExternal && (cleanId || trackTitle || searchKeywords)) {
     const gdStart = Date.now();
     const gdSource =
       cleanSource === 'qq' ? 'tencent' : cleanSource === 'sonic' || cleanSource === 'ncm' ? 'netease' : cleanSource;
