@@ -52,6 +52,7 @@ declare module 'vue' {
     SearchSongs: typeof import('./../components/Search/SearchSongs.vue')['default']
     ShadowBling: typeof import('./../components/Background/ShadowBling.vue')['default']
     ShadowBlingSettingsPanel: typeof import('./../components/Background/ShadowBlingSettingsPanel.vue')['default']
+    SidebarAccount: typeof import('./../components/Account/SidebarAccount.vue')['default']
     SmartDiscoverySection: typeof import('./../components/Recommend/SmartDiscoverySection.vue')['default']
     SongCard: typeof import('./../components/Ui/SongCard.vue')['default']
     SongCommentsDialog: typeof import('./../components/Comments/SongCommentsDialog.vue')['default']

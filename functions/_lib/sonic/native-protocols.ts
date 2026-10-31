@@ -839,6 +839,7 @@ export async function resolvePlayableStream(
   let circuitState: CircuitState | undefined;
 
   // 2. If running on Cloudflare Pages with Linux Local Engine configured: call VPS first!
+  let engineRes: { ok: boolean; data?: { ok: boolean; data?: ResolvedStreamInfo; attempts?: SonicAttempt[]; error?: string }; attempts?: SonicAttempt[]; error?: string; latencyMs: number; status?: number; skippedByCircuit?: boolean; circuitState: CircuitState } | undefined;
   if (cfg.enableLocalEngine) {
     const q = new URLSearchParams({
       id: cleanId,
@@ -851,7 +852,7 @@ export async function resolvePlayableStream(
     if (!allowTrial) q.set('allowTrial', '0');
     if (opts.nocache) q.set('nocache', '1');
 
-    const engineRes = await callLocalEngineJson<{ ok: boolean; data?: ResolvedStreamInfo; attempts?: SonicAttempt[]; error?: string }>(
+    engineRes = await callLocalEngineJson<{ ok: boolean; data?: ResolvedStreamInfo; attempts?: SonicAttempt[]; error?: string }>(
       `/api/sonic/resolve/stream?${q.toString()}`,
       env,
       { request: opts.request, timeoutMs: cfg.engineTimeoutMs },

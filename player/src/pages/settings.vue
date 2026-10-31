@@ -5,6 +5,7 @@ import GlassCheckbox from '@/components/Ui/GlassCheckbox.vue'
 import PrivacyDataSection from '@/components/Settings/PrivacyDataSection.vue'
 import { useSettingsStore } from '@/stores/modules/settings'
 import { useGlobalStore } from '@/stores/modules/global'
+import { useAuthStore } from '@/stores/modules/auth'
 import { useToastStore } from '@/stores/modules/toast'
 import I18n from '@/languages'
 import { useI18n } from 'vue-i18n'
@@ -33,6 +34,7 @@ const ShadowBlingSettingsPanel = defineAsyncComponent(
 const settings = useSettingsStore()
 const { backgroundType, footerLyrics, audioQuality, audioVisualizer } = storeToRefs(settings)
 const globalStore = useGlobalStore()
+const authStore = useAuthStore()
 const toastStore = useToastStore()
 const { theme, lang } = storeToRefs(globalStore)
 const { t } = useI18n()
@@ -131,6 +133,7 @@ onMounted(() => {
       </div>
 
       <div class="grid grid-cols-2 gap-6">
+        <!-- 主题色调设置 (从侧边栏底部迁移并整合) -->
         <div class="glass-card space-y-5 rounded-2xl p-5">
           <div class="flex items-center gap-3 border-b border-white/10 pb-4">
             <div
@@ -145,7 +148,94 @@ onMounted(() => {
               <p class="text-primary/50 text-xs">{{ t('components.settings.themeModeDesc') }}</p>
             </div>
           </div>
-          <GlassSelect v-model="theme" :options="themeOptions" />
+          <!-- 胶囊分段单选交互 -->
+          <div class="grid grid-cols-3 gap-2 p-1 rounded-xl bg-button-glass border border-glass">
+            <button
+              v-for="opt in themeOptions"
+              :key="opt.value"
+              type="button"
+              @click="theme = opt.value"
+              class="flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+              :class="theme === opt.value ? 'bg-[var(--glass-interactive-active)] text-primary shadow-xs border border-glass' : 'text-primary/50 hover:text-primary hover:bg-hover-glass'"
+            >
+              <span
+                :class="[
+                  opt.value === 'dark' ? 'icon-[mdi--weather-night]' : opt.value === 'light' ? 'icon-[mdi--weather-sunny]' : 'icon-[mdi--theme-light-dark]',
+                  'size-4 shrink-0'
+                ]"
+              ></span>
+              <span class="truncate">{{ opt.label }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- EpoMail 统一账户管理卡片 -->
+        <div class="glass-card space-y-5 rounded-2xl p-5">
+          <div class="flex items-center justify-between border-b border-glass pb-4">
+            <div class="flex items-center gap-3">
+              <div
+                class="flex h-9 w-9 items-center justify-center rounded-xl bg-linear-to-br from-sky-500 to-blue-600"
+              >
+                <span class="icon-[mdi--shield-account-outline] h-5 w-5 text-sky-50" />
+              </div>
+              <div>
+                <h3 class="text-primary text-sm font-semibold">
+                  {{ t('account.title') || 'EpoMail 统一账户' }}
+                </h3>
+                <p class="text-primary/50 text-xs">{{ t('account.signInDesc') || '全权统一认证与多端协同' }}</p>
+              </div>
+            </div>
+            <span
+              v-if="authStore.isAuthenticated"
+              class="rounded bg-emerald-500/15 border border-emerald-400/25 px-2 py-0.5 text-[11px] font-bold text-emerald-300"
+            >
+              SSO 已连接
+            </span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3 min-w-0">
+              <div
+                v-if="!authStore.user?.avatar"
+                class="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-linear-to-tr from-blue-600 to-sky-400 text-xs font-bold text-sky-50 shadow-xs"
+              >
+                {{ authStore.userInitial }}
+              </div>
+              <img
+                v-else
+                :src="authStore.user.avatar"
+                :alt="authStore.userName"
+                class="h-9 w-9 shrink-0 rounded-full object-cover border border-glass"
+              />
+              <div class="flex flex-col min-w-0">
+                <span class="text-xs font-semibold text-primary truncate">
+                  {{ authStore.userName }}
+                </span>
+                <span class="text-[11px] text-primary/45 truncate">
+                  {{ authStore.userEmail || (t('account.guestUser') || '未登录访客') }}
+                </span>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button
+                v-if="authStore.isAuthenticated"
+                type="button"
+                @click="authStore.openProfile()"
+                class="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-button-glass hover:bg-hover-button-glass border border-glass text-xs font-medium text-primary transition-colors cursor-pointer"
+              >
+                <span>{{ t('account.manageProfile') || '账号设置' }}</span>
+                <span class="icon-[mdi--arrow-top-right] size-3.5 opacity-60"></span>
+              </button>
+              <button
+                v-else
+                type="button"
+                @click="authStore.login()"
+                class="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-bold text-sky-50 shadow-sm transition-colors cursor-pointer"
+              >
+                <span class="icon-[mdi--login] size-3.5"></span>
+                <span>{{ t('account.signIn') || '登录' }}</span>
+              </button>
+            </div>
+          </div>
         </div>
 
         <div class="glass-card space-y-5 rounded-2xl p-5">

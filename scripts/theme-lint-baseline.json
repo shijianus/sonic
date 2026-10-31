@@ -176,28 +176,13 @@
     "player/src/directives/animations.ts": {
       "rgb-white:rgb(255,255,255)": 6
     },
-    "player/src/layout/aside.vue": {
-      "rgb-white:rgb(255,255,255)": 4,
-      "tailwind-white:bg-white": 1,
-      "tailwind-white:bg-white/10": 2,
-      "tailwind-white:bg-white/15": 1,
-      "tailwind-white:bg-white/5": 3,
-      "tailwind-white:border-white/10": 6,
-      "tailwind-white:border-white/20": 1,
-      "tailwind-white:focus-within:bg-white/10": 1,
-      "tailwind-white:hover:bg-white/10": 2,
-      "tailwind-white:hover:bg-white/5": 1,
-      "tailwind-white:text-white/90": 1
-    },
     "player/src/layout/footer.vue": {
       "tailwind-white:bg-white": 3,
       "tailwind-white:ring-white/15": 1,
       "tailwind-white:text-white/80": 2
     },
     "player/src/layout/mobile/Header.vue": {
-      "tailwind-white:bg-white/95": 1,
-      "tailwind-white:hover:bg-white/10": 2,
-      "tailwind-white:ring-white/50": 1
+      "tailwind-white:hover:bg-white/10": 2
     },
     "player/src/layout/mobile/TabBar.vue": {
       "tailwind-white:bg-white/10": 1,

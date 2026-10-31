@@ -12,8 +12,20 @@ export const useGlobalStore = defineStore('global', {
     /** 搜索历史记录（最多保留 10 条） */
     searchHistory: [] as string[],
     lang: undefined,
+    /** 侧边栏折叠状态 */
+    sidebarCollapsed: false,
   }),
   actions: {
+    /** 切换侧边栏折叠状态 */
+    toggleSidebarCollapsed() {
+      this.sidebarCollapsed = !this.sidebarCollapsed
+    },
+
+    /** 设置侧边栏折叠状态 */
+    setSidebarCollapsed(collapsed: boolean) {
+      this.sidebarCollapsed = collapsed
+    },
+
     /** 通用状态更新方法 */
     setGlobalState<K extends keyof GlobalState>(key: K, value: GlobalState[K]) {
       this.$patch(state => {

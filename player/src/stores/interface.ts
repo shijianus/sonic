@@ -122,4 +122,6 @@ export interface GlobalState {
   searchHistory: string[]
   /** 界面语言 */
   lang?: 'zh' | 'en' | 'ja'
+  /** 侧边栏是否折叠为图标模式 */
+  sidebarCollapsed?: boolean
 }

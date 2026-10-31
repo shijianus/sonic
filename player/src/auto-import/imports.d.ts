@@ -154,6 +154,7 @@ declare global {
   const unref: typeof import('vue').unref
   const useAttrs: typeof import('vue').useAttrs
   const useAudioStore: typeof import('../stores/modules/audio').useAudioStore
+  const useAuthStore: typeof import('../stores/modules/auth').useAuthStore
   const useCssModule: typeof import('vue').useCssModule
   const useCssVars: typeof import('vue').useCssVars
   const useDownloadStore: typeof import('../stores/modules/download').useDownloadStore
@@ -208,6 +209,9 @@ declare global {
   // @ts-ignore
   export type { QualityLevel, QualityChoiceMeta, ProbeQualityItem, SongProbeResult } from '../utils/qualityProbe'
   import('../utils/qualityProbe')
+  // @ts-ignore
+  export type { UserInfo, AuthState } from '../stores/modules/auth'
+  import('../stores/modules/auth')
   // @ts-ignore
   export type { QualityChoice } from '../stores/modules/download'
   import('../stores/modules/download')
