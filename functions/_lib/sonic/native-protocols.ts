@@ -1243,6 +1243,7 @@ export async function resolvePlayableStream(
       // 5a. Direct ID Lookup via External Source
       if (cleanId) {
         const gdUrl = new URL(cfg.upstreamGdstudio);
+        gdUrl.searchParams.set('s', Math.random().toString(36).substring(2, 15));
         gdUrl.searchParams.set('types', 'url');
         gdUrl.searchParams.set('id', cleanId);
         gdUrl.searchParams.set('source', gdSource);
@@ -1283,6 +1284,7 @@ export async function resolvePlayableStream(
       // 5b. Search-Assisted External Match (when direct ID fails or ID format differs)
       if (searchKeywords) {
         const gdSearchUrl = new URL(cfg.upstreamGdstudio);
+        gdSearchUrl.searchParams.set('s', Math.random().toString(36).substring(2, 15));
         gdSearchUrl.searchParams.set('types', 'search');
         gdSearchUrl.searchParams.set('name', searchKeywords);
         gdSearchUrl.searchParams.set('source', 'netease');
@@ -1305,6 +1307,7 @@ export async function resolvePlayableStream(
           if (Array.isArray(searchData) && searchData.length > 0 && searchData[0]?.id) {
             const matchedId = String(searchData[0].id);
             const gdUrl2 = new URL(cfg.upstreamGdstudio);
+            gdUrl2.searchParams.set('s', Math.random().toString(36).substring(2, 15));
             gdUrl2.searchParams.set('types', 'url');
             gdUrl2.searchParams.set('id', matchedId);
             gdUrl2.searchParams.set('source', 'netease');

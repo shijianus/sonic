@@ -294,7 +294,7 @@ export function evaluateContentFlags(env?: AppEnv): EffectiveContentFlags {
       enableApple: checkStrict('apple', e.SONIC_ENABLE_APPLE) && Boolean(e.SONIC_APPLE_MUSIC_TOKEN),
       enableYtmusic: checkStrict('ytmusic', e.SONIC_ENABLE_YTMUSIC) && Boolean(e.SONIC_YOUTUBE_API_KEY),
       enableListenbrainz: checkStrict('listenbrainz', e.SONIC_ENABLE_LISTENBRAINZ),
-      enableGdstudio: checkStrict('gdstudio', e.SONIC_ENABLE_GDSTUDIO, true),
+      enableGdstudio: checkStrict('gdstudio', e.SONIC_ENABLE_GDSTUDIO),
       enableLyriva: false,
       enableUnblock: false,
       allowedSources: [] as string[],
