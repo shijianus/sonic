@@ -80,3 +80,15 @@ E2E 使用 Mock 网关与本地 WAV，**不代表真实 CDN/OAuth**。
 3. agy 完成健康端点版本字段、告警与回滚演练。
 4. 在 Staging 复跑同款 E2E + 真机/跨浏览器人工验收。
 5. 全部门禁满足后重新评估 GO；在此之前保持 NO-GO。
+
+## 8. 2026-10-31 Windows 公测冲刺补充
+
+- 工作分支：`work/zcode-beta-20261031-20261031T013704Z`
+- 基线：`401dbce`；本轮验证代码 SHA：`1cc1ac8`
+- 修复：播放起播 15s 看门狗（上游挂起时不再无限加载，停止媒体并给出可重试网络错误）；
+  播放错误 Toast 节流键纳入具体文案（503 降级原因不再被泛化提示覆盖）。
+- 新增 E2E：404/503/挂起超时 3 例；主要路由、路由切换、404 页、无登录入口 15 例。
+- 复跑结果：`npm test` 167 jiti + 142 Vitest；player 38；`typecheck`/`lint`/`build`/`build:engine` 全过；
+  Playwright **42/42 PASS**（桌面 38 + 移动 4）。证据见 `reports/handoff/evidence/public-beta-windows-20261031.log`。
+- 结论不变：P0 代码层 0；OAuth、商业 CDN、逐源授权仍为外部阻断。
+  受控公测（匿名 + 仅第一方/合成音源）**CONDITIONAL GO**；公众商业发布 **NO-GO**。

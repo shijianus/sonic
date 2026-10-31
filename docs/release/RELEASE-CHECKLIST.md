@@ -89,3 +89,19 @@
 
 > 「agy 环境」表示证据来自 Linux 侧一次性实测，Windows 环境未复跑；详见
 > `reports/handoff/ZCODE-INTEGRATION-20261030.md` §3。
+
+---
+
+# 2026-10-31 公测冲刺复跑（`1cc1ac8`）
+
+| # | 检查项 | 结果 | 证据 |
+|---|---|---|---|
+| A12 | 公测异常态 E2E（404/503/挂起超时） | PASS | `resilience.spec.ts` 13 例 |
+| A13 | 主要路由/切换/404/无登录入口 | PASS | `routes.spec.ts` 15 例 |
+| A14 | 起播挂起不再无限加载 | PASS | 15s 看门狗 + E2E；修复前 25s 无提示 |
+| A7 | 浏览器 E2E 全量 | PASS | **42/42**（桌面 38 + 移动 4） |
+| A2–A9 | typecheck/lint/root tests/player tests/build/engine | PASS | 同 SHA 复跑 |
+
+`npm test`：jiti 167 + Vitest 142；player 38。完整记录见
+`reports/handoff/evidence/public-beta-windows-20261031.log`。
+C 项外部门禁（OAuth、商业 CDN、逐源授权、真机）状态未变。

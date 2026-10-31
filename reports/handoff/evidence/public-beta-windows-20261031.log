@@ -1,0 +1,67 @@
+# Windows Public Beta Regression — 2026-10-31
+
+Environment : Windows 11 10.0.26200 x64
+Node        : v24.14.0
+npm         : 11.9.0
+pnpm        : 10.34.5
+Browser     : system Chrome (Playwright channel=chrome)
+Branch      : work/zcode-beta-20261031-20261031T013704Z
+Baseline RC : 401dbcee7be316300bf26375d6eec41a754f8bc2 (origin/rc/sonic-20261031)
+Code commit : 1cc1ac86548f7700db649a08b70f4fbbbce0f79b
+UTC         : 2026-10-31T02:41:48Z
+
+## 1. Pre-fix reproduction (same worktree, built dist)
+
+Mock fixtures: 9307 -> 404, 9308 -> 503 + X-Sonic-Degraded, 9306 -> 200 headers then no body.
+
+- playback 404 : PASS — error toast shown, page still usable.
+- playback 503 : FAIL — toast showed generic "This audio source is unavailable;
+                 try another track" instead of the degraded reason.
+- hanging 9306 : FAIL — no alert after 25 s; audio.play() stayed pending and
+                 store isLoading stayed true (infinite loading).
+
+Command:
+E2E_CHANNEL=chrome pnpm --dir player exec playwright test e2e/specs/resilience.spec.ts --grep "播放 (404|503)"
+Result: 1 failed, 1 passed.
+
+Command:
+E2E_CHANNEL=chrome pnpm --dir player exec playwright test e2e/specs/resilience.spec.ts --grep "挂起"
+Result: 1 failed (alert not found after 25 s).
+
+## 2. Fix verified
+
+- 15 s startup watchdog aborts the pending media load, increments playbackGeneration,
+  pauses the element, clears isLoading and shows a retryable network error.
+- Toast throttle key now includes the concrete message, so the 503 degraded reason
+  replaces the generic toast instead of being suppressed.
+- 404 / 503 / hanging fixtures added to player/e2e/mock-server.mjs.
+- Route smoke spec added: 12 main routes, sidebar switching, 404 route, no login entry.
+
+Post-fix targeted:
+E2E_CHANNEL=chrome pnpm --dir player exec playwright test e2e/specs/resilience.spec.ts
+Result: 13 passed (includes 404, 503, hanging timeout).
+
+E2E_CHANNEL=chrome pnpm --dir player exec playwright test e2e/specs/routes.spec.ts
+Result: 15 passed.
+
+## 3. Full gate on final tree
+
+npm ci                                                  exit 0 (39 packages, 0 vulnerabilities)
+pnpm --dir player install --frozen-lockfile             exit 0 (lockfile up to date)
+npm run typecheck                                       exit 0
+npm run lint                                            exit 0 (theme baseline 430 existing; ESLint 0)
+npm test                                                exit 0
+  gateway 60 / auth 43 / cover 15 / engine 49 = 167 jiti cases
+  Vitest 10 files / 142 tests passed
+pnpm --dir player test                                  exit 0 (8 files / 38 tests)
+npm run build                                           exit 0
+  dist/ 270 files; 32/32 static references in index.html exist
+npm run build:engine                                    exit 0 (dist-server/index.mjs 816.3 kb)
+E2E_CHANNEL=chrome pnpm --dir player exec playwright test exit 0
+  42/42 passed (9.5 min): desktop 38 + mobile 4
+
+## 4. Scope boundary
+
+These E2E runs use a deterministic mock gateway and a locally generated WAV file.
+They do not prove real commercial CDN Range/206, real OAuth, real device rendering,
+or content licensing. No production deployment was performed.

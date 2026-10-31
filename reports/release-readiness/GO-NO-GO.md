@@ -156,3 +156,27 @@
   关闭 OAuth 时无“点击必失败的登录按钮”，降级干净，但产品当前**没有账号会话 UI**。
 - 受控内测（仅第一方合成音源）：服务端与前端均就绪，可作为 **CONDITIONAL GO** 候选，
   必须保持访问令牌、`noindex`、`strict-allowlist`、`SONIC_ENABLE_OAUTH=0`。
+
+---
+
+# 2026-10-31 Windows 公测冲刺复跑（`work/zcode-beta-20261031-20261031T013704Z` @ `1cc1ac8`）
+
+- 基线：`401dbce`（`origin/rc/sonic-20261031`）。
+- 修复：起播挂起 15s 看门狗；503 降级文案不再被同类型泛化 Toast 节流吞掉。
+- 新增：404/503/挂起超时 E2E；12 条主要路由 + 路由切换 + 404 + 无登录入口 E2E。
+- 复跑：`npm test` 167 jiti + 142 Vitest；player 38；typecheck/lint/build/build:engine 全过；
+  Playwright **42/42 PASS**。详细证据：`reports/handoff/evidence/public-beta-windows-20261031.log`。
+
+## 状态更新
+
+| ID | 旧状态 | 新状态 | 依据 |
+|---|---|---|---|
+| P1-02 异常降级 | PARTIAL | **CLOSED（Mock 浏览器层）** | 403/404/429/503/断网/挂起超时/异常 JSON 均有 E2E |
+| P1-06 起播挂起无限加载 | — | **CLOSED（代码 + Mock E2E）** | 15s 看门狗，超时后停止媒体并提示 |
+| 主要路由不白屏 | NOT RUN | **PASS（Mock）** | routes 15 例 |
+| 匿名模式登录死入口 | 文档核验 | **PASS（E2E）** | 无登录路由/按钮 |
+
+外部阻断不变：P0-05 OAuth **BLOCKED**、P0-06 商业 CDN **PARTIAL**、P0-07 授权 **BLOCKED**；
+真机与人工无障碍仍 **NOT RUN**。
+
+**Recommendation：受控公测 CONDITIONAL GO；公众商业发布 NO-GO。**
