@@ -210,11 +210,11 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
         <!-- 顶部：epocanvas sonic 品牌 Logo + 前进后退导航按钮 -->
         <div class="flex items-center justify-between pb-[4px] border-b border-white/10 shrink-0">
           <router-link to="/" class="group flex items-center gap-2.5" :aria-label="BRAND_FULL">
-            <span class="relative flex h-8.5 w-8.5 items-center justify-center rounded-2xl bg-linear-to-br from-[#2563eb] via-[#38bdf8] to-[#3b82f6] p-0.5 shadow-[0_0_16px_rgba(37,99,235,0.6)] transition-transform duration-300 group-hover:scale-105">
-              <span class="flex h-full w-full items-center justify-center rounded-[13px] bg-black/40">
-                <span class="h-2 w-2 rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.9)] animate-pulse"></span>
-              </span>
-            </span>
+            <img
+              src="/logo.svg"
+              :alt="BRAND_PRODUCT"
+              class="h-8.5 w-8.5 rounded-xl shadow-[0_0_16px_rgba(37,99,235,0.55)] transition-transform duration-300 group-hover:scale-105 shrink-0 object-contain"
+            />
             <div class="flex flex-col leading-none">
               <span class="text-[11px] font-semibold tracking-[0.16em] text-primary/55">{{ BRAND_PARENT }}</span>
               <div class="mt-0.5 flex items-center gap-1.5">
