@@ -216,8 +216,16 @@
       "tailwind-white:text-white": 2
     },
     "player/src/pages/artists.vue": {
-      "tailwind-white:hover:bg-white/10": 1,
-      "tailwind-white:hover:bg-white/5": 3
+      "tailwind-white:bg-white/10": 1,
+      "tailwind-white:bg-white/5": 3,
+      "tailwind-white:border-white/10": 3,
+      "tailwind-white:border-white/5": 2,
+      "tailwind-white:focus:bg-white/10": 1,
+      "tailwind-white:hover:bg-white/10": 3,
+      "tailwind-white:hover:bg-white/15": 1,
+      "tailwind-white:hover:bg-white/5": 5,
+      "tailwind-white:hover:text-white": 1,
+      "tailwind-white:text-white": 1
     },
     "player/src/pages/index.vue": {
       "tailwind-white:bg-white": 4,
@@ -269,11 +277,6 @@
     },
     "player/src/pages/mv-list.vue": {
       "tailwind-white:text-white": 2
-    },
-    "player/src/pages/mv-player.vue": {
-      "tailwind-white:hover:bg-white/10": 1,
-      "tailwind-white:hover:bg-white/5": 1,
-      "tailwind-white:text-white": 3
     },
     "player/src/pages/new-albums.vue": {
       "tailwind-white:hover:bg-white/10": 1,

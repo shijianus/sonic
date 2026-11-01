@@ -7,11 +7,8 @@ import { fetchRecommendTrending } from '@/api/recommend'
 import { usePlayActions } from '@/composables/usePlayActions'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { useI18n } from 'vue-i18n'
-import LazyImage from '@/components/Ui/LazyImage.vue'
-import TabGroup from '@/components/Ui/TabGroup.vue'
 import Button from '@/components/Ui/Button.vue'
 import { transformTopSongs, transformSongs, type SongData } from '@/utils/transformers'
-import { formatCoverUrl } from '@/utils/imageUrl'
 
 const { t } = useI18n()
 const { playAll: playAllAction } = usePlayActions()
@@ -38,9 +35,9 @@ const { activeTab, trendingWindow, activeType } = toRefs(state)
 const officialScrollRef = ref<HTMLElement | null>(null)
 
 const mainTabs = computed(() => [
-  { key: 'trending', labelKey: 'charts.trending', icon: 'icon-[mdi--chart-line-variant]' },
-  { key: 'newSong', labelKey: 'charts.newSongs', icon: 'icon-[mdi--music-note-plus]' },
-  { key: 'official', labelKey: 'charts.official', icon: 'icon-[mdi--trophy]' },
+  { key: 'trending' as const, labelKey: 'charts.trending', icon: 'icon-[mdi--chart-line-variant]' },
+  { key: 'newSong' as const, labelKey: 'charts.newSongs', icon: 'icon-[mdi--music-note-plus]' },
+  { key: 'official' as const, labelKey: 'charts.official', icon: 'icon-[mdi--trophy]' },
 ])
 
 const trendingWindows = [
@@ -151,19 +148,9 @@ const headerTitle = computed(() => {
 })
 
 const currentSubtitle = computed(() => {
-  if (state.activeTab === 'trending') return '实时基于全站听歌热度与探索推荐模型精算'
+  if (state.activeTab === 'trending') return '基于全站实时收听热度与探索推荐模型精算'
   if (state.activeTab === 'newSong') return '全球最新发布的录音室曲目抢先速递'
   return state.selectedList?.updateFrequency || state.selectedList?.description || t('charts.official')
-})
-
-const currentCover = computed(() => {
-  if (state.activeTab === 'official' && state.selectedList?.cover) {
-    return state.selectedList.cover
-  }
-  if (currentSongs.value.length > 0 && currentSongs.value[0]?.cover) {
-    return currentSongs.value[0].cover
-  }
-  return ''
 })
 
 const handleOfficialWheel = (e: WheelEvent) => {
@@ -171,12 +158,6 @@ const handleOfficialWheel = (e: WheelEvent) => {
   if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) {
     officialScrollRef.value.scrollLeft += e.deltaY * 0.8
   }
-}
-
-const scrollOfficial = (dir: 'left' | 'right') => {
-  if (!officialScrollRef.value) return
-  const offset = dir === 'left' ? -320 : 320
-  officialScrollRef.value.scrollBy({ left: offset, behavior: 'smooth' })
 }
 
 watch(trendingWindow, () => {
@@ -205,71 +186,35 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full flex-1 flex-col gap-3 sm:gap-4 overflow-hidden p-3 sm:p-5">
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- 上栏：顶部控制枢纽与看板区 (Header & Dimension Hub)  -->
-    <!-- ═══════════════════════════════════════════════════ -->
-    <header class="glass-card shrink-0 flex flex-col gap-3 rounded-2xl sm:rounded-3xl p-3 sm:p-4 transition-all">
-      <!-- 第一行：顶级 Tab 切换 + 行动操作栏 -->
-      <div class="flex flex-wrap items-center justify-between gap-3">
-        <!-- 主 Tab 分段控制器 -->
-        <div class="flex items-center gap-3">
-          <TabGroup
-            v-model="state.activeTab"
-            :tabs="mainTabs"
-            variant="gradient"
-            size="sm"
-            :show-count="false"
-          />
-
-          <!-- 趋势榜：次级时间窗药丸组（大屏合流在一行展示） -->
-          <div
-            v-if="activeTab === 'trending'"
-            class="hidden md:flex items-center gap-1.5 rounded-xl bg-button-glass p-1 border border-glass-subtle"
-          >
-            <button
-              v-for="win in trendingWindows"
-              :key="win.key"
-              type="button"
-              class="flex items-center gap-1.5 px-3 py-1 text-xs rounded-lg transition-all"
-              :class="
-                trendingWindow === win.key
-                  ? 'bg-hover-glass text-sky-400 font-medium shadow-xs'
-                  : 'text-primary/60 hover:text-primary hover:bg-hover-glass/40'
-              "
-              @click="trendingWindow = win.key as any"
-            >
-              <span :class="[win.icon, 'h-3.5 w-3.5']" />
-              {{ t(win.labelKey) }}
-            </button>
+  <div class="flex h-full flex-1 flex-col overflow-hidden">
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 顶部控制与筛选区（严格同步“歌手”页面：单一 glass-card，无嵌套框） -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="glass-card mx-1 sm:mx-2 mt-1 mb-3 shrink-0 p-3 sm:p-4 transition-all">
+      <!-- 第一栏（上栏）：板块标题、榜单图标、状态与「播放全部」操作 -->
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-glass-subtle">
+        <div class="flex items-center gap-2.5">
+          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/20 text-sky-400">
+            <span class="icon-[mdi--chart-line] h-5 w-5" />
           </div>
-
-          <!-- 新歌榜：地区筛选药丸组（大屏合流） -->
-          <div
-            v-else-if="activeTab === 'newSong'"
-            class="hidden md:flex items-center gap-1.5 rounded-xl bg-button-glass p-1 border border-glass-subtle"
-          >
-            <button
-              v-for="type in newSongTypes"
-              :key="type.key"
-              type="button"
-              class="flex items-center gap-1.5 px-3 py-1 text-xs rounded-lg transition-all"
-              :class="
-                activeType === type.key
-                  ? 'bg-hover-glass text-sky-400 font-medium shadow-xs'
-                  : 'text-primary/60 hover:text-primary hover:bg-hover-glass/40'
-              "
-              @click="activeType = type.key as any"
-            >
-              <span :class="[type.icon, 'h-3.5 w-3.5']" />
-              {{ t(type.labelKey) }}
-            </button>
+          <div>
+            <div class="flex items-center gap-2">
+              <h1 class="text-primary text-base sm:text-lg font-bold tracking-tight">
+                {{ t('routes.charts') }}
+              </h1>
+              <span class="rounded bg-sky-500/15 border border-sky-500/30 px-2 py-0.5 text-[10px] sm:text-[11px] font-medium text-sky-400">
+                {{ headerTitle }}
+              </span>
+            </div>
+            <p class="text-primary/40 text-[11px] hidden sm:block mt-0.5">
+              {{ currentSubtitle }}
+            </p>
           </div>
         </div>
 
-        <!-- 右侧看板指标 & 播放全部 CTA -->
-        <div class="flex items-center gap-3 ml-auto">
-          <span class="hidden sm:inline-flex items-center rounded-full bg-button-glass px-3 py-1 text-xs font-medium text-primary/60 border border-glass-subtle">
+        <!-- 右侧：曲目数指标 + 「播放全部」主操作按钮 -->
+        <div class="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end">
+          <span class="text-primary/50 text-xs px-2.5 py-1 rounded-full bg-button-glass border border-glass-subtle">
             {{ currentSongs.length }} {{ t('charts.songs') }}
           </span>
 
@@ -278,161 +223,139 @@ onMounted(() => {
             variant="solid"
             size="sm"
             rounded="xl"
-            class="gap-2 shadow-md shadow-sky-500/20 px-4 py-2"
+            class="gap-1.5 shadow-md shadow-sky-500/20 px-3.5 py-1.5 text-xs"
             @click="playAll"
           >
             <span class="icon-[mdi--play] h-4 w-4" />
-            {{ t('actions.playAll') }}
+            <span>{{ t('actions.playAll') }}</span>
           </Button>
         </div>
       </div>
 
-      <!-- 中窄屏设备下的次级选项自适应折叠条 -->
-      <div v-if="activeTab === 'trending'" class="flex md:hidden items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
-        <button
-          v-for="win in trendingWindows"
-          :key="win.key"
-          type="button"
-          class="flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg transition-all"
-          :class="
-            trendingWindow === win.key
-              ? 'bg-hover-glass text-sky-400 font-medium shadow-xs'
-              : 'text-primary/60 hover:bg-hover-glass/40'
-          "
-          @click="trendingWindow = win.key as any"
-        >
-          <span :class="[win.icon, 'h-3.5 w-3.5']" />
-          {{ t(win.labelKey) }}
-        </button>
-      </div>
+      <!-- 第二栏（下栏）：分类维度筛选与小滑块栏 -->
+      <div class="pt-3 space-y-2.5">
+        <!-- 维度 1：榜单主分类 -->
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-16">
+            {{ t('layout.aside.menu.charts') }}:
+          </span>
+          <div class="flex flex-wrap gap-1">
+            <button
+              v-for="tab in mainTabs"
+              :key="tab.key"
+              type="button"
+              class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer flex items-center gap-1.5"
+              :class="
+                activeTab === tab.key
+                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
+                  : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
+              "
+              @click="state.activeTab = tab.key"
+            >
+              <span :class="[tab.icon, 'h-3.5 w-3.5']" />
+              <span>{{ t(tab.labelKey) }}</span>
+            </button>
+          </div>
+        </div>
 
-      <div v-else-if="activeTab === 'newSong'" class="flex md:hidden items-center gap-1.5 overflow-x-auto no-scrollbar pb-1">
-        <button
-          v-for="type in newSongTypes"
-          :key="type.key"
-          type="button"
-          class="flex shrink-0 items-center gap-1.5 px-2.5 py-1 text-xs rounded-lg transition-all"
-          :class="
-            activeType === type.key
-              ? 'bg-hover-glass text-sky-400 font-medium shadow-xs'
-              : 'text-primary/60 hover:bg-hover-glass/40'
-          "
-          @click="activeType = type.key as any"
-        >
-          <span :class="[type.icon, 'h-3.5 w-3.5']" />
-          {{ t(type.labelKey) }}
-        </button>
-      </div>
+        <!-- 维度 2：次级选项与小滑块 (与歌手页面的首字母/地区小滑块轨完全同步) -->
+        <!-- 趋势榜时间窗小滑块 -->
+        <div v-if="activeTab === 'trending'" class="flex items-center gap-2">
+          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-16">
+            {{ t('recommend.tabs.trending') }}:
+          </span>
+          <div class="flex flex-1 items-center gap-1 overflow-x-auto py-0.5 no-scrollbar">
+            <button
+              v-for="win in trendingWindows"
+              :key="win.key"
+              type="button"
+              class="rounded-lg px-2.5 py-1 text-xs transition-all shrink-0 cursor-pointer flex items-center gap-1.5"
+              :class="
+                trendingWindow === win.key
+                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold shadow-[0_0_8px_rgba(56,189,248,0.15)]'
+                  : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
+              "
+              @click="trendingWindow = win.key as any"
+            >
+              <span :class="[win.icon, 'h-3.5 w-3.5']" />
+              <span>{{ t(win.labelKey) }}</span>
+            </button>
+          </div>
+        </div>
 
-      <!-- 官方精选榜单专属：横向轻量平滑微卡片流 (Horizontal Billboard Snap Strip) -->
-      <div v-if="activeTab === 'official'" class="relative flex items-center pt-1 border-t border-glass/40">
-        <!-- 向左滑动按钮 -->
-        <button
-          type="button"
-          class="hidden sm:flex absolute left-0 z-10 -ml-2 h-8 w-8 items-center justify-center rounded-full glass-card hover:bg-hover-glass shadow-md text-primary/80 transition-all cursor-pointer"
-          title="向左滚动"
-          @click="scrollOfficial('left')"
-        >
-          <span class="icon-[mdi--chevron-left] h-5 w-5" />
-        </button>
+        <!-- 新歌榜地区小滑块 -->
+        <div v-else-if="activeTab === 'newSong'" class="flex items-center gap-2">
+          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-16">
+            {{ t('artists.area') }}:
+          </span>
+          <div class="flex flex-1 items-center gap-1 overflow-x-auto py-0.5 no-scrollbar">
+            <button
+              v-for="type in newSongTypes"
+              :key="type.key"
+              type="button"
+              class="rounded-lg px-2.5 py-1 text-xs transition-all shrink-0 cursor-pointer flex items-center gap-1.5"
+              :class="
+                activeType === type.key
+                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold shadow-[0_0_8px_rgba(56,189,248,0.15)]'
+                  : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
+              "
+              @click="activeType = type.key as any"
+            >
+              <span :class="[type.icon, 'h-3.5 w-3.5']" />
+              <span>{{ t(type.labelKey) }}</span>
+            </button>
+          </div>
+        </div>
 
-        <!-- 卡片滚动区 -->
-        <div
-          ref="officialScrollRef"
-          class="flex w-full items-center gap-2.5 overflow-x-auto no-scrollbar scroll-smooth py-1 px-1 sm:px-6"
-          @wheel.passive="handleOfficialWheel"
-        >
+        <!-- 官方权威精选榜单（30+）专属小滑块轨 -->
+        <div v-else class="flex items-center gap-2">
+          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-16">
+            {{ t('charts.official') }}:
+          </span>
           <div
-            v-for="item in state.officialLists"
-            :key="item.id"
-            class="group flex shrink-0 cursor-pointer items-center gap-2.5 rounded-xl border p-1.5 pr-3 transition-all duration-200"
-            :class="
-              state.selectedList?.id === item.id
-                ? 'bg-hover-glass border-sky-400/50 shadow-sm shadow-sky-500/10'
-                : 'border-glass-subtle bg-button-glass hover:border-glass hover:bg-hover-glass'
-            "
-            @click="selectList(item)"
+            ref="officialScrollRef"
+            class="flex flex-1 items-center gap-1.5 overflow-x-auto py-0.5 no-scrollbar scroll-smooth"
+            @wheel.passive="handleOfficialWheel"
           >
-            <div class="relative shrink-0 overflow-hidden rounded-lg">
-              <LazyImage
-                :src="formatCoverUrl(item.cover, { size: 80 })"
-                :alt="item.name"
-                imgClass="h-10 w-10 object-cover rounded-lg group-hover:scale-105 transition-transform duration-300"
-                wrapperClass="h-10 w-10"
-              />
-              <div
+            <button
+              v-for="item in state.officialLists"
+              :key="item.id"
+              type="button"
+              class="rounded-lg px-2.5 py-1 text-xs transition-all shrink-0 cursor-pointer flex items-center gap-1.5 border"
+              :class="
+                state.selectedList?.id === item.id
+                  ? 'bg-sky-500/20 text-sky-400 border-sky-500/30 font-semibold shadow-[0_0_8px_rgba(56,189,248,0.15)]'
+                  : 'text-primary/60 hover:bg-hover-glass hover:text-primary border-transparent'
+              "
+              @click="selectList(item)"
+            >
+              <span
                 v-if="state.selectedList?.id === item.id"
-                class="absolute inset-0 flex items-center justify-center bg-black/40"
-              >
-                <span class="icon-[mdi--equalizer] h-4 w-4 text-sky-400 animate-pulse" />
-              </div>
-            </div>
-            <div class="min-w-0 max-w-[120px]">
-              <p
-                class="truncate text-xs font-medium transition-colors"
-                :class="state.selectedList?.id === item.id ? 'text-sky-400 font-semibold' : 'text-primary'"
-              >
-                {{ item.name }}
-              </p>
-              <p class="text-primary/40 mt-0.5 truncate text-[11px]">{{ item.updateFrequency }}</p>
-            </div>
-          </div>
-        </div>
-
-        <!-- 向右滑动按钮 -->
-        <button
-          type="button"
-          class="hidden sm:flex absolute right-0 z-10 -mr-2 h-8 w-8 items-center justify-center rounded-full glass-card hover:bg-hover-glass shadow-md text-primary/80 transition-all cursor-pointer"
-          title="向右滚动"
-          @click="scrollOfficial('right')"
-        >
-          <span class="icon-[mdi--chevron-right] h-5 w-5" />
-        </button>
-      </div>
-
-      <!-- 紧凑型榜单沉浸看板条 (Hero Billboard Strip) -->
-      <div class="flex items-center justify-between rounded-xl bg-button-glass px-3 py-2 border border-glass-subtle">
-        <div class="flex items-center gap-3 min-w-0">
-          <!-- 封面图或专属图标 -->
-          <div class="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-sky-500/15 text-sky-400 border border-sky-400/30 shadow-xs">
-            <LazyImage
-              v-if="currentCover"
-              :src="formatCoverUrl(currentCover, { size: 80 })"
-              :alt="headerTitle"
-              imgClass="h-full w-full object-cover"
-              wrapperClass="h-full w-full"
-            />
-            <template v-else>
-              <span v-if="activeTab === 'trending'" class="icon-[mdi--chart-line-variant] h-5 w-5" />
-              <span v-else-if="activeTab === 'newSong'" class="icon-[mdi--music-note-plus] h-5 w-5" />
-              <span v-else class="icon-[mdi--trophy-variant] h-5 w-5" />
-            </template>
-          </div>
-
-          <div class="min-w-0">
-            <h1 class="truncate text-sm sm:text-base font-bold text-primary tracking-tight">
-              {{ headerTitle }}
-            </h1>
-            <p class="truncate text-xs text-primary/50">
-              {{ currentSubtitle }}
-            </p>
+                class="icon-[mdi--equalizer] h-3.5 w-3.5 text-sky-400 animate-pulse"
+              />
+              <span v-else class="icon-[mdi--trophy-outline] h-3.5 w-3.5 opacity-60" />
+              <span>{{ item.name }}</span>
+              <span v-if="item.updateFrequency" class="text-[10px] opacity-50 ml-0.5">
+                ({{ item.updateFrequency }})
+              </span>
+            </button>
           </div>
         </div>
       </div>
-    </header>
+    </div>
 
-    <!-- ═══════════════════════════════════════════════════ -->
-    <!-- 下栏：全景歌曲流沉浸区 (Full-width Song Table)        -->
-    <!-- ═══════════════════════════════════════════════════ -->
-    <main class="glass-card relative min-h-0 flex-1 overflow-hidden rounded-2xl sm:rounded-3xl p-3 sm:p-4">
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- 主展示区（下栏内容区）：严格同步“歌手”页面，直接在画板内 overflow-auto，无嵌套方框 -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <div class="flex-1 overflow-auto px-1 sm:px-2 pb-6">
       <PageSkeleton v-if="currentLoading" :sections="['list']" :list-count="12" />
       <SongList v-else :songs="currentSongs" :show-header="true" :show-controls="true" />
-    </main>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* 隐藏横向滚动条，保留滑动能力与极简视觉 */
+/* 隐藏横向滚动条，保留滑动与手势支持 */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }
