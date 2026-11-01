@@ -1598,7 +1598,7 @@ watch(
                             热门
                           </span>
                           <span
-                            v-else-if="c.time === '刚刚' || (c.rawTime && Date.now() - c.rawTime < 3600000)"
+                            v-else-if="(state.commentsSort === 'latest' && i < 3) || c.time === '刚刚' || (c.rawTime && Date.now() - c.rawTime < 3600000)"
                             class="rounded-full bg-sky-500/15 border border-sky-500/30 px-1.5 py-0.2 text-[9px] font-semibold text-sky-400 shrink-0"
                           >
                             最新

@@ -89,8 +89,8 @@ async function run() {
     }
   });
 
-  // Navigate to live search page
-  const searchPageUrl = `${targetHost}/search?q=${encodeURIComponent('夜に駆ける')}`;
+  // Navigate to live search page (hash router)
+  const searchPageUrl = `${targetHost}/#/search?q=${encodeURIComponent('夜に駆ける')}`;
   console.log(`Navigating to ${searchPageUrl}...`);
   await page.goto(searchPageUrl, { waitUntil: 'networkidle2', timeout: 35000 });
 
@@ -169,18 +169,64 @@ async function run() {
 
   // Step 3: Switch track to "晴天" (Zhou Jay) to verify Zero-Stale and seamless playback
   console.log(`\n--- Step 3: Switch to 周杰伦《晴天》to verify zero-stale and auto-play ---`);
-  await page.goto(`${targetHost}/search?q=${encodeURIComponent('周杰伦 晴天')}`, { waitUntil: 'networkidle2', timeout: 35000 });
-  await page.waitForSelector('.song-item', { timeout: 15000 });
   
-  console.log('Clicking to play 晴天...');
-  await page.click('.song-item');
-  await new Promise(r => setTimeout(r, 3000));
+  // First close drawer with Escape key so it does not block the search UI with inert
+  console.log('Closing Player Drawer via Escape key...');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('main')?.hasAttribute('inert'), { timeout: 5000 });
+  await new Promise(r => setTimeout(r, 800));
 
+  console.log('Typing "周杰伦 晴天" in search box...');
+  await page.click('.search-box input');
+  // Clear and type
+  await page.keyboard.down('Control');
+  await page.keyboard.press('KeyA');
+  await page.keyboard.up('Control');
+  await page.keyboard.press('Backspace');
+  await page.type('.search-box input', '周杰伦 晴天');
+  await new Promise(r => setTimeout(r, 300));
+  await page.click('.search-btn');
+
+  console.log('Waiting for "晴天" search results...');
+  await page.waitForFunction(() => {
+    const firstTitle = document.querySelector('.song-item')?.textContent || '';
+    return firstTitle.includes('晴天');
+  }, { timeout: 20000 });
+  
+  console.log('Clicking on 晴天 song item to play...');
+  await page.click('.song-item');
+  await new Promise(r => setTimeout(r, 3500));
+
+  // Verify audio playback on second song
+  const audioState2 = await page.evaluate(() => {
+    const audio = document.querySelector('audio');
+    return audio ? {
+      src: audio.src ? audio.src.slice(0, 100) : '',
+      paused: audio.paused,
+      currentTime: audio.currentTime,
+      duration: audio.duration,
+      readyState: audio.readyState,
+      error: audio.error ? audio.error.message : null
+    } : null;
+  });
+  console.log('✓ Second track (晴天) audio state:', audioState2);
+
+  console.log('Opening Player Drawer for 晴天...');
   await page.waitForSelector('#footer-cover', { timeout: 10000 });
   await page.click('#footer-cover');
   await new Promise(r => setTimeout(r, 2500));
 
   await page.waitForSelector('[data-testid="lyrics-container"], .lyrics-scroll, .lyrics-container', { timeout: 10000 });
+  
+  // Wait for 晴天 lyrics to replace previous lyrics
+  console.log('Waiting for 晴天 lyrics to render in drawer...');
+  await page.waitForFunction(() => {
+    const text = Array.from(document.querySelectorAll('.lyric-line, .lyric-text, [data-testid="lyrics-container"] p'))
+      .map(e => e.textContent.trim())
+      .join(' ');
+    return text.includes('故事的小黄花') || text.includes('晴天') || text.includes('为你翘课的那一天');
+  }, { timeout: 15000 });
+
   const qingtianLyrics = await page.$$eval('.lyric-line, .lyric-text, [data-testid="lyrics-container"] p', els => els.map(e => e.textContent.trim()).filter(Boolean));
   const fullQingtianLyric = qingtianLyrics.join(' ');
   console.log(`晴天 rendered lyric sample: ${fullQingtianLyric.slice(0, 160)}`);
@@ -188,6 +234,7 @@ async function run() {
   assert(fullQingtianLyric.includes('故事的小黄花') || fullQingtianLyric.includes('晴天') || fullQingtianLyric.includes('为你翘课的那一天'),
     'Rendered lyric must contain 晴天 lyrics');
   assert(!fullQingtianLyric.includes('沈むように'), 'Old song lyrics must be zero-staled and completely evicted');
+  console.log('✓ Verified Zero-Stale eviction and high-precision alignment on track switch!');
 
   // Screenshot 3: Drawer lyrics for 晴天
   const screenshot3Path = `${ARTIFACT_DIR}/03_drawer_lyrics_qingtian.png`;

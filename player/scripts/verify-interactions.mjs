@@ -109,23 +109,125 @@ async function verifyAllInteractions() {
     await cancelBtn.click()
   }
 
-  // 5. Test Sort Dropdown Switching
-  console.log('--- Step 5: Testing comment sorting dropdown ---')
+  // 5. Test Sort Dropdown Switching and Real Content Reload
+  console.log('--- Step 5: Testing comment sorting dropdown and real content update ---')
   const sortBtn = page.locator('button', { hasText: /排序方式/ }).first()
-  await sortBtn.click()
+  const initialSortText = await sortBtn.textContent()
+  console.log('Initial sort text:', initialSortText)
+  if (!initialSortText.includes('最热评论')) {
+    throw new Error(`FAIL: Expected initial sort text to be "排序方式: 最热评论", got: "${initialSortText}"`)
+  }
+
+  // Get initial Hot comments data
+  const hotData = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('.space-y-2\\.5:not(.pt-1) > div.glass-card'))
+    return cards.map(c => {
+      const username = c.querySelector('.text-primary.text-xs.font-semibold')?.textContent?.trim() || ''
+      const badge = c.querySelector('span.rounded-full')?.textContent?.trim() || ''
+      const content = c.querySelector('p.select-text')?.textContent?.trim() || ''
+      const likes = c.querySelector('button span.h-3\\.5 + span')?.textContent?.trim() || ''
+      const time = c.querySelector('.text-primary\\/40.text-\\[11px\\]')?.textContent?.trim() || ''
+      return { username, badge, content, likes, time }
+    })
+  })
+  console.log('Hot comments count:', hotData.length)
+  console.log('Top Hot comment:', hotData[0])
+
+  if (!hotData[0] || !hotData[0].badge.includes('热门')) {
+    throw new Error(`FAIL: Top comment in hot mode must have "热门" badge, got: ${JSON.stringify(hotData[0])}`)
+  }
+  const topHotLikes = parseInt(hotData[0].likes, 10)
+  if (isNaN(topHotLikes) || topHotLikes < 100) {
+    throw new Error(`FAIL: Top comment in hot mode should have high like count (>= 100), got: ${hotData[0].likes}`)
+  }
+
+  // Screenshot Hot comments
+  await page.evaluate(() => {
+    const el = document.querySelector('section.mt-8')
+    if (el) el.scrollIntoView({ behavior: 'instant', block: 'start' })
+  })
   await page.waitForTimeout(500)
+  await page.screenshot({
+    path: path.join(ARTIFACTS_DIR, 'mv-player-sort-hot.png'),
+    fullPage: false,
+  })
+  console.log('Saved mv-player-sort-hot.png')
+
+  // Open dropdown and click "最新评论"
+  await sortBtn.click()
+  await page.waitForTimeout(400)
   const latestSortBtn = page.locator('button', { hasText: '最新评论' })
   if (!await latestSortBtn.isVisible()) {
     throw new Error('FAIL: Sort dropdown menu did not open!')
   }
   await latestSortBtn.click()
-  await page.waitForTimeout(2000)
-  const currentSortText = await sortBtn.textContent()
-  console.log('Current sort text after toggle:', currentSortText)
-  if (!currentSortText.includes('最新评论')) {
-    throw new Error(`FAIL: Expected sort text to be "排序方式: 最新评论", got: "${currentSortText}"`)
+
+  // Wait for loading to finish and new comments to appear
+  await page.waitForTimeout(1200)
+  await page.waitForSelector('.space-y-2\\.5:not(.pt-1) > div.glass-card', { timeout: 10000 })
+
+  const latestSortText = await sortBtn.textContent()
+  console.log('Sort text after switching to Latest:', latestSortText)
+  if (!latestSortText.includes('最新评论')) {
+    throw new Error(`FAIL: Expected sort text to be "排序方式: 最新评论", got: "${latestSortText}"`)
   }
-  console.log('✓ Comment sorting dropdown switches successfully!')
+
+  // Get Latest comments data
+  const latestData = await page.evaluate(() => {
+    const cards = Array.from(document.querySelectorAll('.space-y-2\\.5:not(.pt-1) > div.glass-card'))
+    return cards.map(c => {
+      const username = c.querySelector('.text-primary.text-xs.font-semibold')?.textContent?.trim() || ''
+      const badge = c.querySelector('span.rounded-full')?.textContent?.trim() || ''
+      const content = c.querySelector('p.select-text')?.textContent?.trim() || ''
+      const likes = c.querySelector('button span.h-3\\.5 + span')?.textContent?.trim() || ''
+      const time = c.querySelector('.text-primary\\/40.text-\\[11px\\]')?.textContent?.trim() || ''
+      return { username, badge, content, likes, time }
+    })
+  })
+  console.log('Latest comments count:', latestData.length)
+  console.log('Top Latest comment:', latestData[0])
+
+  // Assert distinctness: top comment must be different from hot mode
+  if (latestData[0].username === hotData[0].username && latestData[0].content === hotData[0].content) {
+    throw new Error(`FAIL: Comments did not change when switching to latest! Still showing: ${latestData[0].username}`)
+  }
+
+  // Assert latest top comment properties
+  if (!latestData[0].time.includes('刚刚') && !latestData[0].badge.includes('最新')) {
+    throw new Error(`FAIL: Top comment in latest mode must have fresh time or "最新" badge, got: ${JSON.stringify(latestData[0])}`)
+  }
+
+  // Screenshot Latest comments
+  await page.screenshot({
+    path: path.join(ARTIFACTS_DIR, 'mv-player-sort-latest.png'),
+    fullPage: false,
+  })
+  console.log('Saved mv-player-sort-latest.png')
+
+  // Switch back to "最热评论" to verify round-trip
+  await sortBtn.click()
+  await page.waitForTimeout(400)
+  const hotOptionBtn = page.locator('button', { hasText: '最热评论' })
+  await hotOptionBtn.click()
+  await page.waitForTimeout(1200)
+
+  const restoredSortText = await sortBtn.textContent()
+  console.log('Sort text after restored to Hot:', restoredSortText)
+  if (!restoredSortText.includes('最热评论')) {
+    throw new Error(`FAIL: Expected sort text to restore to "最热评论", got: "${restoredSortText}"`)
+  }
+
+  const restoredData = await page.evaluate(() => {
+    const card = document.querySelector('.space-y-2\\.5:not(.pt-1) > div.glass-card')
+    if (!card) return null
+    const username = card.querySelector('.text-primary.text-xs.font-semibold')?.textContent?.trim() || ''
+    const content = card.querySelector('p.select-text')?.textContent?.trim() || ''
+    return { username, content }
+  })
+  if (restoredData.username !== hotData[0].username) {
+    throw new Error(`FAIL: Restored comment (${restoredData.username}) does not match initial hot comment (${hotData[0].username})`)
+  }
+  console.log('✓ Comment sorting dropdown switches with real loading and distinct filtered datasets!')
 
   // 6. Test Dual Column Alignment
   console.log('--- Step 6: Testing Dual Column Termination Alignment ---')
