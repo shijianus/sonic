@@ -5,9 +5,13 @@
 import type { AppEnv } from '../../types';
 import type {
   CanonicalTrack,
+  EntityRelation,
   RecommendStore,
+  SonicEntity,
+  SonicEntityType,
   StoredBehaviorEvent,
   TrackEdition,
+  UserEntityFeedback,
 } from './types';
 import {
   compactNormalize,
@@ -34,6 +38,12 @@ export class MemoryRecommendStore implements RecommendStore {
   private userEventsIndex = new Map<string, StoredBehaviorEvent[]>();
   private cooccurrence = new Map<string, Map<string, number>>();
   private searchQueries = new Map<string, { display: string; count: number; updatedAt: number }>();
+
+  // Multi-entity storage
+  private entities = new Map<string, SonicEntity>();
+  private entityRelations = new Map<string, EntityRelation>();
+  private userEntityFeedbacks = new Map<string, UserEntityFeedback[]>();
+  private entityFeedbackIds = new Set<string>();
 
   upsertTrack(incoming: CanonicalTrack): void {
     if (!incoming?.canonicalTrackId) return;
@@ -243,7 +253,8 @@ export class MemoryRecommendStore implements RecommendStore {
     if (removed > 0) {
       this.events = this.events.filter((e) => e.subjectKey !== subjectKey);
     }
-    return removed;
+    const removedFeedbacks = this.clearUserEntityFeedbacks(subjectKey);
+    return removed + removedFeedbacks;
   }
 
   getAllRecentEvents(sinceMs: number, limit = 10000): StoredBehaviorEvent[] {
@@ -317,15 +328,110 @@ export class MemoryRecommendStore implements RecommendStore {
     return matches.slice(0, limit).map(({ query, count }) => ({ query, count }));
   }
 
-  getStats(): { trackCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string } {
+  getStats(): { trackCount: number; entityCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string } {
     let pairs = 0;
     for (const m of this.cooccurrence.values()) pairs += m.size;
     return {
       trackCount: this.tracks.size,
+      entityCount: this.entities.size,
       eventCount: this.events.length,
       cooccurrencePairs: Math.floor(pairs / 2),
       storageKind: this.kind,
     };
+  }
+
+  // Multi-entity operations
+  upsertEntity(entity: SonicEntity): void {
+    if (!entity?.id || !entity?.type) return;
+    this.entities.set(entity.id, entity);
+  }
+
+  upsertEntities(entities: SonicEntity[]): void {
+    for (const e of entities) this.upsertEntity(e);
+  }
+
+  getEntity(id: string): SonicEntity | null {
+    if (!id) return null;
+    return this.entities.get(id) || null;
+  }
+
+  listEntities(type?: SonicEntityType, limit = 500): SonicEntity[] {
+    const all = Array.from(this.entities.values());
+    const filtered = type ? all.filter((e) => e.type === type) : all;
+    filtered.sort((a, b) => b.updatedAt - a.updatedAt);
+    return filtered.slice(0, Math.max(1, limit));
+  }
+
+  upsertEntityRelation(rel: EntityRelation): void {
+    if (!rel?.parentId || !rel?.childId) return;
+    const relationId = rel.relationId || `${rel.parentId}:::${rel.childId}:::${rel.relationType}`;
+    this.entityRelations.set(relationId, { ...rel, relationId });
+  }
+
+  upsertEntityRelations(rels: EntityRelation[]): void {
+    for (const r of rels) this.upsertEntityRelation(r);
+  }
+
+  getEntityRelations(entityId: string, direction: 'children' | 'parents' = 'children'): EntityRelation[] {
+    if (!entityId) return [];
+    const out: EntityRelation[] = [];
+    for (const rel of this.entityRelations.values()) {
+      if (direction === 'children' && rel.parentId === entityId) {
+        out.push(rel);
+      } else if (direction === 'parents' && rel.childId === entityId) {
+        out.push(rel);
+      }
+    }
+    if (direction === 'children') {
+      out.sort((a, b) => (a.position ?? 0) - (b.position ?? 0) || (b.weight ?? 1) - (a.weight ?? 1));
+    } else {
+      out.sort((a, b) => (b.weight ?? 1) - (a.weight ?? 1));
+    }
+    return out;
+  }
+
+  recordEntityFeedback(feedback: UserEntityFeedback): { inserted: boolean; deduplicated: boolean } {
+    if (!feedback?.feedbackId || !feedback?.subjectKey || !feedback?.entityId) {
+      return { inserted: false, deduplicated: false };
+    }
+    if (this.entityFeedbackIds.has(feedback.feedbackId)) {
+      return { inserted: false, deduplicated: true };
+    }
+    this.entityFeedbackIds.add(feedback.feedbackId);
+    let list = this.userEntityFeedbacks.get(feedback.subjectKey);
+    if (!list) {
+      list = [];
+      this.userEntityFeedbacks.set(feedback.subjectKey, list);
+    }
+    list.push(feedback);
+    if (list.length > 600) {
+      const removed = list.shift();
+      if (removed) this.entityFeedbackIds.delete(removed.feedbackId);
+    }
+    return { inserted: true, deduplicated: false };
+  }
+
+  getUserEntityFeedbacks(subjectKey: string, limit = 200, sinceMs = 0): UserEntityFeedback[] {
+    if (!subjectKey) return [];
+    const list = this.userEntityFeedbacks.get(subjectKey) || [];
+    const out: UserEntityFeedback[] = [];
+    for (let i = list.length - 1; i >= 0 && out.length < limit; i--) {
+      if (list[i].createdAt >= sinceMs) {
+        out.push(list[i]);
+      }
+    }
+    return out;
+  }
+
+  clearUserEntityFeedbacks(subjectKey: string): number {
+    if (!subjectKey) return 0;
+    const list = this.userEntityFeedbacks.get(subjectKey) || [];
+    const count = list.length;
+    for (const f of list) {
+      this.entityFeedbackIds.delete(f.feedbackId);
+    }
+    this.userEntityFeedbacks.delete(subjectKey);
+    return count;
   }
 
   clearAll(): void {
@@ -337,6 +443,10 @@ export class MemoryRecommendStore implements RecommendStore {
     this.userEventsIndex.clear();
     this.cooccurrence.clear();
     this.searchQueries.clear();
+    this.entities.clear();
+    this.entityRelations.clear();
+    this.userEntityFeedbacks.clear();
+    this.entityFeedbackIds.clear();
   }
 }
 

@@ -124,4 +124,6 @@ export interface GlobalState {
   lang?: 'zh' | 'en' | 'ja'
   /** 侧边栏是否折叠为图标模式 */
   sidebarCollapsed?: boolean
+  /** 播放器全屏抽屉是否开启 */
+  isPlayerDrawerOpen?: boolean
 }

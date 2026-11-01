@@ -31,7 +31,13 @@ const VALID_EVENT_TYPES = new Set([
   'unfavorite',
   'dislike',
   'undislike',
+  'open',
+  'add_to_playlist',
+  'watch_progress',
+  'watch_complete',
 ]);
+
+const VALID_ENTITY_TYPES = new Set(['track', 'album', 'playlist', 'mv']);
 
 export async function onRequest({
   request,
@@ -162,23 +168,26 @@ export async function onRequest({
     ? parsed
     : Array.isArray(parsed?.events)
       ? parsed.events
-      : parsed?.type
+      : parsed?.type || parsed?.action
         ? [parsed]
         : [];
 
   if (rawEvents.length === 0) {
-    return sonicError('EMPTY_EVENTS', 'Provide `events` array or single event object with valid `type`', 400);
+    return sonicError('EMPTY_EVENTS', 'Provide `events` array or single event object with valid `type` or `action`', 400);
   }
 
   const validEvents: SonicBehaviorEventInput[] = [];
   for (const ev of rawEvents.slice(0, 50)) {
-    if (ev && typeof ev === 'object' && VALID_EVENT_TYPES.has(String(ev.type))) {
-      validEvents.push(ev as SonicBehaviorEventInput);
+    if (ev && typeof ev === 'object') {
+      const act = ev.action || ev.type;
+      if (act && VALID_EVENT_TYPES.has(String(act))) {
+        validEvents.push(ev as SonicBehaviorEventInput);
+      }
     }
   }
 
   if (validEvents.length === 0) {
-    return sonicError('INVALID_EVENT_TYPE', 'No valid event types found in payload', 400);
+    return sonicError('INVALID_EVENT_TYPE', 'No valid event types or actions found in payload', 400);
   }
 
   // Primary Hop: forward to Linux VPS Sonic Engine when configured

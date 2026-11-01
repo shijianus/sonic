@@ -48,7 +48,12 @@ const handleClickOutside = (event: MouseEvent) => {
 
 // 跨标签页感知 EpoMail 登录/登出变动
 const handleStorageChange = (e: StorageEvent) => {
-  if (e.key === 'token' || e.key === 'loginEmail' || e.key === 'epo_sessions') {
+  if (
+    e.key === 'token' ||
+    e.key === 'loginEmail' ||
+    e.key === 'epo_sessions' ||
+    e.key === 'sonic_epomail_session'
+  ) {
     authStore.checkAuth(true)
   }
 }

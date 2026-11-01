@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { playlistDetail, playlistTrackAll } from '@/api'
+import { playlistDetail, playlistTrackAll, simiPlaylist, search } from '@/api'
 import { usePlayActions } from '@/composables/usePlayActions'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import PlaylistCommentsPopup from '@/components/Mobile/PlaylistCommentsPopup.vue'
@@ -9,6 +9,7 @@ import { formatCount } from '@/utils/time'
 import {
   transformPlaylistDetail,
   transformSongs,
+  transformSearchPlaylists,
   type SongData,
 } from '@/utils/transformers'
 import { formatCoverUrl } from '@/utils/imageUrl'
@@ -48,6 +49,14 @@ const state = reactive({
   isSongLoadError: false,
   isPreparingFullList: false,
   partialPlayNotice: '',
+  similarPlaylists: [] as Array<{
+    id: number | string
+    name: string
+    coverImgUrl: string
+    trackCount?: number
+    playCount?: number
+  }>,
+  loadingSimilar: false,
 })
 
 const { playAll: playAllAction, shufflePlay: shufflePlayAction } = usePlayActions()
@@ -75,32 +84,115 @@ const load = async (id: number) => {
   state.isSongLoadError = false
   state.partialPlayNotice = ''
   try {
-    const [detailRes, tracksRes] = await Promise.all([
+    const [detailRes, tracksRes] = await Promise.allSettled([
       playlistDetail({ id }),
       playlistTrackAll({ id, limit: SONG_PAGE_SIZE, offset: 0 }),
     ])
 
-    const detail = transformPlaylistDetail(
-      detailRes as Record<string, unknown>,
-      t('home.playlistFallback')
-    )
+    const detailRaw = detailRes.status === 'fulfilled' ? detailRes.value : null
+    const tracksRaw = tracksRes.status === 'fulfilled' ? tracksRes.value : null
+
+    const detail = detailRaw
+      ? transformPlaylistDetail(
+          detailRaw as Record<string, unknown>,
+          t('home.playlistFallback')
+        )
+      : null
+
+    let songList: SongData[] = []
+    if (tracksRaw) {
+      songList = transformSongs(tracksRaw as Record<string, unknown>)
+    }
+    // 降级回退：若独立歌曲列表为空或失败，优先从歌单详情中提取 tracks 歌曲数据
+    if ((!songList || songList.length === 0) && detailRaw) {
+      songList = transformSongs(detailRaw as Record<string, unknown>)
+    }
+
     if (detail) {
       state.info = {
         ...detail,
+        coverImgUrl: detail.coverImgUrl || songList[0]?.cover || '',
         playCount: formatCount(detail.playCount as number),
         likes: formatCount(detail.likes as number),
+        songCount: detail.songCount || songList.length,
       }
-      state.songTotal = detail.songCount
+      state.songTotal = detail.songCount || songList.length
       state.collected = libraryStore.isPlaylistCollected(id)
+    } else if (songList.length > 0) {
+      state.info = {
+        name: t('common.unknownPlaylist'),
+        description: '',
+        creator: '',
+        creatorAvatar: '',
+        createTime: '',
+        songCount: songList.length,
+        playCount: '0',
+        likes: '0',
+        category: t('home.playlistFallback'),
+        coverImgUrl: songList[0]?.cover || '',
+      }
+      state.songTotal = songList.length
     }
 
-    state.songs = transformSongs(tracksRes as Record<string, unknown>)
+    state.songs = songList
     const reachedTotal = state.songTotal > 0 && state.songs.length >= state.songTotal
     state.hasMoreSongs = !reachedTotal && state.songs.length === SONG_PAGE_SIZE
+    state.isSongLoadError = songList.length === 0 && !detail
+
+    if (state.info.name) {
+      loadSimilarPlaylists(state.info.name, id)
+    }
   } catch {
     state.isSongLoadError = true
   } finally {
     state.loading = false
+  }
+}
+
+const loadSimilarPlaylists = async (name: string, id: number) => {
+  if (!id) return
+  state.loadingSimilar = true
+  try {
+    try {
+      const simiRes: any = await simiPlaylist({ id })
+      const list = simiRes?.playlists || []
+      if (Array.isArray(list) && list.length > 0) {
+        state.similarPlaylists = list
+          .filter((pl: any) => String(pl.id) !== String(id))
+          .slice(0, 8)
+          .map((pl: any) => ({
+            id: pl.id,
+            name: pl.name,
+            coverImgUrl: pl.coverImgUrl || pl.picUrl || '',
+            trackCount: pl.trackCount,
+            playCount: pl.playCount,
+          }))
+        if (state.similarPlaylists.length > 0) {
+          state.loadingSimilar = false
+          return
+        }
+      }
+    } catch {}
+
+    const cleaned = (name || '')
+      .replace(/\[.*?\]|【.*?】|（.*?）|\(.*?\)/g, ' ')
+      .replace(/[|/\\_—–\-+#!~`]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    const res = await search({ keywords: cleaned || name || '流行', type: 1000, limit: 10 })
+    const { playlists } = transformSearchPlaylists(res as Record<string, unknown>, 10)
+    state.similarPlaylists = playlists
+      .filter(pl => String(pl.id) !== String(id))
+      .slice(0, 8)
+      .map(pl => ({
+        id: pl.id,
+        name: pl.name,
+        coverImgUrl: pl.coverImgUrl,
+        trackCount: pl.trackCount,
+        playCount: pl.playCount,
+      }))
+  } catch {} finally {
+    state.loadingSimilar = false
   }
 }
 
@@ -344,7 +436,23 @@ const toggleCollect = () => {
               {{ t('playlist.dismiss') }}
             </button>
           </div>
-          <MobileSongList :songs="state.songs" :show-index="true" />
+          <MobileSongList v-if="state.songs.length" :songs="state.songs" :show-index="true" />
+          <div
+            v-else-if="!state.loading"
+            class="my-8 flex flex-col items-center justify-center rounded-2xl bg-white/5 p-8 text-center ring-1 ring-white/10"
+          >
+            <span class="icon-[mdi--music-off] mb-2 h-8 w-8 text-primary/40" />
+            <p class="mb-4 text-xs text-primary/70">{{ t('components.songList.empty') }}</p>
+            <Button
+              variant="solid"
+              size="sm"
+              rounded="full"
+              @click="load(playlistId)"
+            >
+              <span class="icon-[mdi--refresh] mr-1.5 h-4 w-4" />
+              {{ t('common.retry') }}
+            </Button>
+          </div>
           <div class="mt-3 flex flex-col items-center gap-2 pb-2">
             <p v-if="state.songTotal" class="text-[11px] text-primary/70">
               {{ t('playlist.loadedProgress', { loaded: state.songs.length, total: state.songTotal }) }}
@@ -372,6 +480,45 @@ const toggleCollect = () => {
             >
               {{ t('playlist.retryLoad') }}
             </button>
+          </div>
+
+          <!-- 相似歌单推荐 (移动端) -->
+          <div v-if="state.similarPlaylists.length" class="mt-6 mb-4">
+            <div class="mb-3 flex items-center justify-between">
+              <h3 class="text-xs font-bold text-primary/80">
+                {{ t('playlist.tabs.similar', '相似歌单推荐') }}
+              </h3>
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <router-link
+                v-for="pl in state.similarPlaylists"
+                :key="pl.id"
+                :to="`/playlist/${pl.id}`"
+                class="rounded-xl border border-glass bg-white/5 p-2 transition-all active:scale-[0.98]"
+              >
+                <div class="relative aspect-square overflow-hidden rounded-lg">
+                  <LazyImage
+                    :src="formatCoverUrl(pl.coverImgUrl, { size: 200 })"
+                    :alt="pl.name"
+                    imgClass="h-full w-full object-cover"
+                    wrapperClass="h-full w-full"
+                  />
+                  <div
+                    v-if="pl.playCount"
+                    class="absolute top-1.5 right-1.5 flex items-center gap-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] text-white backdrop-blur-xs"
+                  >
+                    <span class="icon-[mdi--play] h-2.5 w-2.5" />
+                    {{ formatCount(pl.playCount) }}
+                  </div>
+                </div>
+                <p class="mt-1.5 line-clamp-1 text-xs font-medium text-primary">
+                  {{ pl.name }}
+                </p>
+                <p class="text-[10px] text-primary/50">
+                  {{ t('commonUnits.songsShort', { count: pl.trackCount || 0 }) }}
+                </p>
+              </router-link>
+            </div>
           </div>
         </section>
       </div>

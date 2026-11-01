@@ -2,6 +2,7 @@
 import { handleNexusLyricsRequest } from '../functions/api/sonic/lyrics/nexus';
 import { handleSingleProviderLyricsRequest } from '../functions/_lib/sonic/route-helpers';
 import { handleNexusSearchRequest, handleSingleProviderSearchRequest } from '../functions/_lib/sonic/route-helpers';
+import { handleUpstreamEndpoint } from '../functions/_lib/sonic/upstream';
 
 let passed = 0;
 let failed = 0;
@@ -219,6 +220,73 @@ async function runTests() {
     // 9. Zero bytes -> unavailable
     const zeroBytes = evaluateStreamTypeByRelativeBytes(0, 240, 320);
     assert(zeroBytes.streamType === 'unavailable', `0 bytes is unavailable`);
+  }
+
+  // Test 13: Recommended Playlists & Playlist Detail & Track Pagination
+  console.log('\n13. Testing /api/top/playlist & /api/playlist/detail & /api/playlist/track/all');
+  {
+    const urlTop = new URL('http://localhost/api/top/playlist?order=hot&limit=5');
+    const resTop = await handleUpstreamEndpoint('top/playlist', urlTop, new Request(urlTop.toString()));
+    const dataTop = await resTop.json();
+    assert(resTop.status === 200, `Top playlist returns 200 (got ${resTop.status})`);
+    assert(Array.isArray(dataTop.playlists) && dataTop.playlists.length > 0, `Top playlist contains playlists (${dataTop.playlists?.length})`);
+
+    const playlistId = dataTop.playlists?.[0]?.id || '2936255937';
+    const urlDetail = new URL(`http://localhost/api/playlist/detail?id=${playlistId}`);
+    const resDetail = await handleUpstreamEndpoint('playlist/detail', urlDetail, new Request(urlDetail.toString()));
+    const dataDetail = await resDetail.json();
+    assert(resDetail.status === 200, `Playlist detail returns 200`);
+    assert(Boolean(dataDetail.playlist?.name), `Playlist detail contains name: "${dataDetail.playlist?.name}"`);
+
+    const urlTracks = new URL(`http://localhost/api/playlist/track/all?id=${playlistId}&limit=10&offset=0`);
+    const resTracks = await handleUpstreamEndpoint('playlist/track/all', urlTracks, new Request(urlTracks.toString()));
+    const dataTracks = await resTracks.json();
+    assert(resTracks.status === 200, `Playlist track/all returns 200`);
+    assert(Array.isArray(dataTracks.songs) && dataTracks.songs.length > 0, `Playlist track/all contains songs (${dataTracks.songs?.length})`);
+
+    // Paging with offset
+    const urlTracksP2 = new URL(`http://localhost/api/playlist/track/all?id=${playlistId}&limit=5&offset=5`);
+    const resTracksP2 = await handleUpstreamEndpoint('playlist/track/all', urlTracksP2, new Request(urlTracksP2.toString()));
+    const dataTracksP2 = await resTracksP2.json();
+    assert(resTracksP2.status === 200, `Playlist track/all page 2 returns 200`);
+    assert(Array.isArray(dataTracksP2.songs) && dataTracksP2.songs.length === 5, `Playlist track/all page 2 contains 5 songs`);
+  }
+
+  // 14. Testing Playlist Comments and Similar Playlists
+  console.log('\n14. Testing /api/comment/playlist, /api/comment/new & /api/simi/playlist');
+  {
+    const testPlaylistId = '3778678';
+
+    // 14.1 /api/comment/playlist
+    const urlComments = new URL(`http://localhost/api/comment/playlist?id=${testPlaylistId}&limit=5&offset=0`);
+    const resComments = await handleUpstreamEndpoint('comment/playlist', urlComments, new Request(urlComments.toString()));
+    const dataComments = await resComments.json();
+    assert(resComments.status === 200, `Comment/playlist returns 200 (got ${resComments.status})`);
+    assert(dataComments.brand === 'Sonic', `Comment/playlist brand is Sonic`);
+    assert(Array.isArray(dataComments.comments) && dataComments.comments.length > 0, `Comment/playlist contains comments (${dataComments.comments?.length})`);
+    assert(typeof dataComments.total === 'number' && dataComments.total > 0, `Comment/playlist has positive total count (${dataComments.total})`);
+
+    // 14.2 /api/comment/new with type=2
+    const urlCommentNew = new URL(`http://localhost/api/comment/new?id=${testPlaylistId}&type=2&pageSize=5&pageNo=1`);
+    const resCommentNew = await handleUpstreamEndpoint('comment/new', urlCommentNew, new Request(urlCommentNew.toString()));
+    const dataCommentNew = await resCommentNew.json();
+    assert(resCommentNew.status === 200, `Comment/new with type=2 returns 200`);
+    assert(Array.isArray(dataCommentNew.comments) && dataCommentNew.comments.length > 0, `Comment/new contains comments (${dataCommentNew.comments?.length})`);
+
+    // 14.3 /api/simi/playlist
+    const urlSimi = new URL(`http://localhost/api/simi/playlist?id=${testPlaylistId}`);
+    const resSimi = await handleUpstreamEndpoint('simi/playlist', urlSimi, new Request(urlSimi.toString()));
+    const dataSimi = await resSimi.json();
+    assert(resSimi.status === 200, `Simi/playlist returns 200 (got ${resSimi.status})`);
+    assert(dataSimi.brand === 'Sonic', `Simi/playlist brand is Sonic`);
+    assert(Array.isArray(dataSimi.playlists) && dataSimi.playlists.length > 0, `Simi/playlist returns playlists (${dataSimi.playlists?.length})`);
+
+    // 14.4 /api/cloudsearch with type=1000
+    const urlSearchPl = new URL(`http://localhost/api/cloudsearch?keywords=热歌&type=1000&limit=5`);
+    const resSearchPl = await handleUpstreamEndpoint('cloudsearch', urlSearchPl, new Request(urlSearchPl.toString()));
+    const dataSearchPl = await resSearchPl.json();
+    assert(resSearchPl.status === 200, `Cloudsearch type=1000 returns 200`);
+    assert(Array.isArray(dataSearchPl.result?.playlists) && dataSearchPl.result.playlists.length > 0, `Cloudsearch returns playlists (${dataSearchPl.result?.playlists?.length})`);
   }
 
 

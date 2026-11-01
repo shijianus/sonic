@@ -292,11 +292,251 @@ async function handleApi(req, res, url) {
     })
   }
 
+  if (p === '/api/album') {
+    const id = Number(q.get('id') || 1)
+    const ids = [9001, 9002, 9003, 9004]
+    const songs = ids.map(neteaseSong)
+    return sendJson(res, {
+      code: 200,
+      album: {
+        id,
+        name: 'E2E Test Album',
+        picUrl: '',
+        publishTime: 1672531199000,
+        size: songs.length,
+        description: 'Deterministic album fixture',
+        artist: { id: 1, name: 'Tester A' },
+      },
+      songs,
+    })
+  }
+
+  if (p === '/api/album/new') {
+    return sendJson(res, {
+      code: 200,
+      albums: [
+        {
+          id: 406521987,
+          name: 'New Album Fixture',
+          picUrl: '',
+          publishTime: 1672531199000,
+          artist: { id: 1, name: 'Tester A' },
+          size: 4,
+        },
+      ],
+    })
+  }
+
   if (p === '/api/banner') return sendJson(res, { banners: [] })
   if (p === '/api/top/playlist') return sendJson(res, { playlists: [] })
   if (p === '/api/top/song') return sendJson(res, { data: [] })
   if (p === '/api/top/artists') return sendJson(res, { artists: [] })
   if (p === '/api/personalized/mv') return sendJson(res, { result: [] })
+  if (p === '/api/mv/all') {
+    const type = url.searchParams.get('type') || ''
+    const allMVs = [
+      {
+        id: 10880673,
+        name: '起风了 (电视剧《加油你是最棒的》主题曲)',
+        artistName: '吴青峰',
+        duration: 303000,
+        playCount: 7692718,
+        cover: '/static/covers/cover-1.jpg',
+        tag: '精选',
+        publishTime: '2019-07-26',
+        desc: '2019年度热单吴青峰《起风了》正式版MV，“纵使疾风起，人生不言弃”。',
+        briefDesc: '吴青峰热单《起风了》MV公开！',
+      },
+      {
+        id: 5308076,
+        name: '关键词 (实验专辑《和自己对话》第三波主打)',
+        artistName: '林俊杰',
+        duration: 257090,
+        playCount: 18350842,
+        cover: '/static/covers/cover-2.jpg',
+        tag: '官方版',
+        publishTime: '2015-12-25',
+        desc: '林俊杰2015年实验专辑《和自己对话》第三波温情主打，用琴键与声线描绘心底最深处的感动。',
+        briefDesc: '林俊杰经典治愈系单曲。',
+      },
+      {
+        id: 5581237,
+        name: '清白之年 (跨界歌王 现场版)',
+        artistName: '王珞丹 / 朴树',
+        duration: 265900,
+        playCount: 4187058,
+        cover: '/static/covers/cover-3.jpg',
+        tag: '现场版',
+        publishTime: '2017-07-01',
+        desc: '《清白之年》现场合作版，历尽千帆，归来仍是少年。',
+        briefDesc: '历尽千帆，归来仍是少年。',
+      },
+      {
+        id: 10989376,
+        name: '超级面对面 第230期 辣目洋子',
+        artistName: '辣目洋子',
+        duration: 890000,
+        playCount: 1598844,
+        cover: '/static/covers/cover-4.jpg',
+        tag: 'Sonic 甄选',
+        publishTime: '2020-12-11',
+        desc: '辣目洋子：我为什么要撕掉网红标签？做最真实的自己。',
+        briefDesc: '深度人物专访与音乐故事。',
+      },
+      {
+        id: 14689667,
+        name: '早发白帝城 (诗画中国 第2季)',
+        artistName: '许嵩',
+        duration: 240000,
+        playCount: 2765012,
+        cover: '/static/covers/cover-5.jpg',
+        tag: '最新',
+        publishTime: '2024-01-14',
+        desc: '许嵩倾情献唱央视《诗画中国》，以古韵悠长的歌声重现李白轻舟已过万重山的豪迈诗意。',
+        briefDesc: '轻舟已过万重山。',
+      },
+    ]
+
+    let filtered = allMVs
+    if (type === '现场版' || type === '现场') {
+      filtered = [
+        allMVs[2],
+        {
+          id: 14292978,
+          name: 'Elemma (现场版 - 乌鲁木齐音乐节)',
+          artistName: 'Mustafa Abdulla',
+          duration: 310000,
+          playCount: 520410,
+          cover: '/static/covers/cover-1.jpg',
+          tag: '现场版',
+          publishTime: '2021-03-15',
+          desc: '丝路音乐节热力震撼现场，民族旋律与现代编曲交织。',
+          briefDesc: '震撼现场Live呈现。',
+        },
+        {
+          id: 14506286,
+          name: '成都小酒馆25周年现场 - 声音玩具《虎口脱险》',
+          artistName: '成都小酒馆LittleBar',
+          duration: 285000,
+          playCount: 891200,
+          cover: '/static/covers/cover-2.jpg',
+          tag: '现场版',
+          publishTime: '2022-04-18',
+          desc: '成都小酒馆25周年特别纪念现场，声音玩具乐队深情演绎经典。',
+          briefDesc: '小酒馆纪念专场。',
+        },
+      ]
+    } else if (type === '官方版' || type === '官方') {
+      filtered = [
+        allMVs[1],
+        {
+          id: 218008,
+          name: '倔强 (鸟巢官方版 现场巡演)',
+          artistName: '五月天',
+          duration: 274000,
+          playCount: 12450000,
+          cover: '/static/covers/cover-3.jpg',
+          tag: '官方版',
+          publishTime: '2014-01-03',
+          desc: '五月天代表作《倔强》鸟巢官方MV，万人大合唱感动全场。',
+          briefDesc: '五月天热血青春之歌。',
+        },
+        {
+          id: 5567192,
+          name: "There's Nothing Holdin' Me Back (Official MV)",
+          artistName: 'Shawn Mendes',
+          duration: 220000,
+          playCount: 38200000,
+          cover: '/static/covers/cover-4.jpg',
+          tag: '官方版',
+          publishTime: '2017-06-21',
+          desc: '萌德全球大热单曲官方MV，高能节奏与浪漫视觉。',
+          briefDesc: 'Shawn Mendes 热门官方录像带。',
+        },
+      ]
+    } else if (type === '网易出品' || type === 'netease') {
+      filtered = [
+        allMVs[3],
+        {
+          id: 10973136,
+          name: '超级面对面 第229期 陈奕迅：我是树上一只懒懒的豹',
+          artistName: '陈奕迅',
+          duration: 940000,
+          playCount: 2410000,
+          cover: '/static/covers/cover-5.jpg',
+          tag: 'Sonic 甄选',
+          publishTime: '2020-11-26',
+          desc: '歌神陈奕迅独家深度对话，聊音乐、聊生活与当下感悟。',
+          briefDesc: 'Sonic 独家面对面。',
+        },
+        {
+          id: 10968259,
+          name: '音乐好朋友3 EP06 沈以诚 & 刘瑞琦: “深夜食堂”限时营业',
+          artistName: '沈以诚 / 刘瑞琦',
+          duration: 720000,
+          playCount: 1880000,
+          cover: '/static/covers/cover-1.jpg',
+          tag: 'Sonic 甄选',
+          publishTime: '2020-10-15',
+          desc: '两位唱作人相遇合作，温暖声线治愈每个孤独灵魂。',
+          briefDesc: '音乐好朋友特别企划。',
+        },
+      ]
+    } else if (type === '最新') {
+      filtered = [
+        allMVs[4],
+        {
+          id: 14690387,
+          name: '你走你的路 (全新录音室版)',
+          artistName: '汪峰',
+          duration: 260000,
+          playCount: 1450000,
+          cover: '/static/covers/cover-2.jpg',
+          tag: '最新',
+          publishTime: '2024-01-12',
+          desc: '汪峰2024年度最新单曲MV，以坚毅从容的态度面对岁月沧桑。',
+          briefDesc: '汪峰全新单曲发布。',
+        },
+        {
+          id: 14690391,
+          name: 'Dusk Till Dawn (Cover Version)',
+          artistName: '刘逸云 Amber Liu',
+          duration: 235000,
+          playCount: 980000,
+          cover: '/static/covers/cover-3.jpg',
+          tag: '最新',
+          publishTime: '2024-01-15',
+          desc: 'Amber Liu 最新倾心翻唱巨作，充满力量感的声音叙事。',
+          briefDesc: 'Amber 全新力作。',
+        },
+      ]
+    }
+
+    return sendJson(res, {
+      code: 200,
+      brand: 'Sonic',
+      data: filtered,
+      hasMore: false,
+      count: filtered.length,
+    })
+  }
+  if (p === '/api/mv/detail') {
+    const id = url.searchParams.get('mvid') || url.searchParams.get('id') || '10880673'
+    return sendJson(res, {
+      code: 200,
+      brand: 'Sonic',
+      data: {
+        id: Number(id),
+        name: '起风了',
+        artistName: '吴青峰',
+        publishTime: '2019-07-26',
+        playCount: 7692718,
+        duration: 303000,
+        desc: '2019年度热单吴青峰《起风了》正式版MV，“纵使疾风起，人生不言弃”。',
+        briefDesc: '吴青峰热单《起风了》MV公开！',
+      },
+    })
+  }
   if (p === '/api/search/hot/detail') return sendJson(res, { data: [{ searchWord: 'sonic', score: 100 }] })
   if (p === '/api/search/default') return sendJson(res, { data: { showKeyword: 'sonic' } })
   if (p === '/api/login/status') return sendJson(res, { data: { code: 200, account: null } })

@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { playlistDetail, playlistTrackAll, commentNew, search } from '@/api'
+import {
+  playlistDetail,
+  playlistTrackAll,
+  commentPlaylist,
+  commentNew,
+  simiPlaylist,
+  search,
+} from '@/api'
 import { usePlayActions } from '@/composables/usePlayActions'
 import { PlaylistInfo, CommentItem } from '@/typings'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import Button from '@/components/Ui/Button.vue'
 import TabGroup from '@/components/Ui/TabGroup.vue'
 import InfiniteScroll from '@/components/Ui/InfiniteScroll.vue'
+import PageSkeleton from '@/components/PageSkeleton.vue'
 import { formatCount, formatDateTime } from '@/utils/time'
 import { useI18n } from 'vue-i18n'
 import {
@@ -16,11 +24,15 @@ import {
 } from '@/utils/transformers'
 import { formatCoverUrl } from '@/utils/imageUrl'
 import { useLibraryStore } from '@/stores/modules/library'
+import { useAuthStore } from '@/stores/modules/auth'
+import { useToastStore } from '@/stores/modules/toast'
 
 const route = useRoute()
 const router = useRouter()
-const playlistId = route.params.id
+const playlistId = computed(() => route.params.id)
 const libraryStore = useLibraryStore()
+const authStore = useAuthStore()
+const toastStore = useToastStore()
 
 interface SimilarPlaylist {
   id: number | string
@@ -37,12 +49,16 @@ interface PlaylistState {
   isCollected: boolean
   songs: SongData[]
   comments: CommentItem[]
+  hotComments: CommentItem[]
   isPageLoading: boolean
   similarPlaylists: SimilarPlaylist[]
   commentPage: number
   hasMoreComments: boolean
   isLoadingMoreComments: boolean
+  isLoadingComments: boolean
   isCommentLoadError: boolean
+  isLoadingSimilar: boolean
+  isSimilarLoadError: boolean
   commentTotal: number
   songTotal: number
   hasMoreSongs: boolean
@@ -50,6 +66,7 @@ interface PlaylistState {
   isSongLoadError: boolean
   isPreparingFullList: boolean
   partialPlayNotice: string
+  commentDraft: string
 }
 
 const state = reactive<PlaylistState>({
@@ -58,12 +75,16 @@ const state = reactive<PlaylistState>({
   isCollected: false,
   songs: [],
   comments: [],
+  hotComments: [],
   isPageLoading: true,
   similarPlaylists: [],
   commentPage: 1,
   hasMoreComments: true,
   isLoadingMoreComments: false,
+  isLoadingComments: false,
   isCommentLoadError: false,
+  isLoadingSimilar: false,
+  isSimilarLoadError: false,
   commentTotal: 0,
   songTotal: 0,
   hasMoreSongs: false,
@@ -71,17 +92,22 @@ const state = reactive<PlaylistState>({
   isSongLoadError: false,
   isPreparingFullList: false,
   partialPlayNotice: '',
+  commentDraft: '',
 })
 const {
   activeTab,
   playlistInfo,
   songs,
   comments,
+  hotComments,
   isPageLoading,
   similarPlaylists,
   hasMoreComments,
   isLoadingMoreComments,
+  isLoadingComments,
   isCommentLoadError,
+  isLoadingSimilar,
+  isSimilarLoadError,
   commentTotal,
   songTotal,
   hasMoreSongs,
@@ -89,6 +115,7 @@ const {
   isSongLoadError,
   isPreparingFullList,
   partialPlayNotice,
+  commentDraft,
 } = toRefs(state)
 const { playAll: playAllAction, shufflePlay: shufflePlayAction } = usePlayActions()
 const { t } = useI18n()
@@ -121,12 +148,27 @@ const loadPlaylist = async (id: number) => {
   state.isSongLoadError = false
   state.partialPlayNotice = ''
   try {
-    const [detailRes, tracksRes] = await Promise.all([
+    const [detailRes, tracksRes] = await Promise.allSettled([
       playlistDetail({ id }),
       playlistTrackAll({ id, limit: SONG_PAGE_SIZE, offset: 0 }),
     ])
 
-    const detail = transformPlaylistDetail(detailRes as Record<string, unknown>, t('home.playlistFallback'))
+    const detailRaw = detailRes.status === 'fulfilled' ? detailRes.value : null
+    const tracksRaw = tracksRes.status === 'fulfilled' ? tracksRes.value : null
+
+    const detail = detailRaw
+      ? transformPlaylistDetail(detailRaw as Record<string, unknown>, t('home.playlistFallback'))
+      : null
+
+    let songList: SongData[] = []
+    if (tracksRaw) {
+      songList = transformSongs(tracksRaw as Record<string, unknown>)
+    }
+    // 降级回退：若独立歌曲列表为空或失败，优先从歌单详情中提取 tracks 歌曲数据
+    if ((!songList || songList.length === 0) && detailRaw) {
+      songList = transformSongs(detailRaw as Record<string, unknown>)
+    }
+
     if (detail) {
       state.playlistInfo = {
         name: detail.name,
@@ -134,21 +176,38 @@ const loadPlaylist = async (id: number) => {
         creator: detail.creator,
         creatorAvatar: detail.creatorAvatar,
         createTime: detail.createTime,
-        songCount: detail.songCount,
+        songCount: detail.songCount || songList.length,
         playCount: detail.playCount as number,
         likes: String(detail.likes),
         category: detail.category,
         emoji: state.playlistInfo.emoji,
         gradient: pickGradient(),
-        coverImgUrl: detail.coverImgUrl,
+        coverImgUrl: detail.coverImgUrl || songList[0]?.cover || '',
       }
-      state.songTotal = detail.songCount
+      state.songTotal = detail.songCount || songList.length
       state.isCollected = libraryStore.isPlaylistCollected(id)
+    } else if (songList.length > 0) {
+      state.playlistInfo = {
+        name: t('common.unknownPlaylist'),
+        description: '',
+        creator: '',
+        creatorAvatar: '',
+        createTime: '',
+        songCount: songList.length,
+        playCount: 0,
+        likes: '0',
+        category: t('home.playlistFallback'),
+        emoji: state.playlistInfo.emoji,
+        gradient: pickGradient(),
+        coverImgUrl: songList[0]?.cover || '',
+      }
+      state.songTotal = songList.length
     }
 
-    state.songs = transformSongs(tracksRes as Record<string, unknown>)
+    state.songs = songList
     const reachedTotal = state.songTotal > 0 && state.songs.length >= state.songTotal
     state.hasMoreSongs = !reachedTotal && state.songs.length === SONG_PAGE_SIZE
+    state.isSongLoadError = songList.length === 0 && !detail
   } catch {
     state.isSongLoadError = true
   } finally {
@@ -220,23 +279,40 @@ const dismissPartialPlayNotice = () => {
 
 let commentRequestSeq = 0
 
+const handleCommentAction = () => {
+  if (!authStore.isAuthenticated) {
+    toastStore.show({
+      message: t('comments.pleaseLoginEpomail') || '请先登录epomail',
+      type: 'warning',
+    })
+    return
+  }
+  toastStore.show({
+    message: t('comments.commentsNotOpen') || '评论区暂时没有开放',
+    type: 'info',
+  })
+}
+
 const resetCommentState = () => {
   commentRequestSeq += 1
   state.comments = []
+  state.hotComments = []
   state.commentPage = 1
   state.hasMoreComments = true
   state.isLoadingMoreComments = false
+  state.isLoadingComments = false
   state.isCommentLoadError = false
   state.commentTotal = 0
 }
 
 const loadComments = async (id?: number, reset = false) => {
-  const targetId = id || Number(playlistId)
+  const targetId = id || Number(route.params.id)
   if (!targetId) return
   if (!reset && (state.isLoadingMoreComments || !state.hasMoreComments)) return
 
   if (reset) {
     resetCommentState()
+    state.isLoadingComments = true
   } else {
     state.isLoadingMoreComments = true
   }
@@ -245,34 +321,56 @@ const loadComments = async (id?: number, reset = false) => {
   state.isCommentLoadError = false
 
   try {
-    const res = await commentNew({
-      id: targetId,
-      type: 2,
-      sortType: 1,
-      pageNo,
-      pageSize: 20,
-    })
+    let res: any = null
+    try {
+      res = await commentPlaylist({
+        id: targetId,
+        limit: 20,
+        offset: (pageNo - 1) * 20,
+      })
+    } catch {
+      res = await commentNew({
+        id: targetId,
+        type: 2,
+        sortType: 1,
+        pageNo,
+        pageSize: 20,
+      })
+    }
     if (requestSeq !== commentRequestSeq) return
     const list = (res as any)?.data?.comments || (res as any)?.comments || []
+    const hotList = (res as any)?.data?.hotComments || (res as any)?.hotComments || []
+
+    const mapComment = (c: any, i: number, isHot = false): CommentItem => ({
+      id: c?.commentId || c?.id || `${pageNo}-${i}`,
+      username: c?.user?.nickname || t('comments.user'),
+      avatarGradient: gradients[(state.comments.length + i) % gradients.length],
+      time: c?.time ? formatDateTime(c.time) : (c?.timeStr || ''),
+      content: c?.content || '',
+      likes: c?.likedCount || 0,
+      liked: Boolean(c?.liked),
+      location: c?.ipLocation?.location || '',
+      isHot,
+      avatarUrl: c?.user?.avatarUrl || '',
+      replies: (c?.beReplied || []).map((r: any, ri: number) => ({
+        username: r?.user?.nickname || t('comments.user'),
+        avatarUrl: r?.user?.avatarUrl || '',
+        avatarGradient: gradients[(state.comments.length + i + ri + 1) % gradients.length],
+        time: '',
+        content: r?.content || '',
+      })),
+    })
+
     if (Array.isArray(list)) {
-      const mapped = list.map((c: any, i: number) => ({
-        username: c?.user?.nickname || t('comments.user'),
-        avatarGradient: gradients[(state.comments.length + i) % gradients.length],
-        time: c?.time ? formatDateTime(c.time) : '',
-        content: c?.content || '',
-        likes: c?.likedCount || 0,
-        avatarUrl: c?.user?.avatarUrl || '',
-        replies: (c?.beReplied || []).map((r: any, ri: number) => ({
-          username: r?.user?.nickname || t('comments.user'),
-          avatarUrl: r?.user?.avatarUrl || '',
-          avatarGradient: gradients[(state.comments.length + i + ri + 1) % gradients.length],
-          time: '',
-          content: r?.content || '',
-        })),
-      }))
+      const mapped = list.map((c, i) => mapComment(c, i, false))
+      if (reset && Array.isArray(hotList) && hotList.length > 0) {
+        state.hotComments = hotList.map((c, i) => mapComment(c, i, true))
+      } else if (reset) {
+        state.hotComments = []
+      }
 
       state.comments = reset ? mapped : [...state.comments, ...mapped]
-      state.hasMoreComments = list.length === 20
+      state.hasMoreComments = (res as any)?.more ?? (list.length === 20)
       const total = Number(
         (res as any)?.data?.total ??
           (res as any)?.total ??
@@ -282,12 +380,15 @@ const loadComments = async (id?: number, reset = false) => {
       if (Number.isFinite(total)) {
         state.commentTotal = total
       } else if (reset) {
-        state.commentTotal = mapped.length
+        state.commentTotal = mapped.length + state.hotComments.length
       }
       if (mapped.length) state.commentPage += 1
     } else {
       state.hasMoreComments = false
-      if (reset) state.commentTotal = 0
+      if (reset) {
+        state.commentTotal = 0
+        state.hotComments = []
+      }
     }
   } catch {
     if (requestSeq !== commentRequestSeq) return
@@ -299,32 +400,80 @@ const loadComments = async (id?: number, reset = false) => {
   } finally {
     if (requestSeq === commentRequestSeq) {
       state.isLoadingMoreComments = false
+      state.isLoadingComments = false
     }
   }
 }
 
-const loadSimilarPlaylists = async (name: string) => {
+const cleanPlaylistKeyword = (name: string): string => {
+  if (!name) return ''
+  let cleaned = name
+    .replace(/\[.*?\]|【.*?】|（.*?）|\(.*?\)/g, ' ')
+    .replace(/[|/\\_—–\-+#!~`]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return cleaned || name
+}
+
+const loadSimilarPlaylists = async (name: string, id?: number | string) => {
+  const currentId = String(id || route.params.id)
+  state.isLoadingSimilar = true
+  state.isSimilarLoadError = false
   try {
-    const res = await search({ keywords: name, type: 1000 })
-    const { playlists } = transformSearchPlaylists(res as Record<string, unknown>, 12)
-    state.similarPlaylists = playlists.map(pl => ({
-      id: pl.id,
-      name: pl.name,
-      coverImgUrl: pl.coverImgUrl,
-      trackCount: pl.trackCount,
-      playCount: pl.playCount,
-    }))
-  } catch {}
+    if (currentId) {
+      try {
+        const simiRes: any = await simiPlaylist({ id: currentId })
+        const list = simiRes?.playlists || []
+        if (Array.isArray(list) && list.length > 0) {
+          state.similarPlaylists = list
+            .filter((pl: any) => String(pl.id) !== currentId)
+            .slice(0, 12)
+            .map((pl: any) => ({
+              id: pl.id,
+              name: pl.name,
+              coverImgUrl: pl.coverImgUrl || pl.picUrl || '',
+              trackCount: pl.trackCount,
+              playCount: pl.playCount,
+              creator: pl.creator,
+            }))
+          if (state.similarPlaylists.length > 0) {
+            state.isLoadingSimilar = false
+            return
+          }
+        }
+      } catch {}
+    }
+
+    const q = cleanPlaylistKeyword(name)
+    const res = await search({ keywords: q || name || '流行', type: 1000, limit: 16 })
+    const { playlists } = transformSearchPlaylists(res as Record<string, unknown>, 16)
+    state.similarPlaylists = playlists
+      .filter(pl => String(pl.id) !== currentId)
+      .slice(0, 12)
+      .map(pl => ({
+        id: pl.id,
+        name: pl.name,
+        coverImgUrl: pl.coverImgUrl,
+        trackCount: pl.trackCount,
+        playCount: pl.playCount,
+        creator: (pl as any).creator,
+      }))
+  } catch {
+    state.isSimilarLoadError = true
+  } finally {
+    state.isLoadingSimilar = false
+  }
 }
 
 // 初始化加载播放列表
 onMounted(() => {
-  const idNum = Number(playlistId)
+  const idNum = Number(route.params.id)
   if (!Number.isNaN(idNum) && idNum > 0) {
     state.isPageLoading = true
     resetCommentState()
     loadPlaylist(idNum)
     loadComments(idNum, true)
+    loadSimilarPlaylists(state.playlistInfo.name || '', idNum)
   }
 })
 
@@ -337,6 +486,7 @@ watch(
       resetCommentState()
       loadPlaylist(idNum)
       loadComments(idNum, true)
+      loadSimilarPlaylists(state.playlistInfo.name || '', idNum)
     }
   }
 )
@@ -344,7 +494,7 @@ watch(
 watch(
   () => state.playlistInfo.name,
   name => {
-    if (name) loadSimilarPlaylists(name)
+    if (name) loadSimilarPlaylists(name, String(route.params.id))
   }
 )
 
@@ -352,7 +502,7 @@ watch(
 const toggleCollect = () => {
   if (!state.playlistInfo) return
   const collected = libraryStore.toggleCollectPlaylist({
-    id: Number(playlistId),
+    id: Number(route.params.id),
     name: state.playlistInfo.name,
     coverImgUrl: state.playlistInfo.coverImgUrl,
     trackCount: state.playlistInfo.songCount,
@@ -389,7 +539,7 @@ const tabsWithCount = computed(() =>
       tab.key === 'songs'
         ? songTotal.value || songs.value.length
         : tab.key === 'comments'
-          ? commentTotal.value || comments.value.length
+          ? commentTotal.value || comments.value.length + hotComments.value.length
           : similarPlaylists.value.length,
   }))
 )
@@ -595,7 +745,27 @@ const tabsWithCount = computed(() =>
               {{ $t('playlist.dismiss') }}
             </button>
           </div>
-          <SongList :songs="songs" :show-header="true" />
+          <SongList v-if="songs.length" :songs="songs" :show-header="true" />
+          <div
+            v-else-if="!isPageLoading"
+            class="glass-card my-6 flex flex-col items-center justify-center p-12 text-center"
+          >
+            <div
+              class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-white/5 text-primary/40 ring-1 ring-white/10"
+            >
+              <span class="icon-[mdi--music-off] h-8 w-8" />
+            </div>
+            <p class="text-primary/70 mb-2 font-medium">{{ $t('components.songList.empty') }}</p>
+            <Button
+              variant="solid"
+              size="sm"
+              rounded="full"
+              @click="loadPlaylist(Number(route.params.id))"
+            >
+              <span class="icon-[mdi--refresh] mr-1.5 h-4 w-4" />
+              {{ $t('common.retry') }}
+            </Button>
+          </div>
           <div class="mt-4 flex flex-col items-center gap-2 pb-4">
             <p v-if="songTotal" class="text-primary/50 text-xs">
               {{ $t('playlist.loadedProgress', { loaded: songs.length, total: songTotal }) }}
@@ -627,13 +797,192 @@ const tabsWithCount = computed(() =>
         </section>
 
         <!-- 评论区 -->
-        <section v-show="activeTab === 'comments'" class="animate-fade-in">
+        <section v-show="activeTab === 'comments'" class="animate-fade-in flex flex-col gap-4">
+          <!-- 评论发表占位区域 (公测UI，未登录提示登录epomail，已登录提示未开放) -->
+          <div class="glass-card overflow-hidden p-5 transition-all">
+            <div class="flex items-start gap-3.5">
+              <!-- 用户头像 -->
+              <div class="h-10 w-10 shrink-0 overflow-hidden rounded-full ring-2 ring-glass">
+                <img
+                  v-if="authStore.userAvatar"
+                  :src="authStore.userAvatar"
+                  class="h-full w-full object-cover"
+                  alt=""
+                  referrerpolicy="no-referrer"
+                />
+                <div
+                  v-else-if="authStore.isAuthenticated"
+                  class="flex h-full w-full items-center justify-center bg-linear-to-tr from-sky-500 to-blue-600 text-sm font-bold text-white"
+                >
+                  {{ authStore.userInitial }}
+                </div>
+                <div
+                  v-else
+                  class="flex h-full w-full items-center justify-center bg-white/10 text-primary/50"
+                >
+                  <span class="icon-[mdi--account] h-5 w-5" />
+                </div>
+              </div>
+
+              <!-- 输入交互框架 -->
+              <div class="min-w-0 flex-1">
+                <div class="mb-2 flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <span class="text-primary text-sm font-semibold">
+                      {{ authStore.isAuthenticated ? authStore.userName : $t('account.guestUser', '访客用户') }}
+                    </span>
+                    <span
+                      v-if="authStore.isAuthenticated"
+                      class="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400"
+                    >
+                      EpoMail
+                    </span>
+                    <span
+                      v-else
+                      class="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-medium text-primary/50"
+                    >
+                      {{ $t('account.guest', '未登录') }}
+                    </span>
+                  </div>
+                  <span class="text-primary/40 text-xs hidden sm:inline">
+                    {{ $t('comments.guestTip', '登录 EpoMail 账号即可参与评论互动') }}
+                  </span>
+                </div>
+
+                <div
+                  class="group relative rounded-xl border border-glass bg-white/5 transition-all focus-within:border-sky-500/50 focus-within:bg-white/10 cursor-pointer"
+                  @click="handleCommentAction"
+                >
+                  <textarea
+                    v-model="commentDraft"
+                    rows="2"
+                    :placeholder="$t('comments.writeTip', '发表你的友善评论，留下此刻的听歌心境...')"
+                    class="w-full resize-none bg-transparent px-3.5 py-2.5 text-sm text-primary placeholder-primary/30 outline-none cursor-pointer"
+                    readonly
+                    @click.stop="handleCommentAction"
+                  ></textarea>
+                  <div class="flex items-center justify-between border-t border-glass px-3 py-2">
+                    <div class="flex items-center gap-2 text-xs text-primary/40">
+                      <span class="icon-[mdi--shield-check-outline] h-4 w-4 text-sky-400" />
+                      <span class="text-[11px]">{{ $t('comments.title', '歌单评论') }}</span>
+                    </div>
+                    <Button
+                      variant="solid"
+                      size="sm"
+                      rounded="full"
+                      class="px-4 py-1.5 shadow-sm text-xs font-medium"
+                      @click.stop="handleCommentAction"
+                    >
+                      <span class="icon-[mdi--send-variant-outline] mr-1.5 h-3.5 w-3.5" />
+                      {{ $t('comments.submit', '发表评论') }}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 评论列表主体 -->
           <div class="glass-card overflow-hidden">
-            <!-- 评论列表（只读，无后端写接口） -->
+            <!-- 列表标题与总数 -->
+            <div class="flex items-center justify-between border-b border-glass px-6 py-4">
+              <div class="flex items-center gap-2">
+                <span class="icon-[mdi--comment-text-multiple-outline] text-primary/60 h-5 w-5" />
+                <h3 class="text-primary text-base font-semibold">
+                  {{ $t('comments.title', '全部评论') }}
+                </h3>
+                <span
+                  class="rounded-full bg-white/10 px-2 py-0.5 text-xs font-semibold text-primary/70"
+                >
+                  {{ formatCount(commentTotal || comments.length + hotComments.length) }}
+                </span>
+              </div>
+              <button
+                type="button"
+                class="flex items-center gap-1 text-xs text-primary/60 hover:text-primary transition-colors cursor-pointer"
+                @click="loadComments(undefined, true)"
+              >
+                <span class="icon-[mdi--refresh] h-4 w-4" />
+                <span>{{ $t('common.refresh', '刷新') }}</span>
+              </button>
+            </div>
+
+            <!-- 初次加载中骨架屏 -->
+            <div v-if="isLoadingComments && !comments.length && !hotComments.length" class="p-6">
+              <PageSkeleton :sections="['list']" :list-count="6" />
+            </div>
+
+            <!-- 热评列表 (若有) -->
+            <div v-else-if="hotComments.length" class="border-b border-glass bg-amber-500/5">
+              <div class="flex items-center gap-1.5 px-6 pt-4 pb-2 text-xs font-bold text-amber-400">
+                <span class="icon-[mdi--fire] h-4 w-4" />
+                <span>{{ $t('comments.hotBadge', '热门评论') }}</span>
+              </div>
+              <div class="divide-y divide-glass">
+                <div
+                  v-for="(comment, index) in hotComments"
+                  :key="comment.id || `hot-${index}`"
+                  class="hover:bg-hover-glass p-6 transition-colors"
+                >
+                  <div class="flex gap-4">
+                    <img
+                      v-if="comment.avatarUrl"
+                      :src="formatCoverUrl(comment.avatarUrl, { size: 100 })"
+                      class="h-11 w-11 shrink-0 rounded-full ring-2 ring-glass"
+                      referrerpolicy="no-referrer"
+                    />
+                    <div
+                      v-else
+                      class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-linear-to-br text-sm font-semibold text-white"
+                      :class="comment.avatarGradient"
+                    >
+                      {{ comment.username.charAt(0) }}
+                    </div>
+
+                    <div class="min-w-0 flex-1">
+                      <div class="mb-2 flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                          <span class="text-primary text-sm font-semibold">{{ comment.username }}</span>
+                          <span v-if="comment.location" class="text-primary/40 text-xs">
+                            {{ comment.location }}
+                          </span>
+                        </div>
+                        <span class="text-primary/50 text-xs">{{ comment.time }}</span>
+                      </div>
+
+                      <p class="text-primary/80 mb-3 text-sm leading-relaxed whitespace-pre-wrap break-words">
+                        {{ comment.content }}
+                      </p>
+
+                      <div class="flex items-center gap-4 text-xs text-primary/50">
+                        <button
+                          type="button"
+                          class="flex items-center gap-1.5 transition-colors hover:text-red-400 cursor-pointer"
+                          @click="handleCommentAction"
+                        >
+                          <span class="icon-[mdi--thumb-up-outline] h-4 w-4" />
+                          <span class="font-medium">{{ comment.likes || 0 }}</span>
+                        </button>
+                        <button
+                          type="button"
+                          class="flex items-center gap-1 transition-colors hover:text-primary cursor-pointer"
+                          @click="handleCommentAction"
+                        >
+                          <span class="icon-[mdi--comment-outline] h-3.5 w-3.5" />
+                          <span>{{ $t('comments.reply', '回复') }}</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 评论列表 -->
             <div v-if="comments.length" class="divide-y divide-glass">
               <div
                 v-for="(comment, index) in comments"
-                :key="index"
+                :key="comment.id || index"
                 class="hover:bg-hover-glass p-6 transition-colors"
               >
                 <div class="flex gap-4">
@@ -652,18 +1001,37 @@ const tabsWithCount = computed(() =>
                   </div>
 
                   <div class="min-w-0 flex-1">
-                    <div class="mb-2 flex items-center gap-3">
-                      <span class="text-primary text-sm font-semibold">{{ comment.username }}</span>
+                    <div class="mb-2 flex items-center justify-between">
+                      <div class="flex items-center gap-2">
+                        <span class="text-primary text-sm font-semibold">{{ comment.username }}</span>
+                        <span v-if="comment.location" class="text-primary/40 text-xs">
+                          {{ comment.location }}
+                        </span>
+                      </div>
                       <span class="text-primary/50 text-xs">{{ comment.time }}</span>
                     </div>
 
-                    <p class="text-primary/80 mb-4 text-sm leading-relaxed">
+                    <p class="text-primary/80 mb-3 text-sm leading-relaxed whitespace-pre-wrap break-words">
                       {{ comment.content }}
                     </p>
 
-                    <div class="flex items-center gap-1.5 text-xs text-primary/50">
-                      <span class="icon-[mdi--thumb-up-outline] h-4 w-4"></span>
-                      <span class="font-medium">{{ comment.likes || 0 }}</span>
+                    <div class="flex items-center gap-4 text-xs text-primary/50">
+                      <button
+                        type="button"
+                        class="flex items-center gap-1.5 transition-colors hover:text-red-400 cursor-pointer"
+                        @click="handleCommentAction"
+                      >
+                        <span class="icon-[mdi--thumb-up-outline] h-4 w-4"></span>
+                        <span class="font-medium">{{ comment.likes || 0 }}</span>
+                      </button>
+                      <button
+                        type="button"
+                        class="flex items-center gap-1 transition-colors hover:text-primary cursor-pointer"
+                        @click="handleCommentAction"
+                      >
+                        <span class="icon-[mdi--comment-outline] h-3.5 w-3.5"></span>
+                        <span>{{ $t('comments.reply', '回复') }}</span>
+                      </button>
                     </div>
 
                     <!-- 回复列表 -->
@@ -694,7 +1062,10 @@ const tabsWithCount = computed(() =>
             </div>
 
             <!-- 空状态 -->
-            <div v-else class="flex flex-col items-center justify-center py-20">
+            <div
+              v-else-if="!isLoadingComments"
+              class="flex flex-col items-center justify-center py-20"
+            >
               <span class="icon-[mdi--comment-off-outline] text-primary/20 mb-4 h-16 w-16"></span>
               <p class="text-primary/50 text-sm font-medium">{{ $t('comments.empty') }}</p>
             </div>
@@ -716,8 +1087,26 @@ const tabsWithCount = computed(() =>
 
         <!-- 相似歌单 -->
         <section v-show="activeTab === 'similar'" class="animate-fade-in">
+          <!-- 加载中骨架 -->
           <div
-            v-if="similarPlaylists.length"
+            v-if="isLoadingSimilar && !similarPlaylists.length"
+            class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+          >
+            <div
+              v-for="i in 12"
+              :key="i"
+              class="glass-card overflow-hidden animate-pulse rounded-2xl"
+            >
+              <div class="aspect-square bg-white/10" />
+              <div class="p-3 space-y-2">
+                <div class="h-4 w-3/4 rounded bg-white/10" />
+                <div class="h-3 w-1/2 rounded bg-white/5" />
+              </div>
+            </div>
+          </div>
+
+          <div
+            v-else-if="similarPlaylists.length"
             class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
           >
             <router-link
@@ -772,7 +1161,19 @@ const tabsWithCount = computed(() =>
             class="glass-card flex flex-col items-center justify-center py-20 text-center"
           >
             <span class="icon-[mdi--playlist-remove] text-primary/20 mb-5 h-20 w-20"></span>
-            <p class="text-primary/50 text-base font-medium">{{ $t('playlist.similarEmpty') }}</p>
+            <p class="text-primary/50 text-base font-medium mb-1">{{ $t('playlist.similarEmpty') }}</p>
+            <p v-if="isSimilarLoadError" class="text-amber-400/80 text-xs mb-3">
+              {{ $t('common.networkError', '推荐加载异常，请点击重试') }}
+            </p>
+            <Button
+              variant="soft"
+              size="sm"
+              rounded="full"
+              @click="loadSimilarPlaylists(playlistInfo.name, String(route.params.id))"
+            >
+              <span class="icon-[mdi--refresh] mr-1.5 h-4 w-4" />
+              {{ $t('common.retry') }}
+            </Button>
           </div>
         </section>
       </div>

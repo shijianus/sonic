@@ -48,6 +48,7 @@ declare global {
   const formatDuration: typeof import('../utils/time').formatDuration
   const formatDurationOrDash: typeof import('../utils/time').formatDurationOrDash
   const formatNumber: typeof import('../utils/time').formatNumber
+  const formatRelativeTimeYT: typeof import('../utils/time').formatRelativeTimeYT
   const formatTime: typeof import('../utils/audioUtils').formatTime
   const gatewayHealth: typeof import('../utils/gatewayHealth').gatewayHealth
   const generateGradientFromColor: typeof import('../utils/colorExtractor').generateGradientFromColor

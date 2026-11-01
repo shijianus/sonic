@@ -98,6 +98,28 @@ export const useAuthStore = defineStore('auth', {
       // 联动检测：检查当前域的 localStorage 中是否存在 epocanvas-mail 凭证
       try {
         if (typeof window !== 'undefined') {
+          // 优先检查 Sonic 规范的 EpoMail 会话缓存 (sonic_epomail_session)
+          const sonicSessionRaw = localStorage.getItem('sonic_epomail_session')
+          if (sonicSessionRaw) {
+            try {
+              const sess = JSON.parse(sonicSessionRaw)
+              if (sess && (sess.email || sess.id)) {
+                this.user = {
+                  id: String(sess.id || sess.email),
+                  email: sess.email || '',
+                  name: sess.name || (sess.email ? sess.email.split('@')[0] : 'User'),
+                  avatar: sess.avatar || '',
+                  role: sess.role || 'user',
+                  expiresAt: sess.expiresAt,
+                }
+                this.isAuthenticated = true
+                this.lastSyncTime = now
+                this.isLoading = false
+                return this.user
+              }
+            } catch (_) {}
+          }
+
           const loginEmail = localStorage.getItem('loginEmail')
           const token = localStorage.getItem('token')
           const sessionsRaw = localStorage.getItem('epo_sessions')

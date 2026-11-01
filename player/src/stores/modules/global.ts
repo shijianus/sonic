@@ -14,8 +14,25 @@ export const useGlobalStore = defineStore('global', {
     lang: undefined,
     /** 侧边栏折叠状态 */
     sidebarCollapsed: false,
+    /** 播放器全屏抽屉是否开启 */
+    isPlayerDrawerOpen: false,
   }),
   actions: {
+    /** 打开播放器抽屉 */
+    openPlayerDrawer() {
+      this.isPlayerDrawerOpen = true
+    },
+
+    /** 关闭播放器抽屉 */
+    closePlayerDrawer() {
+      this.isPlayerDrawerOpen = false
+    },
+
+    /** 切换播放器抽屉状态 */
+    togglePlayerDrawer() {
+      this.isPlayerDrawerOpen = !this.isPlayerDrawerOpen
+    },
+
     /** 切换侧边栏折叠状态 */
     toggleSidebarCollapsed() {
       this.sidebarCollapsed = !this.sidebarCollapsed
@@ -71,5 +88,5 @@ export const useGlobalStore = defineStore('global', {
       this.searchHistory = []
     },
   },
-  persist: piniaPersistConfig('global'),
+  persist: piniaPersistConfig('global', ['theme', 'searchHistory', 'lang', 'sidebarCollapsed']),
 })

@@ -63,7 +63,8 @@ const NON_USER_SKIP_REASONS = new Set([
 
 // ── 1. Event Credibility Weighting & Ingestion ──
 export function computeEventCredibilityWeight(ev: SonicBehaviorEventInput): number {
-  switch (ev.type) {
+  const act = (ev.action || ev.type) as string;
+  switch (act) {
     case 'favorite':
       return 4.0;
     case 'unfavorite':
@@ -71,9 +72,18 @@ export function computeEventCredibilityWeight(ev: SonicBehaviorEventInput): numb
     case 'replay':
       return 3.5;
     case 'play_complete':
+    case 'watch_complete':
       return 2.5;
-    case 'play_progress': {
+    case 'add_to_playlist':
+      return 2.0;
+    case 'open':
+      return 0.5;
+    case 'play_start':
+      return 0.35;
+    case 'play_progress':
+    case 'watch_progress': {
       const ratio =
+        ev.progress ??
         ev.progressRatio ??
         (ev.playedSeconds && ev.durationSeconds && ev.durationSeconds > 0
           ? ev.playedSeconds / ev.durationSeconds
@@ -82,8 +92,6 @@ export function computeEventCredibilityWeight(ev: SonicBehaviorEventInput): numb
       if (ratio >= 0.45 || (ev.playedSeconds && ev.playedSeconds >= 60)) return 1.2;
       return 0.2;
     }
-    case 'play_start':
-      return 0.35;
     case 'search_click':
       return 1.1;
     case 'search':
@@ -93,6 +101,7 @@ export function computeEventCredibilityWeight(ev: SonicBehaviorEventInput): numb
         return 0; // Never confuse network stall / playback error / trial end with user dislike!
       }
       const ratio =
+        ev.progress ??
         ev.progressRatio ??
         (ev.playedSeconds !== undefined && ev.durationSeconds && ev.durationSeconds > 0
           ? ev.playedSeconds / ev.durationSeconds
@@ -146,11 +155,54 @@ export async function ingestBehaviorEvents(
     .slice(0, 4);
 
   for (const rawEv of inputs.slice(0, 50)) {
-    if (!rawEv || !rawEv.type) continue;
+    if (!rawEv) continue;
+    const evType = rawEv.type || (rawEv.action as any);
+    if (!evType && !rawEv.action) continue;
+
     const ts =
       typeof rawEv.timestamp === 'number' && Number.isFinite(rawEv.timestamp)
         ? Math.min(now + 60_000, Math.max(now - 90 * DAY_MS, rawEv.timestamp))
         : now;
+
+    // Multi-entity feedback handling (album, playlist, mv, or track with explicit entityType)
+    const entityType = rawEv.entity_type || rawEv.entityType;
+    const entityId = rawEv.entity_id || rawEv.entityId;
+    const entityAction = rawEv.action || (rawEv.type as any);
+
+    if (entityType && entityId && store.recordEntityFeedback) {
+      const fbWeight = computeEventCredibilityWeight(rawEv);
+      if (!(entityAction === 'skip' && fbWeight === 0)) {
+        const fbFallbackSeed = `${identity.subjectKey}:${entityType}:${entityId}:${entityAction}:${Math.floor(ts / 2000)}`;
+        const feedbackId =
+          rawEv.eventId && /^[a-zA-Z0-9_.:-]{6,96}$/.test(rawEv.eventId)
+            ? rawEv.eventId
+            : `fb_${deterministicHash16(fbFallbackSeed)}`;
+
+        const fbRes = store.recordEntityFeedback({
+          feedbackId,
+          subjectKey: identity.subjectKey,
+          entityType,
+          entityId,
+          action: entityAction,
+          weight: fbWeight,
+          progress: rawEv.progress ?? rawEv.progressRatio,
+          context: rawEv.context,
+          createdAt: ts,
+        });
+
+        if (fbRes.deduplicated) {
+          deduplicated += 1;
+          continue;
+        }
+        if (fbRes.inserted) {
+          accepted += 1;
+        }
+      }
+      // If entity is not a track and not accompanied by a track payload, finish here
+      if (entityType !== 'track' && !rawEv.track) {
+        continue;
+      }
+    }
 
     let canonicalTrack: CanonicalTrack | null = null;
     if (rawEv.track) {
@@ -173,7 +225,7 @@ export async function ingestBehaviorEvents(
       store.recordSearchQuery(compactNormalize(cleanQuery), cleanQuery, rawEv.type === 'search_click');
     }
 
-    const fallbackIdSeed = `${identity.subjectKey}:${rawEv.type}:${canonicalTrack?.canonicalTrackId || cleanQuery || ''}:${Math.floor(ts / 2000)}`;
+    const fallbackIdSeed = `${identity.subjectKey}:${rawEv.type || rawEv.action}:${canonicalTrack?.canonicalTrackId || cleanQuery || ''}:${Math.floor(ts / 2000)}`;
     const eventId =
       rawEv.eventId && /^[a-zA-Z0-9_.:-]{6,96}$/.test(rawEv.eventId)
         ? rawEv.eventId
@@ -183,7 +235,7 @@ export async function ingestBehaviorEvents(
     const storedEv: StoredBehaviorEvent = {
       eventId,
       subjectKey: identity.subjectKey,
-      type: rawEv.type,
+      type: rawEv.type || (rawEv.action as any) || 'play_complete',
       canonicalTrackId: canonicalTrack?.canonicalTrackId,
       artistKey: canonicalTrack?.canonicalArtist || undefined,
       genres: canonicalTrack?.genres?.length ? canonicalTrack.genres : inferredQueryGenres.length ? inferredQueryGenres : undefined,
@@ -347,6 +399,41 @@ export function buildUserPreferenceProfile(
       if (idx !== -1) profile.recentTrackIds.splice(idx, 1);
       profile.recentTrackIds.unshift(ev.canonicalTrackId);
       if (profile.recentTrackIds.length > 40) profile.recentTrackIds.pop();
+    }
+  }
+
+  // Fold multi-entity feedback signals (albums, playlists, MVs)
+  const entityFeedbacks = (identity.subjectKey && store.getUserEntityFeedbacks)
+    ? store.getUserEntityFeedbacks(identity.subjectKey, 200, nowMs - 90 * DAY_MS)
+    : [];
+  profile.totalEvents += entityFeedbacks.length;
+
+  for (const ef of [...entityFeedbacks].reverse()) {
+    const ageMs = Math.max(0, nowMs - ef.createdAt);
+    const shortDecay = exponentialTimeDecay(ageMs, 24 * HOUR_MS);
+    const longDecay = exponentialTimeDecay(ageMs, 21 * DAY_MS);
+    const effWeight = ef.weight;
+
+    if (ef.action === 'dislike' || effWeight <= -4.0) {
+      profile.blockedTrackIds.add(ef.entityId);
+    } else if (ef.action === 'undislike') {
+      profile.blockedTrackIds.delete(ef.entityId);
+    } else if (ef.action === 'favorite') {
+      if (ef.entityType === 'track') {
+        profile.likedTrackIds.add(ef.entityId);
+      }
+      profile.hasPlayHistory = true;
+    }
+
+    const ent = store.getEntity ? store.getEntity(ef.entityId) : null;
+    if (ent?.artistName) {
+      const ar = resolveCanonicalArtist(ent.artistName);
+      if (effWeight > 0) {
+        profile.longTermArtists[ar] = (profile.longTermArtists[ar] || 0) + effWeight * 0.4 * longDecay;
+        profile.shortTermArtists[ar] = (profile.shortTermArtists[ar] || 0) + effWeight * 0.4 * shortDecay;
+      } else if (effWeight < 0) {
+        profile.penalizedArtists[ar] = (profile.penalizedArtists[ar] || 0) + Math.abs(effWeight) * 0.25 * shortDecay;
+      }
     }
   }
 

@@ -33,18 +33,21 @@ const handleTabClick = (key: T) => {
 
 <template>
   <div
-    class="flex items-center gap-2 p-1.5 transition-all"
-    :class="{
-      'glass-card': variant === 'glass',
-      'rounded-xl bg-white/10 border border-white/5': variant === 'gradient',
-    }"
+    class="flex items-center transition-all"
+    :class="[
+      size === 'sm' ? 'gap-1 p-1 rounded-xl' : 'gap-2 p-1.5 rounded-xl',
+      {
+        'glass-card': variant === 'glass',
+        'bg-white/10 border border-white/5': variant === 'gradient',
+      },
+    ]"
   >
     <button
       v-for="tab in tabs"
       :key="String(tab.key)"
-      class="relative flex min-h-11 items-center gap-2 rounded-xl transition-all duration-300"
+      class="relative flex items-center transition-all duration-300"
       :class="[
-        size === 'sm' ? 'px-3 py-1.5 text-sm' : 'px-4 py-2.5 text-sm',
+        size === 'sm' ? 'min-h-8 h-8 px-2.5 py-1 text-xs gap-1.5 rounded-lg' : 'min-h-11 px-4 py-2.5 text-sm gap-2 rounded-xl',
         modelValue === tab.key
           ? variant === 'glass'
             ? 'bg-hover-glass text-primary shadow-sm font-medium'
@@ -53,18 +56,19 @@ const handleTabClick = (key: T) => {
       ]"
       @click="handleTabClick(tab.key)"
     >
-      <span :class="tab.icon" class="h-4 w-4"></span>
+      <span :class="[tab.icon, size === 'sm' ? 'h-3.5 w-3.5' : 'h-4 w-4']"></span>
       <span>{{ $t(tab.labelKey) }}</span>
       <span
         v-if="showCount && tab.count !== undefined"
-        class="rounded-full px-2 py-0.5 text-xs font-medium transition-colors"
-        :class="
+        class="rounded-full font-medium transition-colors"
+        :class="[
+          size === 'sm' ? 'px-1.5 py-0.2 text-[10px]' : 'px-2 py-0.5 text-xs',
           modelValue === tab.key
             ? variant === 'glass'
               ? 'bg-button-glass text-primary'
               : 'bg-white/20 text-white'
-            : 'bg-button-glass/50 text-primary/60'
-        "
+            : 'bg-button-glass/50 text-primary/60',
+        ]"
       >
         {{ tab.count }}
       </span>

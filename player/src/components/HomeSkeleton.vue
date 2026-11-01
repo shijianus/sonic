@@ -24,8 +24,8 @@
       <div class="mb-6">
         <div class="h-7 w-36 rounded-lg bg-white/10"></div>
       </div>
-      <div class="grid grid-cols-3 gap-3.5 sm:grid-cols-5 lg:grid-cols-7 xl:grid-cols-10">
-        <div v-for="i in 10" :key="i">
+      <div class="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+        <div v-for="i in 24" :key="i">
           <div class="relative aspect-square overflow-hidden rounded-2xl bg-white/5">
             <div class="absolute inset-0 animate-shimmer"></div>
             <div class="absolute right-0 bottom-0 left-0 p-2.5">
@@ -83,7 +83,7 @@
         <div class="h-4 w-14 rounded bg-white/8"></div>
       </div>
       <div class="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-        <div v-for="i in 6" :key="i" class="relative aspect-video overflow-hidden rounded-2xl bg-white/5">
+        <div v-for="i in 12" :key="i" class="relative aspect-video overflow-hidden rounded-2xl bg-white/5">
           <div class="absolute inset-0 animate-shimmer"></div>
           <div class="absolute top-2 right-2 h-4 w-14 rounded-full bg-black/20"></div>
           <div class="absolute right-0 bottom-0 left-0 p-3">

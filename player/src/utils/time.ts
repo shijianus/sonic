@@ -122,3 +122,82 @@ export const formatDateTime = (value: number | string | Date) => {
     minute: '2-digit',
   }).format(date)
 }
+
+/**
+ * 学习 YouTube 相对时间展示规则（考虑当前用户本地时区）：
+ * - 1天以内的，以最小单位为准（秒、分钟、小时，均不超过3位数）；
+ * - 1天以上的，不到半个月[14天即2周，但是15天依然展示15天]的，展示天数；
+ * - 2周以上[不含2周]，不超过1.5个月的，展示周数；
+ * - 1.5个月以上不超过1年的，展示月数；
+ * - 1年以上不超过60年的展示年数；
+ * - 60年以上，不超过360年的，展示纪数[1纪=12年]；
+ * - 再往上用"世纪"[1世纪=100年]兜底。
+ *
+ * @param time - 时间戳、日期字符串或 Date 对象
+ * @param customNow - 自定义参考当前时间戳（用于测试或指定时间基准）
+ */
+export const formatRelativeTimeYT = (
+  time: number | string | Date | undefined | null,
+  customNow?: number
+): string => {
+  if (!time) return ''
+  const date = time instanceof Date ? time : new Date(time)
+  const timestamp = date.getTime()
+  if (Number.isNaN(timestamp)) return ''
+
+  const now = typeof customNow === 'number' ? customNow : Date.now()
+  const diffMs = Math.max(0, now - timestamp)
+  const diffSec = Math.floor(diffMs / 1000)
+
+  // 1天以内的，以最小单位为准——例如秒、分钟、小时，均不超过3位数
+  if (diffSec < 60) {
+    const s = Math.min(diffSec, 999)
+    return `${s}秒前`
+  }
+  const diffMin = Math.floor(diffSec / 60)
+  if (diffMin < 60) {
+    const m = Math.min(diffMin, 999)
+    return `${m}分钟前`
+  }
+  const diffHours = Math.floor(diffSec / 3600)
+  if (diffHours < 24) {
+    const h = Math.min(diffHours, 999)
+    return `${h}小时前`
+  }
+
+  // 1天以上的
+  const diffDays = Math.floor(diffSec / 86400)
+
+  // 不到半个月[14天即2周，但是15天依然展示15天]的，展示天数
+  if (diffDays <= 15) {
+    return `${diffDays}天前`
+  }
+
+  // 2周以上[不含2周]，不超过1.5个月的，展示周数（1.5个月按45天计）
+  if (diffDays <= 45) {
+    const weeks = Math.floor(diffDays / 7)
+    return `${weeks}周前`
+  }
+
+  // 1.5个月以上不超过1年的，展示月数
+  if (diffDays < 365) {
+    const months = Math.max(1, Math.floor(diffDays / 30))
+    return `${months}个月前`
+  }
+
+  // 1年以上不超过60年的展示年数
+  const diffYears = Math.floor(diffDays / 365)
+  if (diffYears <= 60) {
+    return `${diffYears}年前`
+  }
+
+  // 60年以上，不超过360年的，展示纪数[1纪=12年]
+  if (diffYears <= 360) {
+    const ji = Math.floor(diffYears / 12)
+    return `${ji}纪前`
+  }
+
+  // 再往上用"世纪"[1世纪=100年]兜底
+  const century = Math.floor(diffYears / 100)
+  return `${century}世纪前`
+}

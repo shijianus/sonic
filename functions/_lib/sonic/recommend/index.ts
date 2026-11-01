@@ -9,3 +9,4 @@ export * from './external-adapters';
 export * from './seed-catalog';
 export * from './engine';
 export * from './smart-search';
+export * from './multi-entity';

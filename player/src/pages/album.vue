@@ -1,24 +1,29 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
-import { albumDetail } from '@/api'
+import { albumDetail, search } from '@/api'
 import SongList from '@/components/SongList.vue'
 import PageSkeleton from '@/components/PageSkeleton.vue'
 import Button from '@/components/Ui/Button.vue'
 import { usePlayActions } from '@/composables/usePlayActions'
 import {
   transformAlbumDetail,
+  transformSearchSongs,
   extractArray,
   normalizeDurationMs,
   type SongData,
   type AlbumData,
 } from '@/utils/transformers'
 import { formatCoverUrl } from '@/utils/imageUrl'
-import { formatDateLong } from '@/utils/time'
 
 const route = useRoute()
 const albumId = computed(() => Number(route.params.id))
 
-const state = reactive({ info: null as AlbumData | null, songs: [] as SongData[], loading: false })
+const state = reactive({
+  info: null as AlbumData | null,
+  songs: [] as SongData[],
+  loading: false,
+  error: false,
+})
 const showDesc = ref(false)
 
 const { playAll: playAllAction, shufflePlay: shufflePlayAction } = usePlayActions()
@@ -28,6 +33,7 @@ const shufflePlay = () => shufflePlayAction(state.songs)
 const load = async () => {
   if (!albumId.value) return
   state.loading = true
+  state.error = false
   try {
     const res = await albumDetail({ id: albumId.value })
     const album = transformAlbumDetail(res as Record<string, unknown>)
@@ -41,16 +47,37 @@ const load = async () => {
         ? s.ar.map((a: any) => a.name).join(' / ')
         : Array.isArray(s?.artists)
           ? s.artists.map((a: any) => a.name).join(' / ')
-          : '',
+          : album?.artist || '',
       album: s?.al?.name || s?.album?.name || album?.name || '',
       albumId: s?.al?.id ?? s?.album?.id ?? album?.id,
       duration: normalizeDurationMs(s?.dt ?? s?.duration ?? 0),
       cover: s?.al?.picUrl || s?.album?.picUrl || album?.picUrl || '',
       liked: false,
     }))
+
+    // 容错搜索补齐：若专辑曲目为空但存在专辑名称，尝试搜索补齐歌曲列表
+    if (state.songs.length === 0 && state.info?.name) {
+      try {
+        const fallbackRes = await search({
+          keywords: `${state.info.name} ${state.info.artist || ''}`.trim(),
+          type: 1,
+          limit: 30,
+        })
+        const searchSongs = transformSearchSongs(fallbackRes as Record<string, unknown>).songs
+        if (searchSongs.length > 0) {
+          state.songs = searchSongs
+        }
+      } catch (e) {
+        console.warn('[Album] Fallback search failed:', e)
+      }
+    }
+
     if (route.query.autoplay === '1' && state.songs.length > 0) {
       playAll()
     }
+  } catch (err) {
+    console.error('[Album] Failed to load album:', err)
+    state.error = true
   } finally {
     state.loading = false
   }
@@ -97,9 +124,7 @@ onMounted(() => load())
               <div class="text-primary/80 mt-2 flex flex-wrap items-center gap-2 text-xs">
                 <span class="glass-button px-2 py-1"
                   >{{ $t('albumPage.published') }}
-                  {{
-                    state.info?.publishTime ? formatDateLong(state.info.publishTime) : '-'
-                  }}</span
+                  {{ state.info?.publishTime || '-' }}</span
                 >
                 <span v-if="state.info?.artist" class="glass-button px-2 py-1">{{
                   state.info.artist
@@ -111,7 +136,7 @@ onMounted(() => load())
               </div>
             </div>
           </div>
-          <div class="ml-auto flex items-center gap-3">
+          <div v-if="state.songs.length > 0" class="ml-auto flex items-center gap-3">
             <Button
               variant="solid"
               size="md"
@@ -142,22 +167,32 @@ onMounted(() => load())
           <p v-if="!showDesc" class="text-primary/80 line-clamp-3">{{ state.info.description }}</p>
           <p v-else class="text-primary/80">{{ state.info.description }}</p>
           <button
-            class="hover:text-primary mt-2 text-xs text-blue-300"
+            class="hover:text-primary mt-2 text-xs text-blue-300 cursor-pointer"
             @click="showDesc = !showDesc"
           >
             {{ showDesc ? $t('albumPage.collapse') : $t('albumPage.expandMore') }}
           </button>
         </div>
 
-        <h2 class="mb-3 text-lg font-semibold">{{ $t('albumPage.trackList') }}</h2>
-        <PageSkeleton v-if="state.loading" :sections="['list']" :list-count="12" />
-        <SongList
-          class="h-[50vh]!"
-          v-else
-          :songs="state.songs"
-          :current-playing-index="-1"
-          :show-header="true"
-        />
+        <div v-if="state.error && !state.loading" class="flex flex-col items-center justify-center py-12 text-center">
+          <span class="icon-[mdi--alert-circle-outline] text-rose-400 h-12 w-12 mb-3"></span>
+          <p class="text-primary/80 mb-4">{{ $t('artistDetail.loadFailedRetry') }}</p>
+          <Button variant="solid" size="sm" rounded="lg" @click="load">
+            {{ $t('common.refresh') }}
+          </Button>
+        </div>
+
+        <template v-else>
+          <h2 class="mb-3 text-lg font-semibold">{{ $t('albumPage.trackList') }}</h2>
+          <PageSkeleton v-if="state.loading" :sections="['list']" :list-count="12" />
+          <SongList
+            class="h-[50vh]!"
+            v-else
+            :songs="state.songs"
+            :current-playing-index="-1"
+            :show-header="true"
+          />
+        </template>
       </div>
     </div>
   </div>

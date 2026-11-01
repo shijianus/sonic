@@ -55,6 +55,23 @@ export interface CanonicalTrack {
   updatedAt: number; // Unix ms
 }
 
+export type SonicEntityType = 'track' | 'album' | 'playlist' | 'mv';
+
+export type SonicEntityAction =
+  | 'favorite'
+  | 'unfavorite'
+  | 'play_start'
+  | 'play_progress'
+  | 'play_complete'
+  | 'replay'
+  | 'skip'
+  | 'dislike'
+  | 'undislike'
+  | 'open'
+  | 'add_to_playlist'
+  | 'watch_progress'
+  | 'watch_complete';
+
 export type SonicEventType =
   | 'search'
   | 'search_click'
@@ -66,11 +83,20 @@ export type SonicEventType =
   | 'favorite'
   | 'unfavorite'
   | 'dislike'
-  | 'undislike';
+  | 'undislike'
+  | 'open'
+  | 'add_to_playlist'
+  | 'watch_progress'
+  | 'watch_complete';
 
 export interface SonicBehaviorEventInput {
   eventId?: string;
-  type: SonicEventType;
+  type?: SonicEventType;
+  action?: SonicEntityAction;
+  entity_type?: SonicEntityType;
+  entityType?: SonicEntityType;
+  entity_id?: string;
+  entityId?: string;
   timestamp?: number; // Unix ms
   track?: Partial<SonicSearchTrack> & {
     id?: string | number;
@@ -92,7 +118,14 @@ export interface SonicBehaviorEventInput {
   position?: number;
   playedSeconds?: number;
   durationSeconds?: number;
+  progress?: number;
   progressRatio?: number;
+  session_id?: string;
+  sessionId?: string;
+  context?: {
+    from?: string;
+    [key: string]: any;
+  };
   reason?: string; // e.g., 'user_skip', 'network_stall', 'playback_error', 'trial_end'
 }
 
@@ -296,6 +329,98 @@ export interface SmartSearchResultData {
   fallbackTracks?: SonicSearchTrack[];
 }
 
+export interface SonicEntity {
+  id: string; // trk_<hash> | alb_<hash> | pl_<hash> | mv_<hash>
+  type: SonicEntityType;
+  title: string;
+  subtitle?: string;
+  artistId?: string;
+  artistName?: string;
+  coverUrl?: string;
+  source: string; // 'netease' | 'qq' | 'sonic' | ...
+  sourceId?: string;
+  tags: string[];
+  language?: InferredLanguage;
+  duration?: number;
+  externalPopularity: number; // 0..100
+  createdAt: number;
+  updatedAt: number;
+  payload: Record<string, any>;
+}
+
+export type EntityRelationType = 'contains' | 'video_of' | 'associated';
+
+export interface EntityRelation {
+  relationId?: string;
+  parentId: string;
+  parentType: SonicEntityType;
+  childId: string;
+  childType: SonicEntityType;
+  relationType: EntityRelationType;
+  weight: number; // default 1.0
+  position?: number;
+  createdAt?: number;
+}
+
+export interface UserEntityFeedback {
+  feedbackId: string;
+  subjectKey: string;
+  entityType: SonicEntityType;
+  entityId: string;
+  action: SonicEntityAction;
+  weight: number;
+  progress?: number;
+  context?: Record<string, any>;
+  createdAt: number;
+}
+
+export interface EntityStats {
+  entityId: string;
+  entityType: SonicEntityType;
+  playCount: number;
+  completeCount: number;
+  favoriteCount: number;
+  openCount: number;
+  uniqueUsers: number;
+  score: number;
+  updatedAt: number;
+}
+
+export interface PropagationCoefficients {
+  albumToTrack: number; // default 0.40
+  playlistToTrack: number; // default 0.35
+  trackToAlbum: number; // default 0.30
+  trackToPlaylist: number; // default 0.25
+  trackToMv: number; // default 0.35
+  mvToTrack: number; // default 0.45
+  mvToArtistMv: number; // default 0.25
+  dislikePropagation: number; // default 0.15
+}
+
+export interface MixedFeedItem {
+  type: SonicEntityType;
+  id: string;
+  title: string;
+  subtitle: string;
+  cover: string;
+  score: number;
+  reason: string;
+  payload: Record<string, any>;
+}
+
+export interface MixedFeedResponse {
+  brand: 'Sonic';
+  data: MixedFeedItem[];
+  meta: {
+    latency_ms: number;
+    strategy: string;
+    distribution?: Record<string, number>;
+    personalized?: boolean;
+    total?: number;
+    [key: string]: any;
+  };
+}
+
 export interface RecommendStore {
   readonly kind: 'sqlite' | 'memory';
   upsertTrack(track: CanonicalTrack): void;
@@ -313,4 +438,16 @@ export interface RecommendStore {
   recordSearchQuery(normQuery: string, displayQuery: string, clicked?: boolean): void;
   getTopSearchQueries(prefix: string, limit?: number): Array<{ query: string; count: number }>;
   getStats(): { trackCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string };
+
+  // Multi-entity extensions
+  upsertEntity?(entity: SonicEntity): void;
+  upsertEntities?(entities: SonicEntity[]): void;
+  getEntity?(id: string): SonicEntity | null;
+  listEntities?(type?: SonicEntityType, limit?: number): SonicEntity[];
+  upsertEntityRelation?(rel: EntityRelation): void;
+  upsertEntityRelations?(rels: EntityRelation[]): void;
+  getEntityRelations?(entityId: string, direction?: 'children' | 'parents'): EntityRelation[];
+  recordEntityFeedback?(feedback: UserEntityFeedback): { inserted: boolean; deduplicated: boolean };
+  getUserEntityFeedbacks?(subjectKey: string, limit?: number, sinceMs?: number): UserEntityFeedback[];
+  clearUserEntityFeedbacks?(subjectKey: string): number;
 }

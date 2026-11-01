@@ -9,9 +9,13 @@ import { DatabaseSync } from 'node:sqlite';
 
 import type {
   CanonicalTrack,
+  EntityRelation,
   RecommendStore,
+  SonicEntity,
+  SonicEntityType,
   StoredBehaviorEvent,
   TrackEdition,
+  UserEntityFeedback,
 } from '../functions/_lib/sonic/recommend/types';
 import {
   buildFtsTokens,
@@ -114,6 +118,78 @@ export class SqliteRecommendStore implements RecommendStore {
         norm_query TEXT PRIMARY KEY,
         display_query TEXT NOT NULL,
         hit_count INTEGER NOT NULL DEFAULT 1,
+        updated_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS entities (
+        entity_id TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        subtitle TEXT,
+        artist_id TEXT,
+        artist_name TEXT,
+        cover_url TEXT,
+        source TEXT NOT NULL DEFAULT 'sonic',
+        source_id TEXT,
+        tags_json TEXT,
+        language TEXT,
+        duration INTEGER DEFAULT 0,
+        external_popularity REAL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        payload_json TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_entities_type_updated
+        ON entities(entity_type, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_entities_artist
+        ON entities(artist_name);
+
+      CREATE TABLE IF NOT EXISTS entity_relations (
+        relation_id TEXT PRIMARY KEY,
+        parent_id TEXT NOT NULL,
+        parent_type TEXT NOT NULL,
+        child_id TEXT NOT NULL,
+        child_type TEXT NOT NULL,
+        relation_type TEXT NOT NULL,
+        weight REAL NOT NULL DEFAULT 1.0,
+        position INTEGER DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_rel_parent
+        ON entity_relations(parent_id, child_id);
+      CREATE INDEX IF NOT EXISTS idx_rel_child
+        ON entity_relations(child_id, parent_id);
+
+      CREATE TABLE IF NOT EXISTS user_entity_feedback (
+        feedback_id TEXT PRIMARY KEY,
+        subject_key TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        weight REAL NOT NULL,
+        progress REAL,
+        context_json TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_uef_user_time
+        ON user_entity_feedback(subject_key, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_uef_entity_time
+        ON user_entity_feedback(entity_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_uef_user_entity
+        ON user_entity_feedback(subject_key, entity_id);
+
+      CREATE TABLE IF NOT EXISTS entity_stats (
+        entity_id TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        play_count INTEGER DEFAULT 0,
+        complete_count INTEGER DEFAULT 0,
+        favorite_count INTEGER DEFAULT 0,
+        open_count INTEGER DEFAULT 0,
+        unique_users INTEGER DEFAULT 0,
+        score REAL DEFAULT 0,
         updated_at INTEGER NOT NULL
       );
     `);
@@ -383,8 +459,9 @@ export class SqliteRecommendStore implements RecommendStore {
 
   clearUserEvents(subjectKey: string): number {
     if (!subjectKey) return 0;
-    const info = this.db.prepare(`DELETE FROM behavior_events WHERE subject_key = ?`).run(subjectKey);
-    return Number(info.changes) || 0;
+    const info1 = this.db.prepare(`DELETE FROM behavior_events WHERE subject_key = ?`).run(subjectKey);
+    const info2 = this.db.prepare(`DELETE FROM user_entity_feedback WHERE subject_key = ?`).run(subjectKey);
+    return (Number(info1.changes) || 0) + (Number(info2.changes) || 0);
   }
 
   getAllRecentEvents(sinceMs: number, limit = 10000): StoredBehaviorEvent[] {
@@ -468,22 +545,219 @@ export class SqliteRecommendStore implements RecommendStore {
     return rows;
   }
 
-  getStats(): { trackCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string } {
+  getStats(): { trackCount: number; entityCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string } {
     const tRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM canonical_tracks`).get() as { cnt: number };
+    const entRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM entities`).get() as { cnt: number };
     const eRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM behavior_events`).get() as { cnt: number };
     const cRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM track_cooccurrence`).get() as { cnt: number };
     return {
       trackCount: Number(tRow?.cnt || 0),
+      entityCount: Number(entRow?.cnt || 0),
       eventCount: Number(eRow?.cnt || 0),
       cooccurrencePairs: Math.floor(Number(cRow?.cnt || 0) / 2),
       storageKind: this.kind,
     };
   }
 
+  upsertEntity(entity: SonicEntity): void {
+    if (!entity?.id || !entity?.type) return;
+    const stmt = this.db.prepare(`
+      INSERT INTO entities (
+        entity_id, entity_type, title, subtitle, artist_id, artist_name,
+        cover_url, source, source_id, tags_json, language, duration,
+        external_popularity, created_at, updated_at, payload_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(entity_id) DO UPDATE SET
+        title = excluded.title,
+        subtitle = excluded.subtitle,
+        artist_name = excluded.artist_name,
+        cover_url = excluded.cover_url,
+        tags_json = excluded.tags_json,
+        duration = excluded.duration,
+        external_popularity = excluded.external_popularity,
+        updated_at = excluded.updated_at,
+        payload_json = excluded.payload_json
+    `);
+    stmt.run(
+      entity.id,
+      entity.type,
+      entity.title,
+      entity.subtitle ?? null,
+      entity.artistId ?? null,
+      entity.artistName ?? null,
+      entity.coverUrl ?? null,
+      entity.source || 'sonic',
+      entity.sourceId ?? null,
+      entity.tags ? JSON.stringify(entity.tags) : '[]',
+      entity.language ?? null,
+      entity.duration ?? 0,
+      entity.externalPopularity ?? 0,
+      entity.createdAt || Date.now(),
+      entity.updatedAt || Date.now(),
+      JSON.stringify(entity.payload || {}),
+    );
+  }
+
+  upsertEntities(entities: SonicEntity[]): void {
+    if (!entities?.length) return;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const e of entities) {
+        this.upsertEntity(e);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {}
+      throw err;
+    }
+  }
+
+  getEntity(id: string): SonicEntity | null {
+    if (!id) return null;
+    const row = this.db.prepare(`SELECT * FROM entities WHERE entity_id = ?`).get(id) as Record<string, any> | undefined;
+    return row ? this.rowToEntity(row) : null;
+  }
+
+  listEntities(type?: SonicEntityType, limit = 500): SonicEntity[] {
+    const lim = Math.max(1, Math.min(2000, limit));
+    const rows = type
+      ? (this.db
+          .prepare(`SELECT * FROM entities WHERE entity_type = ? ORDER BY updated_at DESC LIMIT ?`)
+          .all(type, lim) as Array<Record<string, any>>)
+      : (this.db
+          .prepare(`SELECT * FROM entities ORDER BY updated_at DESC LIMIT ?`)
+          .all(lim) as Array<Record<string, any>>);
+    return rows.map((r) => this.rowToEntity(r)).filter((x): x is SonicEntity => x !== null);
+  }
+
+  upsertEntityRelation(rel: EntityRelation): void {
+    if (!rel?.parentId || !rel?.childId) return;
+    const relationId = rel.relationId || `${rel.parentId}:::${rel.childId}:::${rel.relationType}`;
+    const stmt = this.db.prepare(`
+      INSERT INTO entity_relations (
+        relation_id, parent_id, parent_type, child_id, child_type,
+        relation_type, weight, position, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(relation_id) DO UPDATE SET
+        weight = excluded.weight,
+        position = excluded.position
+    `);
+    stmt.run(
+      relationId,
+      rel.parentId,
+      rel.parentType,
+      rel.childId,
+      rel.childType,
+      rel.relationType,
+      rel.weight ?? 1.0,
+      rel.position ?? 0,
+      rel.createdAt || Date.now(),
+    );
+  }
+
+  upsertEntityRelations(rels: EntityRelation[]): void {
+    if (!rels?.length) return;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const r of rels) {
+        this.upsertEntityRelation(r);
+      }
+      this.db.exec('COMMIT');
+    } catch (err) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {}
+      throw err;
+    }
+  }
+
+  getEntityRelations(entityId: string, direction: 'children' | 'parents' = 'children'): EntityRelation[] {
+    if (!entityId) return [];
+    const rows =
+      direction === 'children'
+        ? (this.db
+            .prepare(`SELECT * FROM entity_relations WHERE parent_id = ? ORDER BY position ASC, weight DESC`)
+            .all(entityId) as Array<Record<string, any>>)
+        : (this.db
+            .prepare(`SELECT * FROM entity_relations WHERE child_id = ? ORDER BY weight DESC`)
+            .all(entityId) as Array<Record<string, any>>);
+    return rows.map((r) => ({
+      relationId: String(r.relation_id),
+      parentId: String(r.parent_id),
+      parentType: r.parent_type,
+      childId: String(r.child_id),
+      childType: r.child_type,
+      relationType: r.relation_type,
+      weight: Number(r.weight || 1.0),
+      position: Number(r.position || 0),
+      createdAt: Number(r.created_at || 0),
+    }));
+  }
+
+  recordEntityFeedback(feedback: UserEntityFeedback): { inserted: boolean; deduplicated: boolean } {
+    if (!feedback?.feedbackId || !feedback?.subjectKey || !feedback?.entityId) {
+      return { inserted: false, deduplicated: false };
+    }
+    const stmt = this.db.prepare(`
+      INSERT OR IGNORE INTO user_entity_feedback (
+        feedback_id, subject_key, entity_type, entity_id, action,
+        weight, progress, context_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const info = stmt.run(
+      feedback.feedbackId,
+      feedback.subjectKey,
+      feedback.entityType,
+      feedback.entityId,
+      feedback.action,
+      feedback.weight,
+      feedback.progress ?? null,
+      feedback.context ? JSON.stringify(feedback.context) : null,
+      feedback.createdAt || Date.now(),
+    );
+    const inserted = Number(info.changes) > 0;
+    return {
+      inserted,
+      deduplicated: !inserted,
+    };
+  }
+
+  getUserEntityFeedbacks(subjectKey: string, limit = 200, sinceMs = 0): UserEntityFeedback[] {
+    if (!subjectKey) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM user_entity_feedback
+         WHERE subject_key = ? AND created_at >= ?
+         ORDER BY created_at DESC
+         LIMIT ?`,
+      )
+      .all(subjectKey, sinceMs, Math.min(1000, Math.max(1, limit))) as Array<Record<string, any>>;
+    return rows.map((r) => ({
+      feedbackId: String(r.feedback_id),
+      subjectKey: String(r.subject_key),
+      entityType: r.entity_type,
+      entityId: String(r.entity_id),
+      action: r.action,
+      weight: Number(r.weight || 0),
+      progress: r.progress !== null && r.progress !== undefined ? Number(r.progress) : undefined,
+      context: r.context_json ? JSON.parse(r.context_json) : undefined,
+      createdAt: Number(r.created_at || 0),
+    }));
+  }
+
+  clearUserEntityFeedbacks(subjectKey: string): number {
+    if (!subjectKey) return 0;
+    const info = this.db.prepare(`DELETE FROM user_entity_feedback WHERE subject_key = ?`).run(subjectKey);
+    return Number(info.changes) || 0;
+  }
+
   pruneRetention(retentionDays = 90): void {
     const cutoff = Date.now() - retentionDays * 24 * 3600 * 1000;
     try {
       this.db.prepare(`DELETE FROM behavior_events WHERE created_at < ?`).run(cutoff);
+      this.db.prepare(`DELETE FROM user_entity_feedback WHERE created_at < ?`).run(cutoff);
     } catch {}
   }
 
@@ -541,6 +815,40 @@ export class SqliteRecommendStore implements RecommendStore {
       weight: Number(r.weight || 0),
       progressRatio: r.progress_ratio !== null && r.progress_ratio !== undefined ? Number(r.progress_ratio) : undefined,
       createdAt: Number(r.created_at || 0),
+    };
+  }
+
+  private rowToEntity(r: Record<string, any>): SonicEntity | null {
+    if (!r?.entity_id || !r?.entity_type) return null;
+    let tags: string[] = [];
+    if (typeof r.tags_json === 'string' && r.tags_json) {
+      try {
+        tags = JSON.parse(r.tags_json);
+      } catch {}
+    }
+    let payload: Record<string, any> = {};
+    if (typeof r.payload_json === 'string' && r.payload_json) {
+      try {
+        payload = JSON.parse(r.payload_json);
+      } catch {}
+    }
+    return {
+      id: String(r.entity_id),
+      type: r.entity_type as SonicEntityType,
+      title: String(r.title || ''),
+      subtitle: r.subtitle ? String(r.subtitle) : undefined,
+      artistId: r.artist_id ? String(r.artist_id) : undefined,
+      artistName: r.artist_name ? String(r.artist_name) : undefined,
+      coverUrl: r.cover_url ? String(r.cover_url) : undefined,
+      source: String(r.source || 'sonic'),
+      sourceId: r.source_id ? String(r.source_id) : undefined,
+      tags,
+      language: r.language ? (String(r.language) as any) : undefined,
+      duration: Number(r.duration || 0),
+      externalPopularity: Number(r.external_popularity || 0),
+      createdAt: Number(r.created_at || 0),
+      updatedAt: Number(r.updated_at || 0),
+      payload,
     };
   }
 }

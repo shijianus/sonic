@@ -37,12 +37,16 @@ export interface ReplyItem {
 }
 
 export interface CommentItem {
+  id?: number | string
   username: string
   avatarUrl: string
   avatarGradient: string
   time: string
   content: string
   likes: number
+  liked?: boolean
+  location?: string
+  isHot?: boolean
   replies: ReplyItem[]
 }
 

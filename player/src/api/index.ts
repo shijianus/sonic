@@ -196,6 +196,8 @@ export const recordRecentSong = (params?: { limit?: number }) =>
 export const mvDetail = (params: { mvid: number | string }) => httpGet('/mv/detail', params)
 export const mvUrl = (params: { id: number | string; r?: number }) => httpGet('/mv/url', params)
 export const simiMv = (params: { mvid: number | string }) => httpGet('/simi/mv', params)
+export const simiPlaylist = (params: { id: number | string }) => httpGet('/simi/playlist', params)
+export const relatedPlaylist = (params: { id: number | string }) => httpGet('/related/playlist', params)
 export const mvAll = (params: {
   area?: string
   type?: string
@@ -213,7 +215,8 @@ export const lyric = (params: { id: number | string }) => httpGet('/lyric', para
 export const personalized = (params?: { limit?: number }) => httpGet('/personalized', params)
 export const personalizedNewsong = (params?: { limit?: number }) =>
   httpGet('/personalized/newsong', params)
-export const personalizedMv = () => httpGet('/personalized/mv')
+export const personalizedMv = (params?: { limit?: number }) =>
+  httpGet('/personalized/mv', params)
 export const playlistCatlist = () => httpGet('/playlist/catlist')
 export const topArtists = (params?: { limit?: number; offset?: number }) =>
   httpGet('/top/artists', params)

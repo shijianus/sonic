@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { albumDetail } from '@/api'
+import { albumDetail, search } from '@/api'
 import { usePlayActions } from '@/composables/usePlayActions'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import MobileSongList from '@/components/Mobile/MobileSongList.vue'
 import Button from '@/components/Ui/Button.vue'
+import PageSkeleton from '@/components/PageSkeleton.vue'
 import { useI18n } from 'vue-i18n'
 import {
   transformAlbumDetail,
+  transformSearchSongs,
   extractArray,
   normalizeDurationMs,
   type SongData,
@@ -35,6 +37,7 @@ const state = reactive({
   info: {} as AlbumInfo,
   songs: [] as SongData[],
   loading: true,
+  error: false,
   collected: false,
   showFullDesc: false,
 })
@@ -43,6 +46,7 @@ const { playAll: playAllAction, shufflePlay: shufflePlayAction } = usePlayAction
 
 const load = async (id: number) => {
   state.loading = true
+  state.error = false
   try {
     const res = await albumDetail({ id })
     const album = transformAlbumDetail(res as Record<string, unknown>)
@@ -78,10 +82,32 @@ const load = async (id: number) => {
         cover: state.info.coverImgUrl,
         liked: false,
       }))
-      if (route.query.autoplay === '1') {
-        playAll()
+    }
+
+    // 容错搜索补齐：若专辑曲目为空但存在专辑名称，尝试搜索补齐歌曲列表
+    if (state.songs.length === 0 && state.info?.name) {
+      try {
+        const fallbackRes = await search({
+          keywords: `${state.info.name} ${state.info.artist || ''}`.trim(),
+          type: 1,
+          limit: 30,
+        })
+        const searchSongs = transformSearchSongs(fallbackRes as Record<string, unknown>).songs
+        if (searchSongs.length > 0) {
+          state.songs = searchSongs
+          state.info.songCount = searchSongs.length
+        }
+      } catch (e) {
+        console.warn('[Mobile Album] Fallback search failed:', e)
       }
     }
+
+    if (route.query.autoplay === '1' && state.songs.length > 0) {
+      playAll()
+    }
+  } catch (err) {
+    console.error('[Mobile Album] Failed to load album:', err)
+    state.error = true
   } finally {
     state.loading = false
   }
@@ -124,6 +150,13 @@ const goToArtist = () => {
   <div class="album-page flex flex-1 flex-col overflow-hidden">
     <div v-if="state.loading" class="flex-1 overflow-auto px-4 py-6">
       <PageSkeleton :sections="['hero', 'list']" :list-count="8" />
+    </div>
+    <div v-else-if="state.error" class="flex flex-1 flex-col items-center justify-center p-6 text-center">
+      <span class="icon-[mdi--alert-circle-outline] text-rose-400 h-12 w-12 mb-3"></span>
+      <p class="text-accent/80 mb-4 text-sm">{{ $t('artistDetail.loadFailedRetry') }}</p>
+      <Button variant="gradient" size="sm" rounded="full" @click="albumId && load(albumId)">
+        {{ $t('common.refresh') }}
+      </Button>
     </div>
     <template v-else>
       <div class="header-section relative">

@@ -8,9 +8,11 @@ import { callLocalEngineJson } from '../../../_lib/sonic/local-engine';
 import { buildGatewayHeaders, guardGatewayRequest, sonicError } from '../../../_lib/sonic/route-helpers';
 import {
   buildPrivacySafeCacheHeaders,
+  getMultiEntityRecommendationsForYou,
   getRecommendationsForYou,
   resolveUserIdentity,
   type ForYouOptions,
+  type SonicEntityType,
 } from '../../../_lib/sonic/recommend';
 
 export async function onRequest({
@@ -85,7 +87,67 @@ export async function onRequest({
     .map((s) => s.trim())
     .filter(Boolean);
 
+  const feedParam = (url.searchParams.get('feed') || '').trim().toLowerCase();
+  const typesParam = url.searchParams.get('types') || '';
+  const isMixedFeed =
+    feedParam === 'mixed' ||
+    request.headers.get('X-Sonic-Feed') === 'mixed' ||
+    typesParam.includes('album') ||
+    typesParam.includes('mv') ||
+    typesParam.includes('playlist') ||
+    typesParam.includes('mixed') ||
+    typesParam.includes('all');
+
   try {
+    if (isMixedFeed) {
+      let allowedTypes: SonicEntityType[] | undefined;
+      if (typesParam && !typesParam.includes('all') && !typesParam.includes('mixed')) {
+        const parts = typesParam.split(',').map((s) => s.trim().toLowerCase()) as SonicEntityType[];
+        allowedTypes = parts.filter((p) => ['track', 'album', 'playlist', 'mv'].includes(p));
+      }
+
+      const mixedRes = await getMultiEntityRecommendationsForYou(
+        identity,
+        {
+          count,
+          diversity: Number.isFinite(diversity) ? diversity : undefined,
+          temperature: Number.isFinite(temperature) ? temperature : undefined,
+          excludeIds,
+          allowedTypes,
+        },
+        env,
+      );
+
+      return jsonResponse(
+        {
+          brand: 'Sonic',
+          data: mixedRes.data,
+          meta: {
+            cached: false,
+            cacheLevel: 'none',
+            latencyMs: Date.now() - start,
+            latency_ms: Date.now() - start,
+            strategy: mixedRes.meta.strategy,
+            distribution: mixedRes.meta.distribution,
+            personalized: mixedRes.meta.personalized,
+            total: mixedRes.meta.total,
+            provider: 'recommend-for-you',
+            runtime: config.runtime,
+            degraded,
+            ...(degraded ? { degradedReason, circuitState } : {}),
+          },
+        },
+        {
+          status: 200,
+          headers: buildGatewayHeaders(
+            { ...privacyHeaders, 'X-Sonic-Provider': 'recommend-for-you' },
+            degraded,
+            circuitState,
+          ),
+        },
+      );
+    }
+
     const data = await getRecommendationsForYou(
       identity,
       {

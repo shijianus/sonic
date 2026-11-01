@@ -50,7 +50,7 @@ export interface SmartSuggestionItem {
 
 export interface SonicEventPayload {
   eventId?: string
-  type:
+  type?:
     | 'search'
     | 'search_click'
     | 'play_start'
@@ -62,6 +62,19 @@ export interface SonicEventPayload {
     | 'unfavorite'
     | 'dislike'
     | 'undislike'
+    | 'open'
+    | 'add_to_playlist'
+    | 'watch_progress'
+    | 'watch_complete'
+  action?: string
+  entity_type?: 'track' | 'album' | 'playlist' | 'mv'
+  entity_id?: string
+  progress?: number
+  session_id?: string
+  context?: {
+    from?: string
+    [key: string]: any
+  }
   timestamp?: number
   track?: {
     id?: string | number
@@ -163,12 +176,58 @@ export async function fetchRecommendForYou(
   if (params.temperature !== undefined) q.set('temperature', String(params.temperature))
 
   const json = await sonicFetchJson<any>(`/api/sonic/recommend/for-you?${q.toString()}`, { headers })
-  const rawTracks = Array.isArray(json?.data?.tracks) ? json.data.tracks : []
+  const rawTracks = Array.isArray(json?.data?.tracks)
+    ? json.data.tracks
+    : Array.isArray(json?.data)
+      ? json.data.filter((item: any) => item.type === 'track').map((item: any) => item.payload || item)
+      : []
   return {
-    personalized: Boolean(json?.data?.personalized),
+    personalized: Boolean(json?.data?.personalized ?? json?.meta?.personalized),
     privacyMode: String(json?.data?.privacyMode || 'public'),
     profileSummary: json?.data?.profileSummary || { hasHistory: false, topArtists: [], topGenres: [] },
     tracks: rawTracks.map(mapSonicTrackToRecommendSong),
+    meta: json?.meta || {},
+  }
+}
+
+export interface MixedFeedItemDto {
+  type: 'track' | 'album' | 'playlist' | 'mv'
+  id: string
+  title: string
+  subtitle: string
+  cover: string
+  score: number
+  reason: string
+  payload: Record<string, any>
+}
+
+export async function fetchRecommendMixedFeed(
+  params: {
+    count?: number
+    types?: string[]
+    diversity?: number
+    temperature?: number
+    exclude?: string[]
+  } = {},
+  headers: Record<string, string> = {}
+): Promise<{
+  items: MixedFeedItemDto[]
+  distribution?: Record<string, number>
+  meta: Record<string, any>
+}> {
+  const q = new URLSearchParams()
+  q.set('feed', 'mixed')
+  if (params.count) q.set('count', String(params.count))
+  if (params.types?.length) q.set('types', params.types.join(','))
+  if (params.diversity !== undefined) q.set('diversity', String(params.diversity))
+  if (params.temperature !== undefined) q.set('temperature', String(params.temperature))
+  if (params.exclude?.length) q.set('exclude', params.exclude.join(','))
+
+  const json = await sonicFetchJson<any>(`/api/sonic/recommend/for-you?${q.toString()}`, { headers })
+  const items = Array.isArray(json?.data) ? json.data : []
+  return {
+    items,
+    distribution: json?.meta?.distribution,
     meta: json?.meta || {},
   }
 }

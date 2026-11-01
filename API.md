@@ -239,14 +239,14 @@ async function getRecommendations() {
 
 | 方法 | 路径 | 说明 | 核心参数 |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/sonic/recommend/for-you` | 个性化推荐 / 下一首续接 / 相似电台 | `mode=for-you\|recent\|favorites\|next\|radio`, `count`, `seedTrackId`, `diversity`, `temperature` |
+| `GET` | `/api/sonic/recommend/for-you` | 个性化单曲与多实体混合 Feed（单曲 / 歌集 / MV） | `feed=mixed`（启用混合Feed，默认返回数组）、`types=track,album,playlist,mv`、`mode=for-you\|recent\|favorites\|next\|radio`、`count`、`diversity`、`temperature` |
 | `GET` | `/api/sonic/recommend/trending` | 站内真实趋势热榜（严格区分外部热榜） | `window=24h\|7d\|all\|surging\|new`, `genre`, `personalized=0\|1`, `count` |
 | `GET` | `/api/sonic/recommend/similar` | 内容相似度与共现相似歌曲/相似歌手 | `trackId`, `title`, `artist`, `album`, `count`, `includeSameArtist=0\|1` |
 | `GET` | `/api/sonic/recommend/discover` | 风格流派与温度控制探索雷达 | `genre`, `language`, `temperature=0.1~1.5`, `count` |
 | `GET` | `/api/sonic/search/smart` | 智能混合搜索与自动补全建议 | `q`, `mode=search\|suggest`, `page`, `count`, `personalize=0\|1` |
-| `POST / DELETE / GET` | `/api/sonic/events` | 行为反馈上报与一键清除推荐画像 | 请求体 `{ events: [...] }`；支持 `X-Sonic-Personalization: off` 隐私关闭 |
+| `POST / DELETE / GET` | `/api/sonic/events` | 行为反馈上报与一键清除推荐画像（支持单曲及专辑/歌单/MV实体级反馈与双向软传播） | 请求体 `{ events: [...] }`；支持 `entity_type` (`track\|album\|playlist\|mv`)、`action` (`favorite\|play_complete\|watch_complete\|open\|add_to_playlist\|skip\|dislike`)；支持 `X-Sonic-Personalization: off` 隐私关闭 |
 
-完整算法公式与架构说明请参阅 [`docs/recommendation/01-audit-and-selection.md`](docs/recommendation/01-audit-and-selection.md) 与 [`docs/recommendation/02-architecture-and-algorithms.md`](docs/recommendation/02-architecture-and-algorithms.md)。
+完整算法公式、实体图谱与多实体混合推荐设计请参阅 [`docs/recommend-multi-entity.md`](docs/recommend-multi-entity.md)、[`docs/recommendation/01-audit-and-selection.md`](docs/recommendation/01-audit-and-selection.md) 与 [`docs/recommendation/02-architecture-and-algorithms.md`](docs/recommendation/02-architecture-and-algorithms.md)。
 
 ---
 

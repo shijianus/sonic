@@ -4,12 +4,13 @@
 import MobileHeader from './Header.vue'
 import MobileTabBar from './TabBar.vue'
 import PlayerDrawerMobile from '@/components/Mobile/PlayerDrawerMobile.vue'
+import { useGlobalStore } from '@/stores/modules/global'
+import { storeToRefs } from 'pinia'
 
-// 播放器抽屉：沿用全局组件以便在移动端也能开启
-const state = reactive({ isDrawerOpen: false })
-const { isDrawerOpen } = toRefs(state)
+const globalStore = useGlobalStore()
+const { isPlayerDrawerOpen } = storeToRefs(globalStore)
 const openPlayerDrawer = () => {
-  state.isDrawerOpen = true
+  globalStore.openPlayerDrawer()
 }
 </script>
 
@@ -17,12 +18,12 @@ const openPlayerDrawer = () => {
   <!-- 纯色背景容器：移动端更简洁、更聚焦内容 -->
   <div class="text-primary flex h-dvh w-full flex-col">
     <!-- 顶部导航（含搜索/登录入口） -->
-    <MobileHeader :inert="isDrawerOpen || undefined" :aria-hidden="isDrawerOpen || undefined" />
+    <MobileHeader :inert="isPlayerDrawerOpen || undefined" :aria-hidden="isPlayerDrawerOpen || undefined" />
 
     <!-- 内容区域：页面组件渲染 -->
     <main
-      :inert="isDrawerOpen || undefined"
-      :aria-hidden="isDrawerOpen || undefined"
+      :inert="isPlayerDrawerOpen || undefined"
+      :aria-hidden="isPlayerDrawerOpen || undefined"
       class="flex min-h-0 flex-1 flex-col overflow-hidden pt-3"
       style="
         padding-bottom: calc(
@@ -40,12 +41,12 @@ const openPlayerDrawer = () => {
 
     <!-- 底部标签栏：主要导航入口，适配拇指操作 -->
     <MobileTabBar
-      :inert="isDrawerOpen || undefined"
-      :aria-hidden="isDrawerOpen || undefined"
+      :inert="isPlayerDrawerOpen || undefined"
+      :aria-hidden="isPlayerDrawerOpen || undefined"
       @show-player="openPlayerDrawer"
     />
 
     <!-- 播放器抽屉放在背景层之外，打开时背景统一 inert -->
-    <PlayerDrawerMobile v-model="isDrawerOpen" />
+    <PlayerDrawerMobile v-model="isPlayerDrawerOpen" />
   </div>
 </template>

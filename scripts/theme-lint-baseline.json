@@ -28,7 +28,13 @@
       "tailwind-white:hover:bg-white/20": 1
     },
     "player/src/components/Comments/SongCommentsDialog.vue": {
-      "tailwind-white:text-white": 3
+      "tailwind-white:bg-white/10": 1,
+      "tailwind-white:bg-white/5": 1,
+      "tailwind-white:border-white/10": 1,
+      "tailwind-white:text-white": 4,
+      "tailwind-white:text-white/40": 1,
+      "tailwind-white:text-white/50": 1,
+      "tailwind-white:text-white/80": 1
     },
     "player/src/components/HomeSkeleton.vue": {
       "tailwind-white:bg-white/10": 12,
@@ -47,6 +53,11 @@
       "rgb-white:rgb(255,255,255)": 7,
       "tailwind-white:bg-white/10": 1,
       "tailwind-white:bg-white/20": 1,
+      "tailwind-white:text-white": 1
+    },
+    "player/src/components/Mobile/PlaylistCommentsPopup.vue": {
+      "tailwind-white:bg-white/10": 1,
+      "tailwind-white:bg-white/5": 2,
       "tailwind-white:text-white": 1
     },
     "player/src/components/Mobile/PlaylistDrawerMobile.vue": {
@@ -77,6 +88,10 @@
       "tailwind-white:ring-white/15": 3,
       "tailwind-white:text-white/40": 1,
       "tailwind-white:via-white/15": 1
+    },
+    "player/src/components/Recommend/MusicRadarSection.vue": {
+      "tailwind-white:bg-white/5": 5,
+      "tailwind-white:text-white": 1
     },
     "player/src/components/Search/SearchMVs.vue": {
       "tailwind-white:bg-white/20": 1,
@@ -126,7 +141,7 @@
       "css-white:color: white": 1,
       "rgb-white:rgb(255,255,255)": 6,
       "tailwind-white:ring-white/40": 1,
-      "tailwind-white:text-white": 4,
+      "tailwind-white:text-white": 6,
       "tailwind-white:text-white/70": 1
     },
     "player/src/components/Ui/LazyImage.vue": {
@@ -205,9 +220,12 @@
       "tailwind-white:hover:bg-white/5": 3
     },
     "player/src/pages/index.vue": {
-      "tailwind-white:border-white/15": 1,
-      "tailwind-white:text-white": 4,
-      "tailwind-white:text-white/95": 2
+      "tailwind-white:bg-white": 4,
+      "tailwind-white:bg-white/20": 2,
+      "tailwind-white:border-white/40": 1,
+      "tailwind-white:hover:border-white/70": 1,
+      "tailwind-white:text-white": 9,
+      "tailwind-white:text-white/80": 1
     },
     "player/src/pages/local-music.vue": {
       "tailwind-white:text-white": 1
@@ -222,10 +240,17 @@
     "player/src/pages/mobile/index.vue": {
       "css-white:background: white": 1,
       "rgb-white:rgb(255,255,255)": 1,
-      "tailwind-white:bg-white/20": 1,
+      "tailwind-white:bg-white": 4,
+      "tailwind-white:bg-white/20": 3,
       "tailwind-white:bg-white/90": 1,
-      "tailwind-white:border-white/15": 1,
-      "tailwind-white:text-white/95": 1
+      "tailwind-white:border-white/40": 1,
+      "tailwind-white:text-white": 5,
+      "tailwind-white:text-white/80": 1
+    },
+    "player/src/pages/mobile/playlist.vue": {
+      "tailwind-white:bg-white/5": 2,
+      "tailwind-white:ring-white/10": 1,
+      "tailwind-white:text-white": 1
     },
     "player/src/pages/mobile/recent.vue": {
       "css-white:color: white": 2,
@@ -243,8 +268,7 @@
       "tailwind-white:bg-white/10": 1
     },
     "player/src/pages/mv-list.vue": {
-      "tailwind-white:text-white": 2,
-      "tailwind-white:text-white/90": 1
+      "tailwind-white:text-white": 2
     },
     "player/src/pages/mv-player.vue": {
       "tailwind-white:hover:bg-white/10": 1,
@@ -257,7 +281,11 @@
       "tailwind-white:text-white": 1
     },
     "player/src/pages/playlist.vue": {
-      "tailwind-white:text-white": 5
+      "tailwind-white:bg-white/10": 5,
+      "tailwind-white:bg-white/5": 3,
+      "tailwind-white:focus-within:bg-white/10": 1,
+      "tailwind-white:ring-white/10": 1,
+      "tailwind-white:text-white": 7
     },
     "player/src/pages/recent.vue": {
       "rgb-white:rgb(255,255,255)": 1

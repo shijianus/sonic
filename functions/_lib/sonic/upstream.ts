@@ -8,6 +8,8 @@ import { getSonicConfig, SONIC_UA } from './config';
 import { callLocalEngineJson } from './local-engine';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from './security';
 import { recordLicensingBlockMetric } from './observability';
+import { callNeteaseLinuxApi, callNeteaseEapi } from './native-protocols';
+import { getSonicCachedJson, putSonicCachedJson } from './cache';
 import type { AppEnv } from '../types';
 
 function timedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -175,6 +177,10 @@ export async function handleUpstreamEndpoint(
     'comment/playlist',
     'comment/album',
     'comment/mv',
+    'comment/new',
+    'comment/hot',
+    'simi/playlist',
+    'related/playlist',
     'search/suggest',
   ]);
   if (cfg.ncmApiUrl && ncmDirectEndpoints.has(normEndpoint)) {
@@ -256,29 +262,87 @@ export async function handleUpstreamEndpoint(
 
   // 2. Playlists (Top / Highquality / Personalized)
   if (normEndpoint === 'top/playlist' || normEndpoint === 'playlist/highquality/list' || normEndpoint === 'personalized') {
-    const limit = url.searchParams.get('limit') || '20';
+    const limit = url.searchParams.get('limit') || '24';
     const cat = url.searchParams.get('cat') || '全部';
+    const cacheKey = `top-playlist:${cat}:${limit}`;
+    const cached = await getSonicCachedJson<any>('upstream', cacheKey, env);
+    if (cached?.value && Array.isArray(cached.value.playlists) && cached.value.playlists.length >= (parseInt(limit, 10) || 24)) {
+      return jsonResponse(cached.value, { headers: { 'Cache-Control': 'public, max-age=1800' } });
+    }
+
+    let playlists: any[] = [];
+    let total = 0;
+    let more = false;
+
+    // 1. Primary: LinuxApi encrypted protocol
     try {
-      const resp = await timedFetch(`https://music.163.com/api/playlist/highquality/list?limit=${limit}&cat=${encodeURIComponent(cat)}`, {
-        headers: buildUpstreamHeaders(cfg.realIp),
-      });
-      const data: any = await resp.json();
-      const playlists = (data.playlists || []).map((p: any) => ({
-        ...p,
-        copywriter: `${BRAND_PRODUCT} 甄选歌单`,
-      }));
-      return jsonResponse(
+      const lRes = await callNeteaseLinuxApi(
         {
-          code: 200,
-          brand: 'Sonic',
-          playlists: desensitizeData(playlists),
-          total: data.total || playlists.length,
-          more: data.more ?? false,
+          method: 'POST',
+          url: 'http://music.163.com/api/playlist/highquality/list',
+          params: { cat, limit: parseInt(limit, 10) || 24 },
         },
-        { headers: { 'Cache-Control': 'public, max-age=3600' } },
+        env,
       );
+      if (lRes && Array.isArray(lRes.playlists) && lRes.playlists.length > 0) {
+        playlists = lRes.playlists;
+        total = lRes.total || playlists.length;
+        more = lRes.more ?? false;
+      }
     } catch {}
-    return jsonResponse({ code: 200, brand: 'Sonic', playlists: [], total: 0 });
+
+    // 2. Fallback: plaintext legacy API
+    if (playlists.length === 0) {
+      try {
+        const resp = await timedFetch(`https://music.163.com/api/playlist/highquality/list?limit=${limit}&cat=${encodeURIComponent(cat)}`, {
+          headers: buildUpstreamHeaders(cfg.realIp),
+        });
+        const data: any = await resp.json();
+        if (data && Array.isArray(data.playlists) && data.playlists.length > 0) {
+          playlists = data.playlists;
+          total = data.total || playlists.length;
+          more = data.more ?? false;
+        }
+      } catch {}
+    }
+
+    // 3. Supplement from personalized if playlists count is below requested limit
+    if (playlists.length < (parseInt(limit, 10) || 24)) {
+      try {
+        const pResp = await timedFetch(`https://music.163.com/api/personalized?limit=${limit}`, {
+          headers: buildUpstreamHeaders(cfg.realIp),
+        });
+        const pData: any = await pResp.json();
+        const pList = Array.isArray(pData?.result) ? pData.result : [];
+        const seenIds = new Set(playlists.map((p: any) => p.id));
+        for (const item of pList) {
+          if (item?.id && !seenIds.has(item.id)) {
+            playlists.push(item);
+            seenIds.add(item.id);
+          }
+          if (playlists.length >= (parseInt(limit, 10) || 24)) break;
+        }
+      } catch {}
+    }
+
+    const desensitized = (playlists || []).map((p: any) => ({
+      ...p,
+      copywriter: `${BRAND_PRODUCT} 甄选歌单`,
+    }));
+
+    const resultPayload = {
+      code: 200,
+      brand: 'Sonic',
+      playlists: desensitizeData(desensitized),
+      total: total || desensitized.length,
+      more,
+    };
+
+    if (desensitized.length > 0) {
+      await putSonicCachedJson('upstream', cacheKey, resultPayload, 1800, 3600, env);
+    }
+
+    return jsonResponse(resultPayload, { headers: { 'Cache-Control': 'public, max-age=1800' } });
   }
 
   // 3. Top Songs / New Songs
@@ -337,17 +401,83 @@ export async function handleUpstreamEndpoint(
 
   // 5. Personalized MV
   if (normEndpoint === 'personalized/mv' || normEndpoint === 'mv/first') {
-    try {
-      const resp = await timedFetch('https://music.163.com/api/personalized/mv', {
-        headers: buildUpstreamHeaders(cfg.realIp),
-      });
-      const data: any = await resp.json();
-      return jsonResponse(
-        { code: 200, brand: 'Sonic', result: desensitizeData(data.result || []) },
-        { headers: { 'Cache-Control': 'public, max-age=3600' } },
-      );
-    } catch {}
-    return jsonResponse({ code: 200, brand: 'Sonic', result: [] });
+    const limit = parseInt(url.searchParams.get('limit') || '12', 10) || 12;
+    const cacheKey = `mv:${normEndpoint}:${limit}`;
+    const cached = await getSonicCachedJson<any>('upstream', cacheKey, env);
+    if (cached?.value && Array.isArray(cached.value.result) && cached.value.result.length >= limit) {
+      return jsonResponse(cached.value, { headers: { 'Cache-Control': 'public, max-age=3600' } });
+    }
+
+    let mvs: any[] = [];
+    const seenIds = new Set<string | number>();
+
+    // 1. Try personalized/mv if requested
+    if (normEndpoint === 'personalized/mv') {
+      try {
+        const resp = await timedFetch('https://music.163.com/api/personalized/mv', {
+          headers: buildUpstreamHeaders(cfg.realIp),
+        });
+        const data: any = await resp.json();
+        const list = Array.isArray(data?.result) ? data.result : [];
+        for (const item of list) {
+          if (item?.id && !seenIds.has(item.id)) {
+            mvs.push(item);
+            seenIds.add(item.id);
+          }
+        }
+      } catch {}
+    }
+
+    // 2. Supplement or primary from mv/first up to limit
+    if (mvs.length < limit) {
+      try {
+        const resp = await timedFetch(`https://music.163.com/api/mv/first?limit=${limit}`, {
+          headers: buildUpstreamHeaders(cfg.realIp),
+        });
+        const data: any = await resp.json();
+        const list = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.result) ? data.result : []);
+        for (const item of list) {
+          if (item?.id && !seenIds.has(item.id)) {
+            mvs.push(item);
+            seenIds.add(item.id);
+          }
+          if (mvs.length >= limit) break;
+        }
+      } catch {}
+    }
+
+    // 3. Fallback: supplement from mv/all if still below limit
+    if (mvs.length < limit) {
+      try {
+        const resp = await timedFetch(`https://music.163.com/api/mv/all?limit=${limit}&order=%E6%9C%80%E6%96%B0`, {
+          headers: buildUpstreamHeaders(cfg.realIp),
+        });
+        const data: any = await resp.json();
+        const list = Array.isArray(data?.data) ? data.data : [];
+        for (const item of list) {
+          if (item?.id && !seenIds.has(item.id)) {
+            mvs.push(item);
+            seenIds.add(item.id);
+          }
+          if (mvs.length >= limit) break;
+        }
+      } catch {}
+    }
+
+    const desensitized = desensitizeData(mvs.slice(0, limit));
+    const resultPayload = {
+      code: 200,
+      brand: 'Sonic',
+      result: desensitized,
+      data: desensitized,
+      mvs: desensitized,
+    };
+
+    if (desensitized.length > 0) {
+      await putSonicCachedJson('upstream', cacheKey, resultPayload, 1800, 3600, env);
+    }
+
+    return jsonResponse(resultPayload, { headers: { 'Cache-Control': 'public, max-age=3600' } });
   }
 
   // 6. MV All
@@ -358,20 +488,135 @@ export async function handleUpstreamEndpoint(
     let type = url.searchParams.get('type') || '';
     if (['Sonic出品', 'sonic出品', 'Sonic 甄选', 'sonic 甄选', 'netease'].includes(type)) type = '网易出品';
 
+    const cacheKey = `mv:all:${type}:${order}:${limit}:${offset}`;
+    const cached = await getSonicCachedJson<any>('upstream', cacheKey, env);
+    if (cached?.value && Array.isArray(cached.value.data) && cached.value.data.length > 0) {
+      return jsonResponse(cached.value, { headers: { 'Cache-Control': 'public, max-age=3600' } });
+    }
+
     try {
-      const upstreamUrl = `https://music.163.com/api/mv/all?limit=${limit}&offset=${offset}&order=${encodeURIComponent(order)}${type ? `&type=${encodeURIComponent(type)}` : ''}`;
-      const resp = await timedFetch(upstreamUrl, { headers: buildUpstreamHeaders(cfg.realIp) });
-      const data: any = await resp.json();
-      return jsonResponse(
-        {
-          code: 200,
-          brand: 'Sonic',
-          data: desensitizeData(data.data || []),
-          hasMore: data.hasMore ?? false,
-          count: data.count || 0,
-        },
-        { headers: { 'Cache-Control': 'public, max-age=3600' } },
-      );
+      let rawList: any[] = [];
+      let hasMore = false;
+      let totalCount = 0;
+
+      if (type === '网易出品') {
+        const resp = await timedFetch(`https://music.163.com/api/mv/exclusive/rcmd?limit=${limit}&offset=${offset}`, {
+          headers: buildUpstreamHeaders(cfg.realIp),
+        });
+        const data: any = await resp.json();
+        rawList = Array.isArray(data?.data) ? data.data : [];
+        hasMore = data?.hasMore ?? (rawList.length >= parseInt(limit, 10));
+        totalCount = data?.count || rawList.length;
+        for (const item of rawList) {
+          if (!item.tag) item.tag = 'Sonic 甄选';
+        }
+      } else if (type === '现场版' || type === '现场' || type === 'live') {
+        const sRes = await callNeteaseLinuxApi(
+          {
+            method: 'POST',
+            url: 'http://music.163.com/api/cloudsearch/pc',
+            params: {
+              s: '现场',
+              type: 1004,
+              limit: parseInt(limit, 10),
+              offset: parseInt(offset, 10),
+            },
+          },
+          env,
+        );
+        rawList = Array.isArray(sRes?.result?.mvs) ? sRes.result.mvs : [];
+        totalCount = sRes?.result?.mvCount || rawList.length;
+        hasMore = totalCount > parseInt(offset, 10) + rawList.length;
+        for (const item of rawList) {
+          if (!item.tag) item.tag = '现场版';
+        }
+      } else if (type === '官方版' || type === '官方' || type === 'official') {
+        const sRes = await callNeteaseLinuxApi(
+          {
+            method: 'POST',
+            url: 'http://music.163.com/api/cloudsearch/pc',
+            params: {
+              s: '官方版',
+              type: 1004,
+              limit: parseInt(limit, 10),
+              offset: parseInt(offset, 10),
+            },
+          },
+          env,
+        );
+        rawList = Array.isArray(sRes?.result?.mvs) ? sRes.result.mvs : [];
+        totalCount = sRes?.result?.mvCount || rawList.length;
+        hasMore = totalCount > parseInt(offset, 10) + rawList.length;
+        for (const item of rawList) {
+          if (!item.tag) item.tag = '官方版';
+        }
+      } else if (type === '最新' || type === 'first' || type === 'latest') {
+        const resp = await timedFetch(`https://music.163.com/api/mv/first?limit=${limit}`, {
+          headers: buildUpstreamHeaders(cfg.realIp),
+        });
+        const data: any = await resp.json();
+        rawList = Array.isArray(data?.data) ? data.data : [];
+        hasMore = rawList.length >= parseInt(limit, 10);
+        totalCount = rawList.length;
+        for (const item of rawList) {
+          if (!item.tag) item.tag = '最新';
+        }
+      } else {
+        const upstreamUrl = `https://music.163.com/api/mv/all?limit=${limit}&offset=${offset}&order=${encodeURIComponent(order)}`;
+        const resp = await timedFetch(upstreamUrl, { headers: buildUpstreamHeaders(cfg.realIp) });
+        const data: any = await resp.json();
+        rawList = Array.isArray(data?.data) ? data.data : [];
+        hasMore = data.hasMore ?? false;
+        totalCount = data.count || 0;
+        for (const item of rawList) {
+          if (!item.tag) {
+            const name = item.name || item.title || '';
+            if (name.includes('现场') || name.includes('Live') || name.includes('LIVE')) {
+              item.tag = '现场版';
+            } else if (name.includes('官方') || name.includes('Official')) {
+              item.tag = '官方版';
+            } else if (item.new) {
+              item.tag = '最新';
+            } else {
+              item.tag = '精选';
+            }
+          }
+        }
+      }
+
+      // Metadata enrichment: enrich missing desc and publishTime
+      const itemsToEnrich = rawList.slice(0, 16).filter((it: any) => it?.id && (!it.publishTime || !it.desc));
+      if (itemsToEnrich.length > 0) {
+        await Promise.allSettled(
+          itemsToEnrich.map(async (item: any) => {
+            try {
+              const dResp = await timedFetch(`https://music.163.com/api/mv/detail?id=${encodeURIComponent(item.id)}`, {
+                headers: buildUpstreamHeaders(cfg.realIp),
+                signal: AbortSignal.timeout(1800),
+              });
+              const dData: any = await dResp.json();
+              if (dData?.data?.publishTime && !item.publishTime) item.publishTime = dData.data.publishTime;
+              if (dData?.data?.desc && !item.desc) item.desc = dData.data.desc;
+              if (dData?.data?.briefDesc && !item.briefDesc) item.briefDesc = dData.data.briefDesc;
+            } catch {}
+          }),
+        );
+      }
+
+      const desensitized = desensitizeData(rawList);
+      const resultPayload = {
+        code: 200,
+        brand: 'Sonic',
+        data: desensitized,
+        hasMore,
+        count: totalCount,
+      };
+
+      if (desensitized.length > 0) {
+        await putSonicCachedJson('upstream', cacheKey, resultPayload, 1800, 3600, env);
+      }
+
+      return jsonResponse(resultPayload, { headers: { 'Cache-Control': 'public, max-age=3600' } });
     } catch {}
     return jsonResponse({ code: 200, brand: 'Sonic', data: [], hasMore: false });
   }
@@ -445,29 +690,132 @@ export async function handleUpstreamEndpoint(
     return jsonResponse({ code: 200, brand: 'Sonic', mvs: [] });
   }
 
-  // 10. Comments (Music / MV)
-  if (normEndpoint === 'comment/new' || normEndpoint === 'comment/music' || normEndpoint === 'comment') {
-    const id = url.searchParams.get('id') || url.searchParams.get('mvid') || '33894312';
-    const limit = url.searchParams.get('limit') || '20';
-    const type = normEndpoint.includes('mv') || url.searchParams.has('mvid') ? '5' : '4';
+  // 10. Comments (Music / Playlist / Album / MV / Hot / New)
+  if (
+    normEndpoint === 'comment/new' ||
+    normEndpoint === 'comment/music' ||
+    normEndpoint === 'comment/playlist' ||
+    normEndpoint === 'comment/album' ||
+    normEndpoint === 'comment/mv' ||
+    normEndpoint === 'comment/hot' ||
+    normEndpoint === 'comment'
+  ) {
+    const rawId = url.searchParams.get('id') || url.searchParams.get('mvid') || '33894312';
+    const id = rawId.replace(/^[a-z0-9_-]+:/i, '').trim();
+    const limit = url.searchParams.get('limit') || url.searchParams.get('pageSize') || '20';
+    const pageNo = parseInt(url.searchParams.get('pageNo') || '1', 10);
+    const offset =
+      url.searchParams.get('offset') ||
+      (url.searchParams.has('pageNo')
+        ? String((Math.max(1, pageNo) - 1) * parseInt(limit, 10))
+        : '0');
+    const before =
+      url.searchParams.get('before') ||
+      url.searchParams.get('cursor') ||
+      url.searchParams.get('beforeTime') ||
+      '';
 
+    // Determine upstream resource thread prefix
+    // 0: song (R_SO_4_), 1: mv (R_MV_5_), 2: playlist (A_PL_0_), 3: album (R_AL_3_)
+    let resourcePrefix = 'R_SO_4_';
+    const typeParam = url.searchParams.get('type');
+    if (normEndpoint === 'comment/playlist' || typeParam === '2') {
+      resourcePrefix = 'A_PL_0_';
+    } else if (normEndpoint === 'comment/album' || typeParam === '3') {
+      resourcePrefix = 'R_AL_3_';
+    } else if (
+      normEndpoint.includes('mv') ||
+      url.searchParams.has('mvid') ||
+      typeParam === '1' ||
+      typeParam === '5'
+    ) {
+      resourcePrefix = 'R_MV_5_';
+    } else if (normEndpoint === 'comment/music' || typeParam === '0') {
+      resourcePrefix = 'R_SO_4_';
+    }
+
+    const threadId = `${resourcePrefix}${id}`;
+
+    // 1. Primary: Direct fetch upstream resource comments
     try {
-      const resp = await timedFetch(`https://music.163.com/api/v1/resource/comments/R_${type === '5' ? 'MV' : 'SO'}_${type}_${encodeURIComponent(id)}?limit=${limit}`, {
-        headers: buildUpstreamHeaders(cfg.realIp),
-      });
-      const data: any = await resp.json();
-      return jsonResponse(
+      const resp = await timedFetch(
+        `https://music.163.com/api/v1/resource/comments/${encodeURIComponent(threadId)}?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}${before ? `&beforeTime=${encodeURIComponent(before)}` : ''}`,
         {
-          code: 200,
-          brand: 'Sonic',
-          comments: desensitizeData(data.comments || []),
-          total: data.total || 0,
-          more: data.more ?? false,
+          headers: buildUpstreamHeaders(cfg.realIp),
         },
-        { headers: { 'Cache-Control': 'public, max-age=1800' } },
       );
+      const data: any = await resp.json();
+      if (data && (data.code === 200 || Array.isArray(data.comments))) {
+        const comments = desensitizeData(data.comments || []);
+        const hotComments = desensitizeData(data.hotComments || []);
+        const total = Number(data.total ?? comments.length + hotComments.length);
+        const more = data.more ?? false;
+        return jsonResponse(
+          {
+            code: 200,
+            brand: 'Sonic',
+            comments,
+            hotComments,
+            total,
+            more,
+            moreHot: data.moreHot ?? false,
+            data: {
+              comments,
+              hotComments,
+              total,
+              hasMore: more,
+            },
+          },
+          { headers: { 'Cache-Control': 'public, max-age=1800' } },
+        );
+      }
     } catch {}
-    return jsonResponse({ code: 200, brand: 'Sonic', comments: [], total: 0 });
+
+    // 2. Secondary: LinuxApi encrypted protocol fallback
+    try {
+      const lRes = await callNeteaseLinuxApi(
+        {
+          method: 'GET',
+          url: `http://music.163.com/api/v1/resource/comments/${encodeURIComponent(threadId)}?limit=${encodeURIComponent(limit)}&offset=${encodeURIComponent(offset)}${before ? `&beforeTime=${encodeURIComponent(before)}` : ''}`,
+          params: {},
+        },
+        env,
+      );
+      if (lRes && (lRes.code === 200 || Array.isArray(lRes.comments))) {
+        const comments = desensitizeData(lRes.comments || []);
+        const hotComments = desensitizeData(lRes.hotComments || []);
+        const total = Number(lRes.total ?? comments.length + hotComments.length);
+        const more = lRes.more ?? false;
+        return jsonResponse(
+          {
+            code: 200,
+            brand: 'Sonic',
+            comments,
+            hotComments,
+            total,
+            more,
+            moreHot: lRes.moreHot ?? false,
+            data: {
+              comments,
+              hotComments,
+              total,
+              hasMore: more,
+            },
+          },
+          { headers: { 'Cache-Control': 'public, max-age=1800' } },
+        );
+      }
+    } catch {}
+
+    return jsonResponse({
+      code: 200,
+      brand: 'Sonic',
+      comments: [],
+      hotComments: [],
+      total: 0,
+      more: false,
+      data: { comments: [], hotComments: [], total: 0, hasMore: false },
+    });
   }
 
   // 11. Toplists / Charts
@@ -490,35 +838,179 @@ export async function handleUpstreamEndpoint(
 
   // 12. Playlist Detail & Track All
   if (normEndpoint === 'playlist/detail' || normEndpoint === 'playlist/track/all') {
-    const id = url.searchParams.get('id') || '3778678';
-    try {
-      const resp = await timedFetch(`https://music.163.com/api/playlist/detail?id=${encodeURIComponent(id)}`, {
-        headers: buildUpstreamHeaders(cfg.realIp),
-      });
-      const data: any = await resp.json();
-      const p = data.result || data.playlist || {};
-      if (normEndpoint === 'playlist/track/all') {
-        return jsonResponse(
+    const rawId = url.searchParams.get('id') || '3778678';
+    const id = rawId.replace(/^[a-z0-9_-]+:/i, '').trim();
+    const limit = Math.min(200, Math.max(1, parseInt(url.searchParams.get('limit') || '100', 10) || 100));
+    const offset = Math.max(0, parseInt(url.searchParams.get('offset') || '0', 10) || 0);
+
+    // Multi-tier cache for raw playlist data
+    const playlistCacheKey = `raw-pl:${id}`;
+    let p: any = null;
+    const cachedPl = await getSonicCachedJson<any>('playlist-detail', playlistCacheKey, env);
+    if (cachedPl?.value && (cachedPl.value.name || cachedPl.value.id)) {
+      p = cachedPl.value;
+    }
+
+    if (!p) {
+      // 1. Primary: LinuxApi (/api/v3/playlist/detail)
+      try {
+        const lRes = await callNeteaseLinuxApi(
           {
-            code: 200,
-            brand: 'Sonic',
-            songs: desensitizeData(p.tracks || []),
-            privileges: [],
+            method: 'POST',
+            url: 'http://music.163.com/api/v3/playlist/detail',
+            params: { id, n: 100, s: 8 },
           },
-          { headers: { 'Cache-Control': 'public, max-age=3600' } },
+          env,
         );
+        if (lRes && (lRes.code === 200 || lRes.playlist) && (lRes.playlist?.name || lRes.result?.name)) {
+          p = lRes.playlist || lRes.result;
+        }
+      } catch {}
+
+      // 2. Secondary: ncm-api container if available
+      if (!p && cfg.ncmApiUrl) {
+        try {
+          const resp = await timedFetch(
+            `${cfg.ncmApiUrl}/playlist/detail?id=${encodeURIComponent(id)}&realIP=${encodeURIComponent(cfg.realIp)}`,
+          );
+          if (resp.ok) {
+            const data: any = await resp.json();
+            if (data?.playlist?.name) {
+              p = data.playlist;
+            }
+          }
+        } catch {}
       }
+
+      // 3. Fallback: plaintext legacy API
+      if (!p) {
+        try {
+          const resp = await timedFetch(`https://music.163.com/api/playlist/detail?id=${encodeURIComponent(id)}`, {
+            headers: buildUpstreamHeaders(cfg.realIp),
+          });
+          const data: any = await resp.json();
+          const cand = data.result || data.playlist;
+          if (cand && (cand.name || cand.tracks || cand.trackCount)) {
+            p = cand;
+          }
+        } catch {}
+      }
+
+      if (p && (p.name || p.id)) {
+        await putSonicCachedJson('playlist-detail', playlistCacheKey, p, 1800, 3600, env);
+      }
+    }
+
+    if (!p || (!p.name && !p.id && (!p.tracks || p.tracks.length === 0))) {
+      return jsonResponse({ code: 404, message: 'Playlist not found' }, { status: 404 });
+    }
+
+    if (normEndpoint === 'playlist/track/all') {
+      const initialTracks = Array.isArray(p.tracks) ? p.tracks : [];
+      const trackIds = Array.isArray(p.trackIds) ? p.trackIds : [];
+      let songs: any[] = [];
+
+      // If initial tracks already contains the requested slice
+      if (offset + limit <= initialTracks.length) {
+        songs = initialTracks.slice(offset, offset + limit);
+      } else if (offset < initialTracks.length && (initialTracks.length >= trackIds.length || trackIds.length === 0)) {
+        songs = initialTracks.slice(offset, offset + limit);
+      } else if (trackIds.length > 0) {
+        // Paging into trackIds beyond initialTracks
+        const sliceIds = trackIds.slice(offset, offset + limit).map((t: any) => ({ id: t.id || t }));
+        if (sliceIds.length > 0) {
+          try {
+            const songDetailRes = await callNeteaseLinuxApi(
+              {
+                method: 'POST',
+                url: 'http://music.163.com/api/v3/song/detail',
+                params: { c: JSON.stringify(sliceIds) },
+              },
+              env,
+            );
+            if (Array.isArray(songDetailRes?.songs) && songDetailRes.songs.length > 0) {
+              songs = songDetailRes.songs;
+            }
+          } catch {}
+        }
+        // Fallback to initialTracks slice if song detail call failed
+        if (songs.length === 0 && initialTracks.length > 0 && offset < initialTracks.length) {
+          songs = initialTracks.slice(offset, offset + limit);
+        }
+      } else {
+        songs = initialTracks.slice(offset, offset + limit);
+      }
+
       return jsonResponse(
         {
           code: 200,
           brand: 'Sonic',
-          playlist: desensitizeData(p),
-          result: desensitizeData(p),
+          songs: desensitizeData(songs),
+          privileges: [],
         },
-        { headers: { 'Cache-Control': 'public, max-age=3600' } },
+        { headers: { 'Cache-Control': 'public, max-age=1800' } },
+      );
+    }
+
+    return jsonResponse(
+      {
+        code: 200,
+        brand: 'Sonic',
+        playlist: desensitizeData(p),
+        result: desensitizeData(p),
+      },
+      { headers: { 'Cache-Control': 'public, max-age=1800' } },
+    );
+  }
+
+  // 12.1. Similar / Related Playlists
+  if (normEndpoint === 'simi/playlist' || normEndpoint === 'related/playlist') {
+    const rawId = url.searchParams.get('id') || url.searchParams.get('songid') || '';
+    const id = rawId.replace(/^[a-z0-9_-]+:/i, '').trim();
+    if (!id) {
+      return jsonResponse({ code: 200, brand: 'Sonic', playlists: [] });
+    }
+
+    try {
+      let title = '';
+      const pDetail = await callNeteaseLinuxApi(
+        {
+          method: 'POST',
+          url: 'http://music.163.com/api/v3/playlist/detail',
+          params: { id, n: 10, s: 0 },
+        },
+        env,
+      ).catch(() => null);
+
+      if (pDetail?.playlist) {
+        title = pDetail.playlist.name || '';
+      }
+
+      const cleaned = (title || id)
+        .replace(/\[.*?\]|【.*?】|（.*?）|\(.*?\)/g, ' ')
+        .replace(/[|/\\_—–\-+#!~`]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const searchRes = await callNeteaseLinuxApi(
+        {
+          method: 'POST',
+          url: 'http://music.163.com/api/cloudsearch/pc',
+          params: { s: cleaned || title || '流行', type: 1000, limit: 12, offset: 0 },
+        },
+        env,
+      );
+
+      const list = (searchRes?.result?.playlists || []).filter(
+        (pl: any) => String(pl.id) !== String(id),
+      );
+
+      return jsonResponse(
+        { code: 200, brand: 'Sonic', playlists: desensitizeData(list) },
+        { headers: { 'Cache-Control': 'public, max-age=1800' } },
       );
     } catch {}
-    return jsonResponse({ code: 404, message: 'Playlist not found' }, { status: 404 });
+    return jsonResponse({ code: 200, brand: 'Sonic', playlists: [] });
   }
 
   // 13. Artist Detail & Artist Top Song & Albums
@@ -640,6 +1132,30 @@ export async function handleUpstreamEndpoint(
   if (normEndpoint === 'album') {
     const id = url.searchParams.get('id') || '';
     if (id) {
+      // 1. Primary: LinuxApi encrypted protocol (bypasses datacenter block & handles all commercial albums)
+      try {
+        const lRes = await callNeteaseLinuxApi(
+          {
+            method: 'GET',
+            url: `http://music.163.com/api/v1/album/${encodeURIComponent(id)}`,
+            params: {},
+          },
+          env,
+        );
+        if (lRes && (lRes.code === 200 || lRes.album)) {
+          return jsonResponse(
+            {
+              code: 200,
+              brand: 'Sonic',
+              album: desensitizeData(lRes.album || {}),
+              songs: desensitizeData(lRes.songs || []),
+            },
+            { headers: { 'Cache-Control': 'public, max-age=3600' } },
+          );
+        }
+      } catch {}
+
+      // 2. Fallback: plaintext legacy API
       try {
         const resp = await timedFetch(`https://music.163.com/api/v1/album/${encodeURIComponent(id)}`, {
           headers: buildUpstreamHeaders(cfg.realIp),
@@ -659,6 +1175,35 @@ export async function handleUpstreamEndpoint(
       } catch {}
     }
     return jsonResponse({ code: 200, brand: 'Sonic', album: {}, songs: [] });
+  }
+
+  // 16.1. New Albums
+  if (normEndpoint === 'album/new') {
+    const area = url.searchParams.get('area') || 'ALL';
+    const limit = parseInt(url.searchParams.get('limit') || '30', 10);
+    const offset = parseInt(url.searchParams.get('offset') || '0', 10);
+    try {
+      const lRes = await callNeteaseLinuxApi(
+        {
+          method: 'POST',
+          url: 'http://music.163.com/api/album/new',
+          params: { area, limit, offset },
+        },
+        env,
+      );
+      if (lRes && (lRes.code === 200 || Array.isArray(lRes.albums))) {
+        return jsonResponse(
+          {
+            code: 200,
+            brand: 'Sonic',
+            albums: desensitizeData(lRes.albums || []),
+            total: lRes.total || lRes.albums?.length || 0,
+          },
+          { headers: { 'Cache-Control': 'public, max-age=1800' } },
+        );
+      }
+    } catch {}
+    return jsonResponse({ code: 200, brand: 'Sonic', albums: [], total: 0 });
   }
 
   // 16. Song URL
@@ -686,7 +1231,56 @@ export async function handleUpstreamEndpoint(
     const offset = url.searchParams.get('offset') || '0';
 
     if (type === '1000') {
-      // Search playlists
+      // Search playlists (LinuxApi / Eapi encrypted protocol bypasses web plaintext AES encryption)
+      try {
+        const lRes = await callNeteaseLinuxApi(
+          {
+            method: 'POST',
+            url: 'http://music.163.com/api/cloudsearch/pc',
+            params: {
+              s: keywords,
+              type: 1000,
+              limit: parseInt(limit, 10),
+              offset: parseInt(offset, 10),
+            },
+          },
+          env,
+        );
+        if (lRes && (lRes.code === 200 || lRes.result?.playlists)) {
+          return jsonResponse(
+            {
+              code: 200,
+              brand: 'Sonic',
+              result: desensitizeData(lRes.result || { playlists: [], playlistCount: 0 }),
+            },
+            { headers: { 'Cache-Control': 'public, max-age=1800' } },
+          );
+        }
+      } catch {}
+
+      try {
+        const eRes = await callNeteaseEapi(
+          '/api/cloudsearch/pc',
+          {
+            s: keywords,
+            type: 1000,
+            limit: parseInt(limit, 10),
+            offset: parseInt(offset, 10),
+          },
+          env,
+        );
+        if (eRes && (eRes.code === 200 || eRes.result?.playlists)) {
+          return jsonResponse(
+            {
+              code: 200,
+              brand: 'Sonic',
+              result: desensitizeData(eRes.result || { playlists: [], playlistCount: 0 }),
+            },
+            { headers: { 'Cache-Control': 'public, max-age=1800' } },
+          );
+        }
+      } catch {}
+
       try {
         const resp = await timedFetch(`https://music.163.com/api/search/get/web?s=${encodeURIComponent(keywords)}&type=1000&limit=${limit}&offset=${offset}`, {
           headers: buildUpstreamHeaders(cfg.realIp),

@@ -6,6 +6,7 @@ import { storeToRefs } from 'pinia'
 import { computed, defineAsyncComponent } from 'vue'
 import type { Component } from 'vue'
 import { useSettingsStore } from '@/stores/modules/settings'
+import { useGlobalStore } from '@/stores/modules/global'
 
 const Aurora = defineAsyncComponent(() => import('@/components/Background/Aurora.vue'))
 const ColorBends = defineAsyncComponent(() => import('@/components/Background/ColorBends.vue'))
@@ -14,13 +15,8 @@ const ShadowBling = defineAsyncComponent(() => import('@/components/Background/S
 
 const settings = useSettingsStore()
 const { aurora, colorBends, ultimate, shadowBling, backgroundType } = storeToRefs(settings)
-
-// 抽屉状态
-const state = reactive({
-  // 播放器抽屉是否打开
-  isDrawerOpen: false,
-})
-const { isDrawerOpen } = toRefs(state)
+const globalStore = useGlobalStore()
+const { isPlayerDrawerOpen } = storeToRefs(globalStore)
 
 const colorStops = computed(() => {
   const stops = (aurora.value.colorStops || []).slice(0, 3)
@@ -33,7 +29,7 @@ const positions = computed(() => {
 })
 
 const openPlayerDrawer = () => {
-  state.isDrawerOpen = true
+  globalStore.openPlayerDrawer()
 }
 
 type BackgroundType = 'colorbends' | 'ultimate' | 'aurora' | 'shadowBling'
@@ -127,14 +123,14 @@ const onRouteLeave = (el: Element, done: () => void) => {
     <!-- 主工作区：几何对齐的 Studio 架构 (全组件限制在统一上下区间 [Y_top, Y_bottom] 内) -->
     <div class="z-50 flex h-full w-full p-3 sm:p-4 gap-3 sm:gap-4 overflow-hidden">
       <!-- 左侧边栏：单独占用左边所有空间，严格限制在上下区间内 -->
-      <Aside :inert="isDrawerOpen || undefined" :aria-hidden="isDrawerOpen || undefined" />
+      <Aside :inert="isPlayerDrawerOpen || undefined" :aria-hidden="isPlayerDrawerOpen || undefined" />
 
       <!-- 右侧主区域：上部内容画板 + 底部控制 Dock，与左侧边栏上下区间严格同步 -->
       <div class="relative flex flex-1 flex-col h-full min-h-0 min-w-0 gap-3 sm:gap-4 overflow-hidden">
         <!-- 上页内容画板：作为主内容区统一的大磨砂画板，内部绝无嵌套框 -->
         <main
-          :inert="isDrawerOpen || undefined"
-          :aria-hidden="isDrawerOpen || undefined"
+          :inert="isPlayerDrawerOpen || undefined"
+          :aria-hidden="isPlayerDrawerOpen || undefined"
           class="section-container relative flex flex-1 min-h-0 flex-col overflow-hidden p-2 rounded-[28px]"
         >
           <router-view v-slot="{ Component, route }">
@@ -148,13 +144,13 @@ const onRouteLeave = (el: Element, done: () => void) => {
 
         <!-- 底部播放栏：在 main 下方（前终止），保留已有的磨砂玻璃材质，与左侧边栏底缘绝对齐平 -->
         <Footer
-          :inert="isDrawerOpen || undefined"
-          :aria-hidden="isDrawerOpen || undefined"
+          :inert="isPlayerDrawerOpen || undefined"
+          :aria-hidden="isPlayerDrawerOpen || undefined"
           @show="openPlayerDrawer"
         />
 
         <!-- 播放器全屏抽屉 -->
-        <PlayerDrawer v-model="isDrawerOpen" />
+        <PlayerDrawer v-model="isPlayerDrawerOpen" />
       </div>
     </div>
   </div>

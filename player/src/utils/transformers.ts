@@ -224,8 +224,13 @@ export function transformPlaylist(
     id: (item?.id as number | string) || 0,
     name: (item?.name as string) || fallbackName,
     coverImgUrl: (item?.picUrl as string) || (item?.coverImgUrl as string) || '',
-    playCount: (item?.playCount as number) || 0,
-    trackCount: (item?.trackCount as number) || 0,
+    playCount: (item?.playCount as number) || (item?.playcount as number) || 0,
+    trackCount:
+      (item?.trackCount as number) ||
+      (item?.songCount as number) ||
+      ((item?.tracks as any[])?.length) ||
+      ((item?.trackIds as any[])?.length) ||
+      0,
   }
 }
 
@@ -237,7 +242,14 @@ export function transformPlaylists(
   limit?: number,
   fallbackName = i18n.global.t('common.unknownPlaylist')
 ): PlaylistData[] {
-  const list = extractArray(response, 'result', 'data.result', 'playlists', 'data.playlists')
+  const list = extractArray(
+    response,
+    'playlists',
+    'data.playlists',
+    'result',
+    'data.result',
+    'data'
+  )
   const result = list.map(item =>
     transformPlaylist(item as Record<string, unknown>, fallbackName)
   )
@@ -340,6 +352,11 @@ export function transformSongs(
     response,
     'songs',
     'data.songs',
+    'tracks',
+    'playlist.tracks',
+    'result.tracks',
+    'data.playlist.tracks',
+    'data.tracks',
     'result',
     'data.result',
     'result.songs'
@@ -409,7 +426,7 @@ export function transformMVs(
   response: ApiResponse,
   limit?: number
 ): MVData[] {
-  const list = extractArray(response, 'result', 'data.result', 'mvs', 'data.mvs', 'result.mvs')
+  const list = extractArray(response, 'result', 'data.result', 'mvs', 'data.mvs', 'result.mvs', 'data')
   const result = list.map(item => transformMV(item as Record<string, unknown>))
   return limit ? result.slice(0, limit) : result
 }
@@ -462,25 +479,39 @@ export function transformPlaylistDetail(
     response,
     'playlist',
     'data.playlist',
+    'result',
+    'data.result',
     'data'
   )
 
-  if (!detail) return null
+  if (!detail || (!detail.name && !detail.id)) return null
 
   const creator = detail?.creator as Record<string, unknown> | undefined
   const tags = detail?.tags as string[] | undefined
+  const tracks = (detail?.tracks as any[]) || []
+  const trackIds = (detail?.trackIds as any[]) || []
 
   return {
     name: (detail?.name as string) || '',
     description: (detail?.description as string) || '',
-    creator: (creator?.nickname as string) || '',
+    creator: (creator?.nickname as string) || (creator?.name as string) || '',
     creatorAvatar: (creator?.avatarUrl as string) || '',
     createTime: detail?.createTime ? formatDateLong(detail.createTime as number) : '',
-    songCount: (detail?.trackCount as number) || 0,
+    songCount:
+      (detail?.trackCount as number) ||
+      (detail?.songCount as number) ||
+      tracks.length ||
+      trackIds.length ||
+      0,
     playCount: (detail?.playCount as string | number) || 0,
     likes: (detail?.subscribedCount as number) || (detail?.bookedCount as number) || 0,
     category: tags?.[0] || fallbackCategory,
-    coverImgUrl: (detail?.coverImgUrl as string) || '',
+    coverImgUrl:
+      (detail?.coverImgUrl as string) ||
+      (detail?.picUrl as string) ||
+      (tracks[0]?.al?.picUrl as string) ||
+      (tracks[0]?.album?.picUrl as string) ||
+      '',
   }
 }
 
