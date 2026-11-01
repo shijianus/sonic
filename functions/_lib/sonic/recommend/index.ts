@@ -7,5 +7,7 @@ export * from './popularity';
 export * from './identity';
 export * from './external-adapters';
 export * from './seed-catalog';
+export * from './entity-store';
 export * from './engine';
+export * from './multi-entity';
 export * from './smart-search';

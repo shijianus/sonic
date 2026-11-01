@@ -9,8 +9,13 @@ import { DatabaseSync } from 'node:sqlite';
 
 import type {
   CanonicalTrack,
+  EntityAffinityStat,
+  EntityRecord,
+  EntityRelation,
   RecommendStore,
+  SonicEntityType,
   StoredBehaviorEvent,
+  StoredEntityFeedback,
   TrackEdition,
 } from '../functions/_lib/sonic/recommend/types';
 import {
@@ -116,7 +121,73 @@ export class SqliteRecommendStore implements RecommendStore {
         hit_count INTEGER NOT NULL DEFAULT 1,
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS entities (
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        subtitle TEXT,
+        artist_key TEXT,
+        genres_json TEXT,
+        language TEXT,
+        cover_url TEXT,
+        external_popularity REAL NOT NULL DEFAULT 0,
+        derived INTEGER NOT NULL DEFAULT 1,
+        meta_json TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (entity_type, entity_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_entities_type_title
+        ON entities(entity_type, title);
+
+      CREATE TABLE IF NOT EXISTS entity_relations (
+        from_type TEXT NOT NULL,
+        from_id TEXT NOT NULL,
+        to_type TEXT NOT NULL,
+        to_id TEXT NOT NULL,
+        relation TEXT NOT NULL,
+        weight REAL NOT NULL DEFAULT 1,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (from_type, from_id, to_type, to_id, relation)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_entity_relations_in
+        ON entity_relations(to_type, to_id, from_type, weight DESC);
+
+      CREATE TABLE IF NOT EXISTS user_entity_feedback (
+        feedback_id TEXT PRIMARY KEY,
+        subject_key TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        action TEXT NOT NULL,
+        weight REAL NOT NULL,
+        progress_ratio REAL,
+        related_track_id TEXT,
+        created_at INTEGER NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_uef_subject_time
+        ON user_entity_feedback(subject_key, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_uef_entity
+        ON user_entity_feedback(entity_type, entity_id);
     `);
+
+    this.migrateBehaviorEventEntityColumns();
+  }
+
+  // Older databases (pre multi-entity) lack the entity audit columns on behavior_events.
+  // SQLite ALTER TABLE ADD COLUMN is an instant metadata-only change, so this is cheap.
+  private migrateBehaviorEventEntityColumns(): void {
+    const cols = this.db.prepare(`PRAGMA table_info(behavior_events)`).all() as Array<{ name: string }>;
+    const names = new Set(cols.map((c) => c.name));
+    if (!names.has('entity_type')) {
+      this.db.exec(`ALTER TABLE behavior_events ADD COLUMN entity_type TEXT`);
+    }
+    if (!names.has('entity_id')) {
+      this.db.exec(`ALTER TABLE behavior_events ADD COLUMN entity_id TEXT`);
+    }
   }
 
   upsertTrack(incoming: CanonicalTrack): void {
@@ -334,15 +405,17 @@ export class SqliteRecommendStore implements RecommendStore {
     }
     const stmt = this.db.prepare(`
       INSERT OR IGNORE INTO behavior_events (
-        event_id, subject_key, event_type, canonical_track_id, artist_key,
+        event_id, subject_key, event_type, canonical_track_id, entity_type, entity_id, artist_key,
         genres_json, language, query, weight, progress_ratio, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const info = stmt.run(
       event.eventId,
       event.subjectKey,
       event.type,
       event.canonicalTrackId ?? null,
+      event.entityType ?? null,
+      event.entityId ?? null,
       event.artistKey ?? null,
       event.genres ? JSON.stringify(event.genres) : null,
       event.language ?? null,
@@ -369,7 +442,7 @@ export class SqliteRecommendStore implements RecommendStore {
     if (!subjectKey) return [];
     const rows = this.db
       .prepare(
-        `SELECT event_id, subject_key, event_type, canonical_track_id, artist_key,
+        `SELECT event_id, subject_key, event_type, canonical_track_id, entity_type, entity_id, artist_key,
                 genres_json, language, query, weight, progress_ratio, created_at
          FROM behavior_events
          WHERE subject_key = ? AND created_at >= ?
@@ -390,7 +463,7 @@ export class SqliteRecommendStore implements RecommendStore {
   getAllRecentEvents(sinceMs: number, limit = 10000): StoredBehaviorEvent[] {
     const rows = this.db
       .prepare(
-        `SELECT event_id, subject_key, event_type, canonical_track_id, artist_key,
+        `SELECT event_id, subject_key, event_type, canonical_track_id, entity_type, entity_id, artist_key,
                 genres_json, language, query, weight, progress_ratio, created_at
          FROM behavior_events
          WHERE created_at >= ?
@@ -468,6 +541,289 @@ export class SqliteRecommendStore implements RecommendStore {
     return rows;
   }
 
+  // ── Multi-entity catalog & feedback (entities / entity_relations / user_entity_feedback) ──
+
+  upsertEntity(entity: EntityRecord): void {
+    if (!entity?.entityId || !entity?.entityType) return;
+    const now = Date.now();
+    this.db
+      .prepare(
+        `INSERT INTO entities (
+           entity_type, entity_id, title, subtitle, artist_key, genres_json, language,
+           cover_url, external_popularity, derived, meta_json, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(entity_type, entity_id) DO UPDATE SET
+           title = excluded.title,
+           subtitle = COALESCE(excluded.subtitle, entities.subtitle),
+           artist_key = COALESCE(excluded.artist_key, entities.artist_key),
+           genres_json = COALESCE(excluded.genres_json, entities.genres_json),
+           language = COALESCE(excluded.language, entities.language),
+           cover_url = COALESCE(excluded.cover_url, entities.cover_url),
+           external_popularity = excluded.external_popularity,
+           derived = excluded.derived,
+           meta_json = COALESCE(excluded.meta_json, entities.meta_json),
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        entity.entityType,
+        entity.entityId,
+        entity.title,
+        entity.subtitle ?? null,
+        entity.artistKey ?? null,
+        entity.genres?.length ? JSON.stringify(entity.genres) : null,
+        entity.language ?? null,
+        entity.coverUrl ?? null,
+        entity.externalPopularity ?? 0,
+        entity.derived === false ? 0 : 1,
+        entity.meta ? JSON.stringify(entity.meta) : null,
+        entity.createdAt || now,
+        entity.updatedAt || now,
+      );
+  }
+
+  upsertEntities(entities: EntityRecord[]): void {
+    if (entities.length === 0) return;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const e of entities) this.upsertEntity(e);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {}
+      throw err;
+    }
+  }
+
+  getEntity(entityType: SonicEntityType, entityId: string): EntityRecord | null {
+    if (!entityType || !entityId) return null;
+    const row = this.db
+      .prepare(`SELECT * FROM entities WHERE entity_type = ? AND entity_id = ?`)
+      .get(entityType, entityId) as Record<string, any> | undefined;
+    return row ? this.rowToEntity(row) : null;
+  }
+
+  listEntities(entityType?: SonicEntityType, limit = 500): EntityRecord[] {
+    const rows = entityType
+      ? (this.db
+          .prepare(`SELECT * FROM entities WHERE entity_type = ? ORDER BY updated_at DESC LIMIT ?`)
+          .all(entityType, Math.max(1, Math.min(5000, limit))) as Array<Record<string, any>>)
+      : (this.db
+          .prepare(`SELECT * FROM entities ORDER BY updated_at DESC LIMIT ?`)
+          .all(Math.max(1, Math.min(5000, limit))) as Array<Record<string, any>>);
+    return rows.map((r) => this.rowToEntity(r));
+  }
+
+  private rowToEntity(r: Record<string, any>): EntityRecord {
+    let genres: string[] | undefined;
+    if (typeof r.genres_json === 'string' && r.genres_json) {
+      try {
+        genres = JSON.parse(r.genres_json);
+      } catch {}
+    }
+    let meta: Record<string, unknown> | undefined;
+    if (typeof r.meta_json === 'string' && r.meta_json) {
+      try {
+        meta = JSON.parse(r.meta_json);
+      } catch {}
+    }
+    return {
+      entityId: String(r.entity_id),
+      entityType: r.entity_type as SonicEntityType,
+      title: String(r.title || ''),
+      subtitle: r.subtitle ? String(r.subtitle) : undefined,
+      artistKey: r.artist_key ? String(r.artist_key) : undefined,
+      genres,
+      language: r.language ? (String(r.language) as any) : undefined,
+      coverUrl: r.cover_url ? String(r.cover_url) : undefined,
+      externalPopularity: Number(r.external_popularity || 0),
+      derived: Number(r.derived || 0) === 1,
+      meta,
+      createdAt: Number(r.created_at || 0),
+      updatedAt: Number(r.updated_at || 0),
+    };
+  }
+
+  upsertEntityRelation(relation: EntityRelation): void {
+    if (!relation?.fromType || !relation?.fromId || !relation?.toType || !relation?.toId) return;
+    this.db
+      .prepare(
+        `INSERT INTO entity_relations (from_type, from_id, to_type, to_id, relation, weight, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(from_type, from_id, to_type, to_id, relation) DO UPDATE SET
+           weight = MAX(entity_relations.weight, excluded.weight),
+           updated_at = excluded.updated_at`,
+      )
+      .run(
+        relation.fromType,
+        relation.fromId,
+        relation.toType,
+        relation.toId,
+        relation.relation,
+        Math.max(0, Math.min(1, relation.weight || 1)),
+        relation.updatedAt || Date.now(),
+      );
+  }
+
+  upsertEntityRelations(relations: EntityRelation[]): void {
+    if (relations.length === 0) return;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      for (const rel of relations) this.upsertEntityRelation(rel);
+      this.db.exec('COMMIT');
+    } catch (err) {
+      try {
+        this.db.exec('ROLLBACK');
+      } catch {}
+      throw err;
+    }
+  }
+
+  getEntityRelations(
+    anchorType: SonicEntityType,
+    anchorId: string,
+    options?: { direction?: 'out' | 'in' | 'both'; toType?: SonicEntityType; limit?: number },
+  ): EntityRelation[] {
+    if (!anchorType || !anchorId) return [];
+    const direction = options?.direction || 'out';
+    const limit = Math.max(1, Math.min(500, options?.limit ?? 50));
+    const toTypeFilter = options?.toType;
+
+    const mapRow = (r: any): EntityRelation => ({
+      fromType: r.from_type as SonicEntityType,
+      fromId: String(r.from_id),
+      toType: r.to_type as SonicEntityType,
+      toId: String(r.to_id),
+      relation: String(r.relation) as any,
+      weight: Number(r.weight || 1),
+      updatedAt: Number(r.updated_at || 0),
+    });
+
+    const out: EntityRelation[] = [];
+    if (direction === 'out' || direction === 'both') {
+      const rows = toTypeFilter
+        ? (this.db
+            .prepare(
+              `SELECT * FROM entity_relations WHERE from_type = ? AND from_id = ? AND to_type = ? ORDER BY weight DESC LIMIT ?`,
+            )
+            .all(anchorType, anchorId, toTypeFilter, limit) as Array<Record<string, any>>)
+        : (this.db
+            .prepare(`SELECT * FROM entity_relations WHERE from_type = ? AND from_id = ? ORDER BY weight DESC LIMIT ?`)
+            .all(anchorType, anchorId, limit) as Array<Record<string, any>>);
+      for (const r of rows) out.push(mapRow(r));
+    }
+    if (direction === 'in' || direction === 'both') {
+      const rows = toTypeFilter
+        ? (this.db
+            .prepare(
+              `SELECT * FROM entity_relations WHERE to_type = ? AND to_id = ? AND from_type = ? ORDER BY weight DESC LIMIT ?`,
+            )
+            .all(anchorType, anchorId, toTypeFilter, limit) as Array<Record<string, any>>)
+        : (this.db
+            .prepare(`SELECT * FROM entity_relations WHERE to_type = ? AND to_id = ? ORDER BY weight DESC LIMIT ?`)
+            .all(anchorType, anchorId, limit) as Array<Record<string, any>>);
+      for (const r of rows) out.push(mapRow(r));
+    }
+    return out;
+  }
+
+  recordEntityFeedback(feedback: StoredEntityFeedback): { inserted: boolean; deduplicated: boolean } {
+    if (!feedback?.feedbackId || !feedback?.subjectKey || !feedback?.entityType || !feedback?.entityId) {
+      return { inserted: false, deduplicated: false };
+    }
+    const info = this.db
+      .prepare(
+        `INSERT OR IGNORE INTO user_entity_feedback (
+           feedback_id, subject_key, entity_type, entity_id, action, weight, progress_ratio, related_track_id, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        feedback.feedbackId,
+        feedback.subjectKey,
+        feedback.entityType,
+        feedback.entityId,
+        feedback.action,
+        feedback.weight,
+        feedback.progressRatio ?? null,
+        feedback.relatedTrackId ?? null,
+        feedback.createdAt,
+      );
+    const inserted = Number(info.changes) > 0;
+    return { inserted, deduplicated: !inserted };
+  }
+
+  getUserEntityFeedback(subjectKey: string, limit = 200, sinceMs = 0): StoredEntityFeedback[] {
+    if (!subjectKey) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT feedback_id, subject_key, entity_type, entity_id, action, weight, progress_ratio, related_track_id, created_at
+         FROM user_entity_feedback
+         WHERE subject_key = ? AND created_at >= ?
+         ORDER BY created_at DESC
+         LIMIT ?`,
+      )
+      .all(subjectKey, sinceMs, Math.min(1000, Math.max(1, limit))) as Array<Record<string, any>>;
+    return rows.map((r) => ({
+      feedbackId: String(r.feedback_id),
+      subjectKey: String(r.subject_key),
+      entityType: r.entity_type as SonicEntityType,
+      entityId: String(r.entity_id),
+      action: r.action,
+      weight: Number(r.weight || 0),
+      progressRatio: r.progress_ratio !== null && r.progress_ratio !== undefined ? Number(r.progress_ratio) : undefined,
+      relatedTrackId: r.related_track_id ? String(r.related_track_id) : undefined,
+      createdAt: Number(r.created_at || 0),
+    }));
+  }
+
+  getEntityAffinityStats(subjectKey: string, sinceMs = 0): EntityAffinityStat[] {
+    if (!subjectKey) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT entity_type, entity_id,
+                SUM(CASE WHEN weight > 0 THEN weight ELSE 0 END) AS pos_w,
+                SUM(CASE WHEN weight < 0 THEN -weight ELSE 0 END) AS neg_w,
+                COUNT(*) AS interactions,
+                MAX(created_at) AS last_at
+         FROM user_entity_feedback
+         WHERE subject_key = ? AND created_at >= ?
+         GROUP BY entity_type, entity_id`,
+      )
+      .all(subjectKey, sinceMs) as Array<Record<string, any>>;
+    return rows.map((r) => ({
+      entityType: r.entity_type as SonicEntityType,
+      entityId: String(r.entity_id),
+      positiveWeight: Number(r.pos_w || 0),
+      negativeWeight: Number(r.neg_w || 0),
+      interactions: Number(r.interactions || 0),
+      lastInteractionAt: Number(r.last_at || 0),
+    }));
+  }
+
+  clearUserEntityFeedback(subjectKey: string): number {
+    if (!subjectKey) return 0;
+    const info = this.db.prepare(`DELETE FROM user_entity_feedback WHERE subject_key = ?`).run(subjectKey);
+    return Number(info.changes) || 0;
+  }
+
+  countEntities(): { track: number; album: number; playlist: number; mv: number; relations: number; feedback: number } {
+    const rows = this.db
+      .prepare(`SELECT entity_type, COUNT(*) AS cnt FROM entities GROUP BY entity_type`)
+      .all() as Array<{ entity_type: string; cnt: number }>;
+    const byType: Record<string, number> = {};
+    for (const r of rows) byType[r.entity_type] = Number(r.cnt);
+    const relRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM entity_relations`).get() as { cnt: number };
+    const fbRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM user_entity_feedback`).get() as { cnt: number };
+    return {
+      track: byType.track || 0,
+      album: byType.album || 0,
+      playlist: byType.playlist || 0,
+      mv: byType.mv || 0,
+      relations: Number(relRow?.cnt || 0),
+      feedback: Number(fbRow?.cnt || 0),
+    };
+  }
+
   getStats(): { trackCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string } {
     const tRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM canonical_tracks`).get() as { cnt: number };
     const eRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM behavior_events`).get() as { cnt: number };
@@ -534,6 +890,8 @@ export class SqliteRecommendStore implements RecommendStore {
       subjectKey: String(r.subject_key),
       type: r.event_type,
       canonicalTrackId: r.canonical_track_id ? String(r.canonical_track_id) : undefined,
+      entityType: r.entity_type ? (String(r.entity_type) as SonicEntityType) : undefined,
+      entityId: r.entity_id ? String(r.entity_id) : undefined,
       artistKey: r.artist_key ? String(r.artist_key) : undefined,
       genres,
       language: r.language ? (String(r.language) as any) : undefined,

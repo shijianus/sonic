@@ -11,6 +11,7 @@ import type {
   CanonicalTrack,
   ComputedPopularity,
   DiscoverOptions,
+  EntityRecord,
   ExplanationSignal,
   ForYouOptions,
   RecommendationExplanation,
@@ -38,6 +39,7 @@ import {
   toCanonicalTrack,
 } from './track-canonical';
 import { getRecommendStore } from './memory-store';
+import { ensureMultiEntityCatalog, resolveEventEntity } from './entity-store';
 import { computeCatalogPopularity, exponentialTimeDecay } from './popularity';
 import { ensureCatalogSeeded } from './seed-catalog';
 import {
@@ -71,8 +73,10 @@ export function computeEventCredibilityWeight(ev: SonicBehaviorEventInput): numb
     case 'replay':
       return 3.5;
     case 'play_complete':
+    case 'watch_complete': // Video (MV) fully watched — same commitment level as a full listen
       return 2.5;
-    case 'play_progress': {
+    case 'play_progress':
+    case 'watch_progress': {
       const ratio =
         ev.progressRatio ??
         (ev.playedSeconds && ev.durationSeconds && ev.durationSeconds > 0
@@ -82,6 +86,8 @@ export function computeEventCredibilityWeight(ev: SonicBehaviorEventInput): numb
       if (ratio >= 0.45 || (ev.playedSeconds && ev.playedSeconds >= 60)) return 1.2;
       return 0.2;
     }
+    case 'open': // Opened an entity (album / playlist / mv page) — explicit curiosity signal
+      return 0.8;
     case 'play_start':
       return 0.35;
     case 'search_click':
@@ -122,22 +128,26 @@ export async function ingestBehaviorEvents(
   accepted: number;
   deduplicated: number;
   ignoredByPrivacy: number;
+  entityFeedbackAccepted: number;
   storageKind: string;
 }> {
   const store = getRecommendStore(env);
   ensureCatalogSeeded(store, env);
+  ensureMultiEntityCatalog(store, env);
 
   if (!identity.personalizationEnabled || !identity.subjectKey) {
     return {
       accepted: 0,
       deduplicated: 0,
       ignoredByPrivacy: inputs.length,
+      entityFeedbackAccepted: 0,
       storageKind: 'none',
     };
   }
 
   let accepted = 0;
   let deduplicated = 0;
+  let entityFeedbackAccepted = 0;
   const now = Date.now();
   const recentEvents = store.getUserEvents(identity.subjectKey, 12, now - HOUR_MS);
   const recentPositiveTracks = recentEvents
@@ -168,6 +178,13 @@ export async function ingestBehaviorEvents(
       continue;
     }
 
+    // Multi-entity path: entity-bearing events resolve onto a deterministic stored entity
+    // (never silently dropped). Track-affinity handling below continues unchanged.
+    let entityRecord: EntityRecord | null = null;
+    if (rawEv.entityType && rawEv.entityId) {
+      entityRecord = resolveEventEntity(store, rawEv, canonicalTrack, ts).entity;
+    }
+
     const cleanQuery = rawEv.query ? rawEv.query.trim().slice(0, 80) : undefined;
     if (cleanQuery && (rawEv.type === 'search' || rawEv.type === 'search_click')) {
       store.recordSearchQuery(compactNormalize(cleanQuery), cleanQuery, rawEv.type === 'search_click');
@@ -185,6 +202,8 @@ export async function ingestBehaviorEvents(
       subjectKey: identity.subjectKey,
       type: rawEv.type,
       canonicalTrackId: canonicalTrack?.canonicalTrackId,
+      entityType: entityRecord?.entityType,
+      entityId: entityRecord?.entityId,
       artistKey: canonicalTrack?.canonicalArtist || undefined,
       genres: canonicalTrack?.genres?.length ? canonicalTrack.genres : inferredQueryGenres.length ? inferredQueryGenres : undefined,
       language: canonicalTrack?.language,
@@ -201,6 +220,27 @@ export async function ingestBehaviorEvents(
     }
     if (res.inserted) {
       accepted += 1;
+
+      // Persist entity-level feedback (user_entity_feedback) for entity-bearing events
+      if (entityRecord) {
+        const feedbackId = `fb_${deterministicHash16(
+          `${identity.subjectKey}:entity:${entityRecord.entityType}:${entityRecord.entityId}:${rawEv.type}:${Math.floor(ts / 2000)}`,
+        )}`;
+        const fbRes = store.recordEntityFeedback({
+          feedbackId,
+          subjectKey: identity.subjectKey,
+          entityType: entityRecord.entityType,
+          entityId: entityRecord.entityId,
+          action: rawEv.type,
+          weight,
+          progressRatio: rawEv.progressRatio,
+          relatedTrackId: canonicalTrack?.canonicalTrackId,
+          createdAt: ts,
+        });
+        if (fbRes.inserted) {
+          entityFeedbackAccepted += 1;
+        }
+      }
 
       // Update Item-to-Item session co-occurrence graph on real positive engagement
       if (canonicalTrack && weight >= 1.1) {
@@ -228,6 +268,7 @@ export async function ingestBehaviorEvents(
     accepted,
     deduplicated,
     ignoredByPrivacy: 0,
+    entityFeedbackAccepted,
     storageKind: store.kind,
   };
 }
@@ -1395,12 +1436,14 @@ export async function getDiscoverRecommendations(
 export function clearUserRecommendationData(identity: UserIdentityContext, env?: AppEnv): {
   cleared: boolean;
   removedEvents: number;
+  removedEntityFeedback: number;
   storageKind: string;
 } {
   const store = getRecommendStore(env);
   if (!identity.subjectKey) {
-    return { cleared: false, removedEvents: 0, storageKind: store.kind };
+    return { cleared: false, removedEvents: 0, removedEntityFeedback: 0, storageKind: store.kind };
   }
   const removedEvents = store.clearUserEvents(identity.subjectKey);
-  return { cleared: true, removedEvents, storageKind: store.kind };
+  const removedEntityFeedback = store.clearUserEntityFeedback(identity.subjectKey);
+  return { cleared: true, removedEvents, removedEntityFeedback, storageKind: store.kind };
 }

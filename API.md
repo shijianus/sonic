@@ -239,14 +239,16 @@ async function getRecommendations() {
 
 | 方法 | 路径 | 说明 | 核心参数 |
 | :--- | :--- | :--- | :--- |
-| `GET` | `/api/sonic/recommend/for-you` | 个性化推荐 / 下一首续接 / 相似电台 | `mode=for-you\|recent\|favorites\|next\|radio`, `count`, `seedTrackId`, `diversity`, `temperature` |
+| `GET` | `/api/sonic/recommend/for-you` | 个性化推荐 / 下一首续接 / 相似电台 / 多实体混合 | `mode=for-you\|recent\|favorites\|next\|radio`, `feed=mixed`(多实体), `count`, `seedTrackId`, `diversity`, `temperature`, `types=track,album,playlist,mv`(仅 mixed) |
 | `GET` | `/api/sonic/recommend/trending` | 站内真实趋势热榜（严格区分外部热榜） | `window=24h\|7d\|all\|surging\|new`, `genre`, `personalized=0\|1`, `count` |
 | `GET` | `/api/sonic/recommend/similar` | 内容相似度与共现相似歌曲/相似歌手 | `trackId`, `title`, `artist`, `album`, `count`, `includeSameArtist=0\|1` |
 | `GET` | `/api/sonic/recommend/discover` | 风格流派与温度控制探索雷达 | `genre`, `language`, `temperature=0.1~1.5`, `count` |
 | `GET` | `/api/sonic/search/smart` | 智能混合搜索与自动补全建议 | `q`, `mode=search\|suggest`, `page`, `count`, `personalize=0\|1` |
-| `POST / DELETE / GET` | `/api/sonic/events` | 行为反馈上报与一键清除推荐画像 | 请求体 `{ events: [...] }`；支持 `X-Sonic-Personalization: off` 隐私关闭 |
+| `POST / DELETE / GET` | `/api/sonic/events` | 行为反馈上报（含实体事件 track/album/playlist/mv）与一键清除推荐画像 | 请求体 `{ events: [...] }`；实体事件带 `entityType`/`entityId`；支持 `X-Sonic-Personalization: off` 隐私关闭 |
 
 完整算法公式与架构说明请参阅 [`docs/recommendation/01-audit-and-selection.md`](docs/recommendation/01-audit-and-selection.md) 与 [`docs/recommendation/02-architecture-and-algorithms.md`](docs/recommendation/02-architecture-and-algorithms.md)。
+
+**多实体混合推荐（`feed=mixed`）**：返回 `data.items[]`（每项含 `type/id/title/score/reason/reasonCode`，track 项内嵌可播放 `track` 对象，实体项带 `entityId`/`trackIds`）与 `data.distribution`（track/album/playlist/mv 计数）；不带 `feed` 或 `feed` 取其他值时严格保持旧版 `data.tracks` 契约。实体事件 = 行为类型（`favorite` / `play_complete` / `watch_complete` / `watch_progress` / `open` / `skip` / `dislike` 等）× `entityType=track|album|playlist|mv` + `entityId`；非法实体字段整批返回 4xx（`INVALID_ENTITY_TYPE` / `INVALID_ENTITY_ID`），绝不静默丢弃。`DELETE /api/sonic/events` 级联清空 `behavior_events` 与 `user_entity_feedback`（响应含 `removedEntityFeedback`）。设计与自证详见 [`docs/recommend-multi-entity.md`](docs/recommend-multi-entity.md) 与 [`docs/multi-entity-implementation-status.md`](docs/multi-entity-implementation-status.md)。
 
 ---
 

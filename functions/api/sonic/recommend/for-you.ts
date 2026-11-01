@@ -8,9 +8,12 @@ import { callLocalEngineJson } from '../../../_lib/sonic/local-engine';
 import { buildGatewayHeaders, guardGatewayRequest, sonicError } from '../../../_lib/sonic/route-helpers';
 import {
   buildPrivacySafeCacheHeaders,
+  getMultiEntityRecommendations,
   getRecommendationsForYou,
   resolveUserIdentity,
   type ForYouOptions,
+  type MixedFeedOptions,
+  type SonicEntityType,
 } from '../../../_lib/sonic/recommend';
 
 export async function onRequest({
@@ -68,6 +71,74 @@ export async function onRequest({
     }
     degraded = true;
     degradedReason = engineRes.error || 'local_engine_unavailable';
+  }
+
+  // Multi-entity mixed feed branch. The legacy tracks contract below stays byte-for-byte
+  // untouched when `feed` is absent or not `mixed`.
+  const feedRaw = (url.searchParams.get('feed') || '').trim().toLowerCase();
+  if (feedRaw === 'mixed') {
+    const knownParams = new Set([
+      'feed',
+      'mode',
+      'count',
+      'types',
+      'exclude',
+      'diversity',
+      'temperature',
+      'personalize',
+      'personalization',
+    ]);
+    const unrecognizedParams = Array.from(url.searchParams.keys()).filter((k) => !knownParams.has(k));
+    const mixedTypes = (url.searchParams.get('types') || '')
+      .split(',')
+      .map((s) => s.trim().toLowerCase())
+      .filter((s): s is SonicEntityType => ['track', 'album', 'playlist', 'mv'].includes(s));
+    const mixedCount = Math.min(50, Math.max(1, parseInt(url.searchParams.get('count') || '12', 10) || 12));
+    const mixedExclude = (url.searchParams.get('exclude') || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const mixedOptions: MixedFeedOptions = {
+      mode: 'for-you',
+      count: mixedCount,
+      excludeIds: mixedExclude,
+      ...(mixedTypes.length > 0 ? { types: mixedTypes } : {}),
+    };
+
+    try {
+      const data = getMultiEntityRecommendations(identity, mixedOptions, env);
+      return jsonResponse(
+        {
+          brand: 'Sonic',
+          data,
+          meta: {
+            cached: false,
+            cacheLevel: 'none',
+            latencyMs: Date.now() - start,
+            provider: 'recommend-for-you',
+            runtime: config.runtime,
+            degraded,
+            ...(degraded ? { degradedReason, circuitState } : {}),
+            ...(unrecognizedParams.length > 0 ? { unrecognizedParams } : {}),
+          },
+        },
+        {
+          status: 200,
+          headers: buildGatewayHeaders(
+            { ...privacyHeaders, 'X-Sonic-Provider': 'recommend-for-you' },
+            degraded,
+            circuitState,
+          ),
+        },
+      );
+    } catch (err: any) {
+      return sonicError('RECOMMEND_ERROR', err?.message || 'Failed to compute mixed recommendations', 500, {
+        provider: 'recommend-for-you',
+        latencyMs: Date.now() - start,
+        degraded,
+        circuitState: circuitState as any,
+      });
+    }
   }
 
   const modeRaw = (url.searchParams.get('mode') || 'for-you').trim().toLowerCase();

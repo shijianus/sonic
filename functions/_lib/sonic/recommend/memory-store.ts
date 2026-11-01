@@ -5,8 +5,13 @@
 import type { AppEnv } from '../../types';
 import type {
   CanonicalTrack,
+  EntityAffinityStat,
+  EntityRecord,
+  EntityRelation,
   RecommendStore,
+  SonicEntityType,
   StoredBehaviorEvent,
+  StoredEntityFeedback,
   TrackEdition,
 } from './types';
 import {
@@ -22,6 +27,9 @@ const MAX_TRACKS = 6000;
 const MAX_EVENTS = 25000;
 const MAX_COOCCURRENCE_ANCHORS = 3000;
 const MAX_QUERIES = 2000;
+const MAX_ENTITIES = 8000;
+const MAX_ENTITY_RELATION_ANCHORS = 8000;
+const MAX_ENTITY_FEEDBACK = 50000;
 
 export class MemoryRecommendStore implements RecommendStore {
   public readonly kind = 'memory' as const;
@@ -34,6 +42,13 @@ export class MemoryRecommendStore implements RecommendStore {
   private userEventsIndex = new Map<string, StoredBehaviorEvent[]>();
   private cooccurrence = new Map<string, Map<string, number>>();
   private searchQueries = new Map<string, { display: string; count: number; updatedAt: number }>();
+  // Multi-entity state
+  private entities = new Map<string, EntityRecord>(); // "<type>:<id>" -> record
+  private entityRelationsOut = new Map<string, Map<string, EntityRelation>>(); // "<type>:<id>" -> relations
+  private entityRelationsIn = new Map<string, Map<string, EntityRelation>>();
+  private entityFeedbackIds = new Set<string>();
+  private entityFeedback: StoredEntityFeedback[] = [];
+  private userEntityFeedbackIndex = new Map<string, StoredEntityFeedback[]>();
 
   upsertTrack(incoming: CanonicalTrack): void {
     if (!incoming?.canonicalTrackId) return;
@@ -328,6 +343,210 @@ export class MemoryRecommendStore implements RecommendStore {
     };
   }
 
+  // ── Multi-entity catalog & feedback (entities / entity_relations / user_entity_feedback) ──
+
+  upsertEntity(entity: EntityRecord): void {
+    if (!entity?.entityId || !entity?.entityType) return;
+    const key = `${entity.entityType}:${entity.entityId}`;
+    const now = Date.now();
+    if (!this.entities.has(key) && this.entities.size >= MAX_ENTITIES) {
+      const oldestKey = this.entities.keys().next().value;
+      if (oldestKey) this.entities.delete(oldestKey);
+    }
+    const existing = this.entities.get(key);
+    this.entities.set(key, {
+      ...entity,
+      subtitle: entity.subtitle ?? existing?.subtitle,
+      artistKey: entity.artistKey ?? existing?.artistKey,
+      genres: entity.genres ?? existing?.genres,
+      language: entity.language ?? existing?.language,
+      coverUrl: entity.coverUrl ?? existing?.coverUrl,
+      meta: entity.meta ?? existing?.meta,
+      createdAt: entity.createdAt || existing?.createdAt || now,
+      updatedAt: entity.updatedAt || now,
+    });
+  }
+
+  upsertEntities(entities: EntityRecord[]): void {
+    for (const e of entities) this.upsertEntity(e);
+  }
+
+  getEntity(entityType: SonicEntityType, entityId: string): EntityRecord | null {
+    if (!entityType || !entityId) return null;
+    return this.entities.get(`${entityType}:${entityId}`) || null;
+  }
+
+  listEntities(entityType?: SonicEntityType, limit = 500): EntityRecord[] {
+    const all: EntityRecord[] = [];
+    for (const e of this.entities.values()) {
+      if (!entityType || e.entityType === entityType) all.push(e);
+    }
+    all.sort((a, b) => b.updatedAt - a.updatedAt);
+    return all.slice(0, Math.max(1, limit));
+  }
+
+  private addEntityRelation(rel: EntityRelation): void {
+    const outKey = `${rel.fromType}:${rel.fromId}`;
+    const inKey = `${rel.toType}:${rel.toId}`;
+    const relKey = `${rel.toType}:${rel.toId}:${rel.relation}`;
+    let outMap = this.entityRelationsOut.get(outKey);
+    if (!outMap) {
+      if (this.entityRelationsOut.size >= MAX_ENTITY_RELATION_ANCHORS) {
+        const oldest = this.entityRelationsOut.keys().next().value;
+        if (oldest) this.entityRelationsOut.delete(oldest);
+      }
+      outMap = new Map<string, EntityRelation>();
+      this.entityRelationsOut.set(outKey, outMap);
+    }
+    const prev = outMap.get(relKey);
+    outMap.set(relKey, { ...rel, weight: Math.max(prev?.weight ?? 0, rel.weight), updatedAt: rel.updatedAt || Date.now() });
+
+    const inRelKey = `${rel.fromType}:${rel.fromId}:${rel.relation}`;
+    let inMap = this.entityRelationsIn.get(inKey);
+    if (!inMap) {
+      if (this.entityRelationsIn.size >= MAX_ENTITY_RELATION_ANCHORS) {
+        const oldest = this.entityRelationsIn.keys().next().value;
+        if (oldest) this.entityRelationsIn.delete(oldest);
+      }
+      inMap = new Map<string, EntityRelation>();
+      this.entityRelationsIn.set(inKey, inMap);
+    }
+    const prevIn = inMap.get(inRelKey);
+    inMap.set(inRelKey, {
+      fromType: rel.fromType,
+      fromId: rel.fromId,
+      toType: rel.toType,
+      toId: rel.toId,
+      relation: rel.relation,
+      weight: Math.max(prevIn?.weight ?? 0, rel.weight),
+      updatedAt: rel.updatedAt || Date.now(),
+    });
+  }
+
+  upsertEntityRelation(relation: EntityRelation): void {
+    if (!relation?.fromType || !relation?.fromId || !relation?.toType || !relation?.toId) return;
+    this.addEntityRelation({
+      ...relation,
+      weight: Math.max(0, Math.min(1, relation.weight || 1)),
+    });
+  }
+
+  upsertEntityRelations(relations: EntityRelation[]): void {
+    for (const rel of relations) this.upsertEntityRelation(rel);
+  }
+
+  getEntityRelations(
+    anchorType: SonicEntityType,
+    anchorId: string,
+    options?: { direction?: 'out' | 'in' | 'both'; toType?: SonicEntityType; limit?: number },
+  ): EntityRelation[] {
+    if (!anchorType || !anchorId) return [];
+    const direction = options?.direction || 'out';
+    const limit = Math.max(1, Math.min(500, options?.limit ?? 50));
+    const anchorKey = `${anchorType}:${anchorId}`;
+    const out: EntityRelation[] = [];
+    if (direction === 'out' || direction === 'both') {
+      for (const rel of this.entityRelationsOut.get(anchorKey)?.values() || []) {
+        if (options?.toType && rel.toType !== options.toType) continue;
+        out.push(rel);
+      }
+    }
+    if (direction === 'in' || direction === 'both') {
+      for (const rel of this.entityRelationsIn.get(anchorKey)?.values() || []) {
+        if (options?.toType && rel.fromType !== options.toType) continue;
+        out.push(rel);
+      }
+    }
+    out.sort((a, b) => b.weight - a.weight);
+    return out.slice(0, limit);
+  }
+
+  recordEntityFeedback(feedback: StoredEntityFeedback): { inserted: boolean; deduplicated: boolean } {
+    if (!feedback?.feedbackId || !feedback?.subjectKey || !feedback?.entityType || !feedback?.entityId) {
+      return { inserted: false, deduplicated: false };
+    }
+    if (this.entityFeedbackIds.has(feedback.feedbackId)) {
+      return { inserted: false, deduplicated: true };
+    }
+    if (this.entityFeedback.length >= MAX_ENTITY_FEEDBACK) {
+      const evicted = this.entityFeedback.shift();
+      if (evicted) {
+        this.entityFeedbackIds.delete(evicted.feedbackId);
+        const list = this.userEntityFeedbackIndex.get(evicted.subjectKey);
+        if (list && list[0]?.feedbackId === evicted.feedbackId) list.shift();
+      }
+    }
+    this.entityFeedbackIds.add(feedback.feedbackId);
+    this.entityFeedback.push(feedback);
+    let userList = this.userEntityFeedbackIndex.get(feedback.subjectKey);
+    if (!userList) {
+      userList = [];
+      this.userEntityFeedbackIndex.set(feedback.subjectKey, userList);
+    }
+    userList.push(feedback);
+    if (userList.length > 1200) userList.shift();
+    return { inserted: true, deduplicated: false };
+  }
+
+  getUserEntityFeedback(subjectKey: string, limit = 200, sinceMs = 0): StoredEntityFeedback[] {
+    if (!subjectKey) return [];
+    const list = this.userEntityFeedbackIndex.get(subjectKey) || [];
+    const out: StoredEntityFeedback[] = [];
+    for (let i = list.length - 1; i >= 0 && out.length < limit; i--) {
+      if (list[i].createdAt >= sinceMs) out.push(list[i]);
+    }
+    return out;
+  }
+
+  getEntityAffinityStats(subjectKey: string, sinceMs = 0): EntityAffinityStat[] {
+    if (!subjectKey) return [];
+    const agg = new Map<string, EntityAffinityStat>();
+    const list = this.userEntityFeedbackIndex.get(subjectKey) || [];
+    for (const fb of list) {
+      if (fb.createdAt < sinceMs) continue;
+      const key = `${fb.entityType}:${fb.entityId}`;
+      let stat = agg.get(key);
+      if (!stat) {
+        stat = {
+          entityType: fb.entityType,
+          entityId: fb.entityId,
+          positiveWeight: 0,
+          negativeWeight: 0,
+          interactions: 0,
+          lastInteractionAt: 0,
+        };
+        agg.set(key, stat);
+      }
+      if (fb.weight > 0) stat.positiveWeight += fb.weight;
+      else stat.negativeWeight += -fb.weight;
+      stat.interactions += 1;
+      stat.lastInteractionAt = Math.max(stat.lastInteractionAt, fb.createdAt);
+    }
+    return Array.from(agg.values());
+  }
+
+  clearUserEntityFeedback(subjectKey: string): number {
+    if (!subjectKey) return 0;
+    const list = this.userEntityFeedbackIndex.get(subjectKey) || [];
+    const removed = list.length;
+    for (const fb of list) this.entityFeedbackIds.delete(fb.feedbackId);
+    this.userEntityFeedbackIndex.delete(subjectKey);
+    if (removed > 0) {
+      this.entityFeedback = this.entityFeedback.filter((fb) => fb.subjectKey !== subjectKey);
+    }
+    return removed;
+  }
+
+  countEntities(): { track: number; album: number; playlist: number; mv: number; relations: number; feedback: number } {
+    const byType = { track: 0, album: 0, playlist: 0, mv: 0 };
+    for (const e of this.entities.values()) {
+      if (e.entityType in byType) byType[e.entityType as keyof typeof byType] += 1;
+    }
+    let relations = 0;
+    for (const m of this.entityRelationsOut.values()) relations += m.size;
+    return { ...byType, relations, feedback: this.entityFeedback.length };
+  }
+
   clearAll(): void {
     this.tracks.clear();
     this.platformIndex.clear();
@@ -337,6 +556,12 @@ export class MemoryRecommendStore implements RecommendStore {
     this.userEventsIndex.clear();
     this.cooccurrence.clear();
     this.searchQueries.clear();
+    this.entities.clear();
+    this.entityRelationsOut.clear();
+    this.entityRelationsIn.clear();
+    this.entityFeedbackIds.clear();
+    this.entityFeedback = [];
+    this.userEntityFeedbackIndex.clear();
   }
 }
 

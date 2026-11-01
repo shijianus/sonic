@@ -25,6 +25,9 @@ const VALID_EVENT_TYPES = new Set([
   'play_start',
   'play_progress',
   'play_complete',
+  'watch_progress',
+  'watch_complete',
+  'open',
   'skip',
   'replay',
   'favorite',
@@ -32,6 +35,51 @@ const VALID_EVENT_TYPES = new Set([
   'dislike',
   'undislike',
 ]);
+
+// Entity-bearing events are first-class: entityType must be one of these, and entityId must
+// accompany it. Invalid entity fields are rejected with an explicit 4xx — NEVER silently
+// accepted with the entity semantics dropped.
+const VALID_ENTITY_TYPES = new Set(['track', 'album', 'playlist', 'mv']);
+
+interface EventValidationIssue {
+  index: number;
+  code: string;
+  message: string;
+}
+
+function validateEvent(ev: any, index: number): EventValidationIssue | null {
+  if (!ev || typeof ev !== 'object') {
+    return { index, code: 'INVALID_EVENT', message: 'Event must be a JSON object' };
+  }
+  if (!VALID_EVENT_TYPES.has(String(ev.type))) {
+    return { index, code: 'INVALID_EVENT_TYPE', message: `Unknown event type: ${String(ev.type)}` };
+  }
+  const hasEntityType = ev.entityType !== undefined && ev.entityType !== null && ev.entityType !== '';
+  const hasEntityId = ev.entityId !== undefined && ev.entityId !== null && ev.entityId !== '';
+  if (hasEntityType && !VALID_ENTITY_TYPES.has(String(ev.entityType))) {
+    return {
+      index,
+      code: 'INVALID_ENTITY_TYPE',
+      message: `entityType must be one of track|album|playlist|mv, got: ${String(ev.entityType)}`,
+    };
+  }
+  if (!hasEntityType && hasEntityId) {
+    return {
+      index,
+      code: 'INVALID_ENTITY_TYPE',
+      message: 'entityId provided without entityType — entity fields are never silently dropped',
+    };
+  }
+  if (hasEntityType) {
+    if (!hasEntityId || typeof ev.entityId !== 'string' || ev.entityId.trim().length === 0) {
+      return { index, code: 'INVALID_ENTITY_ID', message: `entityType "${ev.entityType}" requires a non-empty entityId` };
+    }
+    if (ev.entityId.length > 128) {
+      return { index, code: 'INVALID_ENTITY_ID', message: 'entityId exceeds 128 characters' };
+    }
+  }
+  return null;
+}
 
 export async function onRequest({
   request,
@@ -76,6 +124,7 @@ export async function onRequest({
     const identity = await resolveUserIdentity(request, env);
     const store = getRecommendStore(env);
     const profile = buildUserPreferenceProfile(identity, store);
+    const entityStats = identity.subjectKey ? store.getEntityAffinityStats(identity.subjectKey) : [];
     return jsonResponse(
       {
         brand: 'Sonic',
@@ -95,6 +144,17 @@ export async function onRequest({
             .slice(0, 5)
             .map(([genre]) => genre),
           recentQueries: profile.recentQueries.slice(0, 6),
+          entityFeedbackCount: entityStats.reduce((n, s) => n + s.interactions, 0),
+          topEntities: entityStats
+            .filter((s) => s.positiveWeight > 0)
+            .sort((a, b) => b.positiveWeight - a.positiveWeight)
+            .slice(0, 4)
+            .map((s) => ({
+              type: s.entityType,
+              id: s.entityId,
+              title: store.getEntity(s.entityType, s.entityId)?.title || s.entityId,
+              weight: Math.round(s.positiveWeight * 100) / 100,
+            })),
           storageKind: store.kind,
         },
         meta: {
@@ -129,6 +189,7 @@ export async function onRequest({
         data: {
           cleared: engineCleared || localClear.cleared,
           removedEvents: localClear.removedEvents,
+          removedEntityFeedback: localClear.removedEntityFeedback,
           privacyMode: identity.mode,
         },
         meta: {
@@ -171,10 +232,27 @@ export async function onRequest({
   }
 
   const validEvents: SonicBehaviorEventInput[] = [];
-  for (const ev of rawEvents.slice(0, 50)) {
-    if (ev && typeof ev === 'object' && VALID_EVENT_TYPES.has(String(ev.type))) {
+  const issues: EventValidationIssue[] = [];
+  for (let i = 0; i < rawEvents.slice(0, 50).length; i++) {
+    const ev = rawEvents[i];
+    const issue = validateEvent(ev, i);
+    if (issue) {
+      issues.push(issue);
+    } else {
       validEvents.push(ev as SonicBehaviorEventInput);
     }
+  }
+
+  // Explicit 4xx contract: an invalid event (unknown type or malformed entity fields) fails the
+  // whole batch instead of being quietly filtered, so clients can never mistake a dropped
+  // entity signal for an accepted one.
+  if (issues.length > 0) {
+    return sonicError(issues[0].code, issues[0].message, 400, {
+      provider: 'sonic-events',
+      ...(issues.length > 1 || issues[0].index > 0
+        ? ({ attempts: issues.map((it) => ({ provider: `event#${it.index}`, error: it.code })) } as any)
+        : {}),
+    });
   }
 
   if (validEvents.length === 0) {
