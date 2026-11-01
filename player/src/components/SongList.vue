@@ -18,6 +18,7 @@ interface Props {
   showControls?: boolean
   emptyMessage?: string
   loading?: boolean
+  flat?: boolean
 }
 
 interface Emits {
@@ -36,6 +37,7 @@ const props = withDefaults(defineProps<Props>(), {
   showControls: true,
   emptyMessage: '',
   loading: false,
+  flat: false,
 })
 
 const emit = defineEmits<Emits>()
@@ -245,10 +247,43 @@ const getQualityBadgeInfo = (song: Song) => {
     width: auto;
   }
 }
+
+/* ── 列表滚动条滑块（清晰可见、天蓝色毛玻璃触感、支持鼠标拖拽） ── */
+.song-list-scroll {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(56, 189, 248, 0.45) transparent !important;
+  -ms-overflow-style: auto !important;
+}
+
+.song-list-scroll::-webkit-scrollbar {
+  display: block !important;
+  width: 6px !important;
+}
+
+.song-list-scroll::-webkit-scrollbar-track {
+  display: block !important;
+  background: transparent !important;
+}
+
+.song-list-scroll::-webkit-scrollbar-thumb {
+  display: block !important;
+  background-color: rgba(56, 189, 248, 0.4) !important;
+  border-radius: 9999px !important;
+  border: 1px solid rgba(56, 189, 248, 0.25) !important;
+  background-clip: padding-box !important;
+  transition: background-color 0.2s ease;
+}
+
+.song-list-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(56, 189, 248, 0.8) !important;
+}
 </style>
 <template>
   <div class="flex h-full flex-col overflow-hidden">
-    <div class="glass-card flex flex-1 flex-col overflow-hidden p-2">
+    <div
+      class="flex flex-1 flex-col overflow-hidden"
+      :class="props.flat ? '' : 'glass-card p-2'"
+    >
       <!-- 列表头部 -->
       <div
         v-if="showHeader"
@@ -269,7 +304,7 @@ const getQualityBadgeInfo = (song: Song) => {
       </div>
 
       <!-- Loading 骨架屏 -->
-      <div v-if="loading" class="custom-scrollbar h-full space-y-1 overflow-x-hidden overflow-y-auto pr-2">
+      <div v-if="loading" class="song-list-scroll flex-1 min-h-0 space-y-1 overflow-x-hidden overflow-y-auto pr-2">
         <div
           v-for="i in 12"
           :key="i"
@@ -306,7 +341,7 @@ const getQualityBadgeInfo = (song: Song) => {
       <!-- 歌曲列表 -->
       <div
         v-else-if="songs.length > 0"
-        class="custom-scrollbar h-full space-y-1 overflow-x-hidden overflow-y-auto pr-2"
+        class="song-list-scroll flex-1 min-h-0 space-y-1 overflow-x-hidden overflow-y-auto pr-2"
       >
         <div
           v-for="(song, index) in songs"

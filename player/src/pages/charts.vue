@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { reactive, toRefs, computed, watch, onMounted, ref } from 'vue'
+import { reactive, toRefs, computed, watch, onMounted } from 'vue'
 import SongList from '@/components/SongList.vue'
-import PageSkeleton from '@/components/PageSkeleton.vue'
 import { topSong, toplist, playlistTrackAll } from '@/api'
 import { fetchRecommendTrending } from '@/api/recommend'
 import { usePlayActions } from '@/composables/usePlayActions'
@@ -16,8 +15,6 @@ const recommendStore = useRecommendStore()
 
 type MainTabKey = 'trending' | 'newSong' | 'official'
 type TrendingWindowKey = '7d' | '24h' | 'surging' | 'new'
-
-const isExpandedOfficial = ref(false)
 
 const state = reactive({
   activeTab: 'trending' as MainTabKey,
@@ -34,6 +31,10 @@ const state = reactive({
 })
 
 const { activeTab, trendingWindow, activeType } = toRefs(state)
+
+const displayedOfficialLists = computed(() => {
+  return state.officialLists.slice(0, 22)
+})
 
 const mainTabs = computed(() => [
   { key: 'trending' as const, labelKey: 'charts.trending', icon: 'icon-[mdi--chart-line-variant]' },
@@ -163,7 +164,6 @@ watch(activeType, () => {
 })
 
 watch(activeTab, (val) => {
-  isExpandedOfficial.value = false
   if (val === 'trending' && !state.trendingSongs.length) {
     loadTrendingSongs()
   } else if (val === 'newSong' && !state.songs.length) {
@@ -332,26 +332,23 @@ onMounted(() => {
               </button>
             </div>
             <span class="text-primary/35 text-[11px] ml-2 hidden sm:inline">
-              轻触切换权威官方榜单
+              权威官方榜单速递
             </span>
           </div>
 
-          <!-- 官方榜单专属：2行结构化排版，上下格式（上名称、下浅细更新周期），无水平滑块 -->
+          <!-- 官方榜单专属：2行排版，上下格式（上名称、下浅细更新周期），禁止横向滑块 -->
           <div class="flex items-start gap-2 pt-0.5">
-            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 mt-1.5">
+            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 mt-1">
               {{ t('charts.official') }}:
             </span>
 
             <div class="flex-1 min-w-0">
-              <div
-                class="flex flex-wrap gap-1.5 transition-all duration-300"
-                :class="isExpandedOfficial ? 'max-h-[260px] overflow-y-auto pr-1' : 'max-h-[82px] overflow-hidden'"
-              >
+              <div class="flex flex-wrap gap-1.5 max-h-[76px] overflow-hidden">
                 <button
-                  v-for="item in state.officialLists"
+                  v-for="item in displayedOfficialLists"
                   :key="item.id"
                   type="button"
-                  class="group flex flex-col items-center justify-center px-2.5 py-1 rounded-lg transition-all cursor-pointer text-center shrink-0 border"
+                  class="group flex flex-col items-center justify-center px-2 py-1 rounded-lg transition-all cursor-pointer text-center shrink-0 border h-[34px] min-w-[70px] max-w-[94px]"
                   :class="
                     state.selectedList?.id === item.id
                       ? 'bg-sky-500/20 text-sky-400 border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
@@ -359,36 +356,22 @@ onMounted(() => {
                   "
                   @click="selectList(item)"
                 >
-                  <div class="flex items-center gap-1">
+                  <div class="flex items-center gap-1 max-w-full">
                     <span
                       v-if="state.selectedList?.id === item.id"
-                      class="icon-[mdi--equalizer] h-3 w-3 text-sky-400 animate-pulse"
+                      class="icon-[mdi--equalizer] h-3 w-3 text-sky-400 animate-pulse shrink-0"
                     />
-                    <span class="text-xs font-medium leading-tight truncate max-w-[96px]">{{ item.name }}</span>
+                    <span class="text-[11px] font-medium leading-none truncate">{{ item.name }}</span>
                   </div>
                   <span
                     v-if="item.updateFrequency"
-                    class="text-[10px] text-primary/40 font-normal leading-tight mt-0.5 truncate max-w-[88px]"
+                    class="text-[9px] text-primary/40 font-normal leading-none mt-0.5 truncate max-w-full"
                   >
                     {{ item.updateFrequency }}
                   </span>
                 </button>
               </div>
             </div>
-
-            <!-- 更多/收起 按钮 -->
-            <button
-              v-if="state.officialLists.length > 14"
-              type="button"
-              class="shrink-0 flex items-center gap-1 text-[11px] text-primary/50 hover:text-sky-400 px-2 py-1 rounded-lg hover:bg-hover-glass transition-colors mt-1 cursor-pointer"
-              @click="isExpandedOfficial = !isExpandedOfficial"
-            >
-              <span>{{ isExpandedOfficial ? '收起' : '更多' }}</span>
-              <span
-                :class="isExpandedOfficial ? 'icon-[mdi--chevron-up]' : 'icon-[mdi--chevron-down]'"
-                class="h-3.5 w-3.5"
-              />
-            </button>
           </div>
         </div>
       </div>
@@ -397,46 +380,40 @@ onMounted(() => {
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- 主展示区（下栏内容区）：严格同步“歌手”页面，并配置清晰可见的滚动滑块 -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <div class="charts-content-container flex-1 min-h-0 px-1 sm:px-2 pb-3 overflow-hidden">
-      <PageSkeleton v-if="currentLoading" :sections="['list']" :list-count="12" />
-      <SongList v-else :songs="currentSongs" :show-header="true" :show-controls="true" />
+    <div class="charts-content-container flex-1 min-h-0 px-1 sm:px-2 pb-2 overflow-hidden">
+      <SongList :songs="currentSongs" :loading="currentLoading" :show-header="true" :show-controls="true" :flat="true" />
     </div>
   </div>
 </template>
 
 <style scoped>
 /* ── 深度强化歌曲列表的垂直滚动条滑块（清晰可见、精致毛玻璃触感、支持拖拽） ── */
-.charts-content-container :deep(.custom-scrollbar),
-.charts-content-container :deep(.overflow-y-auto) {
+.charts-content-container :deep(.song-list-scroll) {
   scrollbar-width: thin !important;
   scrollbar-color: rgba(56, 189, 248, 0.45) transparent !important;
   -ms-overflow-style: auto !important;
 }
 
-.charts-content-container :deep(.custom-scrollbar::-webkit-scrollbar),
-.charts-content-container :deep(.overflow-y-auto::-webkit-scrollbar) {
+.charts-content-container :deep(.song-list-scroll::-webkit-scrollbar) {
   display: block !important;
   width: 6px !important;
 }
 
-.charts-content-container :deep(.custom-scrollbar::-webkit-scrollbar-track),
-.charts-content-container :deep(.overflow-y-auto::-webkit-scrollbar-track) {
+.charts-content-container :deep(.song-list-scroll::-webkit-scrollbar-track) {
   display: block !important;
   background: transparent !important;
 }
 
-.charts-content-container :deep(.custom-scrollbar::-webkit-scrollbar-thumb),
-.charts-content-container :deep(.overflow-y-auto::-webkit-scrollbar-thumb) {
+.charts-content-container :deep(.song-list-scroll::-webkit-scrollbar-thumb) {
   display: block !important;
   background-color: rgba(56, 189, 248, 0.4) !important;
   border-radius: 9999px !important;
-  border: 1px solid rgba(56, 189, 248, 0.2) !important;
+  border: 1px solid rgba(56, 189, 248, 0.25) !important;
   background-clip: padding-box !important;
   transition: background-color 0.2s ease;
 }
 
-.charts-content-container :deep(.custom-scrollbar::-webkit-scrollbar-thumb:hover),
-.charts-content-container :deep(.overflow-y-auto::-webkit-scrollbar-thumb:hover) {
-  background-color: rgba(56, 189, 248, 0.75) !important;
+.charts-content-container :deep(.song-list-scroll::-webkit-scrollbar-thumb:hover) {
+  background-color: rgba(56, 189, 248, 0.8) !important;
 }
 </style>
