@@ -1,5 +1,5 @@
 <script setup lang="ts">
-// 搜索页脚本：关键词输入、云搜索类型切换、分页与历史记录
+// 搜索页脚本：关键词输入、云搜索类型切换、分页与历史记录、风格探索推荐结合
 import SearchSongs from '@/components/Search/SearchSongs.vue'
 import SearchPlaylists from '@/components/Search/SearchPlaylists.vue'
 import SearchMVs from '@/components/Search/SearchMVs.vue'
@@ -44,6 +44,17 @@ const inputFocused = ref(false)
 const placeholder = ref('')
 const liveSuggestions = ref<SmartSuggestionItem[]>([])
 let suggestTimer: ReturnType<typeof setTimeout> | null = null
+
+// 当前选中的风格标签（与探索雷达联动）
+const selectedTag = ref('')
+
+// 内置充足的音乐风格与情绪标签（躺在搜索区域下方供用户选择）
+const recommendedTags = [
+  '华语流行', '欧美流行', '粤语金曲', '摇滚', '民谣', '电子音乐', '说唱',
+  'R&B', '纯音乐', 'ACG二次元', '古典', '爵士', '古风', '轻音乐',
+  '朋克', '蓝调', '金属', '治愈系', '经典老歌', '影视原声', '学习工作',
+  '运动健身', '晚安助眠', '浪漫抒情', '独立音乐', '乡村音乐', '舞曲',
+]
 
 watch(searchInput, (val) => {
   if (suggestTimer) clearTimeout(suggestTimer)
@@ -117,19 +128,51 @@ watch(page, () => {
   state.isLoading = activeType.value !== 1 && !!q.value
 })
 
-// 搜索关键词
+// 监听路由关键词同步输入框与选中标签
+watch(
+  q,
+  (val) => {
+    searchInput.value = val
+    if (val) {
+      selectedTag.value = val
+    }
+    if (!val && state.hotSearches.length === 0) {
+      fetchHotSearch()
+    }
+  },
+  { immediate: true }
+)
+
+// 执行搜索关键词
 const doSearch = (keyword: string) => {
-  if (!keyword.trim()) return
-  globalStore.addSearchHistory(keyword.trim())
-  searchInput.value = ''
+  const term = keyword.trim()
+  if (!term) return
+  globalStore.addSearchHistory(term)
+  searchInput.value = term
   inputRef.value?.blur()
-  router.push({ path: '/search', query: { q: keyword.trim() } })
+  router.push({ path: '/search', query: { q: term } })
+}
+
+// 点击内置推荐 Tag：写入输入框，粗略搜索歌曲，并联动改变风格雷达单曲结果
+const handleSelectTag = (tag: string) => {
+  selectedTag.value = tag
+  searchInput.value = tag
+  doSearch(tag)
 }
 
 // 提交搜索（从输入框回车或点击按钮）
 const handleSubmit = () => {
   const keyword = searchInput.value.trim() || placeholder.value
   if (keyword) doSearch(keyword)
+}
+
+// 清空输入框并重置搜索
+const handleClearInput = () => {
+  searchInput.value = ''
+  selectedTag.value = ''
+  if (q.value) {
+    router.push({ path: '/search' })
+  }
 }
 
 // 清除搜索历史
@@ -163,14 +206,8 @@ const fetchPlaceholder = async () => {
 onMounted(() => {
   if (!q.value) {
     fetchHotSearch()
-    fetchPlaceholder()
   }
-})
-
-watch(q, (val) => {
-  if (!val && state.hotSearches.length === 0) {
-    fetchHotSearch()
-  }
+  fetchPlaceholder()
 })
 
 // 热搜最大分数，用于计算热度条宽度
@@ -181,261 +218,287 @@ const maxScore = computed(() => {
 </script>
 
 <template>
-  <div class="flex h-full flex-1 flex-col overflow-hidden px-4">
-    <!-- 有搜索结果时的布局 -->
-    <template v-if="q">
-      <!-- 顶部操作栏 -->
-      <div class="mb-5 shrink-0">
-        <!-- 搜索结果标题 -->
-        <div class="mb-4 flex items-center gap-3">
-          <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 shadow-lg shadow-sky-500/20">
-            <span class="icon-[mdi--magnify] h-5 w-5 text-white"></span>
-          </div>
-          <div>
-            <h1 class="text-primary text-xl font-bold">
-              {{ $t('search.resultsFor') }}
-              <span class="bg-gradient-to-r from-sky-400 to-blue-400 bg-clip-text text-transparent">"{{ q }}"</span>
-            </h1>
-            <p v-if="total > 0" class="text-primary/50 text-sm">
-              {{ $t('search.foundResults', { count: total }) }}
-            </p>
-          </div>
-        </div>
+  <div class="custom-scrollbar relative flex h-full flex-1 flex-col overflow-y-auto px-4 pb-10">
+    <!-- 背景氛围光 -->
+    <div class="pointer-events-none absolute inset-0 overflow-hidden">
+      <div class="ambient-a absolute -top-20 left-1/3 h-[420px] w-[420px] -translate-x-1/2 rounded-full" />
+      <div class="ambient-b absolute -bottom-32 right-1/4 h-[350px] w-[350px] rounded-full" />
+    </div>
 
-        <!-- Tab + 控制栏 -->
-        <div class="glass-card flex flex-wrap items-center justify-between gap-4 p-3">
-          <!-- Tab 导航 -->
-          <TabGroup
-            v-model="activeType"
-            :tabs="tabs"
-            variant="gradient"
-            size="sm"
-            :show-count="false"
-            @click="(val) => activeType = val"
+    <!-- 顶部搜索核心交互区：搜索框 + 搜索历史 + 推荐风格Tag -->
+    <div class="relative z-10 shrink-0 pt-6 pb-4">
+      <!-- 搜索输入框 (正常尺寸，不臃肿) -->
+      <div
+        class="search-box mx-auto w-full max-w-md md:max-w-lg transition-all duration-300"
+      >
+        <div
+          class="flex h-11 items-center gap-2.5 rounded-full border px-3.5 backdrop-blur-xl transition-all duration-300"
+          :class="[
+            inputFocused
+              ? 'border-sky-500/40 bg-white/[0.08] ring-2 ring-sky-500/20 shadow-[0_0_20px_rgba(56,189,248,0.12)]'
+              : 'border-white/[0.12] bg-white/[0.04] shadow-[0_2px_10px_rgba(0,0,0,0.1)] hover:border-white/20'
+          ]"
+        >
+          <span
+            class="icon-[mdi--magnify] h-4.5 w-4.5 shrink-0 transition-colors"
+            :class="inputFocused ? 'text-sky-400' : 'text-primary/40'"
           />
-
-          <!-- 右侧控制 -->
-          <div class="flex items-center gap-3">
-            <!-- 播放全部按钮（仅歌曲 Tab 显示） -->
-            <Button
-              v-if="activeType === 1 && total > 0"
-              variant="gradient"
-              size="sm"
-              @click="playAllSongs"
-            >
-              <span class="icon-[mdi--play] mr-1.5 h-4 w-4" />
-              {{ $t('actions.playAll') }}
-            </Button>
-
-            <!-- 分页 -->
-            <div v-if="total > 0" class="flex items-center gap-2">
-              <div class="flex items-center gap-1 rounded-xl bg-white/5 p-1">
-                <button
-                  class="flex h-11 w-11 items-center justify-center rounded-lg transition-all"
-                  :class="
-                    page > 1 ? 'text-primary hover:bg-white/10' : 'text-primary/30 cursor-not-allowed'
-                  "
-                  :disabled="page <= 1"
-                  :aria-label="$t('components.pagination.prev')"
-                  @click="page > 1 && page--"
-                >
-                  <span class="icon-[mdi--chevron-left] h-5 w-5" />
-                </button>
-                <span class="text-primary/80 min-w-[60px] text-center text-sm font-medium">
-                  {{ page }} / {{ Math.ceil(total / pageSize) || 1 }}
-                </span>
-                <button
-                  class="flex h-11 w-11 items-center justify-center rounded-lg transition-all"
-                  :class="
-                    page < Math.ceil(total / pageSize)
-                      ? 'text-primary hover:bg-white/10'
-                      : 'text-primary/30 cursor-not-allowed'
-                  "
-                  :disabled="page >= Math.ceil(total / pageSize)"
-                  :aria-label="$t('components.pagination.next')"
-                  @click="page < Math.ceil(total / pageSize) && page++"
-                >
-                  <span class="icon-[mdi--chevron-right] h-5 w-5" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 结果区 -->
-      <div class="relative min-h-0 flex-1 overflow-hidden">
-        <component
-          :is="activeComp"
-          :ref="
-            (el: any) => {
-              if (activeType === 1) songsRef = el
-            }
-          "
-          :keywords="q"
-          :limit="pageSize"
-          :offset="(page - 1) * pageSize"
-          @loaded="onLoaded"
-          @total="onTotal"
-        />
-        <div v-if="isLoading && activeType !== 1" class="absolute inset-0 z-10">
-          <PageSkeleton
-            :sections="activeType === 1000 ? ['grid'] : ['list']"
-            :grid-count="12"
-            :list-count="8"
+          <input
+            ref="inputRef"
+            v-model="searchInput"
+            type="text"
+            :placeholder="placeholder || $t('common.search.placeholder')"
+            class="min-w-0 flex-1 bg-transparent text-sm text-primary outline-none placeholder:text-primary/40 font-normal"
+            @focus="inputFocused = true"
+            @blur="inputFocused = false"
+            @keyup.enter="handleSubmit"
           />
-        </div>
-      </div>
-    </template>
-
-    <!-- ═══════════════════════════════════════════════ -->
-    <!-- 空状态：没有搜索关键词时                         -->
-    <!-- ═══════════════════════════════════════════════ -->
-    <template v-else>
-      <div class="custom-scrollbar relative flex h-full flex-col overflow-y-auto pb-6">
-
-        <!-- 背景氛围光 -->
-        <div class="pointer-events-none absolute inset-0 overflow-hidden">
-          <div class="ambient-a absolute -top-20 left-1/3 h-[420px] w-[420px] -translate-x-1/2 rounded-full" />
-          <div class="ambient-b absolute -bottom-32 right-1/4 h-[350px] w-[350px] rounded-full" />
-        </div>
-
-        <!-- 顶部搜索区 -->
-        <div class="relative z-10 shrink-0 pt-8 pb-6">
-          <!-- 搜索输入框 -->
-          <div
-            class="search-box mx-auto w-full max-w-xl transition-all duration-500"
-            :class="inputFocused ? 'scale-[1.01]' : ''"
-          >
-            <div
-              class="flex items-center gap-3 rounded-full border px-5 py-3.5 backdrop-blur-2xl transition-all duration-300"
-              :class="[
-                inputFocused
-                  ? 'border-sky-500/40 bg-white/[0.08] ring-4 ring-[#2563eb]/20 shadow-[0_0_35px_rgba(56,189,248,0.15),0_8px_32px_rgba(0,0,0,0.25)]'
-                  : 'border-white/[0.12] bg-white/[0.04] shadow-[0_2px_12px_rgba(0,0,0,0.12)] hover:border-white/20'
-              ]"
-            >
-              <span
-                class="icon-[mdi--magnify] h-5 w-5 shrink-0 transition-all duration-300"
-                :class="inputFocused ? 'text-sky-400' : 'text-primary/40'"
-              />
-              <input
-                ref="inputRef"
-                v-model="searchInput"
-                type="text"
-                :placeholder="placeholder || $t('common.search.placeholder')"
-                class="min-w-0 flex-1 bg-transparent text-sm md:text-base text-primary outline-none placeholder:text-primary/40 font-medium"
-                @focus="inputFocused = true"
-                @blur="inputFocused = false"
-                @keyup.enter="handleSubmit"
-              />
-              <!-- 清除按钮 -->
-              <Transition name="fade-scale">
-                <button
-                  v-if="searchInput"
-                  class="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-primary/40 transition-colors hover:bg-white/10 hover:text-white"
-                  :aria-label="$t('common.clear')"
-                  :title="$t('common.clear')"
-                  @click="searchInput = ''"
-                >
-                  <span class="icon-[mdi--close] h-3.5 w-3.5" />
-                </button>
-              </Transition>
-              <!-- 搜索按钮 -->
-              <button
-                class="search-btn flex h-11 shrink-0 items-center gap-1.5 rounded-full px-5 text-xs font-semibold text-white transition-all duration-300 active:scale-95"
-                @click="handleSubmit"
-              >
-                <span class="icon-[mdi--magnify] h-3.5 w-3.5" />
-                {{ $t('common.search.label') }}
-              </button>
-            </div>
-
-            <!-- 智能实时补全建议下拉框 -->
-            <div
-              v-if="inputFocused && liveSuggestions.length > 0"
-              class="border-glass bg-[var(--glass-bg-overlay)] mt-2 overflow-hidden rounded-2xl border p-1.5 shadow-xl backdrop-blur-2xl"
-            >
-              <div class="text-primary/45 px-3 py-1 text-[11px] font-medium">
-                {{ $t('recommend.search.smartSuggestions') }}
-              </div>
-              <button
-                v-for="sug in liveSuggestions"
-                :key="`${sug.type}-${sug.text}`"
-                type="button"
-                @mousedown.prevent="doSearch(sug.text)"
-                class="hover:bg-hover-glass flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-xs transition-colors"
-              >
-                <div class="flex min-w-0 items-center gap-2">
-                  <span
-                    class="h-4 w-4 shrink-0 text-sky-400"
-                    :class="
-                      sug.type === 'artist'
-                        ? 'icon-[mdi--account-music-outline]'
-                        : sug.type === 'genre'
-                          ? 'icon-[mdi--tag-outline]'
-                          : 'icon-[mdi--music-note-outline]'
-                    "
-                  />
-                  <span class="text-primary truncate font-medium">{{ sug.text }}</span>
-                </div>
-                <span v-if="sug.subLabel" class="text-primary/45 shrink-0 text-[11px]">
-                  {{ sug.subLabel }}
-                </span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 搜索历史 -->
-        <div v-if="searchHistory.length > 0" class="relative z-10 mb-6 shrink-0">
-          <div class="mb-2.5 flex items-center justify-between">
-            <div class="flex items-center gap-2">
-              <span class="icon-[mdi--history] h-4 w-4 text-primary/40" />
-              <span class="text-primary/60 text-xs font-bold uppercase tracking-wider">{{ $t('search.recentSearches') }}</span>
-            </div>
+          <!-- 清除按钮 -->
+          <Transition name="fade-scale">
             <button
-              class="text-primary/40 hover:text-primary/70 flex min-h-11 min-w-11 items-center justify-center px-1 text-xs font-medium transition-colors"
-              @click="clearHistory"
+              v-if="searchInput"
+              type="button"
+              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-primary/40 transition-colors hover:bg-white/10 hover:text-white"
+              :aria-label="$t('common.clear')"
+              :title="$t('common.clear')"
+              @click="handleClearInput"
             >
-              {{ $t('common.clear') }}
+              <span class="icon-[mdi--close] h-3.5 w-3.5" />
+            </button>
+          </Transition>
+          <!-- 搜索按钮 -->
+          <button
+            type="button"
+            class="search-btn flex h-7.5 shrink-0 items-center gap-1 rounded-full px-3.5 text-xs font-semibold text-white transition-all duration-200 active:scale-95"
+            @click="handleSubmit"
+          >
+            <span>{{ $t('common.search.label') }}</span>
+          </button>
+        </div>
+
+        <!-- 智能实时补全建议下拉框 -->
+        <div
+          v-if="inputFocused && liveSuggestions.length > 0"
+          class="border-glass bg-[var(--glass-bg-overlay)] mt-2 overflow-hidden rounded-2xl border p-1.5 shadow-xl backdrop-blur-2xl"
+        >
+          <div class="text-primary/45 px-3 py-1 text-[11px] font-medium">
+            {{ $t('recommend.search.smartSuggestions') }}
+          </div>
+          <button
+            v-for="sug in liveSuggestions"
+            :key="`${sug.type}-${sug.text}`"
+            type="button"
+            @mousedown.prevent="doSearch(sug.text)"
+            class="hover:bg-hover-glass flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-xs transition-colors"
+          >
+            <div class="flex min-w-0 items-center gap-2">
+              <span
+                class="h-4 w-4 shrink-0 text-sky-400"
+                :class="
+                  sug.type === 'artist'
+                    ? 'icon-[mdi--account-music-outline]'
+                    : sug.type === 'genre'
+                      ? 'icon-[mdi--tag-outline]'
+                      : 'icon-[mdi--music-note-outline]'
+                "
+              />
+              <span class="text-primary truncate font-medium">{{ sug.text }}</span>
+            </div>
+            <span v-if="sug.subLabel" class="text-primary/45 shrink-0 text-[11px]">
+              {{ sug.subLabel }}
+            </span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 搜索历史（精简大小，上限20条，合并同类项） -->
+      <div v-if="searchHistory.length > 0" class="mt-4">
+        <div class="mb-2 flex items-center justify-between">
+          <div class="flex items-center gap-1.5">
+            <span class="icon-[mdi--history] h-3.5 w-3.5 text-primary/40" />
+            <span class="text-primary/60 text-xs font-medium">{{ $t('search.recentSearches') }}</span>
+            <span class="text-primary/30 text-[11px]">({{ searchHistory.length }}/20)</span>
+          </div>
+          <button
+            type="button"
+            class="text-primary/40 hover:text-primary/70 flex h-6 items-center px-1 text-xs font-medium transition-colors"
+            @click="clearHistory"
+          >
+            {{ $t('common.clear') }}
+          </button>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+          <div
+            v-for="(keyword, ki) in searchHistory"
+            :key="keyword"
+            class="history-chip group flex h-7 items-center rounded-full border border-white/10 bg-white/5 text-xs transition-all duration-200 hover:border-sky-500/30 hover:bg-white/10"
+            :style="{ animationDelay: `${Number(ki) * 20}ms` }"
+          >
+            <button
+              type="button"
+              class="flex h-full min-w-0 items-center gap-1.5 pl-2.5 pr-1 text-xs text-primary/80 group-hover:text-primary transition-colors"
+              @click="doSearch(keyword)"
+            >
+              <span class="max-w-[140px] truncate">{{ keyword }}</span>
+            </button>
+            <button
+              type="button"
+              class="text-primary/40 hover:text-primary mr-1 flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full transition-colors hover:bg-white/10"
+              :aria-label="$t('search.removeHistory', { keyword })"
+              :title="$t('common.delete')"
+              @click="globalStore.removeSearchHistory(keyword)"
+            >
+              <span class="icon-[mdi--close] h-3 w-3"></span>
             </button>
           </div>
-          <div class="flex flex-wrap gap-2">
-            <div
-              v-for="(keyword, ki) in searchHistory"
-              :key="keyword"
-              class="history-chip group flex min-h-11 items-center rounded-full border border-white/10 bg-white/5 text-xs font-medium transition-all duration-200 hover:border-sky-500/30 hover:bg-white/10 hover:-translate-y-0.5"
-              :style="{ animationDelay: `${Number(ki) * 35}ms` }"
-            >
-              <button
-                type="button"
-                class="flex min-h-11 min-w-0 items-center gap-2 pr-1 pl-3.5 text-xs font-medium"
-                @click="doSearch(keyword)"
+        </div>
+      </div>
+
+      <!-- 风格探索雷达内置推荐Tag（躺在搜索区域最下方，引导用户进入搜索） -->
+      <div class="mt-4">
+        <div class="mb-2 flex items-center gap-1.5">
+          <span class="icon-[mdi--compass-outline] h-3.5 w-3.5 text-sky-400" />
+          <span class="text-primary/60 text-xs font-medium">推荐风格探索</span>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            v-for="tag in recommendedTags"
+            :key="tag"
+            type="button"
+            class="tag-chip flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-all duration-200"
+            :class="
+              selectedTag === tag || q === tag
+                ? 'border-sky-500/60 bg-sky-500/20 text-sky-300 shadow-[0_0_12px_rgba(56,189,248,0.2)]'
+                : 'border-glass-subtle bg-button-glass text-primary/70 hover:border-sky-500/30 hover:bg-hover-glass hover:text-primary'
+            "
+            @click="handleSelectTag(tag)"
+          >
+            <span class="text-sky-400/60 text-[10px]">#</span>
+            <span>{{ tag }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════ -->
+    <!-- 下方主内容区                                    -->
+    <!-- ═══════════════════════════════════════════════ -->
+    <div class="relative z-10 flex-1">
+      <!-- 有搜索关键词时：呈现检索结果 + 风格探索雷达 -->
+      <template v-if="q">
+        <div class="mb-5 shrink-0">
+          <!-- 搜索结果标题 -->
+          <div class="mb-4 flex items-center gap-3">
+            <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 shadow-lg shadow-sky-500/20">
+              <span class="icon-[mdi--magnify] h-5 w-5 text-white"></span>
+            </div>
+            <div>
+              <h1 class="text-primary text-xl font-bold">
+                {{ $t('search.resultsFor') }}
+                <span class="bg-gradient-to-r from-sky-400 to-blue-400 bg-clip-text text-transparent">"{{ q }}"</span>
+              </h1>
+              <p v-if="total > 0" class="text-primary/50 text-sm">
+                {{ $t('search.foundResults', { count: total }) }}
+              </p>
+            </div>
+          </div>
+
+          <!-- Tab + 控制栏 -->
+          <div class="glass-card flex flex-wrap items-center justify-between gap-4 p-3">
+            <TabGroup
+              v-model="activeType"
+              :tabs="tabs"
+              variant="gradient"
+              size="sm"
+              :show-count="false"
+              @click="(val) => activeType = val"
+            />
+
+            <div class="flex items-center gap-3">
+              <Button
+                v-if="activeType === 1 && total > 0"
+                variant="gradient"
+                size="sm"
+                @click="playAllSongs"
               >
-                <span class="icon-[mdi--history] size-3.5 shrink-0 text-primary/40"></span>
-                <span class="text-primary/80 group-hover:text-primary truncate transition-colors">{{ keyword }}</span>
-              </button>
-              <button
-                type="button"
-                class="text-primary/40 hover:text-primary flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors"
-                :aria-label="$t('search.removeHistory', { keyword })"
-                :title="$t('common.delete')"
-                @click="globalStore.removeSearchHistory(keyword)"
-              >
-                <span class="icon-[mdi--close] h-4 w-4"></span>
-              </button>
+                <span class="icon-[mdi--play] mr-1.5 h-4 w-4" />
+                {{ $t('actions.playAll') }}
+              </Button>
+
+              <div v-if="total > 0" class="flex items-center gap-2">
+                <div class="flex items-center gap-1 rounded-xl bg-button-glass border border-glass-subtle p-1">
+                  <button
+                    class="flex h-9 w-9 items-center justify-center rounded-lg transition-all"
+                    :class="
+                      page > 1 ? 'text-primary hover:bg-hover-glass' : 'text-primary/30 cursor-not-allowed'
+                    "
+                    :disabled="page <= 1"
+                    :aria-label="$t('components.pagination.prev')"
+                    @click="page > 1 && page--"
+                  >
+                    <span class="icon-[mdi--chevron-left] h-5 w-5" />
+                  </button>
+                  <span class="text-primary/80 min-w-[50px] text-center text-xs font-medium">
+                    {{ page }} / {{ Math.ceil(total / pageSize) || 1 }}
+                  </span>
+                  <button
+                    class="flex h-9 w-9 items-center justify-center rounded-lg transition-all"
+                    :class="
+                      page < Math.ceil(total / pageSize)
+                        ? 'text-primary hover:bg-hover-glass'
+                        : 'text-primary/30 cursor-not-allowed'
+                    "
+                    :disabled="page >= Math.ceil(total / pageSize)"
+                    :aria-label="$t('components.pagination.next')"
+                    @click="page < Math.ceil(total / pageSize) && page++"
+                  >
+                    <span class="icon-[mdi--chevron-right] h-5 w-5" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- 风格探索雷达 -->
-        <div class="relative z-10 mb-8 shrink-0">
-          <StyleRadarSection />
+        <!-- 检索结果区（固定适中高度，避免将下方风格雷达单曲完全阻隔） -->
+        <div class="relative mb-8 h-[520px] md:h-[580px] overflow-hidden rounded-2xl">
+          <component
+            :is="activeComp"
+            :ref="
+              (el: any) => {
+                if (activeType === 1) songsRef = el
+              }
+            "
+            :keywords="q"
+            :limit="pageSize"
+            :offset="(page - 1) * pageSize"
+            @loaded="onLoaded"
+            @total="onTotal"
+          />
+          <div v-if="isLoading && activeType !== 1" class="absolute inset-0 z-10">
+            <PageSkeleton
+              :sections="activeType === 1000 ? ['grid'] : ['list']"
+              :grid-count="12"
+              :list-count="8"
+            />
+          </div>
+        </div>
+
+        <!-- 风格探索雷达（解耦后只保留单曲列表，可独立换一批，与实际检索结果解耦） -->
+        <div class="relative mb-8 shrink-0">
+          <StyleRadarSection :genre="selectedTag || q" />
+        </div>
+      </template>
+
+      <!-- ════════ 未搜索（空状态）时 ════════ -->
+      <template v-else>
+        <!-- 风格探索雷达（解耦后只保留单曲列表，支持换一批） -->
+        <div class="relative mb-8 shrink-0">
+          <StyleRadarSection :genre="selectedTag" />
         </div>
 
         <!-- 热门搜索 -->
-        <div class="relative z-10 min-h-0 flex-1 pb-6">
+        <div class="relative min-h-0 flex-1 pb-6">
           <div class="mb-3 flex items-center gap-2">
             <span class="icon-[mdi--fire] h-4 w-4 text-orange-500/60" />
             <span class="text-primary/40 text-xs font-medium">{{ $t('search.hotSearches') }}</span>
@@ -454,6 +517,7 @@ const maxScore = computed(() => {
             <button
               v-for="(item, index) in state.hotSearches.slice(0, 20)"
               :key="item.searchWord"
+              type="button"
               class="hot-item group flex items-center gap-3 rounded-xl px-3 py-[10px] text-left transition-all duration-200 hover:bg-white/[0.04]"
               :style="{ animationDelay: `${index * 25}ms` }"
               @click="doSearch(item.searchWord)"
@@ -509,8 +573,8 @@ const maxScore = computed(() => {
             </button>
           </div>
         </div>
-      </div>
-    </template>
+      </template>
+    </div>
   </div>
 </template>
 
@@ -533,19 +597,20 @@ const maxScore = computed(() => {
 /* ═══ 搜索按钮渐变 ═══ */
 .search-btn {
   background: linear-gradient(135deg, #38bdf8, #2563eb);
-  box-shadow: 0 4px 16px rgba(56,189,248, 0.25);
+  box-shadow: 0 2px 10px rgba(56,189,248, 0.25);
 }
 .search-btn:hover {
-  box-shadow: 0 6px 24px rgba(56,189,248, 0.35);
+  box-shadow: 0 4px 16px rgba(56,189,248, 0.35);
   filter: brightness(1.1);
 }
 
-/* ═══ 搜索历史标签入场 ═══ */
-.history-chip {
-  animation: chip-in 0.35s var(--glass-ease-out) both;
+/* ═══ 搜索历史与Tag标签入场 ═══ */
+.history-chip,
+.tag-chip {
+  animation: chip-in 0.3s var(--glass-ease-out) both;
 }
 @keyframes chip-in {
-  from { opacity: 0; transform: translateY(4px) scale(0.97); }
+  from { opacity: 0; transform: translateY(3px) scale(0.97); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
 

@@ -2,6 +2,7 @@
  * 全局状态 Store
  * 管理主题、语言、搜索历史等应用级全局配置
  */
+import { defineStore } from 'pinia'
 import { GlobalState } from '../interface'
 import piniaPersistConfig from '../persist'
 
@@ -65,22 +66,28 @@ export const useGlobalStore = defineStore('global', {
       this.lang = lang
     },
 
-    /** 添加搜索历史（去重、最新在前、最多 10 条） */
+    /** 添加搜索历史（去重、合并同类项、最新在前、最多 20 条） */
     addSearchHistory(q: string) {
       const s = q.trim()
       if (!s) return
-      const idx = this.searchHistory.indexOf(s)
-      if (idx !== -1) this.searchHistory.splice(idx, 1)
+      // 合并同类项：忽略大小写匹配已有项并移除，保留最新输入
+      const lower = s.toLowerCase()
+      this.searchHistory = this.searchHistory.filter(
+        (item: string) => item.trim().toLowerCase() !== lower
+      )
       this.searchHistory.unshift(s)
-      if (this.searchHistory.length > 10) this.searchHistory = this.searchHistory.slice(0, 10)
+      if (this.searchHistory.length > 20) {
+        this.searchHistory = this.searchHistory.slice(0, 20)
+      }
     },
 
-    /** 删除指定搜索历史 */
+    /** 删除指定搜索历史（忽略大小写合并删除） */
     removeSearchHistory(q: string) {
-      const s = q.trim()
+      const s = q.trim().toLowerCase()
       if (!s) return
-      const idx = this.searchHistory.indexOf(s)
-      if (idx !== -1) this.searchHistory.splice(idx, 1)
+      this.searchHistory = this.searchHistory.filter(
+        (item: string) => item.trim().toLowerCase() !== s
+      )
     },
 
     /** 清空全部搜索历史 */

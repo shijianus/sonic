@@ -1,57 +1,30 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { useAudioStore } from '@/stores/modules/audio'
-import { useLibraryStore } from '@/stores/modules/library'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { fetchRecommendDiscover, type RecommendSongItem } from '@/api/recommend'
-import LazyImage from '@/components/Ui/LazyImage.vue'
-import { formatCoverUrl } from '@/utils/imageUrl'
+import SongCard from '@/components/Ui/SongCard.vue'
+import MobileSongList from '@/components/Mobile/MobileSongList.vue'
 
-const props = withDefaults(
-  defineProps<{
-    compact?: boolean
-  }>(),
-  {
-    compact: false,
-  }
-)
+interface Props {
+  compact?: boolean
+  genre?: string
+}
 
-const emit = defineEmits<{
-  (e: 'select-genre', genre: string): void
-}>()
+const props = withDefaults(defineProps<Props>(), {
+  compact: false,
+  genre: '',
+})
 
 const { t } = useI18n()
-const router = useRouter()
 const audioStore = useAudioStore()
-const libraryStore = useLibraryStore()
 const recommendStore = useRecommendStore()
 
-const selectedGenre = ref<string>('')
+const selectedGenre = ref<string>(props.genre || '')
 const explorationTemp = ref<number>(0.55)
 const loading = ref<boolean>(false)
 const tracks = ref<RecommendSongItem[]>([])
-
-const genreOptions = [
-  { label: '全部风格', value: '' },
-  { label: '华语流行', value: '华语流行' },
-  { label: 'R&B', value: 'R&B' },
-  { label: '粤语金曲', value: '粤语流行' },
-  { label: '摇滚', value: '摇滚' },
-  { label: '民谣', value: '民谣' },
-  { label: '独立音乐', value: '独立音乐' },
-  { label: '欧美流行', value: '欧美流行' },
-  { label: '日语流行', value: '日语流行' },
-  { label: '说唱', value: '说唱' },
-  { label: '纯音乐', value: '纯音乐' },
-]
-
-const tempLevels = computed(() => [
-  { label: t('recommend.temperature.safe'), value: 0.25 },
-  { label: t('recommend.temperature.balanced'), value: 0.55 },
-  { label: t('recommend.temperature.bold'), value: 0.85 },
-])
 
 const visibleTracks = computed(() => {
   const maxItems = props.compact ? 6 : 8
@@ -60,46 +33,35 @@ const visibleTracks = computed(() => {
     .slice(0, maxItems)
 })
 
-const currentSongId = computed(() => audioStore.audio.currentSong?.id)
-
-const isCurrentPlaying = (id: string | number) =>
-  String(currentSongId.value) === String(id) && audioStore.audio.isPlaying
-
-const formatDuration = (ms?: number) => {
-  if (!ms || ms <= 0) return '0:00'
-  const totalSec = Math.floor(ms / 1000)
-  const mins = Math.floor(totalSec / 60)
-  const secs = totalSec % 60
-  return `${mins}:${secs.toString().padStart(2, '0')}`
-}
-
-async function loadDiscoverTracks() {
+async function loadDiscoverTracks(isRefresh = false) {
   loading.value = true
   const headers = recommendStore.buildRequestHeaders(false)
-  const count = props.compact ? 8 : 12
+  const count = props.compact ? 8 : 16
 
   try {
+    // 换一批时对探索温度做轻微自适应漂移，结合服务端抽取获得新组合
+    const temp = isRefresh
+      ? Math.round((0.4 + Math.random() * 0.5) * 100) / 100
+      : explorationTemp.value
+
     const res = await fetchRecommendDiscover(
       {
         genre: selectedGenre.value || undefined,
-        temperature: explorationTemp.value,
+        temperature: temp,
         count,
       },
       headers
     )
-    tracks.value = res.tracks
+    let newTracks = res.tracks || []
+    if (isRefresh && newTracks.length > 8) {
+      newTracks = [...newTracks].sort(() => Math.random() - 0.5)
+    }
+    tracks.value = newTracks
   } catch (err) {
     console.warn('[StyleRadar] load failed:', err)
   } finally {
     loading.value = false
   }
-}
-
-function handlePlaySong(song: RecommendSongItem, idx: number) {
-  const list = visibleTracks.value
-  if (!list.length) return
-  audioStore.setPlaylist(list, idx)
-  audioStore.playSong(song, idx, true)
 }
 
 function handlePlayAll() {
@@ -109,37 +71,31 @@ function handlePlayAll() {
   audioStore.playSong(list[0], 0, true)
 }
 
-async function handleStartRadio(song: RecommendSongItem, e: Event) {
-  e.stopPropagation()
-  await recommendStore.startSongRadio(song)
-}
-
-function handleToggleLike(song: RecommendSongItem, e: Event) {
-  e.stopPropagation()
-  libraryStore.toggleLikeSong(song)
-}
-
-function goSongDetail(song: RecommendSongItem, e: Event) {
-  e.stopPropagation()
-  router.push(`/song/${song.id}`)
-}
-
-function onGenreClick(val: string) {
-  selectedGenre.value = val
-}
-
-watch([selectedGenre, explorationTemp], () => {
-  loadDiscoverTracks()
-})
+watch(
+  () => props.genre,
+  (newGenre) => {
+    selectedGenre.value = (newGenre || '').trim()
+    loadDiscoverTracks()
+  }
+)
 
 onMounted(() => {
   loadDiscoverTracks()
+})
+
+defineExpose({
+  refresh: () => loadDiscoverTracks(true),
+  loadDiscoverTracks,
+  setGenre: (g: string) => {
+    selectedGenre.value = g.trim()
+    loadDiscoverTracks()
+  },
 })
 </script>
 
 <template>
   <section class="style-radar-section">
-    <!-- 头部栏 -->
+    <!-- 头部栏：标题 + 换一批 / 播放全部 -->
     <div class="mb-3.5 flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
         <h2
@@ -147,23 +103,29 @@ onMounted(() => {
           :class="compact ? 'text-base' : 'text-xl'"
         >
           <span
-            class="flex items-center justify-center rounded-lg bg-linear-to-br from-indigo-500 to-sky-500 text-slate-950 shadow-sm"
+            class="flex items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-sky-500 text-slate-950 shadow-sm"
             :class="compact ? 'h-7 w-7' : 'h-8 w-8'"
           >
             <span class="icon-[mdi--compass-rose]" :class="compact ? 'h-4 w-4' : 'h-5 w-5'" />
           </span>
           <span>{{ t('recommend.styleRadar') }}</span>
+          <span
+            v-if="selectedGenre"
+            class="rounded-full border border-sky-500/30 bg-sky-500/15 px-2 py-0.5 text-xs font-medium text-sky-400"
+          >
+            # {{ selectedGenre }}
+          </span>
         </h2>
         <p v-if="!compact" class="text-primary/55 mt-1 text-xs">
           {{ t('recommend.styleRadarSubtitle') }}
         </p>
       </div>
 
-      <!-- 右侧控制按钮 -->
+      <!-- 右侧快捷操作按钮 -->
       <div class="flex items-center gap-2">
         <button
           type="button"
-          @click="loadDiscoverTracks"
+          @click="loadDiscoverTracks(true)"
           :disabled="loading"
           class="border-glass bg-hover-glass text-primary/75 hover:text-primary inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all"
         >
@@ -171,7 +133,7 @@ onMounted(() => {
             class="icon-[mdi--refresh] h-3.5 w-3.5"
             :class="loading ? 'animate-spin' : ''"
           />
-          <span>{{ t('recommend.actions.refresh') }}</span>
+          <span>换一批</span>
         </button>
 
         <button
@@ -186,156 +148,63 @@ onMounted(() => {
       </div>
     </div>
 
-    <!-- 流派选择器与探索温度控制栏 -->
-    <div class="mb-4 flex flex-wrap items-center justify-between gap-2.5">
-      <div class="scrollbar-hide flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
-        <button
-          v-for="g in genreOptions"
-          :key="g.value || 'all'"
-          type="button"
-          @click="onGenreClick(g.value)"
-          class="shrink-0 rounded-full border px-2.5 py-1 text-xs transition-all"
-          :class="
-            selectedGenre === g.value
-              ? 'border-sky-400/50 bg-sky-500/20 font-medium text-[var(--glass-text-accent)]'
-              : 'border-glass bg-hover-glass text-primary/65 hover:text-primary'
-          "
-        >
-          {{ g.label }}
-        </button>
-      </div>
-
-      <div class="flex items-center gap-1.5 text-xs">
-        <span class="text-primary/50 text-[11px]">{{ t('recommend.temperature.label') }}:</span>
-        <button
-          v-for="lv in tempLevels"
-          :key="lv.value"
-          type="button"
-          @click="explorationTemp = lv.value"
-          class="rounded-lg border px-2 py-0.5 text-[11px] transition-all"
-          :class="
-            Math.abs(explorationTemp - lv.value) < 0.05
-              ? 'border-cyan-400/50 bg-cyan-500/20 text-[var(--glass-text-accent)]'
-              : 'border-glass text-primary/60 hover:text-primary'
-          "
-        >
-          {{ lv.label }}
-        </button>
-      </div>
-    </div>
-
-    <!-- 歌曲卡片列表 -->
+    <!-- 骨架屏：对齐 SongCard 双列单曲布局 -->
     <div
       v-if="loading && visibleTracks.length === 0"
-      class="grid gap-3"
-      :class="compact ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-4'"
+      class="songs-container overflow-hidden rounded-2xl"
     >
-      <div
-        v-for="n in compact ? 4 : 8"
-        :key="n"
-        class="glass-card border-glass flex items-center gap-3 rounded-2xl border p-3 animate-pulse"
-      >
-        <div class="bg-hover-glass h-14 w-14 shrink-0 rounded-xl" />
-        <div class="min-w-0 flex-1 space-y-2">
-          <div class="bg-hover-glass h-3.5 w-3/4 rounded" />
-          <div class="bg-hover-glass h-3 w-1/2 rounded" />
+      <div class="grid md:grid-cols-2">
+        <div
+          v-for="n in compact ? 4 : 8"
+          :key="n"
+          class="song-divider flex w-full items-center gap-4 p-3.5 animate-pulse"
+        >
+          <div class="h-7 w-7 shrink-0 rounded-xl bg-glass-subtle" />
+          <div class="h-12 w-12 shrink-0 rounded-xl bg-glass-subtle" />
+          <div class="min-w-0 flex-1 space-y-2">
+            <div class="h-3.5 w-3/4 rounded bg-glass-subtle" />
+            <div class="h-3 w-1/2 rounded bg-glass-subtle" />
+          </div>
+          <div class="h-3 w-8 shrink-0 rounded bg-glass-subtle" />
         </div>
       </div>
     </div>
 
-    <div
-      v-else
-      class="grid gap-3"
-      :class="compact ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2 xl:grid-cols-4'"
-    >
-      <div
-        v-for="(song, idx) in visibleTracks"
-        :key="`${song.canonicalTrackId || song.id}-${idx}`"
-        @click="handlePlaySong(song, idx)"
-        class="glass-card border-glass hover:bg-hover-glass group relative flex cursor-pointer items-center gap-3 rounded-2xl border p-3 transition-all duration-200"
-      >
-        <div class="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl">
-          <LazyImage
-            :src="formatCoverUrl(song.cover, { size: 160, artist: song.artist })"
-            :alt="song.name"
-            img-class="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-          />
-          <div
-            class="bg-overlay/45 absolute inset-0 flex items-center justify-center transition-opacity duration-200"
-            :class="isCurrentPlaying(song.id) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
-          >
-            <span
-              class="h-6 w-6 text-sky-400"
-              :class="isCurrentPlaying(song.id) ? 'icon-[mdi--volume-high]' : 'icon-[mdi--play]'"
-            />
-          </div>
-        </div>
+    <!-- 移动端紧凑列表视图 -->
+    <div v-else-if="compact">
+      <MobileSongList :songs="visibleTracks" variant="compact" :show-index="true" />
+    </div>
 
-        <div class="min-w-0 flex-1">
-          <div class="flex items-center gap-1.5">
-            <p
-              @click="goSongDetail(song, $event)"
-              class="text-primary truncate text-sm font-semibold hover:text-[var(--glass-text-accent)]"
-            >
-              {{ song.name }}
-            </p>
-            <span
-              v-if="song.genres && song.genres.length > 0"
-              class="shrink-0 rounded-full border border-sky-500/30 bg-sky-500/15 px-1.5 py-0.5 text-[10px] leading-none font-medium text-sky-400"
-            >
-              {{ song.genres[0] }}
-            </span>
-          </div>
-
-          <p class="text-primary/65 mt-0.5 truncate text-xs">
-            {{ song.artist }}
-            <span v-if="song.album" class="text-primary/40"> · {{ song.album }}</span>
-          </p>
-
-          <p
-            v-if="song.recommendReason"
-            class="text-primary/50 mt-1 flex items-center gap-1 truncate text-[11px]"
-          >
-            <span class="icon-[mdi--compass-outline] h-3 w-3 shrink-0 text-sky-400" />
-            <span class="truncate">{{ song.recommendReason }}</span>
-          </p>
-        </div>
-
-        <div class="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            :title="t('recommend.actions.startRadio')"
-            @click="handleStartRadio(song, $event)"
-            class="text-primary/50 hover:bg-hover-glass hover:text-[var(--glass-text-accent)] flex h-7 w-7 items-center justify-center rounded-lg transition-colors"
-          >
-            <span class="icon-[mdi--radio-tower] h-4 w-4" />
-          </button>
-
-          <button
-            type="button"
-            @click="handleToggleLike(song, $event)"
-            class="hover:bg-hover-glass flex h-7 w-7 items-center justify-center rounded-lg transition-colors"
-            :class="
-              libraryStore.isSongLiked(song.id)
-                ? 'text-rose-500'
-                : 'text-primary/50 hover:text-rose-400'
-            "
-          >
-            <span
-              class="h-4 w-4"
-              :class="
-                libraryStore.isSongLiked(song.id)
-                  ? 'icon-[mdi--heart]'
-                  : 'icon-[mdi--heart-outline]'
-              "
-            />
-          </button>
-
-          <span v-if="!compact" class="text-primary/40 ml-1 text-[11px] tabular-nums">
-            {{ formatDuration(song.duration) }}
-          </span>
-        </div>
+    <!-- PC 桌面端：单曲展示结构 (双列 SongCard + song-divider) -->
+    <div v-else class="songs-container overflow-hidden rounded-2xl">
+      <div class="grid md:grid-cols-2">
+        <SongCard
+          v-for="(song, idx) in visibleTracks"
+          :key="`${song.canonicalTrackId || song.id}-${idx}`"
+          :song="song"
+          :index="idx"
+          :to="`/song/${song.id}`"
+          class="song-divider"
+        />
       </div>
     </div>
   </section>
 </template>
+
+<style scoped>
+/* ── 歌曲列表容器 ── */
+.songs-container {
+  background: transparent;
+  border: none;
+}
+
+/* ── 歌曲分隔线 ── */
+.song-divider {
+  border-bottom: 1px solid var(--glass-border-subtle);
+}
+
+.song-divider:last-child,
+.song-divider:nth-last-child(2):nth-child(odd) {
+  border-bottom: none;
+}
+</style>
