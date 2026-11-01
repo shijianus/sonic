@@ -257,8 +257,8 @@ onMounted(() => {
       <div class="pt-2.5 h-[96px] flex flex-col justify-between">
         <!-- 维度行 1：主分类切换（趋势榜 / 新歌速递 / 官方榜单） -->
         <div class="flex items-center gap-2 flex-wrap">
-          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-14">
-            {{ t('layout.aside.menu.charts') }}:
+          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[70px]">
+            榜单分类:
           </span>
           <div class="flex items-center gap-1 flex-wrap">
             <button
@@ -283,8 +283,8 @@ onMounted(() => {
         <div class="h-[58px] flex flex-col justify-center">
           <!-- 模式 A：趋势榜时间范围选项 -->
           <div v-if="activeTab === 'trending'" class="flex items-center gap-2 flex-wrap">
-            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-14">
-              {{ t('recommend.tabs.trending') }}:
+            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[70px]">
+              站内趋势:
             </span>
             <div class="flex items-center gap-1 flex-wrap">
               <button
@@ -307,8 +307,8 @@ onMounted(() => {
 
           <!-- 模式 B：新歌榜地区选项 -->
           <div v-else-if="activeTab === 'newSong'" class="flex items-center gap-2 flex-wrap">
-            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-14">
-              {{ t('artists.area') }}:
+            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[70px]">
+              新歌分类:
             </span>
             <div class="flex items-center gap-1 flex-wrap">
               <button
@@ -331,8 +331,8 @@ onMounted(() => {
 
           <!-- 模式 C：官方榜单（结构完全同步，2 行紧凑排布，文字完整展示绝无省略截断） -->
           <div v-else class="flex items-start gap-2 flex-wrap">
-            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-14 mt-1">
-              {{ t('charts.official') }}:
+            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[70px] mt-1">
+              官方榜单:
             </span>
             <div class="flex items-center gap-1 flex-wrap flex-1 min-w-0 max-h-[58px] overflow-hidden content-start">
               <button

@@ -291,7 +291,7 @@ const getQualityBadgeInfo = (song: Song) => {
       >
         <div class="w-14 text-center">#</div>
         <div class="song-grid grid min-w-0 flex-1 grid-cols-12 items-center gap-4 px-4">
-          <div class="song-col-song col-span-4">{{ t('components.songList.headers.song') }}</div>
+          <div class="song-col-song col-span-5">{{ t('components.songList.headers.song') }}</div>
           <div class="song-col-artist col-span-2 hidden md:block">
             {{ t('components.songList.headers.artist') }}
           </div>
@@ -299,7 +299,7 @@ const getQualityBadgeInfo = (song: Song) => {
             {{ t('components.songList.headers.album') }}
           </div>
           <div class="song-col-duration col-span-1 text-right">{{ t('components.songList.headers.duration') }}</div>
-          <div class="song-col-actions col-span-3 text-center">{{ t('components.songList.headers.actions') }}</div>
+          <div class="song-col-actions col-span-2 text-center">{{ t('components.songList.headers.actions') }}</div>
         </div>
       </div>
 
@@ -314,14 +314,14 @@ const getQualityBadgeInfo = (song: Song) => {
             <div class="h-4 w-4 animate-pulse rounded bg-white/10"></div>
           </div>
           <div class="song-grid grid min-w-0 flex-1 grid-cols-12 items-center gap-4">
-            <div class="song-col-song col-span-4 flex items-center space-x-4">
+            <div class="song-col-song col-span-5 flex items-center space-x-4">
               <div class="h-12 w-12 shrink-0 animate-pulse rounded-lg bg-white/10"></div>
               <div class="min-w-0 flex-1 space-y-2">
                 <div class="h-4 w-3/4 animate-pulse rounded bg-white/10"></div>
                 <div class="h-3 w-1/2 animate-pulse rounded bg-white/10 md:hidden"></div>
               </div>
             </div>
-            <div class="col-span-3 hidden md:block">
+            <div class="col-span-2 hidden md:block">
               <div class="h-4 w-2/3 animate-pulse rounded bg-white/10"></div>
             </div>
             <div class="col-span-2 hidden md:block">
@@ -393,7 +393,7 @@ const getQualityBadgeInfo = (song: Song) => {
           </div>
 
           <div class="song-grid grid min-w-0 flex-1 grid-cols-12 items-center gap-4">
-            <div class="song-col-song col-span-4 flex items-center space-x-4">
+            <div class="song-col-song col-span-5 flex items-center space-x-4 min-w-0">
               <div
                 :id="`song-cover-${song.id}`"
                 class="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg shadow-md transition-shadow group-hover:shadow-lg"
@@ -492,18 +492,12 @@ const getQualityBadgeInfo = (song: Song) => {
                 formatDurationOrDash(song.duration)
               }}</span>
             </div>
-            <!-- 操控按钮 (常态显示低透明度的"···"，悬停显示三个 32px 按钮，间距 8px) -->
-            <div class="song-col-actions song-actions relative flex min-h-11 items-center justify-center">
-              <!-- 常态：低透明度 (0.5) 更多图标 -->
-              <div class="song-actions-dots flex items-center justify-center text-white/50 transition-opacity duration-150 group-hover:opacity-0 group-focus-within:opacity-0">
-                <span class="icon-[mdi--dots-horizontal] h-5 w-5"></span>
-              </div>
-
-              <!-- 悬停或键盘聚焦时：显示三个 32px 按钮，间距 8px (gap-2) -->
-              <div class="song-actions-toolbar absolute inset-0 flex items-center justify-center gap-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
+            <!-- 操控按钮（直接呈现结果，杜绝全列虚假省略号···） -->
+            <div class="song-col-actions song-actions col-span-2 relative flex min-h-11 items-center justify-center">
+              <div class="song-actions-toolbar flex items-center justify-center gap-0.5 opacity-60 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100">
                 <button
                   type="button"
-                  class="flex h-11 w-11 items-center justify-center rounded-lg text-white/70 hover:text-sky-400 hover:bg-white/10 transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
+                  class="flex h-8 w-8 items-center justify-center rounded-lg text-primary/70 hover:text-sky-400 hover:bg-hover-glass transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
                   :title="t('actions.play')"
                   :aria-label="t('actions.play')"
                   @click.stop="(e: MouseEvent) => playSongWithAnimation(song, index, e)"
@@ -513,7 +507,7 @@ const getQualityBadgeInfo = (song: Song) => {
                 <button
                   v-if="song.mvId"
                   type="button"
-                  class="flex h-11 w-11 items-center justify-center rounded-lg text-white/70 hover:text-blue-300 hover:bg-white/10 transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
+                  class="flex h-8 w-8 items-center justify-center rounded-lg text-primary/70 hover:text-blue-300 hover:bg-hover-glass transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
                   :title="t('common.playMV')"
                   @click.stop="openMV(song, index)"
                 >
@@ -522,7 +516,7 @@ const getQualityBadgeInfo = (song: Song) => {
                 <button
                   v-else-if="song.id"
                   type="button"
-                  class="flex h-11 w-11 items-center justify-center rounded-lg text-white/70 hover:text-white hover:bg-white/10 transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
+                  class="flex h-8 w-8 items-center justify-center rounded-lg text-primary/70 hover:text-primary hover:bg-hover-glass transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
                   :title="t('common.detail')"
                   @click.stop="router.push(`/song/${song.id}`)"
                 >
@@ -530,7 +524,8 @@ const getQualityBadgeInfo = (song: Song) => {
                 </button>
                 <button
                   type="button"
-                  class="flex h-11 w-11 items-center justify-center rounded-lg text-primary/70 hover:text-red-400 hover:bg-hover-glass transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
+                  class="flex h-8 w-8 items-center justify-center rounded-lg transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
+                  :class="isLiked(song) ? 'text-red-400 hover:text-red-500' : 'text-primary/70 hover:text-red-400 hover:bg-hover-glass'"
                   :title="isLiked(song) ? t('common.unlike') : t('common.like')"
                   @click.stop="toggleLike(song)"
                 >
@@ -541,7 +536,7 @@ const getQualityBadgeInfo = (song: Song) => {
                 </button>
                 <button
                   type="button"
-                  class="flex h-11 w-11 items-center justify-center rounded-lg text-white/70 hover:text-sky-400 hover:bg-white/10 transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
+                  class="flex h-8 w-8 items-center justify-center rounded-lg text-primary/70 hover:text-sky-400 hover:bg-hover-glass transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
                   :title="t('common.download')"
                   @click.stop="downloadSong(song, index)"
                 >
