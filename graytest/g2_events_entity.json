@@ -1,0 +1,19 @@
+{
+  "events": [
+    {
+      "type": "favorite",
+      "entityType": "album",
+      "entityId": "alb_yehuimei_jay",
+      "album": "叶惠美",
+      "track": {
+        "id": "186016",
+        "platform": "netease",
+        "title": "晴天",
+        "artist": "周杰伦",
+        "album": "叶惠美",
+        "duration": 269,
+        "genres": ["mandopop", "pop-rock", "ballad"]
+      }
+    }
+  ]
+}

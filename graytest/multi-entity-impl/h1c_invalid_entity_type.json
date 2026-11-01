@@ -1,0 +1,18 @@
+{
+  "status": 400,
+  "latencyMs": 7,
+  "json": {
+    "brand": "Sonic",
+    "error": {
+      "code": "INVALID_ENTITY_TYPE",
+      "message": "entityType must be one of track|album|playlist|mv, got: artist"
+    },
+    "meta": {
+      "cached": false,
+      "cacheLevel": "none",
+      "latencyMs": 0,
+      "provider": "sonic-events",
+      "attempts": []
+    }
+  }
+}

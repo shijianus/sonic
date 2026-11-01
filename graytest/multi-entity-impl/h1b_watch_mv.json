@@ -1,0 +1,23 @@
+{
+  "status": 200,
+  "latencyMs": 19,
+  "json": {
+    "brand": "Sonic",
+    "data": {
+      "ok": true,
+      "privacyMode": "anonymous-opt-in",
+      "accepted": 1,
+      "deduplicated": 0,
+      "ignoredByPrivacy": 0,
+      "entityFeedbackAccepted": 1,
+      "storageKind": "sqlite"
+    },
+    "meta": {
+      "cached": false,
+      "cacheLevel": "none",
+      "latencyMs": 14,
+      "provider": "sonic-events",
+      "degraded": false
+    }
+  }
+}

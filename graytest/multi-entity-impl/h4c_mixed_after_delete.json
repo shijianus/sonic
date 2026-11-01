@@ -1,0 +1,891 @@
+{
+  "status": 200,
+  "latencyMs": 22,
+  "json": {
+    "brand": "Sonic",
+    "data": {
+      "feed": "mixed",
+      "mode": "for-you",
+      "personalized": false,
+      "privacyMode": "anonymous-opt-in",
+      "storageKind": "sqlite",
+      "items": [
+        {
+          "type": "track",
+          "id": "trk_fc4da46cda4ecc1e",
+          "title": "七里香",
+          "subtitle": "周杰伦",
+          "cover": "/api/music/cover?artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+          "score": 0.802,
+          "reason": "收录于MV《七里香 MV》",
+          "reasonCode": "entity_propagation",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "entity_propagation",
+              "label": "收录于MV《七里香 MV》",
+              "weight": 0.26
+            }
+          ],
+          "track": {
+            "id": "185811",
+            "sha": "fc4da46cda4ecc1e",
+            "title": "七里香",
+            "name": "七里香",
+            "artist": "周杰伦",
+            "album": "七里香",
+            "duration": 299,
+            "cover": "/api/music/cover?artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+            "coverUrl": "/api/music/cover?artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+            "artistPic": "/api/music/cover?artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+            "platform": "netease",
+            "platformId": "185811",
+            "sources": [
+              {
+                "platform": "netease",
+                "platformId": "185811",
+                "duration": 299
+              }
+            ],
+            "qualities": [
+              {
+                "level": "lossless",
+                "label": "SQ 无损",
+                "bitrate": "FLAC 24bit",
+                "format": "flac",
+                "streamUrl": "/api/music/stream?id=185811&source=netease&title=%E4%B8%83%E9%87%8C%E9%A6%99&artist=%E5%91%A8%E6%9D%B0%E4%BC%A6&br=lossless",
+                "desc": "超清无损母带音质 (FLAC / 24-bit)"
+              },
+              {
+                "level": "exhigh",
+                "label": "HQ 极高",
+                "bitrate": "320kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=185811&source=netease&title=%E4%B8%83%E9%87%8C%E9%A6%99&artist=%E5%91%A8%E6%9D%B0%E4%BC%A6&br=320",
+                "desc": "极高品质MP3 (320kbps 饱满声场)"
+              },
+              {
+                "level": "standard",
+                "label": "标准",
+                "bitrate": "128kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=185811&source=netease&title=%E4%B8%83%E9%87%8C%E9%A6%99&artist=%E5%91%A8%E6%9D%B0%E4%BC%A6&br=128",
+                "desc": "标准流畅音质 (128kbps 快速省流)"
+              }
+            ],
+            "qualityBadge": "SQ",
+            "streamUrl": "/api/music/stream?id=185811&source=netease&title=%E4%B8%83%E9%87%8C%E9%A6%99&artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+            "lyricId": "185811",
+            "urlId": "185811",
+            "source": "netease",
+            "canonicalTrackId": "trk_fc4da46cda4ecc1e",
+            "edition": "studio",
+            "language": "zh",
+            "genres": [
+              "mandopop",
+              "r&b",
+              "pop",
+              "c-pop"
+            ],
+            "recommendScore": 0.8016,
+            "scoreSource": "cold-start-curated",
+            "explanation": {
+              "primaryReason": "收录于MV《七里香 MV》",
+              "reasonCode": "entity_propagation",
+              "scoreSource": "cold-start-curated",
+              "similarityBasis": "metadata-only",
+              "signals": [
+                {
+                  "type": "entity_propagation",
+                  "label": "收录于MV《七里香 MV》",
+                  "weight": 0.26
+                }
+              ],
+              "scoreBreakdown": {
+                "content": 0,
+                "behavior": 0,
+                "popularity": 0.72,
+                "freshness": 0.85,
+                "context": 1,
+                "finalScore": 0.802
+              }
+            }
+          }
+        },
+        {
+          "type": "track",
+          "id": "trk_c71032d73d50aa27",
+          "title": "夜曲",
+          "subtitle": "周杰伦",
+          "cover": "/api/music/cover?artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+          "score": 0.802,
+          "reason": "收录于MV《夜曲 MV》",
+          "reasonCode": "entity_propagation",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "entity_propagation",
+              "label": "收录于MV《夜曲 MV》",
+              "weight": 0.26
+            }
+          ],
+          "track": {
+            "id": "185709",
+            "sha": "c71032d73d50aa27",
+            "title": "夜曲",
+            "name": "夜曲",
+            "artist": "周杰伦",
+            "album": "十一月的萧邦",
+            "duration": 226,
+            "cover": "/api/music/cover?artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+            "coverUrl": "/api/music/cover?artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+            "artistPic": "/api/music/cover?artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+            "platform": "netease",
+            "platformId": "185709",
+            "sources": [
+              {
+                "platform": "netease",
+                "platformId": "185709",
+                "duration": 226
+              }
+            ],
+            "qualities": [
+              {
+                "level": "lossless",
+                "label": "SQ 无损",
+                "bitrate": "FLAC 24bit",
+                "format": "flac",
+                "streamUrl": "/api/music/stream?id=185709&source=netease&title=%E5%A4%9C%E6%9B%B2&artist=%E5%91%A8%E6%9D%B0%E4%BC%A6&br=lossless",
+                "desc": "超清无损母带音质 (FLAC / 24-bit)"
+              },
+              {
+                "level": "exhigh",
+                "label": "HQ 极高",
+                "bitrate": "320kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=185709&source=netease&title=%E5%A4%9C%E6%9B%B2&artist=%E5%91%A8%E6%9D%B0%E4%BC%A6&br=320",
+                "desc": "极高品质MP3 (320kbps 饱满声场)"
+              },
+              {
+                "level": "standard",
+                "label": "标准",
+                "bitrate": "128kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=185709&source=netease&title=%E5%A4%9C%E6%9B%B2&artist=%E5%91%A8%E6%9D%B0%E4%BC%A6&br=128",
+                "desc": "标准流畅音质 (128kbps 快速省流)"
+              }
+            ],
+            "qualityBadge": "SQ",
+            "streamUrl": "/api/music/stream?id=185709&source=netease&title=%E5%A4%9C%E6%9B%B2&artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+            "lyricId": "185709",
+            "urlId": "185709",
+            "source": "netease",
+            "canonicalTrackId": "trk_c71032d73d50aa27",
+            "edition": "studio",
+            "language": "zh",
+            "genres": [
+              "mandopop",
+              "r&b",
+              "hip-hop",
+              "c-pop",
+              "pop"
+            ],
+            "recommendScore": 0.8016,
+            "scoreSource": "cold-start-curated",
+            "explanation": {
+              "primaryReason": "收录于MV《夜曲 MV》",
+              "reasonCode": "entity_propagation",
+              "scoreSource": "cold-start-curated",
+              "similarityBasis": "metadata-only",
+              "signals": [
+                {
+                  "type": "entity_propagation",
+                  "label": "收录于MV《夜曲 MV》",
+                  "weight": 0.26
+                }
+              ],
+              "scoreBreakdown": {
+                "content": 0,
+                "behavior": 0,
+                "popularity": 0.72,
+                "freshness": 0.85,
+                "context": 1,
+                "finalScore": 0.802
+              }
+            }
+          }
+        },
+        {
+          "type": "mv",
+          "id": "mv_a981ce9e27b89372",
+          "title": "晴天 MV",
+          "subtitle": "周杰伦",
+          "cover": "/api/music/cover?artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+          "score": 0.414,
+          "reason": "全站高口碑MV",
+          "reasonCode": "entity_popular",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "external_chart",
+              "label": "全站高口碑MV",
+              "weight": 0.98
+            }
+          ],
+          "entityId": "mv_a981ce9e27b89372",
+          "trackIds": [
+            "trk_9fbb452119376cc7"
+          ],
+          "meta": {
+            "derived": true,
+            "sourceTrackId": "trk_9fbb452119376cc7"
+          }
+        },
+        {
+          "type": "track",
+          "id": "trk_21074f7e799e63b8",
+          "title": "Blinding Lights",
+          "subtitle": "The Weeknd",
+          "cover": "/api/music/cover?artist=The%20Weeknd",
+          "score": 0.802,
+          "reason": "收录于MV《Blinding Lights MV》",
+          "reasonCode": "entity_propagation",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "entity_propagation",
+              "label": "收录于MV《Blinding Lights MV》",
+              "weight": 0.26
+            }
+          ],
+          "track": {
+            "id": "1403318151",
+            "sha": "21074f7e799e63b8",
+            "title": "Blinding Lights",
+            "name": "Blinding Lights",
+            "artist": "The Weeknd",
+            "album": "After Hours",
+            "duration": 200,
+            "cover": "/api/music/cover?artist=The%20Weeknd",
+            "coverUrl": "/api/music/cover?artist=The%20Weeknd",
+            "artistPic": "/api/music/cover?artist=The%20Weeknd",
+            "platform": "netease",
+            "platformId": "1403318151",
+            "sources": [
+              {
+                "platform": "netease",
+                "platformId": "1403318151",
+                "duration": 200
+              }
+            ],
+            "qualities": [
+              {
+                "level": "lossless",
+                "label": "SQ 无损",
+                "bitrate": "FLAC 24bit",
+                "format": "flac",
+                "streamUrl": "/api/music/stream?id=1403318151&source=netease&title=Blinding%20Lights&artist=The%20Weeknd&br=lossless",
+                "desc": "超清无损母带音质 (FLAC / 24-bit)"
+              },
+              {
+                "level": "exhigh",
+                "label": "HQ 极高",
+                "bitrate": "320kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=1403318151&source=netease&title=Blinding%20Lights&artist=The%20Weeknd&br=320",
+                "desc": "极高品质MP3 (320kbps 饱满声场)"
+              },
+              {
+                "level": "standard",
+                "label": "标准",
+                "bitrate": "128kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=1403318151&source=netease&title=Blinding%20Lights&artist=The%20Weeknd&br=128",
+                "desc": "标准流畅音质 (128kbps 快速省流)"
+              }
+            ],
+            "qualityBadge": "SQ",
+            "streamUrl": "/api/music/stream?id=1403318151&source=netease&title=Blinding%20Lights&artist=The%20Weeknd",
+            "lyricId": "1403318151",
+            "urlId": "1403318151",
+            "source": "netease",
+            "canonicalTrackId": "trk_21074f7e799e63b8",
+            "edition": "studio",
+            "language": "en",
+            "genres": [
+              "synth-pop",
+              "r&b",
+              "electronic",
+              "pop"
+            ],
+            "recommendScore": 0.8016,
+            "scoreSource": "cold-start-curated",
+            "explanation": {
+              "primaryReason": "收录于MV《Blinding Lights MV》",
+              "reasonCode": "entity_propagation",
+              "scoreSource": "cold-start-curated",
+              "similarityBasis": "metadata-only",
+              "signals": [
+                {
+                  "type": "entity_propagation",
+                  "label": "收录于MV《Blinding Lights MV》",
+                  "weight": 0.26
+                }
+              ],
+              "scoreBreakdown": {
+                "content": 0,
+                "behavior": 0,
+                "popularity": 0.72,
+                "freshness": 0.85,
+                "context": 1,
+                "finalScore": 0.802
+              }
+            }
+          }
+        },
+        {
+          "type": "track",
+          "id": "trk_3987c5df2aceca96",
+          "title": "起风了",
+          "subtitle": "买辣椒也用券",
+          "cover": "/api/music/cover?artist=%E4%B9%B0%E8%BE%A3%E6%A4%92%E4%B9%9F%E7%94%A8%E5%88%B8",
+          "score": 0.797,
+          "reason": "收录于专辑《起风了》",
+          "reasonCode": "entity_propagation",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "entity_propagation",
+              "label": "收录于专辑《起风了》",
+              "weight": 0.24
+            }
+          ],
+          "track": {
+            "id": "1330348068",
+            "sha": "3987c5df2aceca96",
+            "title": "起风了",
+            "name": "起风了",
+            "artist": "买辣椒也用券",
+            "album": "起风了",
+            "duration": 325,
+            "cover": "/api/music/cover?artist=%E4%B9%B0%E8%BE%A3%E6%A4%92%E4%B9%9F%E7%94%A8%E5%88%B8",
+            "coverUrl": "/api/music/cover?artist=%E4%B9%B0%E8%BE%A3%E6%A4%92%E4%B9%9F%E7%94%A8%E5%88%B8",
+            "artistPic": "/api/music/cover?artist=%E4%B9%B0%E8%BE%A3%E6%A4%92%E4%B9%9F%E7%94%A8%E5%88%B8",
+            "platform": "netease",
+            "platformId": "1330348068",
+            "sources": [
+              {
+                "platform": "netease",
+                "platformId": "1330348068",
+                "duration": 325
+              }
+            ],
+            "qualities": [
+              {
+                "level": "lossless",
+                "label": "SQ 无损",
+                "bitrate": "FLAC 24bit",
+                "format": "flac",
+                "streamUrl": "/api/music/stream?id=1330348068&source=netease&title=%E8%B5%B7%E9%A3%8E%E4%BA%86&artist=%E4%B9%B0%E8%BE%A3%E6%A4%92%E4%B9%9F%E7%94%A8%E5%88%B8&br=lossless",
+                "desc": "超清无损母带音质 (FLAC / 24-bit)"
+              },
+              {
+                "level": "exhigh",
+                "label": "HQ 极高",
+                "bitrate": "320kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=1330348068&source=netease&title=%E8%B5%B7%E9%A3%8E%E4%BA%86&artist=%E4%B9%B0%E8%BE%A3%E6%A4%92%E4%B9%9F%E7%94%A8%E5%88%B8&br=320",
+                "desc": "极高品质MP3 (320kbps 饱满声场)"
+              },
+              {
+                "level": "standard",
+                "label": "标准",
+                "bitrate": "128kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=1330348068&source=netease&title=%E8%B5%B7%E9%A3%8E%E4%BA%86&artist=%E4%B9%B0%E8%BE%A3%E6%A4%92%E4%B9%9F%E7%94%A8%E5%88%B8&br=128",
+                "desc": "标准流畅音质 (128kbps 快速省流)"
+              }
+            ],
+            "qualityBadge": "SQ",
+            "streamUrl": "/api/music/stream?id=1330348068&source=netease&title=%E8%B5%B7%E9%A3%8E%E4%BA%86&artist=%E4%B9%B0%E8%BE%A3%E6%A4%92%E4%B9%9F%E7%94%A8%E5%88%B8",
+            "lyricId": "1330348068",
+            "urlId": "1330348068",
+            "source": "netease",
+            "canonicalTrackId": "trk_3987c5df2aceca96",
+            "edition": "studio",
+            "language": "zh",
+            "genres": [
+              "mandopop",
+              "pop",
+              "ballad"
+            ],
+            "recommendScore": 0.7972,
+            "scoreSource": "cold-start-curated",
+            "explanation": {
+              "primaryReason": "收录于专辑《起风了》",
+              "reasonCode": "entity_propagation",
+              "scoreSource": "cold-start-curated",
+              "similarityBasis": "metadata-only",
+              "signals": [
+                {
+                  "type": "entity_propagation",
+                  "label": "收录于专辑《起风了》",
+                  "weight": 0.24
+                }
+              ],
+              "scoreBreakdown": {
+                "content": 0,
+                "behavior": 0,
+                "popularity": 0.712,
+                "freshness": 0.85,
+                "context": 1,
+                "finalScore": 0.797
+              }
+            }
+          }
+        },
+        {
+          "type": "album",
+          "id": "alb_5bc1b0aa687f2ffe",
+          "title": "叶惠美",
+          "subtitle": "周杰伦",
+          "cover": "/api/music/cover?artist=%E5%91%A8%E6%9D%B0%E4%BC%A6",
+          "score": 0.414,
+          "reason": "全站高口碑专辑",
+          "reasonCode": "entity_popular",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "external_chart",
+              "label": "全站高口碑专辑",
+              "weight": 0.98
+            }
+          ],
+          "entityId": "alb_5bc1b0aa687f2ffe",
+          "trackIds": [
+            "trk_9fbb452119376cc7"
+          ],
+          "meta": {
+            "derived": true,
+            "trackCount": 1,
+            "releaseYear": "2003"
+          }
+        },
+        {
+          "type": "track",
+          "id": "trk_31ef7e5b3c2ab0a4",
+          "title": "富士山下",
+          "subtitle": "陈奕迅",
+          "cover": "/api/music/cover?artist=%E9%99%88%E5%A5%95%E8%BF%85",
+          "score": 0.797,
+          "reason": "收录于专辑《whatsgoingon》",
+          "reasonCode": "entity_propagation",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "entity_propagation",
+              "label": "收录于专辑《whatsgoingon》",
+              "weight": 0.24
+            }
+          ],
+          "track": {
+            "id": "65766",
+            "sha": "31ef7e5b3c2ab0a4",
+            "title": "富士山下",
+            "name": "富士山下",
+            "artist": "陈奕迅",
+            "album": "What's Going On...?",
+            "duration": 259,
+            "cover": "/api/music/cover?artist=%E9%99%88%E5%A5%95%E8%BF%85",
+            "coverUrl": "/api/music/cover?artist=%E9%99%88%E5%A5%95%E8%BF%85",
+            "artistPic": "/api/music/cover?artist=%E9%99%88%E5%A5%95%E8%BF%85",
+            "platform": "netease",
+            "platformId": "65766",
+            "sources": [
+              {
+                "platform": "netease",
+                "platformId": "65766",
+                "duration": 259
+              }
+            ],
+            "qualities": [
+              {
+                "level": "lossless",
+                "label": "SQ 无损",
+                "bitrate": "FLAC 24bit",
+                "format": "flac",
+                "streamUrl": "/api/music/stream?id=65766&source=netease&title=%E5%AF%8C%E5%A3%AB%E5%B1%B1%E4%B8%8B&artist=%E9%99%88%E5%A5%95%E8%BF%85&br=lossless",
+                "desc": "超清无损母带音质 (FLAC / 24-bit)"
+              },
+              {
+                "level": "exhigh",
+                "label": "HQ 极高",
+                "bitrate": "320kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=65766&source=netease&title=%E5%AF%8C%E5%A3%AB%E5%B1%B1%E4%B8%8B&artist=%E9%99%88%E5%A5%95%E8%BF%85&br=320",
+                "desc": "极高品质MP3 (320kbps 饱满声场)"
+              },
+              {
+                "level": "standard",
+                "label": "标准",
+                "bitrate": "128kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=65766&source=netease&title=%E5%AF%8C%E5%A3%AB%E5%B1%B1%E4%B8%8B&artist=%E9%99%88%E5%A5%95%E8%BF%85&br=128",
+                "desc": "标准流畅音质 (128kbps 快速省流)"
+              }
+            ],
+            "qualityBadge": "SQ",
+            "streamUrl": "/api/music/stream?id=65766&source=netease&title=%E5%AF%8C%E5%A3%AB%E5%B1%B1%E4%B8%8B&artist=%E9%99%88%E5%A5%95%E8%BF%85",
+            "lyricId": "65766",
+            "urlId": "65766",
+            "source": "netease",
+            "canonicalTrackId": "trk_31ef7e5b3c2ab0a4",
+            "edition": "studio",
+            "language": "yue",
+            "genres": [
+              "cantopop",
+              "ballad",
+              "pop",
+              "mandopop"
+            ],
+            "recommendScore": 0.7972,
+            "scoreSource": "cold-start-curated",
+            "explanation": {
+              "primaryReason": "收录于专辑《whatsgoingon》",
+              "reasonCode": "entity_propagation",
+              "scoreSource": "cold-start-curated",
+              "similarityBasis": "metadata-only",
+              "signals": [
+                {
+                  "type": "entity_propagation",
+                  "label": "收录于专辑《whatsgoingon》",
+                  "weight": 0.24
+                }
+              ],
+              "scoreBreakdown": {
+                "content": 0,
+                "behavior": 0,
+                "popularity": 0.712,
+                "freshness": 0.85,
+                "context": 1,
+                "finalScore": 0.797
+              }
+            }
+          }
+        },
+        {
+          "type": "track",
+          "id": "trk_9df6f38aadca7f8e",
+          "title": "十年",
+          "subtitle": "陈奕迅",
+          "cover": "/api/music/cover?artist=%E9%99%88%E5%A5%95%E8%BF%85",
+          "score": 0.797,
+          "reason": "收录于专辑《黑白灰》",
+          "reasonCode": "entity_propagation",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "entity_propagation",
+              "label": "收录于专辑《黑白灰》",
+              "weight": 0.24
+            }
+          ],
+          "track": {
+            "id": "65538",
+            "sha": "9df6f38aadca7f8e",
+            "title": "十年",
+            "name": "十年",
+            "artist": "陈奕迅",
+            "album": "黑白灰",
+            "duration": 205,
+            "cover": "/api/music/cover?artist=%E9%99%88%E5%A5%95%E8%BF%85",
+            "coverUrl": "/api/music/cover?artist=%E9%99%88%E5%A5%95%E8%BF%85",
+            "artistPic": "/api/music/cover?artist=%E9%99%88%E5%A5%95%E8%BF%85",
+            "platform": "netease",
+            "platformId": "65538",
+            "sources": [
+              {
+                "platform": "netease",
+                "platformId": "65538",
+                "duration": 205
+              }
+            ],
+            "qualities": [
+              {
+                "level": "lossless",
+                "label": "SQ 无损",
+                "bitrate": "FLAC 24bit",
+                "format": "flac",
+                "streamUrl": "/api/music/stream?id=65538&source=netease&title=%E5%8D%81%E5%B9%B4&artist=%E9%99%88%E5%A5%95%E8%BF%85&br=lossless",
+                "desc": "超清无损母带音质 (FLAC / 24-bit)"
+              },
+              {
+                "level": "exhigh",
+                "label": "HQ 极高",
+                "bitrate": "320kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=65538&source=netease&title=%E5%8D%81%E5%B9%B4&artist=%E9%99%88%E5%A5%95%E8%BF%85&br=320",
+                "desc": "极高品质MP3 (320kbps 饱满声场)"
+              },
+              {
+                "level": "standard",
+                "label": "标准",
+                "bitrate": "128kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=65538&source=netease&title=%E5%8D%81%E5%B9%B4&artist=%E9%99%88%E5%A5%95%E8%BF%85&br=128",
+                "desc": "标准流畅音质 (128kbps 快速省流)"
+              }
+            ],
+            "qualityBadge": "SQ",
+            "streamUrl": "/api/music/stream?id=65538&source=netease&title=%E5%8D%81%E5%B9%B4&artist=%E9%99%88%E5%A5%95%E8%BF%85",
+            "lyricId": "65538",
+            "urlId": "65538",
+            "source": "netease",
+            "canonicalTrackId": "trk_9df6f38aadca7f8e",
+            "edition": "studio",
+            "language": "zh",
+            "genres": [
+              "mandopop",
+              "ballad",
+              "pop",
+              "cantopop"
+            ],
+            "recommendScore": 0.7972,
+            "scoreSource": "cold-start-curated",
+            "explanation": {
+              "primaryReason": "收录于专辑《黑白灰》",
+              "reasonCode": "entity_propagation",
+              "scoreSource": "cold-start-curated",
+              "similarityBasis": "metadata-only",
+              "signals": [
+                {
+                  "type": "entity_propagation",
+                  "label": "收录于专辑《黑白灰》",
+                  "weight": 0.24
+                }
+              ],
+              "scoreBreakdown": {
+                "content": 0,
+                "behavior": 0,
+                "popularity": 0.712,
+                "freshness": 0.85,
+                "context": 1,
+                "finalScore": 0.797
+              }
+            }
+          }
+        },
+        {
+          "type": "playlist",
+          "id": "pl_8c6cb1b873dc3259",
+          "title": "深夜抒情慢歌",
+          "subtitle": "Sonic 编辑精选",
+          "score": 0.414,
+          "reason": "全站高口碑歌单",
+          "reasonCode": "entity_popular",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "external_chart",
+              "label": "全站高口碑歌单",
+              "weight": 0.98
+            }
+          ],
+          "entityId": "pl_8c6cb1b873dc3259",
+          "trackIds": [
+            "trk_ac79bc3b9c74bd35",
+            "trk_cd5ae4c1dba79770",
+            "trk_9fbb452119376cc7",
+            "trk_c844f00d9ffb549b",
+            "trk_8ba26591fe676db6",
+            "trk_d88bfe35cf4a1927",
+            "trk_192f35b072d1af8a",
+            "trk_16f902d35568fd5d",
+            "trk_d93ebc483e4a8805",
+            "trk_67c9f1a4256e9ac8",
+            "trk_d55b7773d97aebd6",
+            "trk_76afdd36aba4da51"
+          ],
+          "meta": {
+            "derived": true,
+            "trackCount": 20
+          }
+        },
+        {
+          "type": "track",
+          "id": "trk_26691ed9da9d01a2",
+          "title": "平凡之路",
+          "subtitle": "朴树",
+          "cover": "/api/music/cover?artist=%E6%9C%B4%E6%A0%91",
+          "score": 0.797,
+          "reason": "收录于专辑《猎户星座》",
+          "reasonCode": "entity_propagation",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "entity_propagation",
+              "label": "收录于专辑《猎户星座》",
+              "weight": 0.24
+            }
+          ],
+          "track": {
+            "id": "28815250",
+            "sha": "26691ed9da9d01a2",
+            "title": "平凡之路",
+            "name": "平凡之路",
+            "artist": "朴树",
+            "album": "猎户星座",
+            "duration": 301,
+            "cover": "/api/music/cover?artist=%E6%9C%B4%E6%A0%91",
+            "coverUrl": "/api/music/cover?artist=%E6%9C%B4%E6%A0%91",
+            "artistPic": "/api/music/cover?artist=%E6%9C%B4%E6%A0%91",
+            "platform": "netease",
+            "platformId": "28815250",
+            "sources": [
+              {
+                "platform": "netease",
+                "platformId": "28815250",
+                "duration": 301
+              }
+            ],
+            "qualities": [
+              {
+                "level": "lossless",
+                "label": "SQ 无损",
+                "bitrate": "FLAC 24bit",
+                "format": "flac",
+                "streamUrl": "/api/music/stream?id=28815250&source=netease&title=%E5%B9%B3%E5%87%A1%E4%B9%8B%E8%B7%AF&artist=%E6%9C%B4%E6%A0%91&br=lossless",
+                "desc": "超清无损母带音质 (FLAC / 24-bit)"
+              },
+              {
+                "level": "exhigh",
+                "label": "HQ 极高",
+                "bitrate": "320kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=28815250&source=netease&title=%E5%B9%B3%E5%87%A1%E4%B9%8B%E8%B7%AF&artist=%E6%9C%B4%E6%A0%91&br=320",
+                "desc": "极高品质MP3 (320kbps 饱满声场)"
+              },
+              {
+                "level": "standard",
+                "label": "标准",
+                "bitrate": "128kbps",
+                "format": "mp3",
+                "streamUrl": "/api/music/stream?id=28815250&source=netease&title=%E5%B9%B3%E5%87%A1%E4%B9%8B%E8%B7%AF&artist=%E6%9C%B4%E6%A0%91&br=128",
+                "desc": "标准流畅音质 (128kbps 快速省流)"
+              }
+            ],
+            "qualityBadge": "SQ",
+            "streamUrl": "/api/music/stream?id=28815250&source=netease&title=%E5%B9%B3%E5%87%A1%E4%B9%8B%E8%B7%AF&artist=%E6%9C%B4%E6%A0%91",
+            "lyricId": "28815250",
+            "urlId": "28815250",
+            "source": "netease",
+            "canonicalTrackId": "trk_26691ed9da9d01a2",
+            "edition": "studio",
+            "language": "zh",
+            "genres": [
+              "folk",
+              "rock",
+              "indie"
+            ],
+            "recommendScore": 0.7972,
+            "scoreSource": "cold-start-curated",
+            "explanation": {
+              "primaryReason": "收录于专辑《猎户星座》",
+              "reasonCode": "entity_propagation",
+              "scoreSource": "cold-start-curated",
+              "similarityBasis": "metadata-only",
+              "signals": [
+                {
+                  "type": "entity_propagation",
+                  "label": "收录于专辑《猎户星座》",
+                  "weight": 0.24
+                }
+              ],
+              "scoreBreakdown": {
+                "content": 0,
+                "behavior": 0,
+                "popularity": 0.712,
+                "freshness": 0.85,
+                "context": 1,
+                "finalScore": 0.797
+              }
+            }
+          }
+        },
+        {
+          "type": "mv",
+          "id": "mv_c65bd93f99f8b14b",
+          "title": "海阔天空 MV",
+          "subtitle": "Beyond",
+          "cover": "/api/music/cover?artist=Beyond",
+          "score": 0.411,
+          "reason": "全站高口碑MV",
+          "reasonCode": "entity_popular",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "external_chart",
+              "label": "全站高口碑MV",
+              "weight": 0.97
+            }
+          ],
+          "entityId": "mv_c65bd93f99f8b14b",
+          "trackIds": [
+            "trk_ee0d629475612407"
+          ],
+          "meta": {
+            "derived": true,
+            "sourceTrackId": "trk_ee0d629475612407"
+          }
+        },
+        {
+          "type": "album",
+          "id": "alb_a00a4bd821e0a138",
+          "title": "乐与怒",
+          "subtitle": "Beyond",
+          "cover": "/api/music/cover?artist=Beyond",
+          "score": 0.411,
+          "reason": "全站高口碑专辑",
+          "reasonCode": "entity_popular",
+          "scoreSource": "cold-start-curated",
+          "signals": [
+            {
+              "type": "external_chart",
+              "label": "全站高口碑专辑",
+              "weight": 0.97
+            }
+          ],
+          "entityId": "alb_a00a4bd821e0a138",
+          "trackIds": [
+            "trk_ee0d629475612407"
+          ],
+          "meta": {
+            "derived": true,
+            "trackCount": 1,
+            "releaseYear": "1993"
+          }
+        }
+      ],
+      "distribution": {
+        "track": 7,
+        "album": 2,
+        "playlist": 1,
+        "mv": 2
+      },
+      "profileSummary": {
+        "hasHistory": false,
+        "topArtists": [],
+        "topGenres": [],
+        "topEntities": []
+      }
+    },
+    "meta": {
+      "cached": false,
+      "cacheLevel": "none",
+      "latencyMs": 16,
+      "provider": "recommend-for-you",
+      "runtime": "linux-engine",
+      "degraded": false
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "events": [
+    {
+      "type": "play_progress",
+      "playedSeconds": 212,
+      "durationSeconds": 326,
+      "progressRatio": 0.65,
+      "track": { "id": "347230", "platform": "netease", "title": "海阔天空", "artist": "Beyond", "album": "乐与怒", "duration": 326, "genres": ["cantopop", "rock", "classic-rock"] }
+    },
+    {
+      "type": "play_complete",
+      "playedSeconds": 299,
+      "durationSeconds": 299,
+      "progressRatio": 1.0,
+      "track": { "id": "346576", "platform": "netease", "title": "光辉岁月", "artist": "Beyond", "album": "命运派对", "duration": 299, "genres": ["cantopop", "rock", "classic-rock"] }
+    }
+  ]
+}

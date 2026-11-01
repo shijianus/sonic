@@ -1,0 +1,12 @@
+{
+  "events": [
+    {
+      "type": "dislike",
+      "track": { "id": "1403318151", "platform": "netease", "title": "Blinding Lights", "artist": "The Weeknd", "album": "After Hours", "duration": 200 }
+    },
+    {
+      "type": "dislike",
+      "track": { "id": "347230", "platform": "netease", "title": "海阔天空", "artist": "Beyond", "album": "乐与怒", "duration": 326 }
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "BASE": "http://127.0.0.1:3210",
+  "ANON": "anon_selftest_me_002",
+  "failures": 0,
+  "latencyP95Ms": 21
+}

@@ -1,0 +1,19 @@
+{
+  "status": 200,
+  "latencyMs": 8,
+  "json": {
+    "brand": "Sonic",
+    "data": {
+      "cleared": true,
+      "removedEvents": 2,
+      "removedEntityFeedback": 2,
+      "privacyMode": "anonymous-opt-in"
+    },
+    "meta": {
+      "cached": false,
+      "cacheLevel": "none",
+      "latencyMs": 3,
+      "provider": "sonic-events"
+    }
+  }
+}

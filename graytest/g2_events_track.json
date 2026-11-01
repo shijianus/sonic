@@ -1,0 +1,61 @@
+{
+  "events": [
+    {
+      "type": "favorite",
+      "track": {
+        "id": "186016",
+        "platform": "netease",
+        "title": "晴天",
+        "artist": "周杰伦",
+        "album": "叶惠美",
+        "duration": 269,
+        "genres": ["mandopop", "pop-rock", "ballad"]
+      }
+    },
+    {
+      "type": "play_complete",
+      "playedSeconds": 269,
+      "durationSeconds": 269,
+      "progressRatio": 1.0,
+      "track": {
+        "id": "186016",
+        "platform": "netease",
+        "title": "晴天",
+        "artist": "周杰伦",
+        "album": "叶惠美",
+        "duration": 269,
+        "genres": ["mandopop", "pop-rock", "ballad"]
+      }
+    },
+    {
+      "type": "play_complete",
+      "playedSeconds": 299,
+      "durationSeconds": 299,
+      "progressRatio": 1.0,
+      "track": {
+        "id": "185811",
+        "platform": "netease",
+        "title": "七里香",
+        "artist": "周杰伦",
+        "album": "七里香",
+        "duration": 299,
+        "genres": ["mandopop", "r&b", "pop"]
+      }
+    },
+    {
+      "type": "play_complete",
+      "playedSeconds": 226,
+      "durationSeconds": 226,
+      "progressRatio": 1.0,
+      "track": {
+        "id": "185709",
+        "platform": "netease",
+        "title": "夜曲",
+        "artist": "周杰伦",
+        "album": "十一月的萧邦",
+        "duration": 226,
+        "genres": ["mandopop", "r&b", "hip-hop"]
+      }
+    }
+  ]
+}

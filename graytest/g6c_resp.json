@@ -1,0 +1,1 @@
+{"brand":"Sonic","error":{"code":"EMPTY_EVENTS","message":"Provide `events` array or single event object with valid `type`"},"meta":{"cached":false,"cacheLevel":"none","latencyMs":0,"provider":"none","attempts":[]}}

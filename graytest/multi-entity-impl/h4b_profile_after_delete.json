@@ -1,0 +1,26 @@
+{
+  "status": 200,
+  "latencyMs": 8,
+  "json": {
+    "brand": "Sonic",
+    "data": {
+      "privacyMode": "anonymous-opt-in",
+      "personalizationEnabled": true,
+      "totalEvents": 0,
+      "likedCount": 0,
+      "dislikedCount": 0,
+      "topArtists": [],
+      "topGenres": [],
+      "recentQueries": [],
+      "entityFeedbackCount": 0,
+      "topEntities": [],
+      "storageKind": "sqlite"
+    },
+    "meta": {
+      "cached": false,
+      "cacheLevel": "none",
+      "latencyMs": 4,
+      "provider": "sonic-events"
+    }
+  }
+}
