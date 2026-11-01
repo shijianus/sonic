@@ -192,6 +192,12 @@ export class SqliteRecommendStore implements RecommendStore {
         score REAL DEFAULT 0,
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS user_radar_profiles (
+        subject_key TEXT PRIMARY KEY,
+        payload_json TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
     `);
   }
 
@@ -850,6 +856,36 @@ export class SqliteRecommendStore implements RecommendStore {
       updatedAt: Number(r.updated_at || 0),
       payload,
     };
+  }
+
+  saveUserRadarProfile(subjectKey: string, payloadJson: string): void {
+    if (!subjectKey || !payloadJson) return;
+    try {
+      const stmt = this.db.prepare(`
+        INSERT INTO user_radar_profiles (subject_key, payload_json, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(subject_key) DO UPDATE SET
+          payload_json = excluded.payload_json,
+          updated_at = excluded.updated_at
+      `);
+      stmt.run(subjectKey, payloadJson, Date.now());
+    } catch (err: any) {
+      recordSqliteMetric('write_error');
+    }
+  }
+
+  getUserRadarProfile(subjectKey: string): { payloadJson: string; updatedAt: number } | null {
+    if (!subjectKey) return null;
+    try {
+      const stmt = this.db.prepare(
+        `SELECT payload_json, updated_at FROM user_radar_profiles WHERE subject_key = ?`,
+      );
+      const row = stmt.get(subjectKey) as any;
+      if (!row) return null;
+      return { payloadJson: String(row.payload_json), updatedAt: Number(row.updated_at) };
+    } catch {
+      return null;
+    }
   }
 }
 

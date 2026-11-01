@@ -141,15 +141,20 @@ export async function fetchAmllBySearch(
         a.toLowerCase().replace(/[\s\-_—·.,!?'"()[\]{}<>《》「」【】]/g, '')
       );
 
+      // 1. 标题必须严格匹配（完全相等，或长标题相互包含）
       if (targetTitle) {
-        return candidateTitles.some((ct: string) =>
-          ct === targetTitle || ct.includes(targetTitle) || (targetTitle.length >= 3 && targetTitle.includes(ct))
+        const titleMatch = candidateTitles.some((ct: string) =>
+          ct === targetTitle || (targetTitle.length >= 4 && (ct.includes(targetTitle) || targetTitle.includes(ct)))
         );
+        if (!titleMatch) return false;
       }
+
+      // 2. 歌手必须严格匹配（杜绝翻唱、李代桃僵或纯音乐被劫持）
       if (targetArtist) {
-        return candidateArtists.some((ca: string) =>
-          ca === targetArtist || ca.includes(targetArtist) || (targetArtist.length >= 3 && targetArtist.includes(ca))
+        const artistMatch = candidateArtists.some((ca: string) =>
+          ca === targetArtist || ca.includes(targetArtist) || (targetArtist.length >= 2 && targetArtist.includes(ca))
         );
+        if (!artistMatch) return false;
       }
       return true;
     });

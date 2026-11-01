@@ -1,3 +1,4 @@
+import { reactive, ref, computed, toRefs } from 'vue'
 import { useAudioStore } from '@/stores/modules/audio'
 import i18n from '@/languages'
 import {
@@ -33,8 +34,31 @@ const state = reactive({
 const lastCacheKey = ref<string | null>(null)
 const loading = ref(false)
 let currentFetchSeq = 0
+let activeAbortController: AbortController | null = null
+let inFlightPromise: Promise<void> | null = null
+let inFlightKey: string | null = null
 
 const lyricCache = new Map<string, { ori: RawLyricLine[]; tran: RawLyricLine[]; roma: RawLyricLine[] }>()
+
+/**
+ * 立即同步清空歌词状态（切歌时防止上一首歌曲歌词串流）
+ */
+export const clearLyrics = () => {
+  currentFetchSeq++
+  if (activeAbortController) {
+    try {
+      activeAbortController.abort()
+    } catch {}
+    activeAbortController = null
+  }
+  state.lyricsOriginal = []
+  state.lyricsTrans = []
+  state.lyricsRoma = []
+  lastCacheKey.value = null
+  loading.value = false
+  inFlightPromise = null
+  inFlightKey = null
+}
 
 /**
  * 统一将歌词行序列转为带逐字发音单元的高精结构
@@ -235,7 +259,7 @@ const activeTimeline = computed<number[]>(() => mergedLines.value.map(m => m.tim
 const timeForIndex = (index: number) => mergedLines.value[index]?.time ?? 0
 
 const fetchLyrics = async (idOrSong?: string | number | any, force = false, songOverride?: any) => {
-  const thisSeq = ++currentFetchSeq
+  let thisSeq = 0
   try {
     let targetSong: any = null
     if (typeof idOrSong === 'object' && idOrSong !== null) {
@@ -262,17 +286,17 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
       return
     }
 
-    const title = String(targetSong?.name || targetSong?.title || '').trim()
-    let artist = ''
+    const rawTitle = String(targetSong?.name || targetSong?.title || '').trim()
+    let rawArtist = ''
     if (Array.isArray(targetSong?.artists)) {
-      artist = targetSong.artists
+      rawArtist = targetSong.artists
         .map((a: any) => (typeof a === 'object' && a ? a.name || '' : String(a)))
         .filter(Boolean)
         .join(' / ')
     } else if (typeof targetSong?.artist === 'string') {
-      artist = targetSong.artist.trim()
+      rawArtist = targetSong.artist.trim()
     } else if (Array.isArray(targetSong?.ar)) {
-      artist = targetSong.ar.map((a: any) => a?.name || '').filter(Boolean).join(' / ')
+      rawArtist = targetSong.ar.map((a: any) => a?.name || '').filter(Boolean).join(' / ')
     }
 
     const album = String(targetSong?.album?.name || targetSong?.album || targetSong?.al?.name || '').trim()
@@ -280,7 +304,15 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
     const source = String(targetSong?.source || targetSong?.platform || 'netease').toLowerCase()
     const cleanId = String(rawId).replace(/^[a-z0-9_-]+:/i, '')
 
-    const cacheKey = `${cleanId}_${title}_${artist}`
+    // 强绑定：优先读取流网关强校验绑定的真实音频来源、真实歌曲 ID 与曲名歌手，杜绝脱节
+    const effectiveSource = String(targetSong?.resolvedSource || source).toLowerCase()
+    const effectiveId = targetSong?.resolvedId ? String(targetSong.resolvedId).replace(/^[a-z0-9_-]+:/i, '') : cleanId
+    const effectiveTitle = String(targetSong?.resolvedTitle || rawTitle).trim()
+    const effectiveArtist = String(targetSong?.resolvedArtist || rawArtist).trim()
+    const title = effectiveTitle
+    const artist = effectiveArtist
+
+    const cacheKey = `${effectiveSource}_${effectiveId}_${effectiveTitle}_${effectiveArtist}`
     if (!force && lastCacheKey.value === cacheKey) return
     if (!force && lyricCache.has(cacheKey)) {
       const cached = lyricCache.get(cacheKey)!
@@ -291,27 +323,49 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
       return
     }
 
+    // 去重并发请求：多个组件同时切歌时复用同一个进行中的 Promise
+    if (!force && inFlightKey === cacheKey && inFlightPromise) {
+      return await inFlightPromise
+    }
+
+    thisSeq = ++currentFetchSeq
+
+    // 切入新歌且无本地缓存：必须在任何异步网络请求前【同步清空旧歌词】，杜绝旧词串流显示！
+    if (activeAbortController) {
+      try {
+        activeAbortController.abort()
+      } catch {}
+    }
+    const abortController = new AbortController()
+    activeAbortController = abortController
+    const abortSignal = abortController.signal
+
+    state.lyricsOriginal = []
+    state.lyricsTrans = []
+    state.lyricsRoma = []
+    lastCacheKey.value = null
     loading.value = true
 
-    let ori: RawLyricLine[] = []
-    let tran: RawLyricLine[] = []
-    let roma: RawLyricLine[] = []
+    const doFetch = async () => {
+      let ori: RawLyricLine[] = []
+      let tran: RawLyricLine[] = []
+      let roma: RawLyricLine[] = []
 
     // ═══════ ① 优先调用 Sonic Lyrics Gateway 聚合端点 (/api/sonic/lyrics/nexus) ═══════
     try {
       const nexusParams = new URLSearchParams()
-      if (title) nexusParams.set('title', title)
-      if (artist) nexusParams.set('artist', artist)
+      if (effectiveTitle) nexusParams.set('title', effectiveTitle)
+      if (effectiveArtist) nexusParams.set('artist', effectiveArtist)
       if (album) nexusParams.set('album', album)
       if (duration) nexusParams.set('duration', String(duration))
 
-      if (cleanId) {
-        nexusParams.set('platform', source)
-        nexusParams.set('platformId', cleanId)
-        if (source === 'netease' || source === 'ncm' || /^\d+$/.test(cleanId)) {
-          nexusParams.set('ncmMusicId', cleanId)
-        } else if (source === 'qq' || source === 'tencent' || /^00[a-zA-Z0-9]{12}$/.test(cleanId)) {
-          nexusParams.set('qqMusicId', cleanId)
+      if (effectiveId) {
+        nexusParams.set('platform', effectiveSource)
+        nexusParams.set('platformId', effectiveId)
+        if (effectiveSource === 'netease' || effectiveSource === 'ncm' || /^\d+$/.test(effectiveId)) {
+          nexusParams.set('ncmMusicId', effectiveId)
+        } else if (effectiveSource === 'qq' || effectiveSource === 'tencent' || /^00[a-zA-Z0-9]{12}$/.test(effectiveId)) {
+          nexusParams.set('qqMusicId', effectiveId)
         }
       }
 
@@ -328,7 +382,7 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
       }
       nexusParams.set('prefer', 'word')
 
-      const nexusRes = await fetch(`/api/sonic/lyrics/nexus?${nexusParams.toString()}`).then(r => r.json()) as any
+      const nexusRes = await fetch(`/api/sonic/lyrics/nexus?${nexusParams.toString()}`, { signal: abortSignal }).then(r => r.json()) as any
       if (nexusRes?.brand === 'Sonic' && nexusRes?.data) {
         const d = nexusRes.data
         if (d.instrumental) {
@@ -396,18 +450,32 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
       } catch {}
     }
 
-    if (thisSeq !== currentFetchSeq) return
+      if (thisSeq !== currentFetchSeq || abortSignal.aborted) return
 
-    state.lyricsOriginal = ori.length > 0 ? ori : [{ time: 0, text: i18n.global.t('song.noLyrics') }]
-    state.lyricsTrans = tran
-    state.lyricsRoma = roma
-    lastCacheKey.value = cacheKey
+      // 防抖校验：核对当前播放器中的正在播放歌曲是否仍为当前请求歌曲
+      try {
+        const audioStore = useAudioStore()
+        const curNow = audioStore.getCurrentSong
+        if (curNow && targetSong?.id && String(curNow.id) !== String(targetSong.id)) {
+          return
+        }
+      } catch {}
 
-    lyricCache.set(cacheKey, {
-      ori: state.lyricsOriginal,
-      tran: state.lyricsTrans,
-      roma: state.lyricsRoma,
-    })
+      state.lyricsOriginal = ori.length > 0 ? ori : [{ time: 0, text: i18n.global.t('song.noLyrics') }]
+      state.lyricsTrans = tran
+      state.lyricsRoma = roma
+      lastCacheKey.value = cacheKey
+
+      lyricCache.set(cacheKey, {
+        ori: state.lyricsOriginal,
+        tran: state.lyricsTrans,
+        roma: state.lyricsRoma,
+      })
+    }
+
+    inFlightKey = cacheKey
+    inFlightPromise = doFetch()
+    await inFlightPromise
   } catch {
     if (thisSeq !== currentFetchSeq) return
     state.lyricsOriginal = [{ time: 0, text: i18n.global.t('song.lyricsFailed') }]
@@ -416,6 +484,8 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
   } finally {
     if (thisSeq === currentFetchSeq) {
       loading.value = false
+      inFlightPromise = null
+      inFlightKey = null
     }
   }
 }
@@ -428,6 +498,22 @@ export const useLyrics = () => {
     activeTimeline,
     timeForIndex,
     fetchLyrics,
+    clearLyrics,
     loading,
   }
+}
+
+// 全局监听流解析完成事件：当音源发生强绑定或跨源裁定时，立即同源同步刷新歌词
+if (typeof window !== 'undefined') {
+  window.addEventListener('sonic:stream-resolved', (e: any) => {
+    const detail = e?.detail
+    if (!detail?.songId) return
+    try {
+      const audioStore = useAudioStore()
+      const cur = audioStore.getCurrentSong
+      if (cur && String(cur.id) === String(detail.songId)) {
+        fetchLyrics(cur, true)
+      }
+    } catch {}
+  })
 }

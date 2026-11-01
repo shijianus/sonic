@@ -12,6 +12,12 @@ import { fetchSmartSuggest, type SmartSuggestionItem } from '@/api/recommend'
 import { useGlobalStore } from '@/stores/modules/global'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { storeToRefs } from 'pinia'
+import {
+  exploreTags,
+  type ExploreTagItem,
+  groupColorConfigs,
+  groupOrder,
+} from '@/utils/exploreTags'
 
 // 路由实例：读取/更新查询参数
 const route = useRoute()
@@ -45,16 +51,20 @@ const placeholder = ref('')
 const liveSuggestions = ref<SmartSuggestionItem[]>([])
 let suggestTimer: ReturnType<typeof setTimeout> | null = null
 
-// 当前选中的风格标签（与探索雷达联动）
-const selectedTag = ref('')
 
-// 内置充足的音乐风格与情绪标签（躺在搜索区域下方供用户选择）
-const recommendedTags = [
-  '华语流行', '欧美流行', '粤语金曲', '摇滚', '民谣', '电子音乐', '说唱',
-  'R&B', '纯音乐', 'ACG二次元', '古典', '爵士', '古风', '轻音乐',
-  '朋克', '蓝调', '金属', '治愈系', '经典老歌', '影视原声', '学习工作',
-  '运动健身', '晚安助眠', '浪漫抒情', '独立音乐', '乡村音乐', '舞曲',
-]
+// 当前选中的多个风格标签列表（支持多角度组合，相斥维度自动替换）
+const selectedTags = ref<ExploreTagItem[]>([])
+
+// 选中的标签名称集合，用于高亮判定
+const selectedTagNames = computed(() => new Set(selectedTags.value.map(t => t.name)))
+
+// 组合后的查询文本（按 group 规范顺序排序：region -> genre -> mood -> scene -> theme）
+const selectedTagQuery = computed(() => {
+  return [...selectedTags.value]
+    .sort((a, b) => (groupOrder[a.group] || 99) - (groupOrder[b.group] || 99))
+    .map(t => t.name)
+    .join(' ')
+})
 
 watch(searchInput, (val) => {
   if (suggestTimer) clearTimeout(suggestTimer)
@@ -132,12 +142,21 @@ watch(page, () => {
 watch(
   q,
   (val) => {
-    searchInput.value = val
     if (val) {
-      selectedTag.value = val
-    }
-    if (!val && state.hotSearches.length === 0) {
-      fetchHotSearch()
+      searchInput.value = val
+      const matched = exploreTags.filter(t => val.includes(t.name))
+      if (matched.length > 0) {
+        selectedTags.value = matched
+      }
+    } else {
+      if (selectedTags.value.length > 0) {
+        searchInput.value = selectedTagQuery.value
+      } else {
+        searchInput.value = ''
+      }
+      if (state.hotSearches.length === 0) {
+        fetchHotSearch()
+      }
     }
   },
   { immediate: true }
@@ -153,11 +172,31 @@ const doSearch = (keyword: string) => {
   router.push({ path: '/search', query: { q: term } })
 }
 
-// 点击内置推荐 Tag：写入输入框，粗略搜索歌曲，并联动改变风格雷达单曲结果
-const handleSelectTag = (tag: string) => {
-  selectedTag.value = tag
-  searchInput.value = tag
-  doSearch(tag)
+// 点击内置推荐 Tag：支持多角度组合与同维度相斥替换
+// 仅以检索方式写入搜索框，并改变风格探索雷达的单曲推荐结果；未点击“搜索”前绝对不进入搜索结果态！
+const handleToggleTag = (tag: ExploreTagItem) => {
+  const isSelected = selectedTags.value.some(t => t.name === tag.name)
+  if (isSelected) {
+    // 再次点击同 tag：取消选择
+    selectedTags.value = selectedTags.value.filter(t => t.name !== tag.name)
+  } else {
+    // 点击新 tag：替换同相斥组 (同 group) 的已有 tag，保持其他维度不变
+    const filtered = selectedTags.value.filter(t => t.group !== tag.group)
+    selectedTags.value = [...filtered, tag]
+  }
+
+  // 同步写入搜索框
+  searchInput.value = selectedTagQuery.value
+
+  // 若此前在搜索结果页，切回风格探索雷达展示态
+  if (q.value) {
+    router.replace({ path: '/search' })
+  }
+}
+
+const clearSelectedTags = () => {
+  selectedTags.value = []
+  searchInput.value = ''
 }
 
 // 提交搜索（从输入框回车或点击按钮）
@@ -169,7 +208,7 @@ const handleSubmit = () => {
 // 清空输入框并重置搜索
 const handleClearInput = () => {
   searchInput.value = ''
-  selectedTag.value = ''
+  selectedTags.value = []
   if (q.value) {
     router.push({ path: '/search' })
   }
@@ -356,25 +395,47 @@ const maxScore = computed(() => {
 
       <!-- 风格探索雷达内置推荐Tag（躺在搜索区域最下方，引导用户进入搜索） -->
       <div class="mt-4">
-        <div class="mb-2 flex items-center gap-1.5">
-          <span class="icon-[mdi--compass-outline] h-3.5 w-3.5 text-sky-400" />
-          <span class="text-primary/60 text-xs font-medium">推荐风格探索</span>
+        <div class="mb-2 flex items-center justify-between">
+          <div class="flex items-center gap-1.5">
+            <span class="icon-[mdi--compass-outline] h-3.5 w-3.5 text-sky-400" />
+            <span class="text-primary/60 text-xs font-medium">{{ $t('search.styleExploreTags') }}</span>
+            <span v-if="selectedTags.length > 0" class="text-sky-400/80 text-[11px]">
+              ({{ selectedTags.length }} 已选)
+            </span>
+          </div>
+          <button
+            v-if="selectedTags.length > 0"
+            type="button"
+            class="text-primary/40 hover:text-primary/70 flex h-6 items-center px-1 text-xs font-medium transition-colors"
+            @click="clearSelectedTags"
+          >
+            {{ $t('common.clear') }}
+          </button>
         </div>
         <div class="flex flex-wrap gap-1.5">
           <button
-            v-for="tag in recommendedTags"
-            :key="tag"
+            v-for="tag in exploreTags"
+            :key="tag.name"
             type="button"
             class="tag-chip flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-all duration-200"
             :class="
-              selectedTag === tag || q === tag
-                ? 'border-sky-500/60 bg-sky-500/20 text-sky-300 shadow-[0_0_12px_rgba(56,189,248,0.2)]'
-                : 'border-glass-subtle bg-button-glass text-primary/70 hover:border-sky-500/30 hover:bg-hover-glass hover:text-primary'
+              selectedTagNames.has(tag.name)
+                ? groupColorConfigs[tag.group].chipActive
+                : groupColorConfigs[tag.group].chipInactive
             "
-            @click="handleSelectTag(tag)"
+            @click="handleToggleTag(tag)"
           >
-            <span class="text-sky-400/60 text-[10px]">#</span>
-            <span>{{ tag }}</span>
+            <span
+              class="text-[10px] transition-colors"
+              :class="
+                selectedTagNames.has(tag.name)
+                  ? groupColorConfigs[tag.group].hashActive
+                  : groupColorConfigs[tag.group].hashInactive
+              "
+            >
+              #
+            </span>
+            <span>{{ tag.name }}</span>
           </button>
         </div>
       </div>
@@ -486,7 +547,7 @@ const maxScore = computed(() => {
 
         <!-- 风格探索雷达（解耦后只保留单曲列表，可独立换一批，与实际检索结果解耦） -->
         <div class="relative mb-8 shrink-0">
-          <StyleRadarSection :genre="selectedTag || q" />
+          <StyleRadarSection :genre="selectedTagQuery || q" />
         </div>
       </template>
 
@@ -494,7 +555,7 @@ const maxScore = computed(() => {
       <template v-else>
         <!-- 风格探索雷达（解耦后只保留单曲列表，支持换一批） -->
         <div class="relative mb-8 shrink-0">
-          <StyleRadarSection :genre="selectedTag" />
+          <StyleRadarSection :genre="selectedTagQuery" />
         </div>
 
         <!-- 热门搜索 -->

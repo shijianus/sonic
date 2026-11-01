@@ -44,6 +44,7 @@ export class MemoryRecommendStore implements RecommendStore {
   private entityRelations = new Map<string, EntityRelation>();
   private userEntityFeedbacks = new Map<string, UserEntityFeedback[]>();
   private entityFeedbackIds = new Set<string>();
+  private userRadarProfiles = new Map<string, { payloadJson: string; updatedAt: number }>();
 
   upsertTrack(incoming: CanonicalTrack): void {
     if (!incoming?.canonicalTrackId) return;
@@ -434,6 +435,20 @@ export class MemoryRecommendStore implements RecommendStore {
     return count;
   }
 
+  saveUserRadarProfile(subjectKey: string, payloadJson: string): void {
+    if (!subjectKey || !payloadJson) return;
+    this.userRadarProfiles.set(subjectKey, { payloadJson, updatedAt: Date.now() });
+    if (this.userRadarProfiles.size > 2000) {
+      const oldest = this.userRadarProfiles.keys().next().value;
+      if (oldest) this.userRadarProfiles.delete(oldest);
+    }
+  }
+
+  getUserRadarProfile(subjectKey: string): { payloadJson: string; updatedAt: number } | null {
+    if (!subjectKey) return null;
+    return this.userRadarProfiles.get(subjectKey) || null;
+  }
+
   clearAll(): void {
     this.tracks.clear();
     this.platformIndex.clear();
@@ -447,6 +462,7 @@ export class MemoryRecommendStore implements RecommendStore {
     this.entityRelations.clear();
     this.userEntityFeedbacks.clear();
     this.entityFeedbackIds.clear();
+    this.userRadarProfiles.clear();
   }
 }
 

@@ -7,6 +7,8 @@ import {
   searchKuwoNative,
   searchNeteaseNative,
   sonicTrackToLegacySongItem,
+  titlesMatchStrictly,
+  artistsMatchStrictly,
 } from './sonic/native-protocols';
 
 const DEFAULT_API_BASE = 'https://music-api.gdstudio.xyz/api.php';
@@ -1039,7 +1041,13 @@ export async function fetchDirectQQLyrics(songmid: string, signal?: AbortSignal)
   return '';
 }
 
-async function crawlNetEaseBySearch(query: string, env?: AppEnv): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+async function crawlNetEaseBySearch(
+  query: string,
+  env?: AppEnv,
+  targetTitle?: string,
+  targetArtist?: string,
+  targetDuration?: number
+): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
   try {
     const searchRes = await searchNeteaseNative(query, 5, 1, env);
     if (!searchRes.tracks.length) return null;
@@ -1048,6 +1056,11 @@ async function crawlNetEaseBySearch(query: string, env?: AppEnv): Promise<{ raw:
 
     for (const song of searchRes.tracks.slice(0, 5)) {
       if (!song?.platformId) continue;
+      // 严格自适应校验：歌名、歌手与时长三合一核准，杜绝张冠李戴
+      if (targetTitle && !titlesMatchStrictly(targetTitle, song.title || '')) continue;
+      if (targetArtist && !artistsMatchStrictly(targetArtist, song.artist || '')) continue;
+      if (targetDuration && song.duration && Math.abs(song.duration - targetDuration) > 6) continue;
+
       const raw = await fetchDirectNetEaseLyrics(song.platformId);
       if (raw && isValidLyric(raw)) {
         const item = {
@@ -1069,7 +1082,12 @@ async function crawlNetEaseBySearch(query: string, env?: AppEnv): Promise<{ raw:
   return null;
 }
 
-async function crawlQQBySearch(query: string): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+async function crawlQQBySearch(
+  query: string,
+  targetTitle?: string,
+  targetArtist?: string,
+  targetDuration?: number
+): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
   try {
     const sUrl = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=5&w=${encodeURIComponent(query)}&format=json`;
     const sRes = await timedFetch(sUrl, {
@@ -1085,13 +1103,19 @@ async function crawlQQBySearch(query: string): Promise<{ raw: string; id: string
 
     for (const song of songList.slice(0, 4)) {
       if (!song?.songmid) continue;
+      const sSong = String(song.songname || '');
+      const sSinger = Array.isArray(song.singer) ? song.singer.map((s: any) => s.name).join(' / ') : '';
+      if (targetTitle && !titlesMatchStrictly(targetTitle, sSong)) continue;
+      if (targetArtist && !artistsMatchStrictly(targetArtist, sSinger)) continue;
+      if (targetDuration && song.interval && Math.abs(song.interval - targetDuration) > 6) continue;
+
       const raw = await fetchDirectQQLyrics(song.songmid);
       if (raw && isValidLyric(raw)) {
         return {
           raw,
           id: song.songmid,
-          title: String(song.songname || ''),
-          artist: Array.isArray(song.singer) ? song.singer.map((s: any) => s.name).join(' / ') : '',
+          title: sSong,
+          artist: sSinger,
         };
       }
     }
@@ -1099,7 +1123,12 @@ async function crawlQQBySearch(query: string): Promise<{ raw: string; id: string
   return null;
 }
 
-async function crawlLrclibBySearch(query: string, title?: string, artist?: string): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+async function crawlLrclibBySearch(
+  query: string,
+  title?: string,
+  artist?: string,
+  targetDuration?: number
+): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
   try {
     let url = '';
     if (title) {
@@ -1113,7 +1142,14 @@ async function crawlLrclibBySearch(query: string, title?: string, artist?: strin
     if (!res.ok) return null;
     const json = (await res.json()) as any;
     if (Array.isArray(json)) {
-      const match = json.find((x: any) => x.syncedLyrics && isValidLyric(x.syncedLyrics));
+      const match = json.find(
+        (x: any) =>
+          x.syncedLyrics &&
+          isValidLyric(x.syncedLyrics) &&
+          (!title || titlesMatchStrictly(title, String(x.trackName || ''))) &&
+          (!artist || artistsMatchStrictly(artist, String(x.artistName || ''))) &&
+          (!targetDuration || !x.duration || Math.abs(x.duration - targetDuration) <= 6)
+      );
       if (match?.syncedLyrics) {
         return {
           raw: match.syncedLyrics,
@@ -1123,12 +1159,18 @@ async function crawlLrclibBySearch(query: string, title?: string, artist?: strin
         };
       }
     } else if (json?.syncedLyrics && isValidLyric(json.syncedLyrics)) {
-      return {
-        raw: json.syncedLyrics,
-        id: String(json.id),
-        title: String(json.trackName || ''),
-        artist: String(json.artistName || ''),
-      };
+      if (
+        (!title || titlesMatchStrictly(title, String(json.trackName || ''))) &&
+        (!artist || artistsMatchStrictly(artist, String(json.artistName || ''))) &&
+        (!targetDuration || !json.duration || Math.abs(json.duration - targetDuration) <= 6)
+      ) {
+        return {
+          raw: json.syncedLyrics,
+          id: String(json.id),
+          title: String(json.trackName || ''),
+          artist: String(json.artistName || ''),
+        };
+      }
     }
   } catch {}
   return null;
@@ -1529,13 +1571,9 @@ async function crawlMusixmatchBySearch(
     const trackInfo = macro?.['matcher.track.get']?.message?.body?.track;
     const subtitleBody = macro?.['track.subtitles.get']?.message?.body?.subtitle_list?.[0]?.subtitle?.subtitle_body;
     if (subtitleBody && isValidLyric(subtitleBody) && trackInfo?.track_name) {
-      const cleanTarget = title.toLowerCase().replace(/[\s\-_—·.,!?'"()[\]{}<>《》「」【】]/g, '');
-      const cleanFound = String(trackInfo.track_name).toLowerCase().replace(/[\s\-_—·.,!?'"()[\]{}<>《》「」【】]/g, '');
       const isMatch =
-        cleanTarget.length >= 2 &&
-        (cleanTarget.includes(cleanFound) ||
-          cleanFound.includes(cleanTarget) ||
-          (cleanTarget.length >= 3 && cleanFound.slice(0, 3) === cleanTarget.slice(0, 3)));
+        titlesMatchStrictly(title, String(trackInfo.track_name || '')) &&
+        (!artist || artistsMatchStrictly(artist, String(trackInfo.artist_name || '')));
       if (!isMatch) {
         return null;
       }

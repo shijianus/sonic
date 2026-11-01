@@ -13,6 +13,7 @@ import type { SonicProviderAdapter, ProviderLyricResult } from './adapter';
 import { getSonicConfig, SONIC_UA } from '../config';
 import { internalLinesToSonicLines, extractPlainLyrics, computeQualityScore } from '../utils';
 import { parseHighPrecisionLyrics, interpolateWordTimestamps, isValidLyric } from '../../music';
+import { titlesMatchStrictly, artistsMatchStrictly } from '../native-protocols';
 
 interface LrclibTrackItem {
   id: number;
@@ -60,12 +61,26 @@ export const lrclibProvider: SonicProviderAdapter = {
       let item: LrclibTrackItem | null = null;
       if (Array.isArray(json)) {
         item =
-          json.find((x: LrclibTrackItem) => x.syncedLyrics && isValidLyric(x.syncedLyrics)) ||
-          json.find((x: LrclibTrackItem) => x.plainLyrics) ||
-          json[0] ||
+          json.find((x: LrclibTrackItem) =>
+            (!params.title || titlesMatchStrictly(params.title, x.trackName || '')) &&
+            (!params.artist || artistsMatchStrictly(params.artist, x.artistName || '')) &&
+            (!params.duration || !x.duration || Math.abs(x.duration - params.duration) <= 4) &&
+            Boolean(x.syncedLyrics && isValidLyric(x.syncedLyrics))
+          ) ||
+          json.find((x: LrclibTrackItem) =>
+            (!params.title || titlesMatchStrictly(params.title, x.trackName || '')) &&
+            (!params.artist || artistsMatchStrictly(params.artist, x.artistName || '')) &&
+            (!params.duration || !x.duration || Math.abs(x.duration - params.duration) <= 4) &&
+            Boolean(x.plainLyrics)
+          ) ||
           null;
-      } else {
-        item = json;
+      } else if (json && typeof json === 'object') {
+        const matchesTitle = !params.title || titlesMatchStrictly(params.title, json.trackName || '');
+        const matchesArtist = !params.artist || artistsMatchStrictly(params.artist, json.artistName || '');
+        const matchesDuration = !params.duration || !json.duration || Math.abs(json.duration - params.duration) <= 4;
+        if (matchesTitle && matchesArtist && matchesDuration) {
+          item = json;
+        }
       }
       if (!item) return null;
 

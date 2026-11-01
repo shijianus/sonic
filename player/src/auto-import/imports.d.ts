@@ -6,7 +6,9 @@
 // biome-ignore lint: disable
 export {}
 declare global {
+  const COMMENT_EMOJI_MAP: typeof import('../utils/commentEmoji').COMMENT_EMOJI_MAP
   const DEFAULT_COVER_DATA_URI: typeof import('../utils/imageUrl').DEFAULT_COVER_DATA_URI
+  const DEFAULT_MV_POOL: typeof import('../stores/modules/radarAlbum').DEFAULT_MV_POOL
   const DEFAULT_QUALITY_CHOICES: typeof import('../stores/modules/download').DEFAULT_QUALITY_CHOICES
   const DownloadedMusicDB: typeof import('../utils/indexedDB').DownloadedMusicDB
   const EffectScope: typeof import('vue').EffectScope
@@ -34,9 +36,11 @@ declare global {
   const downloadedMusicDB: typeof import('../utils/indexedDB').downloadedMusicDB
   const effectScope: typeof import('vue').effectScope
   const escapeHtmlAttribute: typeof import('../utils/escapeHtml').escapeHtmlAttribute
+  const exploreTags: typeof import('../utils/exploreTags').exploreTags
   const extractArray: typeof import('../utils/transformers').extractArray
   const extractColorsFromImage: typeof import('../utils/colorExtractor').extractColorsFromImage
   const extractData: typeof import('../utils/transformers').extractData
+  const extractExpressionUrl: typeof import('../utils/commentEmoji').extractExpressionUrl
   const extractFormatLabel: typeof import('../utils/qualityProbe').extractFormatLabel
   const fadeVolume: typeof import('../utils/audioUtils').fadeVolume
   const formatBytes: typeof import('../utils/qualityProbe').formatBytes
@@ -62,8 +66,17 @@ declare global {
   const getCurrentScope: typeof import('vue').getCurrentScope
   const getCurrentWatcher: typeof import('vue').getCurrentWatcher
   const getFrequencyData: typeof import('../utils/audioUtils').getFrequencyData
+  const getGroupConfig: typeof import('../utils/exploreTags').getGroupConfig
+  const getLikedCommentIds: typeof import('../utils/localCommentDB').getLikedCommentIds
+  const getLocalMVComments: typeof import('../utils/localCommentDB').getLocalMVComments
   const getProxyCoverUrl: typeof import('../utils/imageUrl').getProxyCoverUrl
+  const getRadarBadgeClass: typeof import('../utils/exploreTags').getRadarBadgeClass
+  const getTagGroup: typeof import('../utils/exploreTags').getTagGroup
+  const getTagItem: typeof import('../utils/exploreTags').getTagItem
+  const groupColorConfigs: typeof import('../utils/exploreTags').groupColorConfigs
+  const groupOrder: typeof import('../utils/exploreTags').groupOrder
   const h: typeof import('vue').h
+  const hasLocalCommentDB: typeof import('../utils/localCommentDB').hasLocalCommentDB
   const httpGet: typeof import('../utils/http').httpGet
   const httpPost: typeof import('../utils/http').httpPost
   const httpUpload: typeof import('../utils/http').httpUpload
@@ -107,6 +120,7 @@ declare global {
   const onUpdated: typeof import('vue').onUpdated
   const onWatcherCleanup: typeof import('vue').onWatcherCleanup
   const parseAudioBlob: typeof import('../utils/blobMetadataParser').parseAudioBlob
+  const parseCommentEmoji: typeof import('../utils/commentEmoji').parseCommentEmoji
   const parseTime: typeof import('../utils/audioUtils').parseTime
   const prefersReducedMotion: typeof import('../utils/motion').prefersReducedMotion
   const probeSongQualities: typeof import('../utils/qualityProbe').probeSongQualities
@@ -119,6 +133,7 @@ declare global {
   const resolveComponent: typeof import('vue').resolveComponent
   const rgbToHex: typeof import('../utils/colorExtractor').rgbToHex
   const safeStorage: typeof import('../utils/safeStorage').default
+  const saveLocalMVComment: typeof import('../utils/localCommentDB').saveLocalMVComment
   const setActivePinia: typeof import('pinia').setActivePinia
   const setMapStoreSuffix: typeof import('pinia').setMapStoreSuffix
   const shallowReactive: typeof import('vue').shallowReactive
@@ -131,6 +146,7 @@ declare global {
   const toRef: typeof import('vue').toRef
   const toRefs: typeof import('vue').toRefs
   const toValue: typeof import('vue').toValue
+  const toggleLikedCommentId: typeof import('../utils/localCommentDB').toggleLikedCommentId
   const transformAlbum: typeof import('../utils/transformers').transformAlbum
   const transformAlbumDetail: typeof import('../utils/transformers').transformAlbumDetail
   const transformAlbums: typeof import('../utils/transformers').transformAlbums
@@ -165,6 +181,7 @@ declare global {
   const useLink: typeof import('vue-router').useLink
   const useLocalMusicStore: typeof import('../stores/modules/localMusic').useLocalMusicStore
   const useModel: typeof import('vue').useModel
+  const useRadarAlbumStore: typeof import('../stores/modules/radarAlbum').useRadarAlbumStore
   const useRecommendStore: typeof import('../stores/modules/recommend').useRecommendStore
   const useRoute: typeof import('vue-router').useRoute
   const useRouter: typeof import('vue-router').useRouter
@@ -193,6 +210,9 @@ declare global {
   export type { RGB, ColorPalette } from '../utils/colorExtractor'
   import('../utils/colorExtractor')
   // @ts-ignore
+  export type { ExploreTagGroup, ExploreTagItem, GroupColorConfig } from '../utils/exploreTags'
+  import('../utils/exploreTags')
+  // @ts-ignore
   export type { GatewayStatusKind } from '../utils/gatewayHealth'
   import('../utils/gatewayHealth')
   // @ts-ignore
@@ -219,6 +239,9 @@ declare global {
   // @ts-ignore
   export type { LikedSongItem, CollectedPlaylistItem, FollowedArtistItem, CollectedAlbumItem, LikedMvItem, UserPlaylistItem } from '../stores/modules/library'
   import('../stores/modules/library')
+  // @ts-ignore
+  export type { RadarTrack, RadarAlbumData } from '../stores/modules/radarAlbum'
+  import('../stores/modules/radarAlbum')
   // @ts-ignore
   export type { DislikedTrackEntry } from '../stores/modules/recommend'
   import('../stores/modules/recommend')

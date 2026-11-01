@@ -459,6 +459,7 @@ watch(
   async (s, oldSong) => {
     const targetSongId = s?.id
     lastWordSyncLine.value = -1
+    resetLyrics()
     await fetchLyrics(s)
     // 取歌词期间用户可能已切歌：过期回调不得重置新歌的歌词视图
     if (currentSong.value?.id !== targetSongId) return

@@ -44,6 +44,7 @@ export interface SongData {
   qualityBadge?: string
   qualities?: Array<{ level: string; label: string; bitrate: string; streamUrl?: string }>
   url?: string
+  streamUrl?: string
   streamType?: 'full' | 'trial' | 'unavailable'
   trialDuration?: number
   sources?: Array<{ platform: string; platformId: string | number; duration?: number }>

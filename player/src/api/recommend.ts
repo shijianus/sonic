@@ -396,3 +396,34 @@ export async function deleteSonicEvents(headers: Record<string, string> = {}): P
     return false
   }
 }
+
+export async function fetchUserRadarAlbum(
+  headers: Record<string, string> = {}
+): Promise<{ data: any; syncedAt: number | null } | null> {
+  try {
+    const json = await sonicFetchJson<any>('/api/sonic/recommend/radar-album', { headers })
+    return json?.data ? { data: json.data, syncedAt: json.syncedAt || null } : null
+  } catch {
+    return null
+  }
+}
+
+export async function syncUserRadarAlbum(
+  payload: Record<string, any>,
+  headers: Record<string, string> = {}
+): Promise<boolean> {
+  try {
+    const resp = await fetch('/api/sonic/recommend/radar-album', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: JSON.stringify(payload),
+      keepalive: true,
+    })
+    return resp.ok
+  } catch {
+    return false
+  }
+}

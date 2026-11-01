@@ -229,17 +229,16 @@ export function toCanonicalTrack(
 }
 
 export function canMergeCanonicalTracks(a: CanonicalTrack, b: CanonicalTrack): boolean {
+  if (a.edition !== b.edition) return false;
+  // Strict duration tolerance: if both durations exist, discrepancy must be <= 4s
+  if (a.duration > 0 && b.duration > 0 && Math.abs(a.duration - b.duration) > 4) {
+    return false;
+  }
   if (a.canonicalTrackId === b.canonicalTrackId) {
-    // Guard extreme duration discrepancy (e.g. 30s ringtone vs 260s studio track)
-    if (a.duration > 0 && b.duration > 0 && Math.abs(a.duration - b.duration) > 25) {
-      return false;
-    }
     return true;
   }
-  if (a.edition !== b.edition) return false;
   if (!a.cleanTitle || a.cleanTitle !== b.cleanTitle) return false;
   if (compactNormalize(a.canonicalArtist) !== compactNormalize(b.canonicalArtist)) return false;
-  if (a.duration > 0 && b.duration > 0 && Math.abs(a.duration - b.duration) > 12) return false;
   return true;
 }
 
@@ -252,16 +251,6 @@ const PROVIDER_PRIORITY: Record<string, number> = {
 };
 
 export function mergeCanonicalTracks(existing: CanonicalTrack, incoming: CanonicalTrack): CanonicalTrack {
-  const mergedSourceIds: Record<string, string> = { ...existing.sourceIds, ...incoming.sourceIds };
-  const seenSources = new Set<string>();
-  const mergedSources: SonicSearchSource[] = [];
-  for (const s of [...existing.availableSources, ...incoming.availableSources]) {
-    const key = `${s.platform}:${s.platformId}`;
-    if (!s.platform || !s.platformId || seenSources.has(key)) continue;
-    seenSources.add(key);
-    mergedSources.push(s);
-  }
-
   // Prefer higher-compatibility playable provider ID
   const existingPrio = PROVIDER_PRIORITY[existing.provider] || 0;
   const incomingPrio = PROVIDER_PRIORITY[incoming.provider] || 0;
@@ -272,6 +261,23 @@ export function mergeCanonicalTracks(existing: CanonicalTrack, incoming: Canonic
 
   const provider = preferIncoming ? incoming.provider : existing.provider;
   const providerTrackId = preferIncoming ? incoming.providerTrackId : existing.providerTrackId;
+
+  // Source IDs must align with the chosen primary provider: the winning provider's source ID must never be overwritten
+  const mergedSourceIds: Record<string, string> = preferIncoming
+    ? { ...existing.sourceIds, ...incoming.sourceIds }
+    : { ...incoming.sourceIds, ...existing.sourceIds };
+
+  const seenSources = new Set<string>();
+  const mergedSources: SonicSearchSource[] = [];
+  const primarySources = preferIncoming
+    ? [...incoming.availableSources, ...existing.availableSources]
+    : [...existing.availableSources, ...incoming.availableSources];
+  for (const s of primarySources) {
+    const key = `${s.platform}:${s.platformId}`;
+    if (!s.platform || !s.platformId || seenSources.has(key)) continue;
+    seenSources.add(key);
+    mergedSources.push(s);
+  }
 
   const streamOrder: Record<string, number> = { full: 3, trial: 2, unavailable: 1 };
   const bestStreamType =

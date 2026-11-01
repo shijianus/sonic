@@ -116,6 +116,46 @@ const {
   mvTotal,
 } = toRefs(state)
 
+import {
+  exploreTags,
+  type ExploreTagItem,
+  groupColorConfigs,
+  groupOrder,
+} from '@/utils/exploreTags'
+
+// 当前选中的多个风格标签列表
+const selectedTags = ref<ExploreTagItem[]>([])
+const selectedTagNames = computed(() => new Set(selectedTags.value.map(t => t.name)))
+
+const selectedTagQuery = computed(() => {
+  return [...selectedTags.value]
+    .sort((a, b) => (groupOrder[a.group] || 99) - (groupOrder[b.group] || 99))
+    .map(t => t.name)
+    .join(' ')
+})
+
+const handleToggleTag = (tag: ExploreTagItem) => {
+  const isSelected = selectedTags.value.some(t => t.name === tag.name)
+  if (isSelected) {
+    selectedTags.value = selectedTags.value.filter(t => t.name !== tag.name)
+  } else {
+    const filtered = selectedTags.value.filter(t => t.group !== tag.group)
+    selectedTags.value = [...filtered, tag]
+  }
+
+  state.q = selectedTagQuery.value
+  state.hasSearched = false
+  if (route.query.q) {
+    router.replace({ path: '/mobile/search' })
+  }
+}
+
+const clearSelectedTags = () => {
+  selectedTags.value = []
+  state.q = ''
+  state.hasSearched = false
+}
+
 const fetchDefault = async () => {
   const res = await searchDefault()
   const def = (res as any)?.data?.realkeyword || (res as any)?.data?.showKeyword || ''
@@ -363,9 +403,17 @@ watch(
     if (next) {
       state.q = next
       state.hasSearched = true
+      const matched = exploreTags.filter(t => next.includes(t.name))
+      if (matched.length > 0) {
+        selectedTags.value = matched
+      }
       await searchAll()
     } else {
-      state.q = ''
+      if (selectedTags.value.length > 0) {
+        state.q = selectedTagQuery.value
+      } else {
+        state.q = ''
+      }
       state.hasSearched = false
       fetchHot()
     }
@@ -399,6 +447,7 @@ const clearQuery = () => {
   searchAbort?.abort()
   searchGeneration += 1
   state.q = ''
+  selectedTags.value = []
   state.suggest = []
   state.suggestVisible = false
   state.hasSearched = false
@@ -438,6 +487,18 @@ const mapToStoreSong = (s: SongData): Song => ({
   album: s.album,
   duration: s.duration,
   cover: s.cover,
+  url: s.url,
+  streamUrl: s.streamUrl,
+  qualities: s.qualities,
+  sources: s.sources,
+  sha: s.sha,
+  streamType: s.streamType,
+  trialDuration: s.trialDuration,
+  qualityBadge: s.qualityBadge,
+  resolvedSource: (s as any).resolvedSource,
+  resolvedId: (s as any).resolvedId,
+  resolvedTitle: (s as any).resolvedTitle,
+  resolvedArtist: (s as any).resolvedArtist,
 })
 
 const playAllSongs = () => {
@@ -501,8 +562,8 @@ watch(
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div class="mobile-search-top shrink-0 px-4 pb-3">
       <div ref="searchBoxRef" class="relative">
-        <div class="glass-card flex items-center gap-2 px-3 py-2.5">
-          <span class="icon-[mdi--magnify] search-icon h-5 w-5 shrink-0"></span>
+        <div class="glass-card flex items-center gap-2 px-3 py-1.5">
+          <span class="icon-[mdi--magnify] search-icon h-4.5 w-4.5 shrink-0 text-primary/40"></span>
           <input
             ref="inputRef"
             v-model="q"
@@ -510,13 +571,13 @@ watch(
             @focus="handleInputFocus"
             type="text"
             :placeholder="placeholder || $t('common.search.placeholder')"
-            class="search-input min-h-11 min-w-0 flex-1 bg-transparent text-sm outline-none"
+            class="search-input h-9 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-primary/40"
           />
           <Button
             v-if="q"
             variant="ghost"
             size="none"
-            class="clear-btn flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all"
+            class="clear-btn flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-all"
             icon="icon-[mdi--close-circle]"
             icon-class="h-4 w-4"
             :title="$t('common.clear')"
@@ -526,9 +587,9 @@ watch(
           <Button
             variant="gradient"
             size="none"
-            class="search-btn flex h-11 items-center gap-1.5 rounded-full px-4 text-xs font-medium text-white transition-all active:scale-95"
+            class="search-btn flex h-7.5 items-center gap-1 rounded-full px-3 text-xs font-medium text-white transition-all active:scale-95"
             icon="icon-[mdi--magnify]"
-            icon-class="h-4 w-4"
+            icon-class="h-3.5 w-3.5"
             @click="handleSearchClick"
           >
             {{ $t('common.search.label') }}
@@ -576,54 +637,101 @@ watch(
       </div>
     </div>
 
-    <!-- 未搜索：热门搜索 + 搜索历史 -->
+    <!-- 未搜索：热门搜索 + 搜索历史 + 推荐风格Tag -->
     <div v-if="!hasSearched" class="flex-1 overflow-y-auto px-4 pb-6">
-      <section v-if="searchHistory.length" class="mb-6">
-        <div class="mb-3 flex items-center justify-between">
-          <div class="flex items-center gap-2">
-            <span class="icon-[mdi--history] h-4 w-4 text-primary/40"></span>
-            <h2 class="text-primary/60 text-xs font-bold tracking-wider uppercase">
+      <section v-if="searchHistory.length" class="mb-4">
+        <div class="mb-2 flex items-center justify-between">
+          <div class="flex items-center gap-1.5">
+            <span class="icon-[mdi--history] h-3.5 w-3.5 text-primary/40"></span>
+            <h2 class="text-primary/60 text-xs font-medium">
               {{ $t('search.recentSearches') }}
             </h2>
+            <span class="text-primary/30 text-[11px]">({{ searchHistory.length }}/20)</span>
           </div>
           <button
             type="button"
-            class="text-primary/40 hover:text-primary/70 flex min-h-11 min-w-11 items-center justify-center px-2 text-xs font-medium transition-colors"
+            class="text-primary/40 hover:text-primary/70 flex h-6 items-center px-1 text-xs font-medium transition-colors"
             @click="globalStore.clearSearchHistory()"
           >
             {{ $t('common.clear') }}
           </button>
         </div>
-        <div class="flex flex-wrap gap-2">
+        <div class="flex flex-wrap gap-1.5">
           <div
             v-for="keyword in searchHistory"
             :key="keyword"
-            class="history-chip flex min-h-12 items-center rounded-full border border-glass bg-button-glass text-xs font-medium transition-colors"
+            class="history-chip flex h-7 items-center rounded-full border border-glass bg-button-glass text-xs font-medium transition-colors"
           >
             <button
               type="button"
-              class="flex min-h-12 min-w-0 items-center gap-1.5 pr-1 pl-3.5 text-xs font-medium"
+              class="flex h-full min-w-0 items-center gap-1.5 pl-2.5 pr-1 text-xs font-medium"
               @click="runSearch(keyword)"
             >
-              <span class="icon-[mdi--history] size-3.5 shrink-0 text-primary/40"></span>
-              <span class="text-primary/80 truncate">{{ keyword }}</span>
+              <span class="text-primary/80 max-w-[130px] truncate">{{ keyword }}</span>
             </button>
             <button
               type="button"
-              class="text-primary/40 hover:text-primary/80 flex h-12 w-12 shrink-0 items-center justify-center rounded-full transition-colors"
+              class="text-primary/40 hover:text-primary/80 mr-1 flex h-4.5 w-4.5 shrink-0 items-center justify-center rounded-full transition-colors"
               :aria-label="$t('search.removeHistory', { keyword })"
               :title="$t('common.delete')"
               @click="globalStore.removeSearchHistory(keyword)"
             >
-              <span class="icon-[mdi--close] h-4 w-4"></span>
+              <span class="icon-[mdi--close] h-3 w-3"></span>
             </button>
           </div>
         </div>
       </section>
 
+      <!-- 推荐风格探索Tag（躺在搜索区域下方，引导用户选择） -->
+      <section class="mb-6">
+        <div class="mb-2 flex items-center justify-between">
+          <div class="flex items-center gap-1.5">
+            <span class="icon-[mdi--compass-outline] h-3.5 w-3.5 text-sky-400"></span>
+            <h2 class="text-primary/60 text-xs font-medium">{{ $t('search.styleExploreTags') }}</h2>
+            <span v-if="selectedTags.length > 0" class="text-sky-400/80 text-[11px]">
+              ({{ selectedTags.length }} 已选)
+            </span>
+          </div>
+          <button
+            v-if="selectedTags.length > 0"
+            type="button"
+            class="text-primary/40 hover:text-primary/70 flex h-6 items-center px-1 text-xs font-medium transition-colors"
+            @click="clearSelectedTags"
+          >
+            {{ $t('common.clear') }}
+          </button>
+        </div>
+        <div class="flex flex-wrap gap-1.5">
+          <button
+            v-for="tag in exploreTags"
+            :key="tag.name"
+            type="button"
+            class="tag-chip flex h-7 items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-all active:scale-95"
+            :class="
+              selectedTagNames.has(tag.name)
+                ? groupColorConfigs[tag.group].chipActive
+                : groupColorConfigs[tag.group].chipInactive
+            "
+            @click="handleToggleTag(tag)"
+          >
+            <span
+              class="text-[10px] transition-colors"
+              :class="
+                selectedTagNames.has(tag.name)
+                  ? groupColorConfigs[tag.group].hashActive
+                  : groupColorConfigs[tag.group].hashInactive
+              "
+            >
+              #
+            </span>
+            <span>{{ tag.name }}</span>
+          </button>
+        </div>
+      </section>
+
       <!-- 风格探索雷达 -->
       <section class="mb-6">
-        <StyleRadarSection :compact="true" />
+        <StyleRadarSection :compact="true" :genre="selectedTagQuery || state.q" />
       </section>
 
       <section>
@@ -731,6 +839,11 @@ watch(
               :total="songTotal"
               :page-size="songPageSize"
             />
+
+            <!-- 风格探索雷达（解耦后单曲展示） -->
+            <div class="mt-8 pt-4 border-t border-glass">
+              <StyleRadarSection :compact="true" :genre="selectedTagQuery || state.q" />
+            </div>
           </div>
         </swiper-slide>
 

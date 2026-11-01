@@ -450,4 +450,8 @@ export interface RecommendStore {
   recordEntityFeedback?(feedback: UserEntityFeedback): { inserted: boolean; deduplicated: boolean };
   getUserEntityFeedbacks?(subjectKey: string, limit?: number, sinceMs?: number): UserEntityFeedback[];
   clearUserEntityFeedbacks?(subjectKey: string): number;
+
+  // Radar album profile sync extensions (EpoMail authenticated 1:1 sync)
+  saveUserRadarProfile?(subjectKey: string, payloadJson: string): void;
+  getUserRadarProfile?(subjectKey: string): { payloadJson: string; updatedAt: number } | null;
 }

@@ -57,6 +57,14 @@ export interface Song {
   trialDuration?: number
   /** 候选音源列表（跨源自动兜底） */
   sources?: Array<{ platform: string; platformId: string | number; duration?: number }>
+  /** 流解析网关强校验绑定的真实音频来源 (如 netease / qq / kugou) */
+  resolvedSource?: string
+  /** 流解析网关强校验绑定的真实单曲 ID */
+  resolvedId?: string | number
+  /** 流解析网关强校验绑定的真实曲目名 */
+  resolvedTitle?: string
+  /** 流解析网关强校验绑定的真实歌手名 */
+  resolvedArtist?: string
 }
 
 /** 音频播放器 Store 状态 */

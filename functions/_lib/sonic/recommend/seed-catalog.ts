@@ -83,7 +83,7 @@ const CURATED_SEEDS: RawSeedEntry[] = [
   { id: '19645222', platform: 'netease', title: 'Numb', artist: 'Linkin Park', album: 'Meteora', duration: 185, genres: ['rock', 'alternative'], externalPopularity: 94, releaseDate: '2003-03-25' },
 
   // J-Pop, K-Pop & Pure Instrumental
-  { id: '1409322155', platform: 'netease', title: '夜に駆ける', artist: 'YOASOBI', album: 'THE BOOK', duration: 261, genres: ['j-pop', 'electronic', 'anime'], externalPopularity: 93, releaseDate: '2019-12-15' },
+  { id: '1409311773', platform: 'netease', title: '夜に駆ける', artist: 'YOASOBI', album: 'THE BOOK', duration: 261, genres: ['j-pop', 'electronic', 'anime'], externalPopularity: 93, releaseDate: '2019-12-15' },
   { id: '536622304', platform: 'netease', title: 'Lemon', artist: '米津玄师', album: 'Lemon', duration: 255, genres: ['j-pop', 'ballad'], externalPopularity: 94, releaseDate: '2018-02-12' },
   { id: '426881503', platform: 'netease', title: '前前前世', artist: 'RADWIMPS', album: '君の名は。', duration: 285, genres: ['j-pop', 'rock', 'anime'], externalPopularity: 91, releaseDate: '2016-08-24' },
   { id: '442869498', platform: 'netease', title: 'Summer', artist: '久石让', album: '菊次郎の夏', duration: 386, genres: ['instrumental', 'classical', 'ost'], externalPopularity: 93, releaseDate: '1999-05-19' },

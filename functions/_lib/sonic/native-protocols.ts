@@ -465,6 +465,10 @@ export interface ResolvedStreamInfo {
   degradedReason?: string;
   circuitState?: CircuitState;
   attempts: SonicAttempt[];
+  resolvedSource?: string;
+  resolvedId?: string;
+  resolvedTitle?: string;
+  resolvedArtist?: string;
 }
 
 function mapQualityToNeteaseLevel(quality: string): { level: string; encodeType: string } {
@@ -765,21 +769,52 @@ export function titlesMatchStrictly(targetTitle: string, candidateTitle: string)
   const cNorm = normalizeCjkText(candidateTitle);
   if (!tNorm || !cNorm) return false;
 
-  // Anti-mismatch keyword exclusions: candidate must not be live/remix/cover/accompaniment unless target was
-  const negativeKeywords = ['live', '现场', 'remix', '伴奏', 'instrumental', 'cover', '翻唱', 'dj'];
+  // Anti-mismatch keyword exclusions: candidate must not be live/remix/cover/accompaniment/clip/ringtone unless target was
+  const negativeKeywords = [
+    'live', '现场', 'remix', '伴奏', 'instrumental', 'cover', '翻唱', 'dj',
+    'karaoke', 'k歌', '伴唱', '铃声', '剪辑', '片段', 'preview', '试听',
+    'demo', '纯音乐', '纯享', '慢摇', '加长版', '加快版', '变调', '减速版',
+  ];
+  const tLower = targetTitle.toLowerCase();
+  const cLower = candidateTitle.toLowerCase();
   for (const kw of negativeKeywords) {
-    if (!tNorm.includes(kw) && cNorm.includes(kw)) {
+    if (!tNorm.includes(kw) && !tLower.includes(kw) && (cNorm.includes(kw) || cLower.includes(kw))) {
       return false;
     }
   }
 
   if (tNorm === cNorm) return true;
   if (cNorm.startsWith(tNorm) && cNorm.length <= tNorm.length + 4) return true;
+
+  // Check base titles (stripped of bracketed/parenthetical subtitles)
+  const stripParentheses = (s: string) => s.replace(/\s*[\(\[（【{][^\)\]）】}]+[\)\]）】}]/g, '').trim();
+  const tBase = normalizeCjkText(stripParentheses(targetTitle));
+  const cBase = normalizeCjkText(stripParentheses(candidateTitle));
+  if (tBase && cBase && tBase === cBase) return true;
+
   return false;
 }
 
 export function artistsMatchStrictly(targetArtist: string, candidateArtist: string, minSimilarity = 0.85): boolean {
   if (!targetArtist) return true;
+  const tNorm = normalizeCjkText(targetArtist);
+  const cNorm = normalizeCjkText(candidateArtist);
+  if (!tNorm || !cNorm) return false;
+  if (tNorm === cNorm) return true;
+
+  // Multi-artist collaboration split matching (e.g. "周杰伦 / 费玉清" matches "周杰伦")
+  const splitArtists = (s: string) => s.split(/[\/&,、与和+]/).map((a) => normalizeCjkText(a)).filter(Boolean);
+  const tList = splitArtists(targetArtist);
+  const cList = splitArtists(candidateArtist);
+  if (tList.some((t) => cList.some((c) => t === c))) {
+    return true;
+  }
+
+  // Short Chinese/CJK artist names (<= 4 chars) must match exactly to prevent "周杰" matching "周杰伦"
+  if (tNorm.length <= 4 && cNorm.length <= 4) {
+    return false;
+  }
+
   const sim = calcLevenshteinSimilarity(targetArtist, candidateArtist);
   return sim >= minSimilarity;
 }
@@ -940,6 +975,10 @@ export async function resolvePlayableStream(
             degradedReason,
             circuitState,
             attempts,
+            resolvedSource: 'synthetic',
+            resolvedId: spec ? spec.id : cleanId,
+            resolvedTitle: spec?.title || opts.title || 'Synthetic Test Audio',
+            resolvedArtist: spec?.artist || opts.artist || 'Sonic Acoustic Lab',
           };
         }
         attempts.push({
@@ -967,6 +1006,10 @@ export async function resolvePlayableStream(
             degradedReason: undefined,
             circuitState,
             attempts,
+            resolvedSource: 'netease',
+            resolvedId: cleanId,
+            resolvedTitle: opts.title || undefined,
+            resolvedArtist: opts.artist || undefined,
           };
           if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
           return out;
@@ -994,6 +1037,10 @@ export async function resolvePlayableStream(
               degradedReason,
               circuitState,
               attempts: [...attempts],
+              resolvedSource: 'netease',
+              resolvedId: cleanId,
+              resolvedTitle: opts.title || undefined,
+              resolvedArtist: opts.artist || undefined,
             };
           }
         } else {
@@ -1019,6 +1066,10 @@ export async function resolvePlayableStream(
             degradedReason: undefined,
             circuitState,
             attempts,
+            resolvedSource: 'qq',
+            resolvedId: cleanId,
+            resolvedTitle: opts.title || undefined,
+            resolvedArtist: opts.artist || undefined,
           };
           if (isFull) {
             if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
@@ -1049,6 +1100,10 @@ export async function resolvePlayableStream(
             degradedReason: undefined,
             circuitState,
             attempts,
+            resolvedSource: 'kugou',
+            resolvedId: cleanId,
+            resolvedTitle: opts.title || undefined,
+            resolvedArtist: opts.artist || undefined,
           };
           if (isFull) {
             if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
@@ -1076,6 +1131,10 @@ export async function resolvePlayableStream(
             degradedReason: undefined,
             circuitState,
             attempts,
+            resolvedSource: 'kuwo',
+            resolvedId: cleanId,
+            resolvedTitle: opts.title || undefined,
+            resolvedArtist: opts.artist || undefined,
           };
           if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
           return out;
@@ -1088,7 +1147,12 @@ export async function resolvePlayableStream(
   }
 
   // 4. Fast External Source Fallback (GDStudio Direct ID Lookup)
-  const isCommercialSource = cleanSource === 'netease' || cleanSource === 'qq' || cleanSource === 'sonic';
+  const isCommercialSource =
+    cleanSource === 'netease' ||
+    cleanSource === 'qq' ||
+    cleanSource === 'sonic' ||
+    cleanSource === 'kugou' ||
+    cleanSource === 'kuwo';
   const allowExternal =
     cfg.enableGdstudio ||
     (isCommercialSource && isSourceEnabledByPolicy(cleanSource, env) && (degraded || Boolean(engineRes?.skippedByCircuit) || !engineRes?.ok));
@@ -1133,6 +1197,10 @@ export async function resolvePlayableStream(
             degraded: false,
             circuitState,
             attempts,
+            resolvedSource: gdSource === 'tencent' ? 'qq' : gdSource,
+            resolvedId: cleanId,
+            resolvedTitle: opts.title || undefined,
+            resolvedArtist: opts.artist || undefined,
           };
           if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
           return out;
@@ -1205,6 +1273,10 @@ export async function resolvePlayableStream(
                 degradedReason: undefined,
                 circuitState,
                 attempts,
+                resolvedSource: 'netease',
+                resolvedId: match.platformId,
+                resolvedTitle: match.title,
+                resolvedArtist: match.artist,
               };
               if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
               return out;
@@ -1232,8 +1304,8 @@ export async function resolvePlayableStream(
           const freeItem = (kgJson?.data?.info || []).find(
             (it: any) =>
               (it.privilege === 0 || it.privilege === 8) &&
-              titlesMatchStrictly(opts.title!, String(it.songname || '')) &&
-              artistsMatchStrictly(opts.artist || '', String(it.singername || ''), cfg.crossMatchArtistSimilarity) &&
+              titlesMatchStrictly(trackTitle, String(it.songname || '')) &&
+              artistsMatchStrictly(trackArtist, String(it.singername || ''), cfg.crossMatchArtistSimilarity) &&
               (!opts.durationSec || !it.duration || Math.abs(it.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec),
           );
           if (freeItem?.hash) {
@@ -1255,6 +1327,10 @@ export async function resolvePlayableStream(
                   degradedReason: undefined,
                   circuitState,
                   attempts,
+                  resolvedSource: 'kugou',
+                  resolvedId: freeItem.hash,
+                  resolvedTitle: String(freeItem.songname || trackTitle),
+                  resolvedArtist: String(freeItem.singername || trackArtist),
                 };
                 if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
                 return out;
@@ -1277,8 +1353,8 @@ export async function resolvePlayableStream(
         for (const kt of kwTracks) {
           if (isBudgetExceeded()) break;
           if (
-            titlesMatchStrictly(opts.title!, kt.title) &&
-            artistsMatchStrictly(opts.artist || '', kt.artist, cfg.crossMatchArtistSimilarity) &&
+            titlesMatchStrictly(trackTitle, kt.title) &&
+            artistsMatchStrictly(trackArtist, kt.artist, cfg.crossMatchArtistSimilarity) &&
             (!opts.durationSec || !kt.duration || Math.abs(kt.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec)
           ) {
             const kwStream = await resolveKuwoSingleStream(kt.platformId, env);
@@ -1300,6 +1376,10 @@ export async function resolvePlayableStream(
                   degradedReason: undefined,
                   circuitState,
                   attempts,
+                  resolvedSource: 'kuwo',
+                  resolvedId: kt.platformId,
+                  resolvedTitle: kt.title,
+                  resolvedArtist: kt.artist,
                 };
                 if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
                 return out;
@@ -1357,6 +1437,10 @@ export async function resolvePlayableStream(
               degraded: false,
               circuitState,
               attempts,
+              resolvedSource: gdSource === 'tencent' ? 'qq' : gdSource,
+              resolvedId: cleanId,
+              resolvedTitle: trackTitle || undefined,
+              resolvedArtist: trackArtist || undefined,
             };
             if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
             return out;
@@ -1364,14 +1448,15 @@ export async function resolvePlayableStream(
         }
       }
 
-      // 5b. Search-Assisted External Match (when direct ID fails or ID format differs)
-      if (searchKeywords) {
+      // 5b. Search-Assisted External Match (STRICT TRIPLE VERIFICATION GATE)
+      // Must strictly match Title, Artist, and Duration tolerance to prevent mismatching covers or random songs!
+      if (searchKeywords && trackTitle) {
         const gdSearchUrl = new URL(cfg.upstreamGdstudio);
         gdSearchUrl.searchParams.set('s', Math.random().toString(36).substring(2, 15));
         gdSearchUrl.searchParams.set('types', 'search');
         gdSearchUrl.searchParams.set('name', searchKeywords);
         gdSearchUrl.searchParams.set('source', 'netease');
-        gdSearchUrl.searchParams.set('count', '3');
+        gdSearchUrl.searchParams.set('count', '6');
         const searchRes = await safeFetch(
           gdSearchUrl,
           {
@@ -1387,47 +1472,82 @@ export async function resolvePlayableStream(
         );
         if (searchRes.ok) {
           const searchData = (await searchRes.json()) as any;
-          if (Array.isArray(searchData) && searchData.length > 0 && searchData[0]?.id) {
-            const matchedId = String(searchData[0].id);
-            const gdUrl2 = new URL(cfg.upstreamGdstudio);
-            gdUrl2.searchParams.set('s', Math.random().toString(36).substring(2, 15));
-            gdUrl2.searchParams.set('types', 'url');
-            gdUrl2.searchParams.set('id', matchedId);
-            gdUrl2.searchParams.set('source', 'netease');
-            gdUrl2.searchParams.set('br', quality);
-            const gdRes2 = await safeFetch(
-              gdUrl2,
-              {
-                headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
-              },
-              {
-                allowHttp: false,
-                allowedDomains: [gdUrl2.hostname],
-                maxRedirects: 2,
-                timeoutMs: 12000,
-                maxBytes: 1024 * 1024,
-              },
-            );
-            if (gdRes2.ok) {
-              const gdData2 = (await gdRes2.json()) as any;
-              if (gdData2?.url && typeof gdData2.url === 'string' && gdData2.url.startsWith('http')) {
-                attempts.push({ provider: 'gdstudio', via: 'external-search-match', ok: true, ms: Date.now() - gdStart });
-                const finalUrl2 = toHttpsIfSafe(gdData2.url);
-                const isNeteaseCdn2 = finalUrl2.includes('music.126.net');
-                const out: ResolvedStreamInfo = {
-                  url: finalUrl2,
-                  provider: 'gdstudio',
-                  via: 'external-search-match',
-                  isTrial: false,
-                  streamType: 'full',
-                  corsSafe: isNeteaseCdn2,
-                  degraded: false,
-                  circuitState,
-                  attempts,
-                };
-                if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
-                return out;
+          if (Array.isArray(searchData) && searchData.length > 0) {
+            // Find candidate passing strict title, artist similarity, and duration check
+            const matchedCandidate = searchData.find((item: any) => {
+              if (!item || !item.id) return false;
+              const cTitle = String(item.name || item.title || '').trim();
+              const cArtist = String(
+                Array.isArray(item.artists)
+                  ? item.artists.map((a: any) => (typeof a === 'string' ? a : a?.name || '')).filter(Boolean).join(' / ')
+                  : (item.artist || item.singer || '')
+              ).trim();
+              if (!titlesMatchStrictly(trackTitle, cTitle)) return false;
+              if (trackArtist && !artistsMatchStrictly(trackArtist, cArtist, cfg.crossMatchArtistSimilarity)) return false;
+              if (opts.durationSec && item.duration) {
+                const dSec = typeof item.duration === 'number'
+                  ? (item.duration > 1000 ? Math.round(item.duration / 1000) : item.duration)
+                  : 0;
+                if (dSec > 0 && Math.abs(dSec - opts.durationSec) > cfg.crossMatchDurationToleranceSec) return false;
               }
+              return true;
+            });
+
+            if (matchedCandidate && matchedCandidate.id) {
+              const matchedId = String(matchedCandidate.id);
+              const matchedTitle = String(matchedCandidate.name || matchedCandidate.title || trackTitle);
+              const matchedArtist = String(
+                Array.isArray(matchedCandidate.artists)
+                  ? matchedCandidate.artists.map((a: any) => (typeof a === 'string' ? a : a?.name || '')).filter(Boolean).join(' / ')
+                  : (matchedCandidate.artist || matchedCandidate.singer || trackArtist)
+              );
+
+              const gdUrl2 = new URL(cfg.upstreamGdstudio);
+              gdUrl2.searchParams.set('s', Math.random().toString(36).substring(2, 15));
+              gdUrl2.searchParams.set('types', 'url');
+              gdUrl2.searchParams.set('id', matchedId);
+              gdUrl2.searchParams.set('source', 'netease');
+              gdUrl2.searchParams.set('br', quality);
+              const gdRes2 = await safeFetch(
+                gdUrl2,
+                {
+                  headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
+                },
+                {
+                  allowHttp: false,
+                  allowedDomains: [gdUrl2.hostname],
+                  maxRedirects: 2,
+                  timeoutMs: 12000,
+                  maxBytes: 1024 * 1024,
+                },
+              );
+              if (gdRes2.ok) {
+                const gdData2 = (await gdRes2.json()) as any;
+                if (gdData2?.url && typeof gdData2.url === 'string' && gdData2.url.startsWith('http')) {
+                  attempts.push({ provider: 'gdstudio', via: 'external-search-match', ok: true, ms: Date.now() - gdStart });
+                  const finalUrl2 = toHttpsIfSafe(gdData2.url);
+                  const isNeteaseCdn2 = finalUrl2.includes('music.126.net');
+                  const out: ResolvedStreamInfo = {
+                    url: finalUrl2,
+                    provider: 'gdstudio',
+                    via: 'external-search-match',
+                    isTrial: false,
+                    streamType: 'full',
+                    corsSafe: isNeteaseCdn2,
+                    degraded: false,
+                    circuitState,
+                    attempts,
+                    resolvedSource: 'netease',
+                    resolvedId: matchedId,
+                    resolvedTitle: matchedTitle,
+                    resolvedArtist: matchedArtist,
+                  };
+                  if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+                  return out;
+                }
+              }
+            } else {
+              attempts.push({ provider: 'gdstudio', via: 'external-search-match', ok: false, ms: Date.now() - gdStart, error: `No verified title/artist match for "${trackTitle}" by "${trackArtist}"` });
             }
           }
         }

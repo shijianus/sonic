@@ -30,8 +30,7 @@ export interface NexusSearchResult {
 async function computeSongSha(title: string, artist: string): Promise<string> {
   const cleanTitle = (title || '')
     .toLowerCase()
-    .replace(/[\s\-_—·.,!?'"()[\]{}<>《》「」【】]/g, '')
-    .replace(/(live|remaster|remastered|flac|320k|伴奏|instrumental)/g, '');
+    .replace(/[\s\-_—·.,!?'"()[\]{}<>《》「」【】]/g, '');
   const cleanArtist = (artist || '')
     .toLowerCase()
     .replace(/[\s\-_—·.,!?'"()[\]{}<>《》「」【】]/g, '')
@@ -281,15 +280,16 @@ export async function searchNexus(
     let existingCluster = clusterBySha.get(sha);
     if (!existingCluster) {
       existingCluster = clustersByTitleArtist.get(titleArtistKey)?.find((c) => {
-        // If albums both exist and match, or one is empty
-        if (!c.cleanAlbum || !cleanAl || c.cleanAlbum === cleanAl || c.cleanAlbum.includes(cleanAl) || cleanAl.includes(c.cleanAlbum)) {
-          return true;
+        const cDur = c.track.duration || 0;
+        // Strict duration tolerance: if both tracks have known duration, discrepancy must be <= 4s
+        if (cDur > 0 && trackDur > 0 && Math.abs(cDur - trackDur) > 4) {
+          return false;
         }
-        // If durations are close (within 6s), treat as same song
-        if (c.track.duration && trackDur && Math.abs(c.track.duration - trackDur) <= 6) {
-          return true;
+        // If albums both exist and differ completely, do not merge into the same cluster
+        if (c.cleanAlbum && cleanAl && c.cleanAlbum !== cleanAl && !c.cleanAlbum.includes(cleanAl) && !cleanAl.includes(c.cleanAlbum)) {
+          return false;
         }
-        return false;
+        return true;
       });
     }
 
@@ -336,6 +336,7 @@ export async function searchNexus(
         existing.platformId = track.platformId;
         existing.id = track.platformId;
         existing.urlId = track.platformId;
+        existing.lyricId = track.lyricId || track.platformId;
         existing.streamUrl = `/api/music/stream?${qParams}`;
         if (track.picId) existing.picId = track.picId;
       }

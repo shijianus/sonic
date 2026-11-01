@@ -19,7 +19,7 @@ import {
   isValidLyric,
   searchTracks,
 } from '../../music';
-import { searchNeteaseNative } from '../native-protocols';
+import { searchNeteaseNative, titlesMatchStrictly, artistsMatchStrictly } from '../native-protocols';
 
 async function fetchNeteaseLyricWithLocalFirst(songId: string, env?: AppEnv, signal?: AbortSignal): Promise<string> {
   const cfg = getSonicConfig(env);
@@ -56,15 +56,28 @@ export const neteaseProvider: SonicProviderAdapter = {
 
     if (songId) {
       rawLyric = await fetchNeteaseLyricWithLocalFirst(songId, env, options?.signal);
+      // 自适应校验：若传入了目标歌曲名，核验直连 ID 歌词中的元数据标签，防止张冠李戴（如把错误 ID 当成目标歌曲）
+      if (rawLyric && params.title) {
+        const tiMatch = rawLyric.match(/^\[ti:\s*(.+?)\s*\]/im);
+        if (tiMatch && tiMatch[1] && !titlesMatchStrictly(params.title, tiMatch[1])) {
+          rawLyric = ''; // ID 错位，自动放弃并切入自适应搜索对齐
+        }
+      }
     }
 
-    // Fallback: native encrypted NetEase search if no explicit songId was provided
-    if (!rawLyric && !songId && (params.title || params.artist)) {
+    // Fallback: 自适应多维对齐搜索（歌名 + 歌手 + 时长匹配）
+    if (!rawLyric && (params.title || params.artist)) {
       const q = [params.title, params.artist].filter(Boolean).join(' ').trim();
       try {
-        const nativeRes = await searchNeteaseNative(q, 3, 1, env, options?.signal);
-        if (nativeRes.tracks.length > 0 && nativeRes.tracks[0].platformId) {
-          resolvedId = nativeRes.tracks[0].platformId;
+        const nativeRes = await searchNeteaseNative(q, 5, 1, env, options?.signal);
+        const match = nativeRes.tracks.find(
+          (t) =>
+            (!params.title || titlesMatchStrictly(params.title, t.title)) &&
+            (!params.artist || artistsMatchStrictly(params.artist, t.artist)) &&
+            (!params.duration || !t.duration || Math.abs(t.duration - params.duration) <= 6)
+        );
+        if (match?.platformId) {
+          resolvedId = match.platformId;
           rawLyric = await fetchNeteaseLyricWithLocalFirst(resolvedId, env, options?.signal);
         }
       } catch {}

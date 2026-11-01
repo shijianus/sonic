@@ -18,6 +18,7 @@ import {
   interpolateWordTimestamps,
   isValidLyric,
 } from '../../music';
+import { titlesMatchStrictly, artistsMatchStrictly } from '../native-protocols';
 
 export const qqProvider: SonicProviderAdapter = {
   name: 'qq',
@@ -34,13 +35,20 @@ export const qqProvider: SonicProviderAdapter = {
 
     if (songmid) {
       rawLyric = await fetchDirectQQLyrics(songmid, options?.signal);
+      // 自适应校验：若传入了目标歌曲名，核验直连 ID 歌词中的元数据标签，防止张冠李戴
+      if (rawLyric && params.title) {
+        const tiMatch = rawLyric.match(/^\[ti:\s*(.+?)\s*\]/im);
+        if (tiMatch && tiMatch[1] && !titlesMatchStrictly(params.title, tiMatch[1])) {
+          rawLyric = ''; // 放弃错误 ID 歌词，转入自适应搜索
+        }
+      }
     }
 
-    // Fallback: search QQ if no lyrics by ID
+    // Fallback: 自适应多维对齐搜索（歌名 + 歌手 + 时长匹配）
     if (!rawLyric && (params.title || params.artist)) {
       const q = [params.title, params.artist].filter(Boolean).join(' ').trim();
       try {
-        const sUrl = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=3&w=${encodeURIComponent(q)}&format=json`;
+        const sUrl = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=5&w=${encodeURIComponent(q)}&format=json`;
         const sRes = await fetch(sUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -51,9 +59,19 @@ export const qqProvider: SonicProviderAdapter = {
         if (sRes.ok) {
           const sJson = (await sRes.json()) as any;
           const list = sJson.data?.song?.list;
-          if (Array.isArray(list) && list.length > 0 && list[0].songmid) {
-            resolvedMid = list[0].songmid;
-            rawLyric = await fetchDirectQQLyrics(resolvedMid, options?.signal);
+          if (Array.isArray(list)) {
+            const match = list.find((s: any) => {
+              const singerStr = Array.isArray(s.singer) ? s.singer.map((x: any) => x.name).join(' / ') : '';
+              return (
+                (!params.title || titlesMatchStrictly(params.title, String(s.songname || ''))) &&
+                (!params.artist || artistsMatchStrictly(params.artist, singerStr)) &&
+                (!params.duration || !s.interval || Math.abs(s.interval - params.duration) <= 6)
+              );
+            });
+            if (match?.songmid) {
+              resolvedMid = match.songmid;
+              rawLyric = await fetchDirectQQLyrics(resolvedMid, options?.signal);
+            }
           }
         }
       } catch {}

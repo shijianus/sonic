@@ -33,6 +33,7 @@ import {
   getUniversalLyrics,
 } from '../music';
 import { callLocalEngineJson, type CircuitState } from './local-engine';
+import { titlesMatchStrictly, artistsMatchStrictly } from './native-protocols';
 
 export interface NexusLyricsResult {
   data: SonicLyricsData;
@@ -265,12 +266,38 @@ export async function resolveNexusLyrics(
         const timeoutSignal = AbortSignal.timeout(config.timeoutMs);
         const nativeResult = await adapter.getLyrics(params, { env, signal: timeoutSignal });
         if (nativeResult && nativeResult.data && (nativeResult.data.instrumental || nativeResult.data.syncedLyrics.length > 0)) {
-          recordAttempt(String(adapter.name), true, pStart);
-          if (nativeResult.data.instrumental || nativeResult.data.sourceQuality === 'real') {
-            return finalize(nativeResult);
+          // 自适应校验：防止因直连 ID 错位返回完全不相干歌曲的歌词（如错误 ID "Aku Tergoda" 替代 "夜に駆ける"）
+          const trackTitle = params.title || '';
+          const trackArtist = params.artist || '';
+          const resTrack = nativeResult.data.track;
+          const resTitle = resTrack?.title || '';
+          const resArtist = resTrack?.artist || '';
+          const lrcPlain = nativeResult.data.plainLyrics || '';
+
+          let isMismatched = false;
+          if (trackTitle && resTitle && !titlesMatchStrictly(trackTitle, resTitle)) {
+            isMismatched = true;
           }
-          if (!interpolatedFallback) {
-            interpolatedFallback = nativeResult;
+          if (trackArtist && resArtist && !artistsMatchStrictly(trackArtist, resArtist)) {
+            isMismatched = true;
+          }
+          if (trackTitle && lrcPlain) {
+            const tiMatch = lrcPlain.match(/\[ti:\s*(.+?)\s*\]/im);
+            if (tiMatch && tiMatch[1]?.trim() && !titlesMatchStrictly(trackTitle, tiMatch[1].trim())) {
+              isMismatched = true;
+            }
+          }
+
+          if (isMismatched) {
+            recordAttempt(String(adapter.name), false, pStart, 'Native lyric metadata mismatched requested song');
+          } else {
+            recordAttempt(String(adapter.name), true, pStart);
+            if (nativeResult.data.instrumental || nativeResult.data.sourceQuality === 'real') {
+              return finalize(nativeResult);
+            }
+            if (!interpolatedFallback) {
+              interpolatedFallback = nativeResult;
+            }
           }
         } else {
           recordAttempt(String(adapter.name), false, pStart, 'No native lyrics returned');
@@ -300,39 +327,53 @@ export async function resolveNexusLyrics(
       const amllSignal = AbortSignal.timeout(config.timeoutMs);
       const amllById = await fetchAmllByIds(params, amllSignal, config.upstreamAmll);
       if (amllById) {
-        const lines = parseTtmlLyrics(amllById.ttml);
-        const hasWords = lines.some((l) => l.words && l.words.length > 0);
-        for (const line of lines) {
-          if (!line.words || line.words.length === 0) {
-            line.words = interpolateWordTimestamps(line.text, line.time, line.duration || 3000);
-          }
+        const amllTitle = amllById.metadata.songName || '';
+        const amllArtist = amllById.metadata.artists?.join(' / ') || '';
+        let amllMismatched = false;
+        if (params.title && amllTitle && !titlesMatchStrictly(params.title, amllTitle)) {
+          amllMismatched = true;
         }
-        const sonicLines = internalLinesToSonicLines(lines);
-        if (sonicLines.length > 0) {
-          recordAttempt('amll', true, aStart);
-          const result = buildResult(
-            'amll',
-            sonicLines,
-            hasWords ? 'real' : 'interpolated',
-            amllById.matchLevel,
-            hasWords ? 95 : 60,
-            {
-              rawTtml: amllById.ttml,
-              ttmlMetadata: amllById.metadata,
-              sourceId: amllById.sourceId,
-              sourceUrl: `${config.upstreamAmll}/v1/lyrics/get?id=${amllById.sourceId}`,
-              track: {
-                title: amllById.metadata.songName || params.title || '',
-                artist: amllById.metadata.artists?.join(' / ') || params.artist || '',
-                album: params.album || '',
-                isrc: amllById.metadata.isrc || params.isrc || '',
-              },
-            },
-          );
-          if (result.data.instrumental || hasWords) return finalize(result);
-          if (!interpolatedFallback) interpolatedFallback = result;
+        if (params.artist && amllArtist && !artistsMatchStrictly(params.artist, amllArtist)) {
+          amllMismatched = true;
+        }
+
+        if (amllMismatched) {
+          recordAttempt('amll', false, aStart, 'AMLL metadata mismatched requested song');
         } else {
-          recordAttempt('amll', false, aStart, 'Empty lines parsed from TTML');
+          const lines = parseTtmlLyrics(amllById.ttml);
+          const hasWords = lines.some((l) => l.words && l.words.length > 0);
+          for (const line of lines) {
+            if (!line.words || line.words.length === 0) {
+              line.words = interpolateWordTimestamps(line.text, line.time, line.duration || 3000);
+            }
+          }
+          const sonicLines = internalLinesToSonicLines(lines);
+          if (sonicLines.length > 0) {
+            recordAttempt('amll', true, aStart);
+            const result = buildResult(
+              'amll',
+              sonicLines,
+              hasWords ? 'real' : 'interpolated',
+              amllById.matchLevel,
+              hasWords ? 95 : 60,
+              {
+                rawTtml: amllById.ttml,
+                ttmlMetadata: amllById.metadata,
+                sourceId: amllById.sourceId,
+                sourceUrl: `${config.upstreamAmll}/v1/lyrics/get?id=${amllById.sourceId}`,
+                track: {
+                  title: amllById.metadata.songName || params.title || '',
+                  artist: amllById.metadata.artists?.join(' / ') || params.artist || '',
+                  album: params.album || '',
+                  isrc: amllById.metadata.isrc || params.isrc || '',
+                },
+              },
+            );
+            if (result.data.instrumental || hasWords) return finalize(result);
+            if (!interpolatedFallback) interpolatedFallback = result;
+          } else {
+            recordAttempt('amll', false, aStart, 'Empty lines parsed from TTML');
+          }
         }
       } else {
         recordAttempt('amll', false, aStart, 'Not found by ID');

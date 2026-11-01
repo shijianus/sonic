@@ -708,7 +708,15 @@ async function enrichStoreWithLiveQuery(
       env,
     );
     const canonicals: CanonicalTrack[] = [];
+    const negativeKeywords = ['伴奏', 'instrumental', '铃声', '翻唱', 'dj版', '片段', 'preview', 'k歌'];
+    const qLower = query.toLowerCase();
     res.data.tracks.forEach((t, idx) => {
+      if (!t || !t.title || !t.artist || t.artist === '未知歌手') return;
+      const tLower = String(t.title || '').toLowerCase();
+      const hasNegative = negativeKeywords.some((kw) => tLower.includes(kw) && !qLower.includes(kw));
+      if (hasNegative) return;
+      if (!t.platformId && !t.id) return;
+
       const ct = toCanonicalTrack(t, { rank: idx, explicitGenres });
       if (ct) canonicals.push(ct);
     });
@@ -1395,11 +1403,13 @@ export async function getDiscoverRecommendations(
   const rawLang = (options.language || '').trim().toLowerCase();
   const profile = buildUserPreferenceProfile(identity, store);
 
-  const parsedGenres = rawGenre ? extractQueryGenres(rawGenre).genres : [];
-  const targetGenre = parsedGenres[0] || rawGenre;
+  const parsed = rawGenre ? extractQueryGenres(rawGenre) : { genres: [], languages: [] };
+  const targetGenres = parsed.genres.length > 0 ? parsed.genres : (rawGenre ? [rawGenre] : []);
+  const effectiveLang = rawLang || (parsed.languages.length > 0 ? parsed.languages[0] : '');
+  const targetGenre = targetGenres[0] || rawGenre;
 
-  if (targetGenre && store.listTracks(600).filter((t) => t.genres.includes(targetGenre)).length < 4) {
-    await enrichStoreWithLiveQuery(targetGenre, store, env, [targetGenre]);
+  if (targetGenre && store.listTracks(600).filter((t) => targetGenres.some((g) => t.genres.includes(g))).length < 4) {
+    await enrichStoreWithLiveQuery(rawGenre, store, env, targetGenres);
   }
 
   const allTracks = store.listTracks(1200);
@@ -1410,11 +1420,11 @@ export async function getDiscoverRecommendations(
     if (!isPlayableTrack(track)) continue;
     if (profile.blockedTrackIds.has(track.canonicalTrackId)) continue;
 
-    if (targetGenre) {
-      const hit = track.genres.some((g) => g === targetGenre || g.includes(targetGenre) || targetGenre.includes(g));
+    if (targetGenres.length > 0) {
+      const hit = targetGenres.some((g) => track.genres.some((tg) => tg === g || tg.includes(g) || g.includes(tg)));
       if (!hit) continue;
     }
-    if (rawLang && track.language !== rawLang) {
+    if (effectiveLang && track.language && track.language !== effectiveLang) {
       continue;
     }
 

@@ -47,7 +47,7 @@ const updateLyricIdx = () => {
 
 watch(
   () => currentSong.value,
-  s => fetchLyrics(s, true)
+  s => fetchLyrics(s)
 )
 watch(() => currentTime.value, updateLyricIdx)
 

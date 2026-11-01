@@ -98,6 +98,8 @@ export const songUrl = (params: { id: string; br?: number }) => httpGet('/song/u
 
 export const songUrlV1 = (params: {
   id: string
+  title?: string
+  artist?: string
   level?: 'standard' | 'higher' | 'exhigh' | 'lossless' | 'hires' | 'jyeffect' | 'sky' | 'jymaster'
 }) => httpGet('/song/url/v1', params)
 

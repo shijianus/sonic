@@ -16,10 +16,6 @@ import piniaPersistConfig from '../persist'
 let globalAudio: HTMLAudioElement | null = null
 /** 标记事件是否已绑定，防止重复监听 */
 let eventsBound = false
-/** 链接过期自动重试节流：记录上次重试的歌曲 ID，避免短时间重复刷新 */
-let lastRetrySongId: string | number | null = null
-/** 上次重试时间戳 */
-let lastRetryTime = 0
 /** 标记当前播放歌曲是否已触发过下一首预加载，避免重复发起 */
 let hasPreloadedNext = false
 /** 推荐行为追踪：记录当前歌曲是否已上报过起播与 50% 有效播放进度 */
@@ -87,6 +83,8 @@ const armStartupWatchdog = (onTimeout: () => void) => {
 }
 /** 同一首歌曲的播放地址请求共享结果，避免切歌预加载重复请求 */
 const pendingUrlRequests = new Map<string, Promise<string>>()
+/** 记录每首歌曲尝试切源的序号，支持多源 failover 轮询 */
+const songSourceAttemptMap = new Map<string, number>()
 /** 媒体错误监听器最近一次上报的歌曲与时间，避免 play() 拒绝后重复上报、互相覆盖 */
 let lastMediaErrorReport: { songId: string | number | null; at: number } | null = null
 
@@ -458,7 +456,7 @@ export const useAudioStore = defineStore('audio', {
         this.audio.isMuted = audio.muted
       })
 
-      // 错误处理（区分“本地引擎降级导致的流不可用 503”与“单曲版权/普通播放失败”）
+      // 错误处理（优先自动换源重试，借鉴 YesPlayMusic / UnblockNeteaseMusic 换源兜底机制）
       audio.addEventListener('error', async (e: any) => {
         // 切歌时浏览器会中断上一音源加载并上报 abort，不代表当前歌曲失败
         if (audio.error?.code === 1 /* MEDIA_ERR_ABORTED */) return
@@ -469,8 +467,26 @@ export const useAudioStore = defineStore('audio', {
 
         const failedSrc = audio.currentSrc || audio.src || ''
         const failedSongId = this.audio.currentSong?.id ?? null
-        // 诊断请求本身失败（连接被断开/DNS/超时）时按网络错误归类，
-        // 避免把“网络中断”误报成“版权受限”。
+        const currentSong = this.audio.currentSong
+
+        // 核心容灾：优先静默换源（Failover）轮询候选音轨或跨平台平替源，轮换穷尽前绝不轻易向用户报错！
+        const songKey = String(failedSongId || '')
+        const currentAttempts = songSourceAttemptMap.get(songKey) || 0
+        const maxAttempts = Math.min(4, Math.max(3, (currentSong?.sources?.length || 1) + 1))
+
+        if (failedSongId && !currentSong?.isLocal && currentAttempts < maxAttempts) {
+          console.warn(
+            `[Audio Failover] Stream playback error on attempt ${currentAttempts + 1}/${maxAttempts} for song ${failedSongId}. Seamlessly switching to next alternative source...`
+          )
+          try {
+            await this.refreshAndReplay(true)
+            return
+          } catch (retryErr) {
+            console.warn('[Audio Failover] Retry attempt failed:', retryErr)
+          }
+        }
+
+        // 候选源全部尝试失败后，发起诊断分析具体失败原因
         let diagnosticNetworkFailure = false
         if (failedSrc && failedSrc.includes('/api/music/stream')) {
           try {
@@ -478,7 +494,6 @@ export const useAudioStore = defineStore('audio', {
               method: 'GET',
               headers: { Range: 'bytes=0-0' },
             })
-            // 诊断请求可能在用户切歌后才返回，禁止旧歌曲覆盖当前状态。
             if (this.audio.currentSong?.id !== failedSongId) return
             inspectGatewayHeaders(diagRes.headers)
             if (diagRes.status === 503 || diagRes.status === 404) {
@@ -509,15 +524,6 @@ export const useAudioStore = defineStore('audio', {
         this._reportPlaybackError(
           diagnosticNetworkFailure ? new Error('network fetch failed') : audio.error || e
         )
-
-        // 触发一次刷新播放地址并重试，10秒内同一歌曲仅重试一次
-        const now = Date.now()
-        const id = this.audio.currentSong?.id ?? null
-        if (id && (!lastRetrySongId || lastRetrySongId !== id || now - lastRetryTime > 10000)) {
-          lastRetrySongId = id as any
-          lastRetryTime = now
-          this.refreshAndReplay()
-        }
       })
       eventsBound = true
     },
@@ -667,6 +673,7 @@ export const useAudioStore = defineStore('audio', {
           this.audio.currentTime = 0
         }
         this._loadAudioSrc(this.audio.currentSong.url || '', isSwitchingSong)
+        this._probeStreamMetadata(this.audio.currentSong)
         await this.audio.audio.play()
         clearStartupWatchdog()
 
@@ -679,16 +686,24 @@ export const useAudioStore = defineStore('audio', {
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
         clearStartupWatchdog()
         this.audio.isPlaying = false
+
+        // 播放失败时优先尝试自动刷新地址并切换候选源重试，若重试成功则无缝起播不弹窗
+        const id = this.audio.currentSong?.id ?? null
+        if (id && !this.audio.currentSong.isLocal) {
+          const songKey = String(id)
+          const currentAttempts = songSourceAttemptMap.get(songKey) || 0
+          const maxAttempts = Math.min(4, Math.max(3, (this.audio.currentSong?.sources?.length || 1) + 1))
+          if (currentAttempts < maxAttempts) {
+            try {
+              await this.refreshAndReplay(true)
+              return
+            } catch {}
+          }
+        }
+
         // 媒体错误监听器若已给出更准确的诊断（如网络中断），不重复弹出泛化错误
         if (!mediaErrorAlreadyReported(targetSongId)) this._reportPlaybackError(error)
         console.error('Play error:', error)
-        // 播放失败时也尝试刷新 URL 后重试
-        const id = this.audio.currentSong?.id ?? null
-        if (id && !this.audio.currentSong.isLocal) {
-          if (generation === playbackGeneration && this.audio.currentSong?.id === targetSongId) {
-            await this.refreshAndReplay()
-          }
-        }
       } finally {
         if (generation === playbackGeneration) this.audio.isLoading = false
       }
@@ -696,9 +711,9 @@ export const useAudioStore = defineStore('audio', {
 
     /**
      * 刷新当前歌曲的播放地址并重试播放
-     * 用于链接过期等场景的自动恢复
+     * 用于链接过期、流断开或音源 403/404 场景的多源自动 failover 与恢复
      */
-    async refreshAndReplay() {
+    async refreshAndReplay(tryNextSource = false) {
       if (!this.audio.currentSong || !this.audio.audio) return
       if (this.audio.currentSong.isLocal) return
 
@@ -706,13 +721,14 @@ export const useAudioStore = defineStore('audio', {
       const targetSongId = this.audio.currentSong.id
       this.audio.isLoading = true
       try {
-        await this._fetchAndApplyUrl(this.audio.currentSong)
+        await this._fetchAndApplyUrl(this.audio.currentSong, true, tryNextSource)
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId || !this.audio.currentSong.url) return
-        this._loadAudioSrc(this.audio.currentSong!.url || '')
+        this._loadAudioSrc(this.audio.currentSong!.url || '', true)
         await this.audio.audio!.play()
         clearStartupWatchdog()
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
         this.audio.error = null
+        this._dismissPlaybackErrorToast()
       } catch (e) {
         // 已切歌/暂停导致的取消失败不提示，由新播放代次负责状态
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
@@ -771,35 +787,78 @@ export const useAudioStore = defineStore('audio', {
     /**
      * 内部方法：获取歌曲播放地址并同步到 currentSong 和 playlist
      * 抽取自 playSong 和 refreshAndReplay 的公共逻辑，支持传入目标歌曲进行预解析
+     * @param forceFresh 是否强制跳过内存 Promise 缓存重新请求
+     * @param tryNextSource 是否在发生错误时轮询切换下一个候选音源平台
      */
-    async _fetchAndApplyUrl(targetSong?: Song) {
+    async _fetchAndApplyUrl(targetSong?: Song, forceFresh = false, tryNextSource = false) {
       const song = targetSong || this.audio.currentSong
       if (!song) return
       const settingsStore = useSettingsStore()
       const requestKey = `${String(song.id)}:${settingsStore.audioQuality}`
+      if (forceFresh) {
+        pendingUrlRequests.delete(requestKey)
+        song.url = ''
+      }
       let request = pendingUrlRequests.get(requestKey)
       if (!request) {
         request = (async () => {
           let url = ''
-          try {
-            const res: any = await songUrlV1({
-              id: String(song.id),
-              level: settingsStore.audioQuality,
-            })
-            url = res?.data?.[0]?.url || res?.data?.data?.[0]?.url || res?.url || ''
-          } catch {}
+          const songKey = String(song.id)
+          let attemptIdx = songSourceAttemptMap.get(songKey) || 0
+          if (tryNextSource) {
+            attemptIdx += 1
+            songSourceAttemptMap.set(songKey, attemptIdx)
+          }
 
-          // Sonic 多源聚合网关智能兜底
+          if (!tryNextSource) {
+            try {
+              const res: any = await songUrlV1({
+                id: String(song.id),
+                title: song.name,
+                artist: song.artist,
+                level: settingsStore.audioQuality,
+              })
+              url = res?.data?.[0]?.url || res?.data?.data?.[0]?.url || res?.url || ''
+            } catch {}
+          }
+
+          // Sonic 多源聚合网关智能兜底与多候选源 failover
           if (!url) {
-            const titleParam = song.name ? `&title=${encodeURIComponent(song.name)}` : ''
-            const artistParam = song.artist ? `&artist=${encodeURIComponent(song.artist)}` : ''
-            const durSec = song.duration ? `&duration=${Math.round(song.duration / 1000)}` : ''
-            // 第一方聚合曲目优先复用自带流地址/来源，禁止在网关禁用商业源时误落 netease 造成 403 静音
-            const ownStreamUrl = song.qualities?.find((q: { streamUrl?: string }) => q.streamUrl)?.streamUrl || song.url || ''
-            const fallbackSource = song.sources?.[0]?.platform || 'netease'
+            const songTitle = String(song.name || (song as any).title || '').trim()
+            let songArtist = String(song.artist || '').trim()
+            if (!songArtist && Array.isArray((song as any).artists)) {
+              songArtist = (song as any).artists
+                .map((a: any) => (typeof a === 'object' && a ? a.name || '' : String(a)))
+                .filter(Boolean)
+                .join(' / ')
+            }
+            const titleParam = songTitle ? `&title=${encodeURIComponent(songTitle)}` : ''
+            const artistParam = songArtist ? `&artist=${encodeURIComponent(songArtist)}` : ''
+            const rawDur = song.duration || (song as any).dt || 0
+            const durSec = rawDur ? `&duration=${Math.round(rawDur > 1000 ? rawDur / 1000 : rawDur)}` : ''
+
+            const platformRotation = ['netease', 'qq', 'kugou', 'kuwo']
+            let fallbackSource = 'netease'
+            let fallbackId = String(song.id)
+            if (song.sources && song.sources.length > 0) {
+              const chosen = song.sources[attemptIdx % song.sources.length]
+              if (chosen) {
+                fallbackSource = chosen.platform || fallbackSource
+                fallbackId = String(chosen.platformId || fallbackId)
+              }
+            } else if (attemptIdx > 0) {
+              // 歌曲无多源聚类且重试时，自动轮换到其它主流音源平台检索
+              fallbackSource = platformRotation[attemptIdx % platformRotation.length]
+            }
+
+            // 自带流地址（仅在初次非换源重试时复用）
+            const ownStreamUrl = !tryNextSource
+              ? (song.qualities?.find((q: { streamUrl?: string }) => q.streamUrl)?.streamUrl || song.streamUrl || song.url || '')
+              : ''
+            const retryParam = attemptIdx > 0 ? `&retry=${attemptIdx}&ts=${Date.now()}` : ''
             url =
               ownStreamUrl ||
-              `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=${encodeURIComponent(fallbackSource)}${titleParam}${artistParam}${durSec}`
+              `/api/music/stream?id=${encodeURIComponent(fallbackId)}&source=${encodeURIComponent(fallbackSource)}${titleParam}${artistParam}${durSec}${retryParam}`
           }
           return url
         })()
@@ -819,23 +878,79 @@ export const useAudioStore = defineStore('audio', {
         this.audio.playlist[idx].url = url
       }
 
-      // 异步探测流类型与试听状态响应头
-      if (url.startsWith('/api/music/stream') && !song.streamType && typeof fetch !== 'undefined') {
-        fetch(url, { method: 'HEAD' })
-          .then((res) => {
-            const streamType = res.headers.get('x-sonic-stream-type') as any
-            const trialDur = res.headers.get('x-sonic-trial-duration')
-            if (streamType === 'trial' || streamType === 'full') {
-              song.streamType = streamType
-              if (trialDur) song.trialDuration = parseInt(trialDur, 10)
-              if (idx !== -1) {
-                this.audio.playlist[idx].streamType = streamType
-                if (trialDur) this.audio.playlist[idx].trialDuration = parseInt(trialDur, 10)
-              }
-            }
-          })
-          .catch(() => {})
-      }
+      // 异步探测流类型与强绑定真实解析音源元数据（保障曲目、音频、歌词三者强同步）
+      this._probeStreamMetadata(song)
+    },
+
+    /**
+     * 内部方法：异步探测并强绑定流响应头中的音源解析元数据
+     * 读取网关返回的真实平台 (X-Sonic-Resolved-Source) 与真实 ID (X-Sonic-Resolved-Id)
+     */
+    _probeStreamMetadata(song: Song) {
+      if (!song || !song.url || !song.url.startsWith('/api/music/stream') || typeof fetch === 'undefined') return
+      const targetUrl = song.url
+      const songId = song.id
+      fetch(targetUrl, { method: 'HEAD' })
+        .then((res) => {
+          const streamType = res.headers.get('x-sonic-stream-type') as any
+          const trialDur = res.headers.get('x-sonic-trial-duration')
+          const rSource = res.headers.get('x-sonic-resolved-source')
+          const rId = res.headers.get('x-sonic-resolved-id')
+          const rTitleRaw = res.headers.get('x-sonic-resolved-title')
+          const rArtistRaw = res.headers.get('x-sonic-resolved-artist')
+          const rTitle = rTitleRaw ? decodeURIComponent(rTitleRaw) : ''
+          const rArtist = rArtistRaw ? decodeURIComponent(rArtistRaw) : ''
+
+          let changed = false
+          if (streamType && (streamType === 'trial' || streamType === 'full') && song.streamType !== streamType) {
+            song.streamType = streamType
+            changed = true
+          }
+          if (trialDur) {
+            song.trialDuration = parseInt(trialDur, 10)
+          }
+          if (rSource && song.resolvedSource !== rSource) {
+            song.resolvedSource = rSource
+            changed = true
+          }
+          if (rId && String(song.resolvedId || '') !== String(rId)) {
+            song.resolvedId = rId
+            changed = true
+          }
+          if (rTitle && song.resolvedTitle !== rTitle) {
+            song.resolvedTitle = rTitle
+            changed = true
+          }
+          if (rArtist && song.resolvedArtist !== rArtist) {
+            song.resolvedArtist = rArtist
+            changed = true
+          }
+
+          const idx = this.audio.playlist.findIndex((p: { id: string | number }) => p.id === songId)
+          if (idx !== -1) {
+            if (song.streamType) this.audio.playlist[idx].streamType = song.streamType
+            if (song.trialDuration) this.audio.playlist[idx].trialDuration = song.trialDuration
+            if (song.resolvedSource) this.audio.playlist[idx].resolvedSource = song.resolvedSource
+            if (song.resolvedId) this.audio.playlist[idx].resolvedId = song.resolvedId
+            if (song.resolvedTitle) this.audio.playlist[idx].resolvedTitle = song.resolvedTitle
+            if (song.resolvedArtist) this.audio.playlist[idx].resolvedArtist = song.resolvedArtist
+          }
+
+          if (changed && typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('sonic:stream-resolved', {
+                detail: {
+                  songId,
+                  resolvedSource: rSource,
+                  resolvedId: rId,
+                  resolvedTitle: rTitle,
+                  resolvedArtist: rArtist,
+                },
+              }),
+            )
+          }
+        })
+        .catch(() => {})
     },
 
     /**
@@ -846,7 +961,8 @@ export const useAudioStore = defineStore('audio', {
       const currentSrc = this.audio.audio.src
       const resolved =
         url && typeof window !== 'undefined' ? new URL(url, window.location.href).href : url
-      if (force || (currentSrc !== resolved && this.audio.audio.getAttribute('src') !== url)) {
+      const hasError = !!this.audio.audio.error || this.audio.audio.networkState === 3
+      if (force || hasError || (currentSrc !== resolved && this.audio.audio.getAttribute('src') !== url)) {
         this.audio.audio.src = url
         this.audio.audio.load()
         if (!switchingQuality) {

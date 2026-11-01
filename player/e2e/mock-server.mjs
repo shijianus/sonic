@@ -279,13 +279,27 @@ async function handleApi(req, res, url) {
 
   if (p === '/api/sonic/recommend/for-you' || p === '/api/sonic/recommend/trending' ||
       p === '/api/sonic/recommend/discover' || p === '/api/sonic/recommend/similar') {
+    const ids = [9001, 9002, 9003, 9004]
+    const genre = q.get('genre') || ''
+    const tracks = ids.map(id => ({
+      id: Number(id),
+      platformId: String(id),
+      name: SONG_META[id]?.name || `Track ${id}`,
+      title: SONG_META[id]?.name || `Track ${id}`,
+      artist: SONG_META[id]?.artist || 'Tester',
+      album: 'E2E Album',
+      duration: WAV_SECONDS * 1000,
+      cover: '',
+      streamUrl: `/api/music/stream?id=${id}`,
+      genres: genre ? [genre] : ['流行'],
+    }))
     return sendJson(res, {
       data: {
-        tracks: [],
+        tracks,
         personalized: false,
         privacyMode: 'public',
         window: '7d',
-        stationStats: { activeTracksWithPlays: 0, totalCatalogTracks: 0 },
+        stationStats: { activeTracksWithPlays: tracks.length, totalCatalogTracks: 100 },
         availableGenres: [],
       },
       meta: {},

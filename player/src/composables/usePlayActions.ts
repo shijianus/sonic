@@ -25,6 +25,18 @@ export function mapToStoreSong(song: SongData): StoreSong {
     cover: song.cover,
     liked: song.liked,
     mvId: song.mvId,
+    url: song.url,
+    streamUrl: song.streamUrl,
+    sha: song.sha,
+    qualityBadge: song.qualityBadge,
+    qualities: song.qualities,
+    streamType: song.streamType,
+    trialDuration: song.trialDuration,
+    sources: song.sources,
+    resolvedSource: (song as any).resolvedSource,
+    resolvedId: (song as any).resolvedId,
+    resolvedTitle: (song as any).resolvedTitle,
+    resolvedArtist: (song as any).resolvedArtist,
   }
 }
 

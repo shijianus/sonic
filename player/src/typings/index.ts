@@ -79,12 +79,17 @@ export interface RelatedMV {
   cover: string
   emoji: string
   gradient: string
+  publishTime?: string
 }
 
 export interface MVComment {
+  id?: string | number
   username: string
   avatarUrl: string
   time: string
+  rawTime?: number
   content: string
   likes: number
+  expressionUrl?: string | null
+  isLiked?: boolean
 }

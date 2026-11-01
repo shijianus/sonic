@@ -6,6 +6,7 @@ import { useRecommendStore } from '@/stores/modules/recommend'
 import { fetchRecommendDiscover, type RecommendSongItem } from '@/api/recommend'
 import SongCard from '@/components/Ui/SongCard.vue'
 import MobileSongList from '@/components/Mobile/MobileSongList.vue'
+import { getRadarBadgeClass } from '@/utils/exploreTags'
 
 interface Props {
   compact?: boolean
@@ -27,7 +28,7 @@ const loading = ref<boolean>(false)
 const tracks = ref<RecommendSongItem[]>([])
 
 const visibleTracks = computed(() => {
-  const maxItems = props.compact ? 6 : 8
+  const maxItems = props.compact ? 6 : 10
   return tracks.value
     .filter((item) => !recommendStore.isSongDisliked(item.canonicalTrackId || item.id))
     .slice(0, maxItems)
@@ -36,7 +37,7 @@ const visibleTracks = computed(() => {
 async function loadDiscoverTracks(isRefresh = false) {
   loading.value = true
   const headers = recommendStore.buildRequestHeaders(false)
-  const count = props.compact ? 8 : 16
+  const count = props.compact ? 8 : 20
 
   try {
     // 换一批时对探索温度做轻微自适应漂移，结合服务端抽取获得新组合
@@ -99,26 +100,22 @@ defineExpose({
     <div class="mb-3.5 flex flex-wrap items-center justify-between gap-3">
       <div class="min-w-0">
         <h2
-          class="text-primary flex items-center gap-2.5 font-bold tracking-tight"
+          class="text-primary flex items-center gap-2 font-bold tracking-tight"
           :class="compact ? 'text-base' : 'text-xl'"
         >
-          <span
-            class="flex items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-sky-500 text-slate-950 shadow-sm"
-            :class="compact ? 'h-7 w-7' : 'h-8 w-8'"
-          >
-            <span class="icon-[mdi--compass-rose]" :class="compact ? 'h-4 w-4' : 'h-5 w-5'" />
-          </span>
+          <span class="icon-[mdi--compass-rose] h-4 w-4 text-sky-400" />
           <span>{{ t('recommend.styleRadar') }}</span>
-          <span
-            v-if="selectedGenre"
-            class="rounded-full border border-sky-500/30 bg-sky-500/15 px-2 py-0.5 text-xs font-medium text-sky-400"
-          >
-            # {{ selectedGenre }}
-          </span>
+          <template v-if="selectedGenre">
+            <span
+              v-for="g in selectedGenre.split(/\s+/).filter(Boolean)"
+              :key="g"
+              class="rounded-full border px-2 py-0.5 text-xs font-medium transition-colors"
+              :class="getRadarBadgeClass(g)"
+            >
+              # {{ g }}
+            </span>
+          </template>
         </h2>
-        <p v-if="!compact" class="text-primary/55 mt-1 text-xs">
-          {{ t('recommend.styleRadarSubtitle') }}
-        </p>
       </div>
 
       <!-- 右侧快捷操作按钮 -->

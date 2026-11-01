@@ -289,6 +289,41 @@ async function runTests() {
     assert(Array.isArray(dataSearchPl.result?.playlists) && dataSearchPl.result.playlists.length > 0, `Cloudsearch returns playlists (${dataSearchPl.result?.playlists?.length})`);
   }
 
+  // Test 15: Artist List Multi-Dimensional Filtering & Dedicated Search (Type 100 Artist & Type 10 Album)
+  console.log('\n15. Testing /api/artist/list & dedicated /api/cloudsearch for artists & albums');
+  {
+    // 15.1 Filtered artist list by type=1, area=7, initial=Z
+    const urlArtistsZ = new URL('http://localhost/api/artist/list?type=1&area=7&initial=Z&limit=5');
+    const resArtistsZ = await handleUpstreamEndpoint('artist/list', urlArtistsZ, new Request(urlArtistsZ.toString()));
+    const dataArtistsZ = await resArtistsZ.json();
+    assert(resArtistsZ.status === 200, `Artist list (type=1, area=7, initial=Z) returns 200`);
+    assert(Array.isArray(dataArtistsZ.artists) && dataArtistsZ.artists.length > 0, `Artist list returns artists matching Z (${dataArtistsZ.artists?.length})`);
+    assert(dataArtistsZ.brand === 'Sonic', `Artist list brand is Sonic`);
+
+    // 15.2 Filtered artist list with initial=0 (# other characters)
+    const urlArtistsSymbol = new URL('http://localhost/api/artist/list?type=-1&area=-1&initial=0&limit=5');
+    const resArtistsSymbol = await handleUpstreamEndpoint('artist/list', urlArtistsSymbol, new Request(urlArtistsSymbol.toString()));
+    const dataArtistsSymbol = await resArtistsSymbol.json();
+    assert(resArtistsSymbol.status === 200, `Artist list initial=# returns 200`);
+    assert(Array.isArray(dataArtistsSymbol.artists) && dataArtistsSymbol.artists.length > 0, `Artist list returns # artists (${dataArtistsSymbol.artists?.length})`);
+
+    // 15.3 Dedicated artist search (cloudsearch type=100)
+    const urlSearchArt = new URL('http://localhost/api/cloudsearch?keywords=周杰伦&type=100&limit=5');
+    const resSearchArt = await handleUpstreamEndpoint('cloudsearch', urlSearchArt, new Request(urlSearchArt.toString()));
+    const dataSearchArt = await resSearchArt.json();
+    assert(resSearchArt.status === 200, `Dedicated artist search (type=100) returns 200`);
+    assert(Array.isArray(dataSearchArt.result?.artists) && dataSearchArt.result.artists.length > 0, `Dedicated artist search returns matching artists (${dataSearchArt.result?.artists?.length})`);
+    assert(dataSearchArt.result.artists[0]?.name?.includes('周杰伦'), `Dedicated artist search matched "周杰伦"`);
+
+    // 15.4 Dedicated album search (cloudsearch type=10)
+    const urlSearchAlb = new URL('http://localhost/api/cloudsearch?keywords=范特西&type=10&limit=5');
+    const resSearchAlb = await handleUpstreamEndpoint('cloudsearch', urlSearchAlb, new Request(urlSearchAlb.toString()));
+    const dataSearchAlb = await resSearchAlb.json();
+    assert(resSearchAlb.status === 200, `Dedicated album search (type=10) returns 200`);
+    assert(Array.isArray(dataSearchAlb.result?.albums) && dataSearchAlb.result.albums.length > 0, `Dedicated album search returns matching albums (${dataSearchAlb.result?.albums?.length})`);
+    assert(dataSearchAlb.result.albums[0]?.name?.includes('范特西'), `Dedicated album search matched "范特西"`);
+  }
+
 
   console.log(`\n========================================`);
   console.log(`Test Results: ${passed} passed, ${failed} failed`);

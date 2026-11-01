@@ -100,6 +100,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   let degraded = false;
   let degradedReason: string | undefined;
   let circuitState: string | undefined;
+  let resolvedSource = '';
+  let resolvedTrackId = '';
+  let resolvedTitle = '';
+  let resolvedArtist = '';
 
   if (targetParam) {
     targetUrl = sanitizeTargetUrl(targetParam, allowedDomains);
@@ -255,6 +259,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       degraded = resolved.degraded;
       degradedReason = resolved.degradedReason;
       circuitState = resolved.circuitState;
+      resolvedSource = resolved.resolvedSource || resolvedProvider || source;
+      resolvedTrackId = resolved.resolvedId || id;
+      resolvedTitle = resolved.resolvedTitle || title;
+      resolvedArtist = resolved.resolvedArtist || artist;
     } catch (err: any) {
       recordStreamMetric('err_5xx');
       return errorResponse(redactSensitiveString(err?.message || '解析音频流失败'), 502);
@@ -284,9 +292,13 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     if (resolvedTrial) redirectHeaders.set('X-Sonic-Stream-Trial', '1');
     if (resolvedTrialDuration > 0) redirectHeaders.set('X-Sonic-Trial-Duration', String(resolvedTrialDuration));
     if (degraded) redirectHeaders.set('X-Sonic-Degraded', '1');
+    if (resolvedSource) redirectHeaders.set('X-Sonic-Resolved-Source', resolvedSource);
+    if (resolvedTrackId) redirectHeaders.set('X-Sonic-Resolved-Id', resolvedTrackId);
+    if (resolvedTitle) redirectHeaders.set('X-Sonic-Resolved-Title', encodeURIComponent(resolvedTitle));
+    if (resolvedArtist) redirectHeaders.set('X-Sonic-Resolved-Artist', encodeURIComponent(resolvedArtist));
     redirectHeaders.set(
       'Access-Control-Expose-Headers',
-      'X-Sonic-Provider, X-Sonic-Via, X-Sonic-Stream-Trial, X-Sonic-Stream-Type, X-Sonic-Trial-Duration, X-Sonic-Degraded',
+      'X-Sonic-Provider, X-Sonic-Via, X-Sonic-Stream-Trial, X-Sonic-Stream-Type, X-Sonic-Trial-Duration, X-Sonic-Degraded, X-Sonic-Resolved-Source, X-Sonic-Resolved-Id, X-Sonic-Resolved-Title, X-Sonic-Resolved-Artist',
     );
     return new Response(null, { status: 302, headers: redirectHeaders });
   }
@@ -504,9 +516,13 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       if (degradedReason) headers.set('X-Sonic-Degraded-Reason', encodeURIComponent(degradedReason));
     }
     if (circuitState) headers.set('X-Sonic-Circuit', circuitState);
+    if (resolvedSource) headers.set('X-Sonic-Resolved-Source', resolvedSource);
+    if (resolvedTrackId) headers.set('X-Sonic-Resolved-Id', resolvedTrackId);
+    if (resolvedTitle) headers.set('X-Sonic-Resolved-Title', encodeURIComponent(resolvedTitle));
+    if (resolvedArtist) headers.set('X-Sonic-Resolved-Artist', encodeURIComponent(resolvedArtist));
     headers.set(
       'Access-Control-Expose-Headers',
-      'Content-Range, Content-Length, Accept-Ranges, Content-Type, X-Sonic-Provider, X-Sonic-Via, X-Sonic-Stream-Trial, X-Sonic-Stream-Type, X-Sonic-Trial-Duration, X-Sonic-Degraded, X-Sonic-Circuit',
+      'Content-Range, Content-Length, Accept-Ranges, Content-Type, X-Sonic-Provider, X-Sonic-Via, X-Sonic-Stream-Trial, X-Sonic-Stream-Type, X-Sonic-Trial-Duration, X-Sonic-Degraded, X-Sonic-Circuit, X-Sonic-Resolved-Source, X-Sonic-Resolved-Id, X-Sonic-Resolved-Title, X-Sonic-Resolved-Artist',
     );
 
     recordStreamMetric(status === 206 ? 'proxied_206' : 'proxied_200');

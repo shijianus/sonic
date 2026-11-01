@@ -15,6 +15,13 @@ interface Props {
     cover: string
     duration: number
     album?: string
+    url?: string
+    streamUrl?: string
+    qualities?: Array<{ level: string; label: string; bitrate: string; streamUrl?: string; format?: string; desc?: string }>
+    sources?: Array<{ platform: string; platformId: string | number; duration?: number }>
+    streamType?: 'full' | 'trial' | 'unavailable'
+    qualityBadge?: string
+    sha?: string
   }
   index: number
   to?: string
@@ -44,13 +51,25 @@ const handleClick = async (_event: MouseEvent) => {
   const rect = coverEl.getBoundingClientRect()
 
   // 播放歌曲
+  const rawSong = props.song as any
   const storeSong: StoreSong = {
-    id: props.song.id as number,
-    name: props.song.name,
-    artist: props.song.artist,
-    album: props.song.album || '',
-    duration: props.song.duration,
-    cover: props.song.cover,
+    id: rawSong.id,
+    name: rawSong.name,
+    artist: rawSong.artist,
+    album: rawSong.album || '',
+    duration: rawSong.duration,
+    cover: rawSong.cover,
+    url: rawSong.url || rawSong.streamUrl,
+    streamUrl: rawSong.streamUrl,
+    qualities: rawSong.qualities,
+    sources: rawSong.sources,
+    streamType: rawSong.streamType,
+    sha: rawSong.sha,
+    qualityBadge: rawSong.qualityBadge,
+    resolvedSource: rawSong.resolvedSource,
+    resolvedId: rawSong.resolvedId,
+    resolvedTitle: rawSong.resolvedTitle,
+    resolvedArtist: rawSong.resolvedArtist,
   }
   playAfterCurrent(storeSong)
 
