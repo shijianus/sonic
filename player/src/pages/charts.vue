@@ -17,6 +17,8 @@ const recommendStore = useRecommendStore()
 type MainTabKey = 'trending' | 'newSong' | 'official'
 type TrendingWindowKey = '7d' | '24h' | 'surging' | 'new'
 
+const isExpandedOfficial = ref(false)
+
 const state = reactive({
   activeTab: 'trending' as MainTabKey,
   trendingWindow: '7d' as TrendingWindowKey,
@@ -32,7 +34,6 @@ const state = reactive({
 })
 
 const { activeTab, trendingWindow, activeType } = toRefs(state)
-const officialScrollRef = ref<HTMLElement | null>(null)
 
 const mainTabs = computed(() => [
   { key: 'trending' as const, labelKey: 'charts.trending', icon: 'icon-[mdi--chart-line-variant]' },
@@ -149,16 +150,9 @@ const headerTitle = computed(() => {
 
 const currentSubtitle = computed(() => {
   if (state.activeTab === 'trending') return '基于全站实时收听热度与探索推荐模型精算'
-  if (state.activeTab === 'newSong') return '全球最新发布的录音室曲目抢先速递'
+  if (state.activeTab === 'newSong') return '全球最新发布的录音室优质单曲抢先速递'
   return state.selectedList?.updateFrequency || state.selectedList?.description || t('charts.official')
 })
-
-const handleOfficialWheel = (e: WheelEvent) => {
-  if (!officialScrollRef.value) return
-  if (Math.abs(e.deltaX) < Math.abs(e.deltaY)) {
-    officialScrollRef.value.scrollLeft += e.deltaY * 0.8
-  }
-}
 
 watch(trendingWindow, () => {
   if (state.activeTab === 'trending') loadTrendingSongs()
@@ -169,6 +163,7 @@ watch(activeType, () => {
 })
 
 watch(activeTab, (val) => {
+  isExpandedOfficial.value = false
   if (val === 'trending' && !state.trendingSongs.length) {
     loadTrendingSongs()
   } else if (val === 'newSong' && !state.songs.length) {
@@ -186,15 +181,15 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="flex h-full flex-1 flex-col overflow-hidden">
+  <div class="charts-page flex h-full flex-1 flex-col overflow-hidden">
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- 顶部控制与筛选区（严格同步“歌手”页面：单一 glass-card，无嵌套框） -->
+    <!-- 顶部控制面板（尺寸紧凑，单层 glass-card 规整无嵌套）          -->
     <!-- ═══════════════════════════════════════════════════════════ -->
     <div class="glass-card mx-1 sm:mx-2 mt-1 mb-3 shrink-0 p-3 sm:p-4 transition-all">
-      <!-- 第一栏（上栏）：板块标题、榜单图标、状态与「播放全部」操作 -->
+      <!-- 第一栏（上栏）：板块标题、当前榜单高亮与「播放全部」主操作 -->
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-glass-subtle">
         <div class="flex items-center gap-2.5">
-          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/20 text-sky-400">
+          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500/20 text-sky-400 border border-sky-500/30">
             <span class="icon-[mdi--chart-line] h-5 w-5" />
           </div>
           <div>
@@ -212,7 +207,7 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- 右侧：曲目数指标 + 「播放全部」主操作按钮 -->
+        <!-- 右侧：曲目数指标 + 「播放全部」按钮 -->
         <div class="flex items-center gap-2 w-full md:w-auto justify-between md:justify-end">
           <span class="text-primary/50 text-xs px-2.5 py-1 rounded-full bg-button-glass border border-glass-subtle">
             {{ currentSongs.length }} {{ t('charts.songs') }}
@@ -232,112 +227,167 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 第二栏（下栏）：分类维度筛选与小滑块栏 -->
-      <div class="pt-3 space-y-2.5">
-        <!-- 维度 1：榜单主分类 -->
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-16">
-            {{ t('layout.aside.menu.charts') }}:
-          </span>
-          <div class="flex flex-wrap gap-1">
-            <button
-              v-for="tab in mainTabs"
-              :key="tab.key"
-              type="button"
-              class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer flex items-center gap-1.5"
-              :class="
-                activeTab === tab.key
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                  : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
-              "
-              @click="state.activeTab = tab.key"
-            >
-              <span :class="[tab.icon, 'h-3.5 w-3.5']" />
-              <span>{{ t(tab.labelKey) }}</span>
-            </button>
+      <!-- 第二栏（下栏）：分类维度筛选（向后自然扩展，不强制向下缩进） -->
+      <div class="pt-3">
+        <!-- 模式 A：趋势榜 或 新歌榜（分类与次级选项在单行向后扩展） -->
+        <div v-if="activeTab !== 'official'" class="flex flex-wrap items-center gap-2">
+          <!-- 榜单分类 -->
+          <div class="flex items-center gap-1.5">
+            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0">
+              {{ t('layout.aside.menu.charts') }}:
+            </span>
+            <div class="flex items-center gap-1">
+              <button
+                v-for="tab in mainTabs"
+                :key="tab.key"
+                type="button"
+                class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer flex items-center gap-1.5"
+                :class="
+                  activeTab === tab.key
+                    ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
+                    : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
+                "
+                @click="state.activeTab = tab.key"
+              >
+                <span :class="[tab.icon, 'h-3.5 w-3.5']" />
+                <span>{{ t(tab.labelKey) }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="h-4 w-px bg-glass-subtle shrink-0 mx-1 hidden sm:block" />
+
+          <!-- 趋势榜时间窗选项（直接向后延展） -->
+          <div v-if="activeTab === 'trending'" class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-primary/50 text-xs font-medium shrink-0">
+              {{ t('recommend.tabs.trending') }}:
+            </span>
+            <div class="flex items-center gap-1 flex-wrap">
+              <button
+                v-for="win in trendingWindows"
+                :key="win.key"
+                type="button"
+                class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer flex items-center gap-1"
+                :class="
+                  trendingWindow === win.key
+                    ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold shadow-[0_0_8px_rgba(56,189,248,0.15)]'
+                    : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
+                "
+                @click="trendingWindow = win.key as any"
+              >
+                <span :class="[win.icon, 'h-3.5 w-3.5']" />
+                <span>{{ t(win.labelKey) }}</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 新歌榜地区选项（直接向后延展） -->
+          <div v-else-if="activeTab === 'newSong'" class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-primary/50 text-xs font-medium shrink-0">
+              {{ t('artists.area') }}:
+            </span>
+            <div class="flex items-center gap-1 flex-wrap">
+              <button
+                v-for="type in newSongTypes"
+                :key="type.key"
+                type="button"
+                class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer flex items-center gap-1"
+                :class="
+                  activeType === type.key
+                    ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold shadow-[0_0_8px_rgba(56,189,248,0.15)]'
+                    : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
+                "
+                @click="activeType = type.key as any"
+              >
+                <span :class="[type.icon, 'h-3.5 w-3.5']" />
+                <span>{{ t(type.labelKey) }}</span>
+              </button>
+            </div>
           </div>
         </div>
 
-        <!-- 维度 2：次级选项与小滑块 (与歌手页面的首字母/地区小滑块轨完全同步) -->
-        <!-- 趋势榜时间窗小滑块 -->
-        <div v-if="activeTab === 'trending'" class="flex items-center gap-2">
-          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-16">
-            {{ t('recommend.tabs.trending') }}:
-          </span>
-          <div class="flex flex-1 items-center gap-1 overflow-x-auto py-0.5 no-scrollbar">
-            <button
-              v-for="win in trendingWindows"
-              :key="win.key"
-              type="button"
-              class="rounded-lg px-2.5 py-1 text-xs transition-all shrink-0 cursor-pointer flex items-center gap-1.5"
-              :class="
-                trendingWindow === win.key
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                  : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
-              "
-              @click="trendingWindow = win.key as any"
-            >
-              <span :class="[win.icon, 'h-3.5 w-3.5']" />
-              <span>{{ t(win.labelKey) }}</span>
-            </button>
+        <!-- 模式 B：官方榜单（无水平滑块，上下两行结构化清晰排布） -->
+        <div v-else class="space-y-2">
+          <!-- 上行：主分类切换 -->
+          <div class="flex items-center gap-2">
+            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0">
+              {{ t('layout.aside.menu.charts') }}:
+            </span>
+            <div class="flex items-center gap-1">
+              <button
+                v-for="tab in mainTabs"
+                :key="tab.key"
+                type="button"
+                class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer flex items-center gap-1.5"
+                :class="
+                  activeTab === tab.key
+                    ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
+                    : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
+                "
+                @click="state.activeTab = tab.key"
+              >
+                <span :class="[tab.icon, 'h-3.5 w-3.5']" />
+                <span>{{ t(tab.labelKey) }}</span>
+              </button>
+            </div>
+            <span class="text-primary/35 text-[11px] ml-2 hidden sm:inline">
+              轻触切换权威官方榜单
+            </span>
           </div>
-        </div>
 
-        <!-- 新歌榜地区小滑块 -->
-        <div v-else-if="activeTab === 'newSong'" class="flex items-center gap-2">
-          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-16">
-            {{ t('artists.area') }}:
-          </span>
-          <div class="flex flex-1 items-center gap-1 overflow-x-auto py-0.5 no-scrollbar">
-            <button
-              v-for="type in newSongTypes"
-              :key="type.key"
-              type="button"
-              class="rounded-lg px-2.5 py-1 text-xs transition-all shrink-0 cursor-pointer flex items-center gap-1.5"
-              :class="
-                activeType === type.key
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                  : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
-              "
-              @click="activeType = type.key as any"
-            >
-              <span :class="[type.icon, 'h-3.5 w-3.5']" />
-              <span>{{ t(type.labelKey) }}</span>
-            </button>
-          </div>
-        </div>
+          <!-- 官方榜单专属：2行结构化排版，上下格式（上名称、下浅细更新周期），无水平滑块 -->
+          <div class="flex items-start gap-2 pt-0.5">
+            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 mt-1.5">
+              {{ t('charts.official') }}:
+            </span>
 
-        <!-- 官方权威精选榜单（30+）专属小滑块轨 -->
-        <div v-else class="flex items-center gap-2">
-          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-16">
-            {{ t('charts.official') }}:
-          </span>
-          <div
-            ref="officialScrollRef"
-            class="flex flex-1 items-center gap-1.5 overflow-x-auto py-0.5 no-scrollbar scroll-smooth"
-            @wheel.passive="handleOfficialWheel"
-          >
+            <div class="flex-1 min-w-0">
+              <div
+                class="flex flex-wrap gap-1.5 transition-all duration-300"
+                :class="isExpandedOfficial ? 'max-h-[260px] overflow-y-auto pr-1' : 'max-h-[82px] overflow-hidden'"
+              >
+                <button
+                  v-for="item in state.officialLists"
+                  :key="item.id"
+                  type="button"
+                  class="group flex flex-col items-center justify-center px-2.5 py-1 rounded-lg transition-all cursor-pointer text-center shrink-0 border"
+                  :class="
+                    state.selectedList?.id === item.id
+                      ? 'bg-sky-500/20 text-sky-400 border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
+                      : 'text-primary/70 hover:bg-hover-glass hover:text-primary border-glass-subtle bg-button-glass'
+                  "
+                  @click="selectList(item)"
+                >
+                  <div class="flex items-center gap-1">
+                    <span
+                      v-if="state.selectedList?.id === item.id"
+                      class="icon-[mdi--equalizer] h-3 w-3 text-sky-400 animate-pulse"
+                    />
+                    <span class="text-xs font-medium leading-tight truncate max-w-[96px]">{{ item.name }}</span>
+                  </div>
+                  <span
+                    v-if="item.updateFrequency"
+                    class="text-[10px] text-primary/40 font-normal leading-tight mt-0.5 truncate max-w-[88px]"
+                  >
+                    {{ item.updateFrequency }}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 更多/收起 按钮 -->
             <button
-              v-for="item in state.officialLists"
-              :key="item.id"
+              v-if="state.officialLists.length > 14"
               type="button"
-              class="rounded-lg px-2.5 py-1 text-xs transition-all shrink-0 cursor-pointer flex items-center gap-1.5 border"
-              :class="
-                state.selectedList?.id === item.id
-                  ? 'bg-sky-500/20 text-sky-400 border-sky-500/30 font-semibold shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                  : 'text-primary/60 hover:bg-hover-glass hover:text-primary border-transparent'
-              "
-              @click="selectList(item)"
+              class="shrink-0 flex items-center gap-1 text-[11px] text-primary/50 hover:text-sky-400 px-2 py-1 rounded-lg hover:bg-hover-glass transition-colors mt-1 cursor-pointer"
+              @click="isExpandedOfficial = !isExpandedOfficial"
             >
+              <span>{{ isExpandedOfficial ? '收起' : '更多' }}</span>
               <span
-                v-if="state.selectedList?.id === item.id"
-                class="icon-[mdi--equalizer] h-3.5 w-3.5 text-sky-400 animate-pulse"
+                :class="isExpandedOfficial ? 'icon-[mdi--chevron-up]' : 'icon-[mdi--chevron-down]'"
+                class="h-3.5 w-3.5"
               />
-              <span v-else class="icon-[mdi--trophy-outline] h-3.5 w-3.5 opacity-60" />
-              <span>{{ item.name }}</span>
-              <span v-if="item.updateFrequency" class="text-[10px] opacity-50 ml-0.5">
-                ({{ item.updateFrequency }})
-              </span>
             </button>
           </div>
         </div>
@@ -345,9 +395,9 @@ onMounted(() => {
     </div>
 
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <!-- 主展示区（下栏内容区）：严格同步“歌手”页面，直接在画板内 overflow-auto，无嵌套方框 -->
+    <!-- 主展示区（下栏内容区）：严格同步“歌手”页面，并配置清晰可见的滚动滑块 -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <div class="flex-1 overflow-auto px-1 sm:px-2 pb-6">
+    <div class="charts-content-container flex-1 min-h-0 px-1 sm:px-2 pb-3 overflow-hidden">
       <PageSkeleton v-if="currentLoading" :sections="['list']" :list-count="12" />
       <SongList v-else :songs="currentSongs" :show-header="true" :show-controls="true" />
     </div>
@@ -355,12 +405,38 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* 隐藏横向滚动条，保留滑动与手势支持 */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
+/* ── 深度强化歌曲列表的垂直滚动条滑块（清晰可见、精致毛玻璃触感、支持拖拽） ── */
+.charts-content-container :deep(.custom-scrollbar),
+.charts-content-container :deep(.overflow-y-auto) {
+  scrollbar-width: thin !important;
+  scrollbar-color: rgba(56, 189, 248, 0.45) transparent !important;
+  -ms-overflow-style: auto !important;
 }
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+
+.charts-content-container :deep(.custom-scrollbar::-webkit-scrollbar),
+.charts-content-container :deep(.overflow-y-auto::-webkit-scrollbar) {
+  display: block !important;
+  width: 6px !important;
+}
+
+.charts-content-container :deep(.custom-scrollbar::-webkit-scrollbar-track),
+.charts-content-container :deep(.overflow-y-auto::-webkit-scrollbar-track) {
+  display: block !important;
+  background: transparent !important;
+}
+
+.charts-content-container :deep(.custom-scrollbar::-webkit-scrollbar-thumb),
+.charts-content-container :deep(.overflow-y-auto::-webkit-scrollbar-thumb) {
+  display: block !important;
+  background-color: rgba(56, 189, 248, 0.4) !important;
+  border-radius: 9999px !important;
+  border: 1px solid rgba(56, 189, 248, 0.2) !important;
+  background-clip: padding-box !important;
+  transition: background-color 0.2s ease;
+}
+
+.charts-content-container :deep(.custom-scrollbar::-webkit-scrollbar-thumb:hover),
+.charts-content-container :deep(.overflow-y-auto::-webkit-scrollbar-thumb:hover) {
+  background-color: rgba(56, 189, 248, 0.75) !important;
 }
 </style>
