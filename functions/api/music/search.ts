@@ -60,8 +60,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     const engineRes = await callLocalEngineJson<any>(
       `/api/music/search?q=${encodeURIComponent(query.trim())}&source=${encodeURIComponent(source)}&count=${count}&page=${page}`,
       env,
-      { clientIp: extractClientIp(request, env) },
+      { clientIp: extractClientIp(request, env), signal: request.signal },
     );
+    request.signal.throwIfAborted();
     if (engineRes.ok && engineRes.data && Array.isArray(engineRes.data.tracks)) {
       return jsonResponse(
         {
@@ -80,7 +81,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   }
 
   try {
-    const tracks = await searchTracks(env, query.trim(), source, count, page);
+    const tracks = await searchTracks(env, query.trim(), source, count, page, request.signal);
     const circuit = getLocalEngineCircuitSnapshot(env);
     const isDegraded = tracks.length === 0 && degraded;
     const headers: Record<string, string> = {
@@ -103,6 +104,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       headers,
     );
   } catch (err: any) {
+    request.signal.throwIfAborted();
     console.error('[Sonic Music Search Error]', err);
     return errorResponse(err?.message || '搜索曲库失败', 502);
   }

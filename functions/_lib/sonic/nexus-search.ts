@@ -17,7 +17,7 @@ import { gdstudioProvider } from './providers/gdstudio';
 import { neteaseProvider } from './providers/netease';
 import { qqProvider } from './providers/qq';
 import { kugouProvider } from './providers/kugou';
-import { callLocalEngineJson, type CircuitState } from './local-engine';
+import { callLocalEngineJson, createRuntimeAbortBudget, type CircuitState } from './local-engine';
 
 export interface NexusSearchResult {
   data: SonicSearchData;
@@ -81,6 +81,23 @@ export async function searchNexus(
   options: SonicSearchOptions & { request?: Request } = {},
   env?: AppEnv,
 ): Promise<NexusSearchResult> {
+  const budget = createRuntimeAbortBudget([options.signal, options.request?.signal], getSonicConfig(env).timeoutMs);
+  try {
+    budget.signal.throwIfAborted();
+    const result = await searchNexusWithinBudget(query, { ...options, signal: budget.signal }, env);
+    options.signal?.throwIfAborted();
+    options.request?.signal.throwIfAborted();
+    return result;
+  } finally {
+    budget.dispose();
+  }
+}
+
+async function searchNexusWithinBudget(
+  query: string,
+  options: SonicSearchOptions & { request?: Request },
+  env?: AppEnv,
+): Promise<NexusSearchResult> {
   const config = getSonicConfig(env);
   const attempts: SonicAttempt[] = [];
   let degraded = false;
@@ -109,6 +126,7 @@ export async function searchNexus(
       timeoutMs: engineTimeout,
       signal: options.signal,
     });
+    options.signal?.throwIfAborted();
     circuitState = engineRes.circuitState;
 
     if (engineRes.ok && engineRes.data?.data && Array.isArray(engineRes.data.data.tracks)) {
@@ -165,12 +183,12 @@ export async function searchNexus(
       const pStart = Date.now();
       const pLabel = formatProviderName(String(provider.name));
       try {
-        const timeoutSignal = AbortSignal.timeout(config.timeoutMs);
+        options.signal?.throwIfAborted();
         const tracks = await provider.search!(query, {
           page,
           count,
           env,
-          signal: timeoutSignal,
+          signal: options.signal,
           platform: options.platform,
         });
 
@@ -197,6 +215,7 @@ export async function searchNexus(
     }),
   );
 
+  if (options.signal?.aborted && options.signal.reason?.name !== 'TimeoutError') options.signal.throwIfAborted();
   // Collect all returned tracks with original provider rank
   interface RankedTrack {
     track: SonicSearchTrack;
@@ -216,7 +235,7 @@ export async function searchNexus(
   }
 
   // 3. External Source Fallback: GDStudio
-  if (allRankedTracks.length === 0 && config.enableGdstudio && gdstudioProvider.search) {
+  if (allRankedTracks.length === 0 && !options.signal?.aborted && config.enableGdstudio && gdstudioProvider.search) {
     const gStart = Date.now();
     try {
       const gTracks = await gdstudioProvider.search(query, {
@@ -224,7 +243,7 @@ export async function searchNexus(
         count,
         platform: options.platform,
         env,
-        signal: AbortSignal.timeout(config.timeoutMs),
+        signal: options.signal,
       });
       attempts.push({
         provider: 'gdstudio',
@@ -238,6 +257,7 @@ export async function searchNexus(
         if (t && t.title) allRankedTracks.push({ track: t, rank: idx, provider: 'gdstudio' });
       });
     } catch (err: any) {
+      if (options.signal?.aborted && options.signal.reason?.name !== 'TimeoutError') options.signal.throwIfAborted();
       attempts.push({
         provider: 'gdstudio',
         via: 'third-party',

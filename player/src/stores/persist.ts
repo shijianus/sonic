@@ -12,10 +12,10 @@ import { safeStorage } from '@/utils/safeStorage'
  * @param paths - 需要持久化的 state 路径列表（如 ['audio.volume', 'audio.playMode']）
  * @returns PersistenceOptions 配置对象
  */
-const piniaPersistConfig = <S extends StateTree = StateTree>(key: string, paths?: string[]): PersistenceOptions<S> => {
+const piniaPersistConfig = <S extends StateTree = StateTree>(key: string, paths?: string[], storage: Storage = safeStorage): PersistenceOptions<S> => {
   const persist: PersistenceOptions<S> = {
     key,
-    storage: safeStorage,
+    storage,
     pick: paths,
   }
   return persist

@@ -22,12 +22,16 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        SONIC_RELEASE_COMMIT: "${SONIC_RELEASE_COMMIT:-unknown}"
-        SONIC_BUILD_TIME: "${SONIC_BUILD_TIME:-}"
+        SONIC_RELEASE_COMMIT: "${SONIC_RELEASE_COMMIT:?Set release base commit SHA}"
+        SONIC_BUILD_TIME: "${SONIC_BUILD_TIME:?Set release build time}"
+        SONIC_RELEASE_ID: "${SONIC_RELEASE_ID:?Set release identity from release.json}"
+        SONIC_SOURCE_DIGEST: "${SONIC_SOURCE_DIGEST:?Set source digest from release.json}"
+        SONIC_RELEASE_DIRTY: "${SONIC_RELEASE_DIRTY:?Set release dirty flag from release.json}"
     container_name: sonic-local-engine
     restart: unless-stopped
     init: true
-    stop_grace_period: 15s
+    # Runtime drains for 60s; keep 15s for final SQLite close and process exit.
+    stop_grace_period: 75s
     depends_on:
       ncm-api:
         condition: service_healthy
@@ -36,7 +40,16 @@ services:
     environment:
       SONIC_RUNTIME: "linux-engine"
       SONIC_ENV: "${SONIC_ENV:-production}"
-      SONIC_RELEASE_COMMIT: "${SONIC_RELEASE_COMMIT:-unknown}"
+      SONIC_RELEASE_COMMIT: "${SONIC_RELEASE_COMMIT:?Set release base commit SHA}"
+      SONIC_BUILD_TIME: "${SONIC_BUILD_TIME:?Set release build time}"
+      SONIC_RELEASE_ID: "${SONIC_RELEASE_ID:?Set release identity from release.json}"
+      SONIC_SOURCE_DIGEST: "${SONIC_SOURCE_DIGEST:?Set source digest from release.json}"
+      SONIC_RELEASE_DIRTY: "${SONIC_RELEASE_DIRTY:?Set release dirty flag from release.json}"
+      SONIC_SHUTDOWN_TIMEOUT_MS: "60000"
+      SONIC_ENGINE_SECRET: "${SONIC_ENGINE_SECRET:?Set a private engine secret}"
+      SONIC_ENGINE_IDENTITY_SECRET: "${SONIC_ENGINE_IDENTITY_SECRET:?Set an independent Edge Engine identity secret}"
+      SONIC_REQUIRE_ENGINE_IDENTITY: "1"
+      SONIC_SECRET: "${SONIC_SECRET:?Set a private signing secret}"
       PORT: "8080"
       HOST: "0.0.0.0"
       SONIC_NCM_API_URL: "http://ncm-api:3000"
@@ -48,6 +61,11 @@ services:
       SONIC_ENABLE_LYRIVA: "${SONIC_ENABLE_LYRIVA:-0}"
       SONIC_ENABLE_UNBLOCK: "${SONIC_ENABLE_UNBLOCK:-0}"
       SONIC_RECOMMEND_DB_PATH: "${SONIC_RECOMMEND_DB_PATH:-/app/data/sonic-recommend.sqlite}"
+      SONIC_ACCOUNT_DB_PATH: "${SONIC_ACCOUNT_DB_PATH:-/app/data/sonic-account.sqlite}"
+      SONIC_ACCESS_MODE: "${SONIC_ACCESS_MODE:-open}"
+      SONIC_ACCESS_SECRET: "${SONIC_ACCESS_SECRET:-}"
+      SONIC_ACCESS_DB_PATH: "${SONIC_ACCESS_DB_PATH:-/app/data/sonic-access.sqlite}"
+      SONIC_INVITE_CODES: "${SONIC_INVITE_CODES:-}"
       SONIC_RECOMMEND_RETENTION_DAYS: "${SONIC_RECOMMEND_RETENTION_DAYS:-90}"
       SONIC_MIN_FREE_DISK_MB: "${SONIC_MIN_FREE_DISK_MB:-64}"
       SONIC_ALERT_WEBHOOK_URL: "${SONIC_ALERT_WEBHOOK_URL:-}"

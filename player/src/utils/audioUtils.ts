@@ -1,4 +1,88 @@
 // 音频工具函数
+import type { Song } from '@/stores/interface'
+
+export interface SongSourcePair {
+  platform: string
+  platformId: string
+}
+
+export const normalizeSongSource = (value: unknown): string => {
+  const source = String(value || '').trim().toLowerCase()
+  if (source === 'ncm') return 'netease'
+  if (source === 'tencent') return 'qq'
+  if (source === 'syn' || source === 'test') return 'synthetic'
+  return source
+}
+
+/** A provider ID is meaningful only with its own provider; never relabel a prefixed ID. */
+export const songSourcePair = (source: unknown, id: unknown): SongSourcePair | undefined => {
+  let platform = normalizeSongSource(source)
+  let platformId = String(id ?? '').trim()
+  const prefixed = platformId.match(/^([a-z][a-z0-9_-]*):(.+)$/i)
+  if (prefixed) {
+    const prefix = normalizeSongSource(prefixed[1])
+    if (platform && platform !== prefix) return undefined
+    platform = prefix
+    platformId = prefixed[2].trim()
+  }
+  if (!platform || platform === 'sonic' || !platformId || platformId.includes(':')) return undefined
+  return { platform, platformId }
+}
+
+export const resolvedSongSource = (song: Partial<Song>): SongSourcePair | undefined =>
+  song.resolvedSource
+    ? songSourcePair(song.resolvedSource, song.resolvedPlatformId ?? song.resolvedId)
+    : undefined
+
+/** Only API mappings or the original provider namespace may add a playback candidate. */
+export const songSourceCandidates = (song: Partial<Song>): SongSourcePair[] => {
+  const result: SongSourcePair[] = []
+  const add = (pair?: SongSourcePair) => {
+    if (pair && !result.some(item => item.platform === pair.platform && item.platformId === pair.platformId)) {
+      result.push(pair)
+    }
+  }
+  const originalSource = song.source || song.platform
+  const prefixedId = songSourcePair('', song.id)
+  add(prefixedId)
+  if (!prefixedId && originalSource) add(songSourcePair(originalSource, song.platformId ?? song.id))
+  for (const source of song.sources || []) add(songSourcePair(source.platform, source.platformId))
+  // Legacy NetEase-only lists expose bare numeric IDs. Do not apply this default to
+  // aggregate/foreign IDs or to an incomplete cross-provider source mapping.
+  if (!result.length && !originalSource && !song.sources?.length && /^\d+$/.test(String(song.id ?? ''))) {
+    add(songSourcePair('netease', song.id))
+  }
+  add(resolvedSongSource(song))
+  return result
+}
+
+export const musicStreamUrl = (value?: string): URL | undefined => {
+  if (!value) return undefined
+  try {
+    const base = typeof window !== 'undefined' ? window.location.href : 'https://sonic.invalid/'
+    const url = new URL(value, base)
+    if (url.origin === new URL(base).origin && url.pathname === '/api/music/stream') return url
+  } catch {}
+  return undefined
+}
+
+export const streamSourcePair = (value?: string): SongSourcePair | undefined => {
+  const url = musicStreamUrl(value)
+  if (!url || url.searchParams.has('target') || url.searchParams.has('url')) return undefined
+  const id = url.searchParams.get('id') || ''
+  return songSourcePair('', id) || songSourcePair(url.searchParams.get('source') || 'netease', id)
+}
+
+export const songPlaybackSource = (song: Partial<Song>): SongSourcePair | undefined => {
+  const resolved = resolvedSongSource(song)
+  if (resolved) return resolved
+  const candidates = songSourceCandidates(song)
+  const requested = streamSourcePair(song.url || song.streamUrl)
+  if (requested && candidates.some(pair => pair.platform === requested.platform && pair.platformId === requested.platformId)) {
+    return requested
+  }
+  return candidates[0]
+}
 
 /**
  * 格式化时间（秒）为 mm:ss 格式

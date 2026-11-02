@@ -8,22 +8,37 @@ interface MemoryCacheEntry {
   json: string;
   freshUntil: number;
   staleUntil: number;
+  bytes: number;
 }
 
 const MAX_MEMORY_ENTRIES = 1500;
 const MAX_MEMORY_VALUE_BYTES = 512 * 1024;
+const DEFAULT_MEMORY_BYTES = 16 * 1024 * 1024;
+const encoder = new TextEncoder();
 const memoryLru = new Map<string, MemoryCacheEntry>();
+let memoryBytes = 0;
 
-function touchMemoryLru(key: string, entry: MemoryCacheEntry): void {
-  if (memoryLru.has(key)) {
-    memoryLru.delete(key);
-  } else if (memoryLru.size >= MAX_MEMORY_ENTRIES) {
+function memoryBudget(env?: AppEnv): number {
+  const configured = Number(env?.SONIC_CACHE_MAX_BYTES);
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_MEMORY_BYTES;
+}
+
+function deleteMemoryEntry(key: string): void {
+  const entry = memoryLru.get(key);
+  if (entry) memoryBytes -= entry.bytes;
+  memoryLru.delete(key);
+}
+
+function touchMemoryLru(key: string, entry: MemoryCacheEntry, maxBytes = DEFAULT_MEMORY_BYTES): void {
+  deleteMemoryEntry(key);
+  if (entry.bytes > maxBytes) return;
+  while (memoryLru.size >= MAX_MEMORY_ENTRIES || memoryBytes + entry.bytes > maxBytes) {
     const oldestKey = memoryLru.keys().next().value;
-    if (oldestKey !== undefined) {
-      memoryLru.delete(oldestKey);
-    }
+    if (oldestKey === undefined) break;
+    deleteMemoryEntry(oldestKey);
   }
   memoryLru.set(key, entry);
+  memoryBytes += entry.bytes;
 }
 
 export function buildSonicCacheKey(namespace: string, identifier: string): string {
@@ -67,20 +82,20 @@ export async function getSonicCachedJson<T>(
   const mem = memoryLru.get(key);
   if (mem) {
     if (now <= mem.freshUntil) {
-      touchMemoryLru(key, mem);
+      touchMemoryLru(key, mem, memoryBudget(env));
       try {
         return { value: JSON.parse(mem.json) as T, cacheLevel: 'memory', stale: false, key };
       } catch {
-        memoryLru.delete(key);
+        deleteMemoryEntry(key);
       }
     } else if (allowStale && now <= mem.staleUntil) {
       try {
         return { value: JSON.parse(mem.json) as T, cacheLevel: 'memory-stale', stale: true, key };
       } catch {
-        memoryLru.delete(key);
+        deleteMemoryEntry(key);
       }
     } else if (now > mem.staleUntil) {
-      memoryLru.delete(key);
+      deleteMemoryEntry(key);
     }
   }
 
@@ -137,12 +152,14 @@ export async function putSonicCachedJson<T>(
   const json = JSON.stringify(value);
 
   // 1. Populate bounded in-memory LRU (large payloads go only to edge/KV storage)
-  if (json.length <= MAX_MEMORY_VALUE_BYTES) {
+  const bytes = (json.length + key.length) * 2 + encoder.encode(json).byteLength + encoder.encode(key).byteLength;
+  deleteMemoryEntry(key);
+  if (encoder.encode(json).byteLength <= MAX_MEMORY_VALUE_BYTES) {
     touchMemoryLru(key, {
-      json,
+      json, bytes,
       freshUntil: now + freshTtlSec * 1000,
       staleUntil: now + effectiveStaleSec * 1000,
-    });
+    }, memoryBudget(env));
   }
 
   const tasks: Promise<any>[] = [];
@@ -203,6 +220,65 @@ export async function putSonicCachedJson<T>(
   }
 }
 
+interface JsonFlight {
+  controller: AbortController;
+  promise: Promise<any>;
+  subscribers: number;
+}
+const jsonFlights = new Map<string, JsonFlight>();
+
+// Bound both distinct work and listeners per hot key. Each caller owns its own
+// cancellation; the shared upstream is aborted only when every caller leaves.
+export function withSonicJsonSingleFlight<T>(key: string, load: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (signal?.aborted) return Promise.reject(signal.reason);
+  if (key.length > 16_384) return Promise.reject(new Error('JSON flight key exceeds limit'));
+  let flight = jsonFlights.get(key);
+  if (!flight) {
+    if (jsonFlights.size >= 128) return Promise.reject(new Error('JSON upstream capacity exceeded'));
+    const controller = new AbortController();
+    flight = { controller, promise: Promise.resolve().then(() => load(controller.signal)), subscribers: 0 };
+    jsonFlights.set(key, flight);
+    const owned = flight;
+    void flight.promise.finally(() => {
+      if (jsonFlights.get(key) === owned) jsonFlights.delete(key);
+    }).catch(() => {});
+  }
+  if (flight.subscribers >= 128) return Promise.reject(new Error('JSON upstream waiters exceeded'));
+  const owned = flight;
+  owned.subscribers += 1;
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return false;
+      settled = true;
+      signal?.removeEventListener('abort', onAbort);
+      owned.subscribers -= 1;
+      return true;
+    };
+    const onAbort = () => {
+      if (!finish()) return;
+      reject(signal?.reason);
+      if (owned.subscribers === 0) {
+        if (jsonFlights.get(key) === owned) jsonFlights.delete(key);
+        owned.controller.abort(signal?.reason);
+      }
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) onAbort();
+    owned.promise.then(
+      (value) => { if (finish()) resolve(value); },
+      (error) => { if (finish()) reject(error); },
+    );
+  });
+}
+
+export function getSonicMemoryCacheStats() {
+  return { entries: memoryLru.size, bytes: memoryBytes, inFlight: jsonFlights.size };
+}
+
 export function clearSonicMemoryCacheForTest(): void {
   memoryLru.clear();
+  memoryBytes = 0;
+  for (const flight of jsonFlights.values()) flight.controller.abort();
+  jsonFlights.clear();
 }

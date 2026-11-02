@@ -17,9 +17,9 @@ import {
   buildSafeUpstreamResponseHeaders,
   validateSafeUrl,
   safeFetch,
+  hasSensitiveMediaQuery,
+  isSafeFetchCapacityError,
 } from '../../_lib/sonic/security';
-
-const SENSITIVE_FORWARD_QUERY = /[?&](auth|auth_key|vkey|guid|sign|signature|token|access_token|secret|key|wssecret|wstime|vuutv|dis_k)=/i;
 
 // Everything relayed here is served from the Sonic origin. Reject document-capable types
 // (HTML, XHTML, SVG) so an allowlisted host cannot become a same-origin script vector.
@@ -64,7 +64,8 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
   // Case 1: External URL Proxy / Forwarding (e.g. lyrics URL, audio stream, covers)
   if (targetUrl) {
     try {
-      const allowedDomains = getAllowedMediaDomains(env);
+      const capability = type === 'audio' || type === 'cover' || type === 'lyrics' || type === 'catalog' ? type : undefined;
+      const allowedDomains = getAllowedMediaDomains(env, capability);
       if (allowedDomains.length === 0) {
         recordLicensingBlockMetric('forward-url');
         return sonicError(
@@ -112,7 +113,9 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
       const upstreamResp = await safeFetch(
         valResult.url,
         {
+          method: request.method,
           headers: forwardHeaders,
+          signal: request.signal,
         },
         {
           allowHttp: false,
@@ -120,8 +123,12 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
           maxRedirects: 3,
           timeoutMs: 15000,
           maxBytes: 128 * 1024 * 1024,
+          includeMetadata: true,
         },
       );
+
+      const upstreamSensitive = Boolean(upstreamResp.sensitive);
+      const finalTargetUrl = upstreamResp.finalUrl || valResult.url;
 
       if (!upstreamResp.ok && upstreamResp.status !== 206) {
         upstreamResp.body?.cancel().catch(() => {});
@@ -154,7 +161,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
       });
       const upstreamCc = (upstreamResp.headers.get('cache-control') || '').toLowerCase();
       if (
-        SENSITIVE_FORWARD_QUERY.test(valResult.url.search) ||
+        upstreamSensitive || hasSensitiveMediaQuery(finalTargetUrl) ||
         upstreamCc.includes('private') ||
         upstreamCc.includes('no-store')
       ) {
@@ -167,6 +174,13 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
         headers: responseHeaders,
       });
     } catch (err: any) {
+      if (isSafeFetchCapacityError(err)) {
+        const busy = sonicError('UPSTREAM_BUSY', 'Upstream capacity is temporarily exhausted', 503, {
+          provider: 'forward',
+        });
+        busy.headers.set('Retry-After', '1');
+        return busy;
+      }
       return sonicError('FORWARD_ERROR', redactSensitiveString(err?.message || 'Failed to forward request to target'), 502, {
         provider: 'forward',
       });

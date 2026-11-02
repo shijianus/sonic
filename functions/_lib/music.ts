@@ -1,5 +1,6 @@
 import type { AppEnv, HighPrecisionLyricPayload, LyricFetchOptions, LyricLine, LyricSyncType, LyricWord, SongItem } from './types';
 import { getSonicConfig } from './sonic/config';
+import { createRuntimeAbortBudget, fetchWithRuntimeBudget } from './sonic/local-engine';
 import { isSourceEnabledByPolicy } from './sonic/licensing';
 import { getSyntheticTrackSpec, searchSyntheticCatalog } from './sonic/synthetic-media';
 import {
@@ -15,11 +16,7 @@ const DEFAULT_API_BASE = 'https://music-api.gdstudio.xyz/api.php';
 const KUWO_HOST_PATTERN = /(^|\.)kuwo\.cn$/i;
 
 function timedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const timeoutSignal = AbortSignal.timeout(8000);
-  return fetch(input, {
-    ...init,
-    signal: init?.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal,
-  });
+  return fetchWithRuntimeBudget(input, init, { timeoutMs: 8000 });
 }
 
 export function getMusicApiBase(env: AppEnv): string {
@@ -90,14 +87,15 @@ export function normalizeTrack(raw: Record<string, any>, fallbackSource = 'netea
   };
 }
 
-export async function fetchMusicProvider(env: AppEnv, params: Record<string, string>): Promise<any> {
+export async function fetchMusicProvider(env: AppEnv, params: Record<string, string>, signal?: AbortSignal): Promise<any> {
+  signal?.throwIfAborted();
   const url = new URL(getMusicApiBase(env));
   url.searchParams.set('s', generateSignature());
   Object.entries(params).forEach(([key, value]) => {
     url.searchParams.set(key, value);
   });
 
-  const response = await timedFetch(url.toString(), {
+  const response = await timedFetch(url.toString(), { signal,
     headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
       Accept: 'application/json',
@@ -112,12 +110,13 @@ export async function fetchMusicProvider(env: AppEnv, params: Record<string, str
   const text = await response.text();
   try {
     return JSON.parse(text);
-  } catch {
+  } catch { signal?.throwIfAborted();
     return text;
   }
 }
 
-export async function searchTracks(env: AppEnv, query: string, source = 'netease', count = 20, page = 1): Promise<SongItem[]> {
+export async function searchTracks(env: AppEnv, query: string, source = 'netease', count = 20, page = 1, signal?: AbortSignal): Promise<SongItem[]> {
+  signal?.throwIfAborted();
   const cleanSource = (source || 'netease').toLowerCase().trim();
   const cfg = getSonicConfig(env);
 
@@ -130,7 +129,7 @@ export async function searchTracks(env: AppEnv, query: string, source = 'netease
   try {
     if (cleanSource === 'netease' || cleanSource === 'ncm' || cleanSource === 'sonic') {
       if (cfg.enableNetease) {
-        const ne = await searchNeteaseNative(query, count, page, env);
+        const ne = await searchNeteaseNative(query, count, page, env, signal);
         if (ne.tracks.length > 0) {
           return ne.tracks.map(sonicTrackToLegacySongItem);
         }
@@ -139,7 +138,7 @@ export async function searchTracks(env: AppEnv, query: string, source = 'netease
       }
     } else if (cleanSource === 'kuwo') {
       if (cfg.enableKuwo) {
-        const kw = await searchKuwoNative(query, count, page);
+        const kw = await searchKuwoNative(query, count, page, signal);
         if (kw.length > 0) {
           return kw.map(sonicTrackToLegacySongItem);
         }
@@ -148,13 +147,13 @@ export async function searchTracks(env: AppEnv, query: string, source = 'netease
       const { getProvider } = await import('./sonic/providers');
       const p = getProvider(cleanSource);
       if (p?.search && p.isEnabled(env)) {
-        const list = await p.search(query, { count, page, env });
+        const list = await p.search(query, { count, page, env, signal });
         if (list.length > 0) {
           return list.map(sonicTrackToLegacySongItem);
         }
       }
     }
-  } catch {}
+  } catch { signal?.throwIfAborted();}
 
   // 2. External Source Fallback: GDStudio
   if (!cfg.enableGdstudio) {
@@ -171,8 +170,8 @@ export async function searchTracks(env: AppEnv, query: string, source = 'netease
       name: query,
       count: String(count),
       pages: String(page),
-    });
-  } catch {}
+    }, signal);
+  } catch { signal?.throwIfAborted();}
 
   // If initial source is not supported on GDStudio (e.g. tencent/qq), fall back to netease catalog
   if (!Array.isArray(data) && gdSource !== 'netease') {
@@ -184,8 +183,8 @@ export async function searchTracks(env: AppEnv, query: string, source = 'netease
         name: query,
         count: String(count),
         pages: String(page),
-      });
-    } catch {}
+      }, signal);
+    } catch { signal?.throwIfAborted();}
   }
 
   if (!Array.isArray(data)) return [];
@@ -1017,7 +1016,7 @@ export async function fetchDirectNetEaseLyrics(id: string, signal?: AbortSignal)
         return json.lrc.lyric;
       }
     }
-  } catch {}
+  } catch { signal?.throwIfAborted();}
   return '';
 }
 
@@ -1037,7 +1036,7 @@ export async function fetchDirectQQLyrics(songmid: string, signal?: AbortSignal)
         return json.lyric;
       }
     }
-  } catch {}
+  } catch { signal?.throwIfAborted();}
   return '';
 }
 
@@ -1046,10 +1045,10 @@ async function crawlNetEaseBySearch(
   env?: AppEnv,
   targetTitle?: string,
   targetArtist?: string,
-  targetDuration?: number
-): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+  targetDuration?: number, signal?: AbortSignal): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+  signal?.throwIfAborted();
   try {
-    const searchRes = await searchNeteaseNative(query, 5, 1, env);
+    const searchRes = await searchNeteaseNative(query, 5, 1, env, signal);
     if (!searchRes.tracks.length) return null;
 
     let candidate: { raw: string; id: string; title: string; artist: string } | null = null;
@@ -1061,7 +1060,7 @@ async function crawlNetEaseBySearch(
       if (targetArtist && !artistsMatchStrictly(targetArtist, song.artist || '')) continue;
       if (targetDuration && song.duration && Math.abs(song.duration - targetDuration) > 6) continue;
 
-      const raw = await fetchDirectNetEaseLyrics(song.platformId);
+      const raw = await fetchDirectNetEaseLyrics(song.platformId, signal);
       if (raw && isValidLyric(raw)) {
         const item = {
           raw,
@@ -1078,7 +1077,7 @@ async function crawlNetEaseBySearch(
       }
     }
     return candidate;
-  } catch {}
+  } catch { signal?.throwIfAborted();}
   return null;
 }
 
@@ -1086,11 +1085,11 @@ async function crawlQQBySearch(
   query: string,
   targetTitle?: string,
   targetArtist?: string,
-  targetDuration?: number
-): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+  targetDuration?: number, signal?: AbortSignal): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+  signal?.throwIfAborted();
   try {
     const sUrl = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=5&w=${encodeURIComponent(query)}&format=json`;
-    const sRes = await timedFetch(sUrl, {
+    const sRes = await timedFetch(sUrl, { signal,
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
         Referer: 'https://y.qq.com/',
@@ -1109,7 +1108,7 @@ async function crawlQQBySearch(
       if (targetArtist && !artistsMatchStrictly(targetArtist, sSinger)) continue;
       if (targetDuration && song.interval && Math.abs(song.interval - targetDuration) > 6) continue;
 
-      const raw = await fetchDirectQQLyrics(song.songmid);
+      const raw = await fetchDirectQQLyrics(song.songmid, signal);
       if (raw && isValidLyric(raw)) {
         return {
           raw,
@@ -1119,7 +1118,7 @@ async function crawlQQBySearch(
         };
       }
     }
-  } catch {}
+  } catch { signal?.throwIfAborted();}
   return null;
 }
 
@@ -1127,8 +1126,8 @@ async function crawlLrclibBySearch(
   query: string,
   title?: string,
   artist?: string,
-  targetDuration?: number
-): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+  targetDuration?: number, signal?: AbortSignal): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+  signal?.throwIfAborted();
   try {
     let url = '';
     if (title) {
@@ -1136,7 +1135,7 @@ async function crawlLrclibBySearch(
     } else {
       url = `https://lrclib.net/api/search?q=${encodeURIComponent(query)}`;
     }
-    const res = await timedFetch(url, {
+    const res = await timedFetch(url, { signal,
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
     });
     if (!res.ok) return null;
@@ -1172,7 +1171,7 @@ async function crawlLrclibBySearch(
         };
       }
     }
-  } catch {}
+  } catch { signal?.throwIfAborted();}
   return null;
 }
 
@@ -1197,8 +1196,8 @@ async function crawlKugouBySearch(
   targetDuration?: number,
   targetArtist?: string,
   targetTitle?: string,
-  referenceRawLyric?: string,
-): Promise<{ raw: string; id: string; title: string; artist: string; duration?: number } | null> {
+  referenceRawLyric?: string, signal?: AbortSignal): Promise<{ raw: string; id: string; title: string; artist: string; duration?: number } | null> {
+  signal?.throwIfAborted();
   try {
     const cleanTargetTitle = (targetTitle || '')
       .replace(/\([^)]+\)/g, '')
@@ -1228,7 +1227,7 @@ async function crawlKugouBySearch(
       ];
       for (const sUrl of searchApis) {
         try {
-          const sRes = await timedFetch(sUrl, {
+          const sRes = await timedFetch(sUrl, { signal,
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
           });
           if (sRes.ok) {
@@ -1242,7 +1241,7 @@ async function crawlKugouBySearch(
               if (!hash || !sSong) continue;
 
               const lUrl = `http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(sSong)}&hash=${hash}&timelength=${sDur * 1000}`;
-              const lRes = await timedFetch(lUrl, {
+              const lRes = await timedFetch(lUrl, { signal,
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
               });
               if (lRes.ok) {
@@ -1264,9 +1263,9 @@ async function crawlKugouBySearch(
               }
             }
           }
-        } catch {}
+        } catch { signal?.throwIfAborted();}
       }
-    } catch {}
+    } catch { signal?.throwIfAborted();}
 
     // 渠道 2：直接向 lyrics.kugou.com/search 检索备用候选
     const directQueries = [query];
@@ -1275,7 +1274,7 @@ async function crawlKugouBySearch(
       const durParam = targetDuration ? `&timelength=${Math.round(targetDuration * 1000)}` : '';
       const dUrl = `http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(dq)}${durParam}`;
       try {
-        const dRes = await timedFetch(dUrl, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' } });
+        const dRes = await timedFetch(dUrl, { signal, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' } });
         if (dRes.ok) {
           const dJson = (await dRes.json()) as any;
           for (const c of dJson.candidates || []) {
@@ -1297,7 +1296,7 @@ async function crawlKugouBySearch(
             }
           }
         }
-      } catch {}
+      } catch { signal?.throwIfAborted();}
     }
 
     if (collectedCandidates.length === 0) return null;
@@ -1373,7 +1372,7 @@ async function crawlKugouBySearch(
         // 1. 优先尝试获取并解码毫秒级逐字 KRC 格式
         try {
           const krcUrl = `http://lyrics.kugou.com/download?ver=1&client=pc&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=krc&charset=utf8`;
-          const krcRes = await timedFetch(krcUrl, {
+          const krcRes = await timedFetch(krcUrl, { signal,
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
           });
           if (krcRes.ok) {
@@ -1406,7 +1405,7 @@ async function crawlKugouBySearch(
                           }
                           continue;
                         }
-                      } catch {}
+                      } catch { signal?.throwIfAborted();}
                     }
                     const m = l.match(/^\[(\d{1,2}):(\d{2})(?:\.(\d{2,3}))?\](.*)$/);
                     if (m) {
@@ -1509,12 +1508,12 @@ async function crawlKugouBySearch(
               }
             }
           }
-        } catch {}
+        } catch { signal?.throwIfAborted();}
 
         // 2. 降级尝试获取普通行级 LRC
         try {
           const lrcUrl = `http://lyrics.kugou.com/download?ver=1&client=pc&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=lrc&charset=utf8`;
-          const lrcRes = await timedFetch(lrcUrl, {
+          const lrcRes = await timedFetch(lrcUrl, { signal,
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
           });
           if (lrcRes.ok) {
@@ -1534,21 +1533,21 @@ async function crawlKugouBySearch(
               }
             }
           }
-        } catch {}
+        } catch { signal?.throwIfAborted();}
       }
-  } catch {}
+  } catch { signal?.throwIfAborted();}
   return null;
 }
 
 async function crawlMusixmatchBySearch(
   title?: string,
-  artist?: string,
-): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+  artist?: string, signal?: AbortSignal): Promise<{ raw: string; id: string; title: string; artist: string } | null> {
+  signal?.throwIfAborted();
   if (!title) return null;
   try {
     const tokenRes = await timedFetch('https://apic-desktop.musixmatch.com/ws/1.1/token.get?app_id=web-desktop-app-v1.0', {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
-      signal: AbortSignal.timeout(3000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(3000)]) : AbortSignal.timeout(3000),
     });
     if (!tokenRes.ok) return null;
     const tokenData = (await tokenRes.json()) as any;
@@ -1563,7 +1562,7 @@ async function crawlMusixmatchBySearch(
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         Cookie: 'AWSELBCORS=0; AWSELB=0',
       },
-      signal: AbortSignal.timeout(4000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(4000)]) : AbortSignal.timeout(4000),
     });
     if (!subRes.ok) return null;
     const subData = (await subRes.json()) as any;
@@ -1584,7 +1583,7 @@ async function crawlMusixmatchBySearch(
         artist: trackInfo.artist_name || artist || '',
       };
     }
-  } catch {}
+  } catch { signal?.throwIfAborted();}
   return null;
 
 }
@@ -1663,6 +1662,18 @@ ${paragraphs}
  * 支持通过 ID 直接获取，或通过 title / artist / q 在全网主流平台进行瀑布爬取
  */
 export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions): Promise<HighPrecisionLyricPayload> {
+  const budget = createRuntimeAbortBudget([options.signal], getSonicConfig(env).timeoutMs);
+  try {
+    budget.signal.throwIfAborted();
+    const result = await getUniversalLyricsWithinBudget(env, { ...options, signal: budget.signal });
+    budget.signal.throwIfAborted();
+    return result;
+  } finally {
+    budget.dispose();
+  }
+}
+
+async function getUniversalLyricsWithinBudget(env: AppEnv, options: LyricFetchOptions): Promise<HighPrecisionLyricPayload> {
   const { id = '', source = 'netease', title = '', artist = '', q = '', duration, signal } = options;
   const cfg = getSonicConfig(env);
 
@@ -1714,13 +1725,13 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
       try {
         const gdLyricSource =
           source === 'qq' ? 'tencent' : source === 'sonic' || source === 'ncm' ? 'netease' : source;
-        const data = await fetchMusicProvider(env, { types: 'lyric', id, source: gdLyricSource });
+        const data = await fetchMusicProvider(env, { types: 'lyric', id, source: gdLyricSource }, signal);
         if (typeof data === 'object' && data !== null && typeof data.lyric === 'string' && isValidLyric(data.lyric)) {
           rawLyric = data.lyric;
         } else if (typeof data === 'string' && isValidLyric(data)) {
           rawLyric = data;
         }
-      } catch {}
+      } catch { signal?.throwIfAborted();}
     }
   }
 
@@ -1737,7 +1748,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
   // 若缺失歌曲标题但提供了网易云 ID，自动解析曲名与歌手以便进行全网高精逐字匹配
   if (cfg.enableNetease && !finalTitle && id && id !== 'undefined' && id !== 'null' && (source === 'netease' || /^\d+$/.test(id))) {
     try {
-      const dRes = await timedFetch(`https://music.163.com/api/song/detail/?id=${encodeURIComponent(id)}&ids=[${encodeURIComponent(id)}]`, {
+      const dRes = await timedFetch(`https://music.163.com/api/song/detail/?id=${encodeURIComponent(id)}&ids=[${encodeURIComponent(id)}]`, { signal,
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
       });
       if (dRes.ok) {
@@ -1753,7 +1764,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
           }
         }
       }
-    } catch {}
+    } catch { signal?.throwIfAborted();}
   }
 
   // 2. 逐字高精升级与全网瀑布实时爬虫：
@@ -1762,7 +1773,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
   // 若未获取到原始歌词但提供了搜索线索，优先尝试从网易云获取录音室官方参考 LRC（用于获取权威时间轴与时长）
   if (cfg.enableNetease && !rawLyric && searchQuery) {
     try {
-      const netRef = await crawlNetEaseBySearch(searchQuery, env);
+      const netRef = await crawlNetEaseBySearch(searchQuery, env, undefined, undefined, undefined, signal);
       if (netRef?.raw && isValidLyric(netRef.raw)) {
         rawLyric = netRef.raw;
         finalSource = 'netease';
@@ -1776,7 +1787,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
           }
         }
       }
-    } catch {}
+    } catch { signal?.throwIfAborted();}
   }
 
   // 保存原声提供商基准歌词，用于后续字级歌词物理锚点对齐校准
@@ -1785,7 +1796,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
   if (searchQuery && (!rawLyric || !hasWordSyncTags(rawLyric))) {
     // 2.1 酷狗音乐高精逐字 KRC 检索（严守歌名、歌手、时长一致与内容相似度校验法则）
     const kugouResult = cfg.enableKugou
-      ? await crawlKugouBySearch(searchQuery, estimatedDurationSec, finalArtist || artist, finalTitle || title, referenceRawLyric)
+      ? await crawlKugouBySearch(searchQuery, estimatedDurationSec, finalArtist || artist, finalTitle || title, referenceRawLyric, signal)
       : null;
     if (kugouResult?.raw && isValidLyric(kugouResult.raw) && hasWordSyncTags(kugouResult.raw)) {
       rawLyric = kugouResult.raw;
@@ -1797,7 +1808,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
 
     // 2.2 Musixmatch 字级 rich-sync 与行级 subtitles 检索（欧美及国际歌曲优先字级源）
     if (isSourceEnabledByPolicy('musixmatch', env) && (!rawLyric || !hasWordSyncTags(rawLyric))) {
-      const mmResult = await crawlMusixmatchBySearch(finalTitle || title || searchQuery, finalArtist || artist);
+      const mmResult = await crawlMusixmatchBySearch(finalTitle || title || searchQuery, finalArtist || artist, signal);
       if (mmResult?.raw && isValidLyric(mmResult.raw) && (hasWordSyncTags(mmResult.raw) || !rawLyric)) {
         rawLyric = mmResult.raw;
         finalSource = 'musixmatch';
@@ -1809,7 +1820,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
 
     // 2.3 若当前依然没有任何有效歌词，继续依次尝试网易云、QQ、LRCLIB 与酷狗普通 LRC
     if (!rawLyric && cfg.enableNetease) {
-      const neteaseResult = await crawlNetEaseBySearch(searchQuery, env);
+      const neteaseResult = await crawlNetEaseBySearch(searchQuery, env, undefined, undefined, undefined, signal);
       if (neteaseResult?.raw && isValidLyric(neteaseResult.raw)) {
         rawLyric = neteaseResult.raw;
         finalSource = 'netease';
@@ -1820,7 +1831,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
     }
 
     if (!rawLyric && cfg.enableQq) {
-      const qqResult = await crawlQQBySearch(searchQuery);
+      const qqResult = await crawlQQBySearch(searchQuery, undefined, undefined, undefined, signal);
       if (qqResult?.raw && isValidLyric(qqResult.raw)) {
         rawLyric = qqResult.raw;
         finalSource = 'tencent';
@@ -1831,7 +1842,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
     }
 
     if (!rawLyric && cfg.enableLrclib) {
-      const lrclibResult = await crawlLrclibBySearch(searchQuery, finalTitle || title, finalArtist || artist);
+      const lrclibResult = await crawlLrclibBySearch(searchQuery, finalTitle || title, finalArtist || artist, undefined, signal);
       if (lrclibResult?.raw && isValidLyric(lrclibResult.raw)) {
         rawLyric = lrclibResult.raw;
         finalSource = 'lrclib';
@@ -1858,13 +1869,13 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
           source: 'netease',
           count: '1',
           pages: '1',
-        });
+        }, signal);
         if (Array.isArray(gSearch) && gSearch[0]?.id) {
           const gLyr = await fetchMusicProvider(env, {
             types: 'lyric',
             id: String(gSearch[0].id),
             source: 'netease',
-          });
+          }, signal);
           const cand =
             typeof gLyr === 'object' && gLyr?.lyric
               ? gLyr.lyric
@@ -1883,7 +1894,7 @@ export async function getUniversalLyrics(env: AppEnv, options: LyricFetchOptions
             }
           }
         }
-      } catch {}
+      } catch { signal?.throwIfAborted();}
     }
   }
 

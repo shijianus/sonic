@@ -500,7 +500,7 @@ const playModeIcon = computed(() => {
     </div>
 
     <!-- 顶部栏：返回、标题、副工具按钮 -->
-    <div class="safe-area-top flex items-center justify-between px-4 py-3">
+    <div class="safe-area-top flex shrink-0 items-center justify-between px-4 py-3">
       <Button
         variant="ghost"
         size="icon-lg"
@@ -583,13 +583,13 @@ const playModeIcon = computed(() => {
 
     <!-- 中心展示区：封面或歌词 -->
     <div
-      class="flex flex-1 flex-col items-center justify-center overflow-hidden px-6"
+      class="flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-hidden px-6"
       @touchstart="handleCenterTouchStart"
       @touchend="handleCenterTouchEnd"
     >
       <div
         v-show="!showLyrics"
-        class="album-area flex h-full w-full flex-col items-center justify-center"
+        class="album-area custom-scrollbar flex min-h-0 w-full flex-1 flex-col items-center overflow-x-hidden overflow-y-auto pt-8 pb-4"
         @click.stop="handleShowLyricsClick"
       >
         <VinylDisc
@@ -601,9 +601,9 @@ const playModeIcon = computed(() => {
           class="mb-8"
         />
 
-        <div class="w-full px-6 text-center">
-          <div class="flex items-center justify-center gap-2">
-            <h2 class="text-primary line-clamp-1 text-xl font-bold">
+        <div class="w-full min-w-0 shrink-0 px-6 text-center">
+          <div class="flex min-w-0 flex-wrap items-center justify-center gap-2">
+            <h2 class="text-primary min-w-0 break-words whitespace-normal text-xl font-bold">
               {{ currentSong?.name || t('player.unknownSong') }}
             </h2>
             <span
@@ -614,7 +614,7 @@ const playModeIcon = computed(() => {
               {{ t('player.trialBadge') }}
             </span>
           </div>
-          <p class="text-primary/60 mt-2 line-clamp-1 text-base">
+          <p class="text-primary/60 mt-2 break-words whitespace-normal text-base">
             {{ currentSong?.artist || t('player.unknownArtist') }}
           </p>
         </div>
@@ -648,10 +648,10 @@ const playModeIcon = computed(() => {
         class="z-10 w-full shrink-0 py-4 text-center"
         @click="showLyrics = false"
       >
-        <h2 class="text-primary truncate px-4 text-xl font-bold">
+        <h2 class="text-primary break-words whitespace-normal px-4 text-xl font-bold">
           {{ currentSong?.name || t('player.unknownSong') }}
         </h2>
-        <p class="text-primary/60 mt-1 truncate px-4 text-sm">
+        <p class="text-primary/60 mt-1 break-words whitespace-normal px-4 text-sm">
           {{ currentSong?.artist || t('player.unknownArtist') }}
         </p>
       </div>
@@ -713,7 +713,7 @@ const playModeIcon = computed(() => {
     </div>
 
     <!-- 底部控制区：进度、播放控制、音量滑块 -->
-    <div class="controls-area safe-area-bottom px-6">
+    <div class="controls-area safe-area-bottom shrink-0 px-6">
       <!-- 快捷操作栏 -->
       <div class="mx-auto flex w-full max-w-xs items-center justify-between px-4">
         <!-- 播放列表和历史播放 -->
@@ -810,7 +810,7 @@ const playModeIcon = computed(() => {
         </div>
       </div>
 
-      <div class="mb-4 flex items-center justify-center gap-6">
+      <div class="mb-4 flex items-center justify-center gap-2 sm:gap-6">
         <Button
           variant="ghost"
           size="icon-lg"
@@ -877,6 +877,18 @@ const playModeIcon = computed(() => {
 </template>
 
 <style scoped>
+.album-area > * {
+  flex-shrink: 0;
+}
+
+.album-area > :first-child {
+  margin-top: auto;
+}
+
+.album-area > :last-child {
+  margin-bottom: auto;
+}
+
 .safe-area-top {
   padding-top: max(env(safe-area-inset-top), 12px);
 }

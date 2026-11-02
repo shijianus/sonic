@@ -6,6 +6,7 @@ import type { AppEnv } from '../../types';
 import type {
   CanonicalTrack,
   EntityRelation,
+  RecommendContributionSource,
   RecommendStore,
   SonicEntity,
   SonicEntityType,
@@ -21,11 +22,19 @@ import {
   toSimplifiedChinese,
 } from './text-norm';
 import { canMergeCanonicalTracks, mergeCanonicalTracks } from './track-canonical';
+import { compareEventOrder, subjectEventKey } from './event-state';
+import { upsertTrackMvEntities } from './entity-store';
 
 const MAX_TRACKS = 6000;
 const MAX_EVENTS = 25000;
 const MAX_COOCCURRENCE_ANCHORS = 3000;
 const MAX_QUERIES = 2000;
+const DAY_MS = 24 * 3600 * 1000;
+
+export function normalizeRecommendRetentionDays(value: unknown): number {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? Math.max(7, parsed) : 90;
+}
 
 export class MemoryRecommendStore implements RecommendStore {
   public readonly kind = 'memory' as const;
@@ -36,8 +45,62 @@ export class MemoryRecommendStore implements RecommendStore {
   private eventIds = new Set<string>();
   private events: StoredBehaviorEvent[] = [];
   private userEventsIndex = new Map<string, StoredBehaviorEvent[]>();
-  private cooccurrence = new Map<string, Map<string, number>>();
+  private cooccurrence = new Map<string, Map<string, { weight: number; updatedAt: number }>>();
   private searchQueries = new Map<string, { display: string; count: number; updatedAt: number }>();
+  private queryContributions = new Map<string, { norm: string; display: string; count: number; createdAt: number }>();
+  private cooccurrenceContributions = new Map<string, { createdAt: number; edges: Map<string, { a: string; b: string; weight: number }> }>();
+  private retentionDays: number;
+  private writeCounter = 0;
+  private lastRetentionAt = Date.now();
+
+  constructor(retentionDays: number | string = 90) {
+    this.retentionDays = normalizeRecommendRetentionDays(retentionDays);
+  }
+
+  setRetentionDays(retentionDays: number | string): void {
+    const days = normalizeRecommendRetentionDays(retentionDays);
+    if (days !== this.retentionDays) this.pruneRetention(days);
+  }
+
+  private beforeWrite(): void {
+    if (++this.writeCounter >= 1500 || Date.now() - this.lastRetentionAt >= 3600_000) this.pruneRetention();
+  }
+
+  pruneRetention(retentionDays = this.retentionDays): void {
+    this.retentionDays = normalizeRecommendRetentionDays(retentionDays);
+    const cutoff = Date.now() - this.retentionDays * DAY_MS;
+    this.events = this.events.filter((e) => e.createdAt >= cutoff);
+    this.eventIds.clear();
+    this.userEventsIndex.clear();
+    for (const e of this.events) {
+      this.eventIds.add(subjectEventKey(e.subjectKey, e.eventId));
+      const list = this.userEventsIndex.get(e.subjectKey) || [];
+      list.push(e);
+      this.userEventsIndex.set(e.subjectKey, list);
+    }
+    this.entityFeedbackIds.clear();
+    for (const [subject, list] of this.userEntityFeedbacks) {
+      const retained = list.filter((f) => f.createdAt >= cutoff);
+      if (retained.length) this.userEntityFeedbacks.set(subject, retained);
+      else this.userEntityFeedbacks.delete(subject);
+      for (const f of retained) this.entityFeedbackIds.add(subjectEventKey(subject, f.feedbackId));
+    }
+    for (const [key, v] of this.queryContributions) {
+      if (v.createdAt < cutoff || !this.eventIds.has(key)) this.queryContributions.delete(key);
+    }
+    for (const [key, v] of this.cooccurrenceContributions) {
+      if (v.createdAt < cutoff || !this.eventIds.has(key)) this.cooccurrenceContributions.delete(key);
+    }
+    for (const [key, v] of this.searchQueries) if (v.updatedAt < cutoff) this.searchQueries.delete(key);
+    for (const [a, edges] of this.cooccurrence) {
+      for (const [b, v] of edges) if (v.updatedAt < cutoff) edges.delete(b);
+      if (!edges.size) this.cooccurrence.delete(a);
+    }
+    for (const [key, v] of this.userRadarProfiles) if (v.updatedAt < cutoff) this.userRadarProfiles.delete(key);
+    this.lastRetentionAt = Date.now();
+    this.writeCounter = 0;
+  }
+
 
   // Multi-entity storage
   private entities = new Map<string, SonicEntity>();
@@ -48,6 +111,7 @@ export class MemoryRecommendStore implements RecommendStore {
 
   upsertTrack(incoming: CanonicalTrack): void {
     if (!incoming?.canonicalTrackId) return;
+    this.beforeWrite();
 
     const existing = this.tracks.get(incoming.canonicalTrackId);
     let finalTrack = incoming;
@@ -67,6 +131,7 @@ export class MemoryRecommendStore implements RecommendStore {
     }
 
     this.tracks.set(finalTrack.canonicalTrackId, finalTrack);
+    upsertTrackMvEntities(this, finalTrack);
     const taKey = `${finalTrack.cleanTitle}:::${compactNormalize(finalTrack.canonicalArtist)}:::${finalTrack.edition}`;
     this.titleArtistIndex.set(taKey, finalTrack.canonicalTrackId);
 
@@ -202,22 +267,27 @@ export class MemoryRecommendStore implements RecommendStore {
     if (!event?.eventId || !event?.subjectKey) {
       return { inserted: false, deduplicated: false };
     }
-    if (this.eventIds.has(event.eventId)) {
+    this.beforeWrite();
+    const key = subjectEventKey(event.subjectKey, event.eventId);
+    if (this.eventIds.has(key) || this.entityFeedbackIds.has(key)) {
       return { inserted: false, deduplicated: true };
     }
 
     if (this.events.length >= MAX_EVENTS) {
       const evicted = this.events.shift();
       if (evicted) {
-        this.eventIds.delete(evicted.eventId);
+        const key = subjectEventKey(evicted.subjectKey, evicted.eventId);
+        this.eventIds.delete(key);
+        this.queryContributions.delete(key);
+        this.cooccurrenceContributions.delete(key);
         const uList = this.userEventsIndex.get(evicted.subjectKey);
-        if (uList && uList[0]?.eventId === evicted.eventId) {
-          uList.shift();
-        }
+        const index = uList?.findIndex((e) => e.eventId === evicted.eventId) ?? -1;
+        if (index >= 0) uList!.splice(index, 1);
+        if (uList?.length === 0) this.userEventsIndex.delete(evicted.subjectKey);
       }
     }
 
-    this.eventIds.add(event.eventId);
+    this.eventIds.add(key);
     this.events.push(event);
     let userList = this.userEventsIndex.get(event.subjectKey);
     if (!userList) {
@@ -225,22 +295,14 @@ export class MemoryRecommendStore implements RecommendStore {
       this.userEventsIndex.set(event.subjectKey, userList);
     }
     userList.push(event);
-    if (userList.length > 600) {
-      userList.shift();
-    }
     return { inserted: true, deduplicated: false };
   }
 
   getUserEvents(subjectKey: string, limit = 200, sinceMs = 0): StoredBehaviorEvent[] {
     if (!subjectKey) return [];
     const list = this.userEventsIndex.get(subjectKey) || [];
-    const out: StoredBehaviorEvent[] = [];
-    for (let i = list.length - 1; i >= 0 && out.length < limit; i--) {
-      if (list[i].createdAt >= sinceMs) {
-        out.push(list[i]);
-      }
-    }
-    return out;
+    return list.filter((e) => e.createdAt >= sinceMs)
+      .sort((a, b) => compareEventOrder(b, a)).slice(0, Math.min(1000, Math.max(1, limit)));
   }
 
   clearUserEvents(subjectKey: string): number {
@@ -248,8 +310,12 @@ export class MemoryRecommendStore implements RecommendStore {
     const list = this.userEventsIndex.get(subjectKey) || [];
     const removed = list.length;
     for (const ev of list) {
-      this.eventIds.delete(ev.eventId);
+      const key = subjectEventKey(subjectKey, ev.eventId);
+      this.eventIds.delete(key);
+      this.queryContributions.delete(key);
+      this.cooccurrenceContributions.delete(key);
     }
+    this.userRadarProfiles.delete(subjectKey);
     this.userEventsIndex.delete(subjectKey);
     if (removed > 0) {
       this.events = this.events.filter((e) => e.subjectKey !== subjectKey);
@@ -259,18 +325,32 @@ export class MemoryRecommendStore implements RecommendStore {
   }
 
   getAllRecentEvents(sinceMs: number, limit = 10000): StoredBehaviorEvent[] {
-    const out: StoredBehaviorEvent[] = [];
-    for (let i = this.events.length - 1; i >= 0 && out.length < limit; i--) {
-      const ev = this.events[i];
-      if (ev.createdAt >= sinceMs) {
-        out.push(ev);
-      }
-    }
-    return out;
+    return this.events.filter((e) => e.createdAt >= sinceMs)
+      .sort((a, b) => compareEventOrder(b, a)).slice(0, Math.min(25000, Math.max(1, limit)));
   }
 
-  incrementCooccurrence(trackA: string, trackB: string, delta: number): void {
-    if (!trackA || !trackB || trackA === trackB || delta <= 0) return;
+  private contributionEvent(source: RecommendContributionSource): StoredBehaviorEvent | undefined {
+    if (!source.subjectKey || !source.eventId) return undefined;
+    return this.userEventsIndex.get(source.subjectKey)?.find((e) =>
+      e.eventId === source.eventId && e.createdAt >= Date.now() - this.retentionDays * DAY_MS);
+  }
+
+  incrementCooccurrence(trackA: string, trackB: string, delta: number, source?: RecommendContributionSource): void {
+    if (!trackA || !trackB || trackA === trackB || !Number.isFinite(delta) || delta <= 0) return;
+    this.beforeWrite();
+    if (source) {
+      const event = this.contributionEvent(source);
+      if (!event) return;
+      const key = subjectEventKey(source.subjectKey, source.eventId);
+      const contribution = this.cooccurrenceContributions.get(key) || { createdAt: event.createdAt, edges: new Map() };
+      const [a, b] = [trackA, trackB].sort();
+      const pair = JSON.stringify([a, b]);
+      if (!contribution.edges.has(pair) && contribution.edges.size < 4) {
+        contribution.edges.set(pair, { a, b, weight: Math.min(200, delta) });
+        this.cooccurrenceContributions.set(key, contribution);
+      }
+      return;
+    }
     const addEdge = (from: string, to: string) => {
       let neighbors = this.cooccurrence.get(from);
       if (!neighbors) {
@@ -278,29 +358,47 @@ export class MemoryRecommendStore implements RecommendStore {
           const oldest = this.cooccurrence.keys().next().value;
           if (oldest) this.cooccurrence.delete(oldest);
         }
-        neighbors = new Map<string, number>();
+        neighbors = new Map();
         this.cooccurrence.set(from, neighbors);
       }
-      neighbors.set(to, Math.min(200, (neighbors.get(to) || 0) + delta));
+      neighbors.set(to, { weight: Math.min(200, (neighbors.get(to)?.weight || 0) + delta), updatedAt: Date.now() });
     };
     addEdge(trackA, trackB);
     addEdge(trackB, trackA);
   }
 
   getCooccurringTracks(trackId: string, limit = 20): Array<{ canonicalTrackId: string; weight: number }> {
-    const neighbors = this.cooccurrence.get(trackId);
-    if (!neighbors) return [];
-    return Array.from(neighbors.entries())
-      .map(([canonicalTrackId, weight]) => ({ canonicalTrackId, weight }))
-      .sort((a, b) => b.weight - a.weight)
-      .slice(0, limit);
+    const cutoff = Date.now() - this.retentionDays * DAY_MS;
+    const weights = new Map<string, number>();
+    for (const [id, edge] of this.cooccurrence.get(trackId) || []) {
+      if (edge.updatedAt >= cutoff) weights.set(id, edge.weight);
+    }
+    for (const contribution of this.cooccurrenceContributions.values()) {
+      if (contribution.createdAt < cutoff) continue;
+      for (const edge of contribution.edges.values()) {
+        const id = edge.a === trackId ? edge.b : edge.b === trackId ? edge.a : '';
+        if (id) weights.set(id, Math.min(200, (weights.get(id) || 0) + edge.weight));
+      }
+    }
+    return Array.from(weights, ([canonicalTrackId, weight]) => ({ canonicalTrackId, weight }))
+      .sort((a, b) => b.weight - a.weight).slice(0, limit);
   }
 
-  recordSearchQuery(normQuery: string, displayQuery: string, clicked = false): void {
+  recordSearchQuery(normQuery: string, displayQuery: string, clicked = false, source?: RecommendContributionSource): void {
     const key = normQuery.trim();
-    if (!key || key.length < 1 || key.length > 64) return;
-    const existing = this.searchQueries.get(key);
+    if (!key || key.length > 64) return;
+    this.beforeWrite();
     const inc = clicked ? 3 : 1;
+    if (source) {
+      const event = this.contributionEvent(source);
+      if (!event) return;
+      const eventKey = subjectEventKey(source.subjectKey, source.eventId);
+      if (!this.queryContributions.has(eventKey)) {
+        this.queryContributions.set(eventKey, { norm: key, display: displayQuery.trim(), count: inc, createdAt: event.createdAt });
+      }
+      return;
+    }
+    const existing = this.searchQueries.get(key);
     if (existing) {
       existing.count += inc;
       existing.updatedAt = Date.now();
@@ -309,34 +407,44 @@ export class MemoryRecommendStore implements RecommendStore {
         const firstKey = this.searchQueries.keys().next().value;
         if (firstKey) this.searchQueries.delete(firstKey);
       }
-      this.searchQueries.set(key, {
-        display: displayQuery.trim(),
-        count: inc,
-        updatedAt: Date.now(),
-      });
+      this.searchQueries.set(key, { display: displayQuery.trim(), count: inc, updatedAt: Date.now() });
     }
   }
 
   getTopSearchQueries(prefix: string, limit = 8): Array<{ query: string; count: number }> {
     const pNorm = compactNormalize(prefix);
-    const matches: Array<{ query: string; count: number; updatedAt: number }> = [];
-    for (const [k, v] of this.searchQueries.entries()) {
-      if (!pNorm || k.startsWith(pNorm) || toSimplifiedChinese(v.display).toLowerCase().includes(pNorm)) {
-        matches.push({ query: v.display, count: v.count, updatedAt: v.updatedAt });
-      }
-    }
-    matches.sort((a, b) => b.count - a.count || b.updatedAt - a.updatedAt);
-    return matches.slice(0, limit).map(({ query, count }) => ({ query, count }));
+    const cutoff = Date.now() - this.retentionDays * DAY_MS;
+    const totals = new Map<string, { display: string; count: number; updatedAt: number }>();
+    const add = (key: string, display: string, count: number, updatedAt: number) => {
+      if (updatedAt < cutoff) return;
+      const existing = totals.get(key);
+      totals.set(key, {
+        display: !existing || updatedAt >= existing.updatedAt ? display : existing.display,
+        count: (existing?.count || 0) + count, updatedAt: Math.max(existing?.updatedAt || 0, updatedAt),
+      });
+    };
+    for (const [key, value] of this.searchQueries) add(key, value.display, value.count, value.updatedAt);
+    for (const value of this.queryContributions.values()) add(value.norm, value.display, value.count, value.createdAt);
+    return Array.from(totals).filter(([key, v]) =>
+      !pNorm || key.startsWith(pNorm) || toSimplifiedChinese(v.display).toLowerCase().includes(pNorm))
+      .sort(([, a], [, b]) => b.count - a.count || b.updatedAt - a.updatedAt)
+      .slice(0, limit).map(([, { display, count }]) => ({ query: display, count }));
   }
 
   getStats(): { trackCount: number; entityCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string } {
-    let pairs = 0;
-    for (const m of this.cooccurrence.values()) pairs += m.size;
+    const pairs = new Set<string>();
+    const cutoff = Date.now() - this.retentionDays * DAY_MS;
+    for (const [a, edges] of this.cooccurrence) {
+      for (const [b, v] of edges) if (v.updatedAt >= cutoff) pairs.add(JSON.stringify([a, b].sort()));
+    }
+    for (const contribution of this.cooccurrenceContributions.values()) {
+      if (contribution.createdAt >= cutoff) for (const pair of contribution.edges.keys()) pairs.add(pair);
+    }
     return {
       trackCount: this.tracks.size,
       entityCount: this.entities.size,
-      eventCount: this.events.length,
-      cooccurrencePairs: Math.floor(pairs / 2),
+      eventCount: this.eventIds.size + this.entityFeedbackIds.size,
+      cooccurrencePairs: pairs.size,
       storageKind: this.kind,
     };
   }
@@ -344,6 +452,7 @@ export class MemoryRecommendStore implements RecommendStore {
   // Multi-entity operations
   upsertEntity(entity: SonicEntity): void {
     if (!entity?.id || !entity?.type) return;
+    this.beforeWrite();
     this.entities.set(entity.id, entity);
   }
 
@@ -365,6 +474,7 @@ export class MemoryRecommendStore implements RecommendStore {
 
   upsertEntityRelation(rel: EntityRelation): void {
     if (!rel?.parentId || !rel?.childId) return;
+    this.beforeWrite();
     const relationId = rel.relationId || `${rel.parentId}:::${rel.childId}:::${rel.relationType}`;
     this.entityRelations.set(relationId, { ...rel, relationId });
   }
@@ -395,33 +505,33 @@ export class MemoryRecommendStore implements RecommendStore {
     if (!feedback?.feedbackId || !feedback?.subjectKey || !feedback?.entityId) {
       return { inserted: false, deduplicated: false };
     }
-    if (this.entityFeedbackIds.has(feedback.feedbackId)) {
+    this.beforeWrite();
+    const key = subjectEventKey(feedback.subjectKey, feedback.feedbackId);
+    if (this.entityFeedbackIds.has(key) || this.eventIds.has(key)) {
       return { inserted: false, deduplicated: true };
     }
-    this.entityFeedbackIds.add(feedback.feedbackId);
+    if (this.entityFeedbackIds.size >= MAX_EVENTS) {
+      const oldestSubject = this.userEntityFeedbacks.keys().next().value;
+      const oldestList = oldestSubject ? this.userEntityFeedbacks.get(oldestSubject) : undefined;
+      const evicted = oldestList?.shift();
+      if (evicted) this.entityFeedbackIds.delete(subjectEventKey(evicted.subjectKey, evicted.feedbackId));
+      if (oldestList?.length === 0) this.userEntityFeedbacks.delete(oldestSubject!);
+    }
+    this.entityFeedbackIds.add(key);
     let list = this.userEntityFeedbacks.get(feedback.subjectKey);
     if (!list) {
       list = [];
       this.userEntityFeedbacks.set(feedback.subjectKey, list);
     }
     list.push(feedback);
-    if (list.length > 600) {
-      const removed = list.shift();
-      if (removed) this.entityFeedbackIds.delete(removed.feedbackId);
-    }
     return { inserted: true, deduplicated: false };
   }
 
   getUserEntityFeedbacks(subjectKey: string, limit = 200, sinceMs = 0): UserEntityFeedback[] {
     if (!subjectKey) return [];
     const list = this.userEntityFeedbacks.get(subjectKey) || [];
-    const out: UserEntityFeedback[] = [];
-    for (let i = list.length - 1; i >= 0 && out.length < limit; i--) {
-      if (list[i].createdAt >= sinceMs) {
-        out.push(list[i]);
-      }
-    }
-    return out;
+    return list.filter((e) => e.createdAt >= sinceMs)
+      .sort((a, b) => compareEventOrder(b, a)).slice(0, Math.min(1000, Math.max(1, limit)));
   }
 
   clearUserEntityFeedbacks(subjectKey: string): number {
@@ -429,7 +539,7 @@ export class MemoryRecommendStore implements RecommendStore {
     const list = this.userEntityFeedbacks.get(subjectKey) || [];
     const count = list.length;
     for (const f of list) {
-      this.entityFeedbackIds.delete(f.feedbackId);
+      this.entityFeedbackIds.delete(subjectEventKey(subjectKey, f.feedbackId));
     }
     this.userEntityFeedbacks.delete(subjectKey);
     return count;
@@ -437,6 +547,7 @@ export class MemoryRecommendStore implements RecommendStore {
 
   saveUserRadarProfile(subjectKey: string, payloadJson: string): void {
     if (!subjectKey || !payloadJson) return;
+    this.beforeWrite();
     this.userRadarProfiles.set(subjectKey, { payloadJson, updatedAt: Date.now() });
     if (this.userRadarProfiles.size > 2000) {
       const oldest = this.userRadarProfiles.keys().next().value;
@@ -458,6 +569,10 @@ export class MemoryRecommendStore implements RecommendStore {
     this.userEventsIndex.clear();
     this.cooccurrence.clear();
     this.searchQueries.clear();
+    this.queryContributions.clear();
+    this.cooccurrenceContributions.clear();
+    this.writeCounter = 0;
+    this.lastRetentionAt = Date.now();
     this.entities.clear();
     this.entityRelations.clear();
     this.userEntityFeedbacks.clear();
@@ -479,7 +594,9 @@ export function getRecommendStore(env?: AppEnv): RecommendStore {
   if (env?.RECOMMEND_STORE && typeof env.RECOMMEND_STORE.upsertTrack === 'function') {
     return env.RECOMMEND_STORE as RecommendStore;
   }
-  return getMemoryRecommendStore();
+  const store = getMemoryRecommendStore();
+  if (env?.SONIC_RECOMMEND_RETENTION_DAYS !== undefined) store.setRetentionDays(env.SONIC_RECOMMEND_RETENTION_DAYS);
+  return store;
 }
 
 export function resetMemoryRecommendStoreForTest(): void {

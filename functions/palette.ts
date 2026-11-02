@@ -7,6 +7,9 @@ import {
   evaluateGatewayRateLimit,
   safeFetch,
   validateSafeUrl,
+  hasSensitiveMediaQuery,
+  isSafeFetchCapacityError,
+  type SafeFetchResponse,
 } from "./_lib/sonic/security";
 import type { AppEnv } from "./_lib/types";
 
@@ -333,6 +336,7 @@ export async function readBoundedArrayBuffer(
 ): Promise<ArrayBuffer> {
   const declared = Number(response.headers.get("content-length") || "");
   if (Number.isFinite(declared) && declared > maxBytes) {
+    void response.body?.cancel().catch(() => {});
     throw new ImageTooLargeError(maxBytes);
   }
   if (!response.body) {
@@ -444,7 +448,7 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
     });
   }
 
-  const allowedDomains = getAllowedMediaDomains(env);
+  const allowedDomains = getAllowedMediaDomains(env, "cover");
   if (allowedDomains.length === 0) {
     recordLicensingBlockMetric("palette-url");
     return new Response(
@@ -475,26 +479,32 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
   }
 
   const target: URL = valResult.url;
+  const targetSensitive = hasSensitiveMediaQuery(target);
 
   const cache = typeof caches !== "undefined" ? (caches as any).default : null;
-  const cacheKey = new Request(request.url, request);
-  if (cache) {
+  const cacheKeyUrl = new URL(request.url);
+  cacheKeyUrl.searchParams.set('_sonic_palette_cache_v', '2');
+  const cacheKey = new Request(cacheKeyUrl.toString(), { method: 'GET' });
+  if (cache && !targetSensitive) {
     const cachedResponse = await cache.match(cacheKey);
     if (cachedResponse) {
       return cachedResponse;
     }
   }
 
-  let upstream: Response;
+  let upstream: SafeFetchResponse;
   const imageInit = {
+    signal: request.signal,
+    cache: 'no-store' as RequestCache,
     headers: {
       Accept: "image/avif,image/webp,image/png,image/jpeg,image/*;q=0.8",
       "User-Agent":
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     },
     cf: {
-      cacheTtl: 3600,
-      cacheEverything: true,
+      // A later redirect may introduce a signature; never force shared caching upstream.
+      cacheTtl: 0,
+      cacheEverything: false,
       image: {
         width: MAX_DIMENSION,
         height: MAX_DIMENSION,
@@ -509,14 +519,16 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
     allowedDomains,
     maxRedirects: 2,
     timeoutMs: 6000,
+    bodyIdleTimeoutMs: 30000,
     // readBoundedArrayBuffer enforces the image cap and returns 413 itself.
     maxBytes: 0,
+    includeMetadata: true,
   };
   try {
     upstream = await safeFetch(target, imageInit as any, fetchOptions);
   } catch {
     try {
-      upstream = await safeFetch(target, { headers: imageInit.headers } as any, fetchOptions);
+      upstream = await safeFetch(target, { headers: imageInit.headers, signal: request.signal, cache: 'no-store' }, fetchOptions);
     } catch (error) {
       console.warn("Image fetch failed", error);
       return new Response(JSON.stringify({ error: "Upstream image request failed" }), {
@@ -560,15 +572,20 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
   }
 
   try {
+    const finalTarget = upstream.finalUrl || target;
+    const sensitive = targetSensitive || Boolean(upstream.sensitive) || hasSensitiveMediaQuery(finalTarget) ||
+      /private|no-store/i.test(upstream.headers.get('cache-control') || '');
     const palette = await buildPalette(buffer, contentType);
-    palette.source = target.toString();
+    // Keep the original public source contract, never disclose a signed redirect target.
+    palette.source = targetSensitive ? `${target.origin}${target.pathname}` : target.toString();
 
     const response = new Response(JSON.stringify(palette), {
       status: 200,
       headers: createJsonHeaders(200),
     });
+    if (sensitive) response.headers.set('Cache-Control', 'private, no-store');
 
-    if (cache) {
+    if (cache && !sensitive) {
       try {
         await cache.put(cacheKey, response.clone());
       } catch (cacheError) {

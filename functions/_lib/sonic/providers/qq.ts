@@ -1,3 +1,4 @@
+import { fetchWithRuntimeBudget } from '../local-engine';
 // Sonic Provider — QQ Music (QQ音乐)
 // Direct QRC syllable word-level lyrics & search
 
@@ -49,13 +50,13 @@ export const qqProvider: SonicProviderAdapter = {
       const q = [params.title, params.artist].filter(Boolean).join(' ').trim();
       try {
         const sUrl = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=1&n=5&w=${encodeURIComponent(q)}&format=json`;
-        const sRes = await fetch(sUrl, {
+        const sRes = await fetchWithRuntimeBudget(sUrl, {
           headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             Referer: 'https://y.qq.com/',
           },
-          signal: options?.signal || AbortSignal.timeout(config.timeoutMs),
-        });
+          signal: options?.signal,
+        }, { timeoutMs: config.timeoutMs });
         if (sRes.ok) {
           const sJson = (await sRes.json()) as any;
           const list = sJson.data?.song?.list;
@@ -74,7 +75,7 @@ export const qqProvider: SonicProviderAdapter = {
             }
           }
         }
-      } catch {}
+      } catch { options?.signal?.throwIfAborted();}
     }
 
     if (!rawLyric || !isValidLyric(rawLyric)) return null;
@@ -137,13 +138,13 @@ export const qqProvider: SonicProviderAdapter = {
     // 1. Primary: search_for_qq_cp H5 API (fast, reliable, unblocked internationally)
     try {
       const h5Url = `https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp?g_tk=5381&uin=0&format=json&inCharset=utf-8&outCharset=utf-8&notice=0&platform=h5&needNewCode=1&w=${encodeURIComponent(query)}&zhidaqu=1&catZhida=1&t=0&flag=1&ie=utf-8&sem=1&aggr=0&perpage=${count}&n=${count}&p=${page}`;
-      const h5Res = await fetch(h5Url, {
+      const h5Res = await fetchWithRuntimeBudget(h5Url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
           Referer: 'https://y.qq.com/',
         },
-        signal: options?.signal || AbortSignal.timeout(config.timeoutMs),
-      });
+        signal: options?.signal,
+      }, { timeoutMs: config.timeoutMs });
 
       if (h5Res.ok) {
         const h5Json = (await h5Res.json()) as any;
@@ -187,7 +188,7 @@ export const qqProvider: SonicProviderAdapter = {
           });
         }
       }
-    } catch {}
+    } catch { options?.signal?.throwIfAborted();}
 
     // 2. Secondary: modern QQ musicu.fcg desktop search API
     try {
@@ -205,7 +206,7 @@ export const qqProvider: SonicProviderAdapter = {
         },
       };
 
-      const uRes = await fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+      const uRes = await fetchWithRuntimeBudget('https://u.y.qq.com/cgi-bin/musicu.fcg', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -215,8 +216,8 @@ export const qqProvider: SonicProviderAdapter = {
           'Accept': 'application/json',
         },
         body: JSON.stringify(reqBody),
-        signal: options?.signal || AbortSignal.timeout(config.timeoutMs),
-      });
+        signal: options?.signal,
+      }, { timeoutMs: config.timeoutMs });
 
       if (uRes.ok) {
         const uJson = (await uRes.json()) as any;
@@ -260,18 +261,18 @@ export const qqProvider: SonicProviderAdapter = {
           });
         }
       }
-    } catch {}
+    } catch { options?.signal?.throwIfAborted();}
 
     // 3. Fallback: classic client_search_cp API
     try {
       const sUrl = `https://c.y.qq.com/soso/fcgi-bin/client_search_cp?p=${page}&n=${count}&w=${encodeURIComponent(query)}&format=json`;
-      const sRes = await fetch(sUrl, {
+      const sRes = await fetchWithRuntimeBudget(sUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
           Referer: 'https://y.qq.com/',
         },
-        signal: options?.signal || AbortSignal.timeout(config.timeoutMs),
-      });
+        signal: options?.signal,
+      }, { timeoutMs: config.timeoutMs });
       if (!sRes.ok) return [];
       const sJson = (await sRes.json()) as any;
       const list = sJson?.data?.song?.list;
@@ -313,7 +314,7 @@ export const qqProvider: SonicProviderAdapter = {
           lyricId: platformId,
         };
       });
-    } catch {
+    } catch { options?.signal?.throwIfAborted();
       return [];
     }
   },

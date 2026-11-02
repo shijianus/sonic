@@ -10,6 +10,7 @@ import type {
   StoredBehaviorEvent,
   TrendingWindow,
 } from './types';
+import { foldPreferenceSignals } from './event-state';
 
 const HOUR_MS = 3600 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -113,8 +114,8 @@ export function computeCatalogPopularity(
 
   const accMap = new Map<string, RawTrackAccumulator>();
 
-  // Process chronological / reverse-chronological events
-  for (const ev of events) {
+  // Undo semantics and retries are identical to personalized/mixed profiles.
+  for (const ev of foldPreferenceSignals(events.map((e) => ({ ...e, entityType: 'track', entityId: e.canonicalTrackId || e.trackRef })))) {
     const tid = ev.canonicalTrackId;
     if (!tid || !ev.subjectKey) continue;
     const acc = getOrCreateAcc(accMap, tid);

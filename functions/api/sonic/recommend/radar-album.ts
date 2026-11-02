@@ -14,8 +14,8 @@ import {
 } from '../../../_lib/sonic/route-helpers';
 import {
   getRecommendStore,
-  resolveUserIdentity,
 } from '../../../_lib/sonic/recommend';
+import { resolveAuthenticatedSubject } from '../../../_lib/sonic/authenticated-subject';
 
 const MAX_RADAR_PAYLOAD_BYTES = 8 * 1024; // Strictly bounded: max 8KB for strongest signals only
 
@@ -37,15 +37,15 @@ export async function onRequest({
   if (guardResp) return guardResp;
 
   const start = Date.now();
-  const identity = await resolveUserIdentity(request, env);
   const config = getSonicConfig(env);
   const privateHeaders = {
     'Cache-Control': 'private, no-store',
     Vary: 'Authorization, Cookie, X-Sonic-Key, X-CFSolara-Key, X-Sonic-Anon-Id',
   };
 
-  // Only users authenticated via EpoMail OAuth have cloud DB sync support
-  const isAuthenticatedUser = identity.mode === 'authenticated' && !!identity.userId;
+  // Cloud sync authorization is independent from recommendation consent.
+  const accountSubject = await resolveAuthenticatedSubject(request, env);
+  const isAuthenticatedUser = Boolean(accountSubject);
 
   if (method === 'GET') {
     if (!isAuthenticatedUser) {
@@ -74,10 +74,13 @@ export async function onRequest({
           headers: buildGatewayHeaders(privateHeaders, false, 'CLOSED'),
         });
       }
+      return sonicError('RADAR_STORAGE_UNAVAILABLE', 'Cloud radar storage unavailable; retry later', 503, {
+        provider: 'sonic-radar', degraded: true, retryable: true,
+      });
     }
 
     const store = getRecommendStore(env);
-    const profile = store.getUserRadarProfile?.(identity.subjectKey) || null;
+    const profile = store.getUserRadarProfile?.(accountSubject) || null;
     let parsedData = null;
     if (profile?.payloadJson) {
       try {
@@ -92,7 +95,7 @@ export async function onRequest({
         syncedAt: profile?.updatedAt || null,
         meta: {
           latencyMs: Date.now() - start,
-          subjectKey: identity.subjectKey,
+          subjectKey: accountSubject,
         },
       },
       {
@@ -160,16 +163,25 @@ export async function onRequest({
   const payloadJson = JSON.stringify(sanitized);
 
   if (config.enableLocalEngine) {
-    await callLocalEngineJson<any>('/api/sonic/recommend/radar-album', env, {
+    const engineRes = await callLocalEngineJson<any>('/api/sonic/recommend/radar-album', env, {
       request,
       method: 'POST',
       body: payloadJson,
       timeoutMs: config.engineTimeoutMs,
     });
+    if (!engineRes.ok || engineRes.data?.brand !== 'Sonic') {
+      return sonicError('RADAR_STORAGE_UNAVAILABLE', 'Cloud radar storage unavailable; retry later', 503, {
+        provider: 'sonic-radar', degraded: true, retryable: true,
+      });
+    }
+    return jsonResponse(engineRes.data, {
+      status: 200,
+      headers: buildGatewayHeaders(privateHeaders, false, 'CLOSED'),
+    });
   }
 
   const store = getRecommendStore(env);
-  store.saveUserRadarProfile?.(identity.subjectKey, payloadJson);
+  store.saveUserRadarProfile?.(accountSubject, payloadJson);
 
   return jsonResponse(
     {

@@ -5,6 +5,53 @@
 - 代码 SHA：`d29a32ff61caef96507176325f9b5e296360e3f4`
 - 判定规则：任一硬门禁非 PASS，即 **NO-GO**；不得用“预计/应该”替代证据。
 
+## 源码包重建与溯源门禁（2026-11-02）
+
+以下是当前发布要求；本文其他历史 PASS 只适用于其注明的 SHA/日期，不能沿用到新包。
+
+### 输入与信任边界
+
+- `scripts/release-inputs.mjs` 的 `RELEASE_DIRECTORIES` / `REQUIRED_RELEASE_FILES` 是完整的显式输入策略，打包与摘要使用同一份列表。包含前后端源码、旧版 `js/` 安全测试输入、`player/build/public/scripts`、根/Player 单测与 E2E、`.github` CI、两份锁文件及包管理配置、根/Player tsconfig、Vite/Vitest/Playwright/ESLint/PostCSS/格式配置、主题 lint baseline、Dockerfile/Dockerfile.ncm/Compose/.dockerignore、发布/部署/备份恢复脚本、许可证、环境示例、运维/回滚手册。缺少必需文件或目录直接失败，不再静默跳过。
+- `player/src/auto-import/imports.d.ts` 和 `components.d.ts` 必须入包/入摘要，保证先 typecheck 后 build；未被现行 lint 使用的生成文件 `eslintrc-auto-import.json` 不参与。构建若改写了已冻结声明，必须重新冻结/重建，不能忽略摘要变化。
+- 仅打包列表中已核验的普通文件；不读取/复制私有 `.env*`、凭证/私钥、认证状态、历史、报告、SQLite、缓存、依赖目录或产物。只允许根及 Player 的 `.env.example`，拒绝软/硬链接。不要把秘密写入任何允许发布的源码文件；名称过滤不是秘密内容扫描器。
+- `release.json` 保持原 `schemaVersion: 1` 的六个身份字段不变。`release-files.json` 保存排序路径、字节数、逐文件 SHA-256、聚合摘要及六字段身份校验值。必须同时验证，不能只看传入的 `SONIC_SOURCE_DIGEST`。摘要覆盖精确文件字节，解压后不要做换行转换。
+- archive `.sha256` 需与独立受控渠道保存的值一致；包内清单/索引提供一致性检查，**不是签名/可信发布者证明**。不要仅信任与可疑压缩包一并替换的校验文件。
+
+### 从空目录重建（Node 22.13+，pnpm 10.34.5）
+
+发布负责人先完成全部源文件编辑并冻结，再 `npm run build`、`npm run build:engine`、`node scripts/package-release.mjs`。源文件变化后必须重建；打包脚本拒绝覆盖同名 archive。以下步骤针对该包的空目录解压副本，不读取本机秘密、不发布服务：
+
+```bash
+set -euo pipefail
+# 先用独立保存的 SHA-256 核验 archive，再解压到空目录并进入该目录。
+node scripts/release-inputs.mjs --verify release.json --index release-files.json
+corepack enable
+corepack prepare pnpm@10.34.5 --activate
+npm ci
+pnpm --dir player install --frozen-lockfile
+npm run typecheck
+npm run lint
+npm test
+pnpm --dir player test
+npm run build
+npm run build:engine
+# archive 重建复用已核验的 release 身份，不需要 .git；禁止只校验 subset。
+node scripts/release-inputs.mjs --verify release.json --index release-files.json
+```
+
+依赖目录/标准 build 输出可在二次核验时存在，不属于源码摘要。索引模式拒绝额外未索引文件（包括 `.env`、根日志和远端运行结果）；将操作报告/私有配置写到解压目录外。正常 checkout 的核验用 `node scripts/release-inputs.mjs --verify dist/release.json`；它仍校验全量源码但不要求 archive 索引。
+
+### Docker / Compose 上下文
+
+1. 在完整解压目录、任何 Docker build **之前**执行带 `--index` 的核验；staging 构建脚本必须先调用此 Node-only helper。后续根目录已有运行结果时，可用 `node scripts/write-release-manifest.mjs --digest` 重新算全量源摘要，但这不能替代首次严格解压核验。
+2. 从同一 `release.json` 取 `baseCommit` → `SONIC_RELEASE_COMMIT`、`sourceDigest` → `SONIC_SOURCE_DIGEST`、`releaseId` → `SONIC_RELEASE_ID`、`buildTime` → `SONIC_BUILD_TIME`、`dirty` → `SONIC_RELEASE_DIRTY`，全部传给 Docker build；参见 [回滚手册 §2](../RUNBOOK-ROLLBACK.md#2-部署前强制检查清单)。不得把新构建时间/旧 SHA 拼接成另一份身份。
+3. Docker 前端 stage 只有 `player` 和 manifest helpers。`--partial-docker-stage` 明确只复制传入身份并输出警告，不冒充全源码摘要对比；普通 writer（包括 `--digest`）始终重算并核对任何传入摘要。
+4. 两份 Dockerfile 使用已在 2026-11-02 staging 构建验证的同一 `node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914`，不是升级基底。前端 frozen pnpm lock、引擎 `npm ci`。NCM 侧车顶层包固定 `4.41.1`，但全局 npm 安装没有独立传递依赖锁；不能宣称侧车逐字节可复现，发布时另存已构建侧车镜像 digest。
+5. `docker-compose.yml` 的两个 build context 都是包根目录，两份 Dockerfile 必须存在。仅做结构验证可用 `docker compose --env-file /dev/null config --no-interpolate --no-env-resolution --quiet`，不读取 `.env`。真实 build/run 需运维在源码包之外保管并按部署方式提供配置/密钥；不要把配置回打入包。
+6. 构建后核对 OCI labels、前端 `release.json`、Engine health 的五个身份值。安装/编译通过不等于 UI、音频、真实上游或当前服务回滚通过；相应浏览器和运行环境证据单列。
+
+回滚必须是**匹配的镜像 + 数据库快照**，使用 `--offline` 的恢复工具且保留新数据；隔离恢复测试与当前运行中服务的双向回滚演练分开记录，后者无证据时为 **NOT REHEARSED**。
+
 ## A. 代码与质量硬门禁
 
 | # | 检查项 | 结果 | 证据 |

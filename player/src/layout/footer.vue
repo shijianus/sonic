@@ -666,7 +666,7 @@ const emit = defineEmits(['show'])
         </div>
         <div id="footer-song-info" class="footer-song-info flex min-w-0 flex-col justify-center gap-0.5">
           <div class="flex items-center gap-1.5 min-w-0">
-            <p data-testid="now-playing-title" :title="currentSong?.name" class="text-primary truncate text-sm font-medium">
+            <p data-testid="now-playing-title" :title="currentSong?.name" class="text-primary min-w-0 break-words whitespace-normal text-sm font-medium">
               {{ currentSong ? currentSong.name : t('player.selectSongToStart') }}
             </p>
             <span
@@ -677,7 +677,7 @@ const emit = defineEmits(['show'])
               {{ t('player.trialBadge') }}
             </span>
           </div>
-          <p v-if="currentSong" class="text-primary/80 truncate text-xs">
+          <p v-if="currentSong" class="text-primary/80 break-words whitespace-normal text-xs">
             {{ currentSong.artist || t('player.unknownArtist') }}
           </p>
         </div>

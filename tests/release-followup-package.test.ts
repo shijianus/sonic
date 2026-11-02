@@ -1,0 +1,231 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import {
+  collectReleaseInputs, copyReleaseInputs, createReleaseFileIndex,
+  RELEASE_DIRECTORIES, REQUIRED_RELEASE_FILES,
+} from '../scripts/release-inputs.mjs';
+
+const repo = resolve(import.meta.dirname, '..');
+const directories: string[] = [];
+const metadata = {
+  SONIC_RELEASE_COMMIT: 'a'.repeat(40), SONIC_RELEASE_DIRTY: '1',
+  SONIC_SOURCE_DIGEST: '', SONIC_RELEASE_ID: '', SONIC_BUILD_TIME: '2026-11-02T00:00:00.000Z',
+};
+afterEach(() => {
+  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+function temporary(prefix = 'sonic-package-test-') {
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  directories.push(root);
+  return root;
+}
+function put(root: string, name: string, content = 'fixture\n') {
+  mkdirSync(dirname(join(root, name)), { recursive: true });
+  writeFileSync(join(root, name), content);
+}
+function fixture() {
+  const root = temporary();
+  for (const directory of RELEASE_DIRECTORIES) put(root, `${directory}/fixture.ts`, 'export const fixture = 1;\n');
+  for (const file of REQUIRED_RELEASE_FILES) put(root, file);
+  for (const file of ['release-inputs.mjs', 'write-release-manifest.mjs', 'package-release.mjs', 'prepare-pages-preview.mjs']) {
+    cpSync(join(repo, 'scripts', file), join(root, 'scripts', file));
+  }
+  put(root, 'package.json', '{"type":"module"}\n');
+  put(root, 'player/package.json', '{"type":"module"}\n');
+  return root;
+}
+function runWriter(root: string, args: string[] = [], extra: Record<string, string> = {}) {
+  return spawnSync(process.execPath, [join(root, 'scripts/write-release-manifest.mjs'), ...args], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, ...metadata, ...extra },
+  });
+}
+function snapshot(root: string) {
+  const result = runWriter(root, ['--output', 'dist/release.json']);
+  expect(result.status, result.stderr).toBe(0);
+  const manifest = JSON.parse(result.stdout);
+  put(root, 'release.json', JSON.stringify(manifest));
+  put(root, 'release-files.json', JSON.stringify(createReleaseFileIndex(manifest, collectReleaseInputs(root))));
+  return manifest;
+}
+function verify(root: string) {
+  return spawnSync(process.execPath, [join(root, 'scripts/release-inputs.mjs'), '--verify', 'release.json', '--index', 'release-files.json'], {
+    cwd: root, encoding: 'utf8', env: { ...process.env, SONIC_SOURCE_DIGEST: '' },
+  });
+}
+
+describe('complete, secret-safe release source packages', { timeout: 30_000 }, () => {
+  it('copies one explicit file set with the Compose, pre-build typecheck, lint, test, CI and runbook inputs', () => {
+    const root = fixture();
+    const manifest = snapshot(root);
+    const inputs = collectReleaseInputs(root);
+    const paths = inputs.files.map((file: { path: string }) => file.path);
+    expect(paths).toEqual(expect.arrayContaining([
+      'Dockerfile.ncm', '.dockerignore', 'player/scripts/fixture.ts', 'player/tsconfig.json',
+      'player/src/auto-import/imports.d.ts', 'player/src/auto-import/components.d.ts',
+      'player/eslint.config.mjs', 'scripts/theme-lint-baseline.json', '.github/workflows/ci.yml',
+      'tests/fixture.ts', 'player/tests/fixture.ts', 'player/e2e/fixture.ts', 'js/playlist-view.js',
+      'docs/RUNBOOK-ROLLBACK.md', 'docs/OPERATIONS.md', 'docs/release/RELEASE-CHECKLIST.md',
+    ]));
+    const extracted = temporary();
+    copyReleaseInputs(root, extracted, inputs.files);
+    for (const name of ['release.json', 'release-files.json']) cpSync(join(root, name), join(extracted, name));
+    expect(existsSync(join(extracted, '.git'))).toBe(false);
+    expect(existsSync(join(extracted, 'node_modules'))).toBe(false);
+    const result = verify(extracted);
+    expect(result.status, result.stderr).toBe(0);
+    expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, verification: 'full-source', sourceDigest: manifest.sourceDigest, indexVerified: true });
+    expect(collectReleaseInputs(extracted)).toEqual(inputs);
+    // No .git/env metadata is needed when rebuilding from a verified archive.
+    const rebuilt = runWriter(extracted, ['--print'], {
+      SONIC_RELEASE_COMMIT: '', SONIC_RELEASE_DIRTY: '', SONIC_BUILD_TIME: '',
+    });
+    expect(rebuilt.status, rebuilt.stderr).toBe(0);
+    expect(JSON.parse(rebuilt.stdout)).toEqual(manifest);
+  });
+
+  it.each([
+    'Dockerfile.ncm', '.dockerignore', 'player/tsconfig.json', 'player/scripts',
+    'player/src/auto-import/imports.d.ts', 'player/eslint.config.mjs',
+    'scripts/theme-lint-baseline.json', '.github/workflows/ci.yml',
+    'docs/RUNBOOK-ROLLBACK.md', 'docs/OPERATIONS.md', 'docs/release/RELEASE-CHECKLIST.md',
+  ])('fails closed if an extraction is missing %s', (name) => {
+    const root = fixture();
+    snapshot(root);
+    rmSync(join(root, name), { recursive: true, force: true });
+    const result = verify(root);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(name);
+    expect(() => collectReleaseInputs(root)).toThrow(/Missing required release input/);
+  });
+
+  it.each([
+    '.dockerignore', 'Dockerfile.ncm', 'player/tsconfig.json', 'player/.npmrc',
+    'package-lock.json', 'player/pnpm-lock.yaml', 'player/scripts/fixture.ts',
+    'player/src/auto-import/components.d.ts', 'tests/fixture.ts',
+    'player/e2e/fixture.ts', '.github/workflows/ci.yml', 'scripts/theme-lint-baseline.json',
+  ])('detects tampering with %s despite a supplied original digest', (name) => {
+    const root = fixture();
+    const manifest = snapshot(root);
+    put(root, name, readFileSync(join(root, name), 'utf8') + '\n// changed\n');
+    const result = runWriter(root, ['--print'], { SONIC_SOURCE_DIGEST: manifest.sourceDigest });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('does not match the full source checkout');
+    const digest = runWriter(root, ['--digest'], { SONIC_SOURCE_DIGEST: manifest.sourceDigest });
+    expect(digest.status).not.toBe(0);
+    expect(verify(root).stderr).toContain('Source digest mismatch');
+  });
+
+  it('requires the exact index and manifest identity, not just a matching aggregate digest', () => {
+    const root = fixture();
+    const manifest = snapshot(root);
+    const original = readFileSync(join(root, 'release-files.json'), 'utf8');
+    const index = JSON.parse(original);
+    index.files.pop();
+    put(root, 'release-files.json', JSON.stringify(index));
+    expect(verify(root).stderr).toContain('complete input list');
+    index.files.unshift(index.files[0]);
+    put(root, 'release-files.json', JSON.stringify(index));
+    expect(verify(root).stderr).toContain('index mismatch');
+    put(root, 'release-files.json', original);
+    put(root, 'release.json', JSON.stringify({ ...manifest, buildTime: '2026-11-03T00:00:00.000Z' }));
+    expect(verify(root).stderr).toContain('metadata mismatch');
+  });
+
+  it('detects added source files and unindexed archive payloads', () => {
+    const root = fixture();
+    snapshot(root);
+    put(root, 'functions/added.ts', 'export const changed = true;');
+    expect(verify(root).stderr).toContain('Source digest mismatch');
+    rmSync(join(root, 'functions/added.ts'));
+    put(root, 'unexpected.txt', 'not in the release');
+    expect(verify(root).stderr).toContain('Unindexed file');
+  });
+
+  it('excludes credentials/history/reports/caches before reading or copying, and rejects them in an extracted archive', () => {
+    const root = fixture();
+    const initial = collectReleaseInputs(root);
+    const excluded = [
+      '.env', 'functions/.env.private', 'player/.env.production', 'player/src/private.key',
+      'functions/credentials.json', 'player/e2e/storage-state.json', 'player/e2e/cookies.json',
+      '.git/history', 'scripts/audit_independent_qa_results.json', 'reports/run.log',
+      'functions/reports/result.json', 'player/node_modules/private.js', 'player/dist/index.html',
+      'player/src/auto-import/eslintrc-auto-import.json', 'functions/cache/item.json',
+    ];
+    for (const name of excluded) put(root, name, 'SYNTHETIC_PRIVATE_TEST_VALUE');
+    expect(collectReleaseInputs(root)).toEqual(initial);
+    const extracted = temporary();
+    copyReleaseInputs(root, extracted, initial.files);
+    for (const name of excluded) expect(existsSync(join(extracted, name)), name).toBe(false);
+    expect(JSON.stringify(initial)).not.toContain('SYNTHETIC_PRIVATE_TEST_VALUE');
+    snapshot(extracted);
+    put(extracted, '.env', 'SYNTHETIC_PRIVATE_TEST_VALUE');
+    expect(verify(extracted).stderr).toContain('Unindexed file');
+  });
+
+  it('rejects hard-linked inputs instead of reading through a link', () => {
+    const root = fixture();
+    const outside = temporary();
+    put(outside, 'test-value', 'SYNTHETIC_PRIVATE_TEST_VALUE');
+    linkSync(join(outside, 'test-value'), join(root, 'functions/linked.ts'));
+    expect(() => collectReleaseInputs(root)).toThrow(/Hard link not allowed/);
+  });
+
+  it('does not mistake a partial frontend digest for a verified complete checkout', () => {
+    const root = temporary();
+    mkdirSync(join(root, 'scripts'));
+    for (const name of ['write-release-manifest.mjs', 'release-inputs.mjs']) cpSync(join(repo, 'scripts', name), join(root, 'scripts', name));
+    put(root, 'player/src/example.ts');
+    const supplied = { SONIC_SOURCE_DIGEST: 'b'.repeat(64), SONIC_RELEASE_ID: 'release-fixture' };
+    expect(runWriter(root, ['--print'], supplied).status).not.toBe(0);
+    const partial = runWriter(root, ['--partial-docker-stage', '--print'], supplied);
+    expect(partial.status, partial.stderr).toBe(0);
+    expect(JSON.parse(partial.stdout).sourceDigest).toBe(supplied.SONIC_SOURCE_DIGEST);
+    expect(Object.keys(JSON.parse(partial.stdout)).sort()).toEqual(['schemaVersion', 'baseCommit', 'sourceDigest', 'releaseId', 'buildTime', 'dirty'].sort());
+    expect(partial.stderr).toContain('supplied identity only');
+    expect(runWriter(root, ['--partial-docker-stage', '--digest'], supplied).status).not.toBe(0);
+    expect(runWriter(root, ['--partial-docker-stage', '--print'], { ...supplied, SONIC_BUILD_TIME: '' }).status).not.toBe(0);
+  });
+
+  it('round-trips a fixture tarball and refuses stale builds and archive overwrite', () => {
+    const root = fixture();
+    const build = runWriter(root, ['--output', 'dist/release.json']);
+    expect(build.status, build.stderr).toBe(0);
+    const command = [join(root, 'scripts/package-release.mjs')];
+    const result = spawnSync(process.execPath, command, { cwd: root, encoding: 'utf8', env: { ...process.env, SONIC_SOURCE_DIGEST: '' } });
+    expect(result.status, result.stderr).toBe(0);
+    const descriptor = JSON.parse(result.stdout);
+    directories.push(descriptor.staging);
+    expect(descriptor.sha256).toBe(createHash('sha256').update(readFileSync(descriptor.archive)).digest('hex'));
+    const extracted = temporary();
+    const tar = process.platform === 'win32' ? 'C:/Windows/System32/tar.exe' : 'tar';
+    execFileSync(tar, ['-xzf', descriptor.archive, '-C', extracted]);
+    expect(verify(extracted).status).toBe(0);
+    const again = spawnSync(process.execPath, command, { cwd: root, encoding: 'utf8' });
+    expect(again.status).not.toBe(0);
+    expect(again.stderr).toContain('refusing overwrite');
+    put(root, '.dockerignore', 'tampered');
+    const stale = spawnSync(process.execPath, command, { cwd: root, encoding: 'utf8' });
+    expect(stale.status).not.toBe(0);
+    expect(stale.stderr).toContain('Source digest mismatch');
+  });
+
+  it('uses only the evidenced Node base digest and an explicitly partial frontend metadata step', () => {
+    const expected = 'node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914';
+    for (const file of ['Dockerfile', 'Dockerfile.ncm']) {
+      const source = readFileSync(join(repo, file), 'utf8');
+      const bases = [...source.matchAll(/^FROM (\S+)/gm)].map(match => match[1]);
+      expect(bases.length).toBeGreaterThan(0);
+      expect(bases.every(base => base === expected)).toBe(true);
+    }
+    const dockerfile = readFileSync(join(repo, 'Dockerfile'), 'utf8');
+    expect(dockerfile).toContain('--partial-docker-stage');
+    expect(dockerfile).toContain('player/pnpm-workspace.yaml player/.npmrc');
+    expect(dockerfile).toContain('pnpm install --frozen-lockfile');
+    expect(dockerfile).toContain('RUN npm ci');
+    expect(readFileSync(join(repo, '.dockerignore'), 'utf8')).toContain('!Dockerfile.ncm');
+  });
+});

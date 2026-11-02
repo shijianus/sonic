@@ -83,7 +83,45 @@ EPOMAIL_HTTP_TIMEOUT_MS=8000
   `{"type":"access","requestId":"...","method":"GET","path":"/api/...","status":200,"durationMs":12}`
   **不记录查询字符串、Cookie、Authorization 或请求体。**
 - 未处理异常记录 `type=unhandled_error`，只包含 requestId、错误名与截断消息。
-- Cloudflare Pages 侧没有自定义全局访问日志；请使用 Cloudflare 日志/Analytics 或外部探针，不要声称本项目内置了统一指标系统。
+- Cloudflare Pages 使用 Cloudflare 日志/Analytics；进程内指标由受密钥保护的 `/api/sonic/engine/metrics` 提供。指标在每个进程/isolate 重启时归零，不跨实例聚合。
+
+### 滚动指标与告警
+
+- `observability.requests` 为进程累计计数；告警依据 `observability.window.requests` 的总请求数、5xx 数与 `errorRate5xx`（0..1），不使用累计错误率。窗口默认 300 秒，按 1 秒桶淘汰，最旧的部分秒不计入；`from`、`to`、`observedSec` 显示实际观察范围。启动后不必等满 300 秒，但必须达到最少请求数。
+- `observability.window.latency.<group>` 为窗口内各路由组最近最多 512 个延迟样本，含 P50/P95/P99、样本数和该组窗口请求数；`latency` 原字段仍为进程累计计数与最近 512 个样本。P95 是有界样本估计，不是全窗口每个请求的精确分位数。Node 延迟包含响应结束前的耗时，长音频流应单独评估。
+- 5xx 默认在窗口内至少 100 个请求、至少 5 个 5xx 后，错误率 **> 2%** 发 warning，**> 5%** 发 critical。2% 与回滚 runbook 的调查阈值一致；低流量未达门槛时不自动通知，仍需外部健康探针。warning 与 critical 独立冷却，升级不会被 warning 冷却压住。
+- P95 告警默认关闭。配置毫秒阈值后，整体及每个路由组在窗口请求数达到门槛、有效样本数达到 `min(最少请求数, 512)`，且 P95 **严格大于**相应阈值时发告警。只在请求完成时评估，P95 最多每秒一次；无后台循环，不保证“持续 N 分钟”判定。未配置阈值时，P95 仅供观察，不能据此声称 P95 告警已验收。
+
+| 配置 | 默认 | 行为 |
+|---|---|---|
+| `SONIC_ALERT_WEBHOOK_URL` | 空 | 自动告警关闭；配置安全 HTTPS URL 后启用；URL 不进入载荷/日志 |
+| `SONIC_ALERT_WINDOW_SEC` | `300` | 滚动窗口 10..3600 秒；每秒桶计数，固定内存上限 |
+| `SONIC_ALERT_MIN_REQUESTS` | `100` | 窗口/路由组最低请求数，1..1000000 |
+| `SONIC_ALERT_5XX_THRESHOLD` | `5` | 窗口内最少 5xx 数（保留旧变量），1..1000000 |
+| `SONIC_ALERT_5XX_WARNING_RATIO` | `0.02` | warning 错误比例；0 关闭该级别 |
+| `SONIC_ALERT_5XX_PAGING_RATIO` | `0.05` | critical 错误比例；0 关闭该级别 |
+| `SONIC_ALERT_P95_WARNING_MS` | `0` | 显式设置 >0 毫秒启用 P95 warning |
+| `SONIC_ALERT_P95_PAGING_MS` | `0` | 显式设置 >0 毫秒启用 P95 critical |
+| `SONIC_ALERT_COOLDOWN_SEC` | `300` | 按 code + severity 冷却，0..86400 秒；0 可关闭冷却，重复并发仍合并 |
+| `SONIC_ALERT_ALLOW_LOCALHOST` | `0` | 仅本地开发允许 loopback webhook；非本地始终要求 HTTPS |
+
+比例限制在 0..1，P95 限制在 0..3600000ms；非法/空值回退默认，超界值截到边界。启用的 critical 阈值若低于 warning，会提升到 warning。配置以 metrics 的 `observability.alerts.policy` 实际生效值为准。Webhook 请求最多 5 秒，不跟随重定向；非 2xx、网络错误/超时均记为失败，重试受冷却约束。载荷脱敏配置密钥、Cookie、Bearer 与签名 URL 参数；不要把额外敏感内容放进人工 note。
+
+### 告警交付门禁
+
+```bash
+# 确定性 stub 自检；不访问真实引擎或外部 webhook
+node scripts/verify-observability-and-alerts.mjs --self-test
+
+# 经授权的 live 检查：此命令实际投递一条 MANUAL_ALERT_SELF_CHECK
+# 密钥由环境提供；不要把密钥放到命令参数或 URL
+SONIC_ENGINE_URL=http://127.0.0.1:8080 node scripts/verify-observability-and-alerts.mjs
+
+# 只读采集，不发送告警；不能作为发布告警门禁
+SONIC_ENGINE_URL=http://127.0.0.1:8080 node scripts/verify-observability-and-alerts.mjs --metrics-only
+```
+
+live 需要 `SONIC_ENGINE_SECRET`（≥32 字符），staging 可提供 `SONIC_STAGING_ACCESS_TOKEN`。完整门禁要求 metrics/health JSON 与 HTTP 成功、有效 release 元数据、readiness/存储健康、两端限流 `productionCompliant === true`，并要求已配置 webhook、POST HTTP 成功且 `delivery.sent === true`、`delivery.status` 为 2xx。持久化存储必须报告 SQLite 与健康可写磁盘；Linux 单进程内存限流可通过，不要求 Cloudflare binding。任何缺配置、投递失败、未就绪都以非零退出并输出 `ok:false, fullGate:false`。显式 `--metrics-only` 仅报告采集成功，始终 `fullGate:false`；`--self-test` 验证本地代码与失败分支，不代表真实 webhook 可用。
 
 ## 6. 限流与熔断
 
@@ -128,33 +166,30 @@ docker cp sonic-local-engine:/app/data/backup-YYYY-MM-DD-HHMM.sqlite ./backup/
 
 ### 恢复（需要停机）
 
+先停用所有写入者及自动重启控制器，确认正常关闭并核对快照摘要。详细流程见 [RUNBOOK-ROLLBACK §3.2](RUNBOOK-ROLLBACK.md#32-离线原子恢复)。不要手动复制覆盖主库或删除 WAL/SHM/journal 来绕过检查。
+
 ```bash
-docker compose stop sonic-engine
-
-# 1. 先把当前数据库复制到宿主机保留
-docker cp sonic-local-engine:/app/data/sonic-recommend.sqlite ./sonic-recommend.pre-restore.sqlite
-
-# 2. 把已通过 integrity_check 的备份复制回容器
-docker cp ./backup/sonic-YYYY-MM-DD-HHMM.sqlite sonic-local-engine:/app/data/sonic-recommend.sqlite
-
-# 3. 清理旧 WAL/SHM（容器内 /app/data 路径）
-docker compose run --rm --no-deps --entrypoint sh sonic-engine \
-  -c 'rm -f /app/data/sonic-recommend.sqlite-wal /app/data/sonic-recommend.sqlite-shm'
-
-docker compose start sonic-engine
-curl -H "X-Sonic-Engine-Key: $SONIC_ENGINE_SECRET" http://127.0.0.1:8080/api/sonic/engine/health
+docker compose stop -t 75 sonic-engine
+test "$(docker inspect --format='{{.State.ExitCode}}' sonic-local-engine)" = 0
+# 使用已核验的恢复工具镜像及实际数据挂载；备份需与目标应用镜像匹配。
+docker run --rm -v "${SONIC_DATA_MOUNT:?}:/app/data" \
+  "${RECOVERY_TOOL_IMAGE_DIGEST:?}" \
+  node --experimental-sqlite scripts/restore-recommend-db.mjs \
+  "/app/data/${MATCHED_DB_SNAPSHOT:?}" /app/data/sonic-recommend.sqlite --offline
 ```
 
-恢复前必须保留现有数据库副本；不得直接删除生产数据。若健康检查失败，停止引擎并把 `sonic-recommend.pre-restore.sqlite` 复制回去。
+恢复脚本验证空间、锁、完整性、digest 和表计数，并保留原库安全快照。失败或维护锁未释放时不得重启。只有同版本恢复才能重新启动原容器；跨版本必须使用与快照配对的镜像重建。隔离恢复单测通过不是当前运行中服务回滚演练通过。
 
 ### 迁移
 
-当前 schema 使用 `CREATE TABLE IF NOT EXISTS` 幂等初始化，**没有版本化迁移框架**。如果后续修改表结构，必须新增显式迁移脚本、备份步骤与回滚方案，不能依赖运行时自动改表。
+当前运行时有 subject-scoped event key 迁移，会重建表/唯一键并执行 `DROP TABLE`/`RENAME`，并非纯 additive schema。没有通用降级迁移框架；未经双向兼容实测，回滚必须使用**匹配的旧镜像 + 迁移前数据库快照**，并保留新版本数据。快照之后的提交不自动恢复，不能承诺 RPO 为零。
 
 ## 9. Docker 构建与运行
 
+先完成 [发布检查单的源码包重建与溯源门禁](release/RELEASE-CHECKLIST.md#源码包重建与溯源门禁2026-11-02)，在解压根目录执行 `node scripts/release-inputs.mjs --verify release.json --index release-files.json`，并从该清单导出五个 release 构建变量。运行 `.env` 由运维单独提供，不放进源码分发包。
+
 ```bash
-# 干净构建（不依赖本机 dist/ 或 dist-server/）
+# 在全量源文件核验之后构建；不依赖本机 dist/ 或 dist-server/。
 docker compose build --no-cache sonic-engine
 docker compose up -d
 
@@ -179,9 +214,9 @@ docker compose logs -f sonic-engine
 
 ### Docker 引擎
 
-- 每次发布使用不可变镜像标签（例如 `sonic-engine:2026-10-28-<sha>`）；
-- 回滚时先备份数据库，再 `docker compose down`，切换到上一镜像标签并 `up -d`；
-- 若 schema 已发生不兼容变更，必须使用对应的数据库备份恢复，不能只回滚镜像。
+- 每次发布记录不可变镜像 digest、release 身份、Pages Deployment ID，以及与该镜像匹配的数据库快照摘要/表计数；tag 名称本身并不不可变。
+- 停写后保留失败版本数据与容器，按 [RUNBOOK-ROLLBACK §4.2](RUNBOOK-ROLLBACK.md#42-linux-engine镜像与数据库成对回滚) 恢复匹配的旧镜像和迁移前数据库；未经双向兼容验证，不能只换镜像复用新库。
+- 恢复单测/历史版本演练不代表当前运行中服务已演练。当前版本的完整回滚、前向恢复及 RTO/RPO 需单独证据。
 
 ## 11. 安全事件处置
 
@@ -189,7 +224,7 @@ docker compose logs -f sonic-engine
 2. **`SONIC_SECRET` 泄露**：立即生成新密钥；旧密钥放 `SONIC_SECRET_PREV` 仅用于短期过渡，或直接移除并让全部用户重新登录；评估是否需要全量吊销。
 3. **`SONIC_ENGINE_SECRET` 泄露**：同时更新 Pages 与 VPS 环境变量并重新部署；检查引擎访问日志中的异常调用。
 4. **OAuth 客户端密钥泄露**：在 Epomail 控制台轮换 Client Secret，更新 Pages 环境变量，清空所有浏览器会话（用户重新登录）。
-5. **数据库损坏**：停止引擎 → 备份损坏文件 → 用最近一次通过完整性校验的备份恢复 → 删除 `-wal/-shm` → 启动并检查健康。
+5. **数据库损坏**：停止全部写入/重启控制器 → 保留损坏主库及旁路文件 → 核对镜像匹配的快照和摘要 → 按 §8 使用 `--offline` 恢复 → 核验后启动。不得删除 WAL/SHM/journal 绕过活动数据库检查。
 
 ## 12. 已知限制与残余风险（必须如实告知）
 
@@ -200,5 +235,5 @@ docker compose logs -f sonic-engine
 - **浏览器会话**：`sonic_session` Cookie 内含签名 API Key；Cookie 被盗等同于 Key 被盗。`GET /api/auth/key` 会按需把 Key 返回给同源 JS，XSS 仍可读取（已有前端 XSS 回归测试，但不等于绝对免疫）。
 - **SQLite 单写者**：引擎设计为单实例；不要水平扩展多个共享同一 SQLite 文件的副本。
 - **构建期依赖告警**：`vite-plugin-svg-icons` 链路的旧版 `postcss`/`micromatch` 仍会在全量审计中出现；它们不进入运行时。
-- **监控**：没有内置 Prometheus/OpenTelemetry exporter；现有可观测性为结构化日志、健康端点、限流/熔断响应头。需要指标时请外接采集。
+- **监控**：有进程/isolate 内的有界指标、滚动阈值告警与 webhook 自检；没有跨实例聚合、后台持续时间判定或 Prometheus/OpenTelemetry exporter。需要完整服务级指标和无请求时的故障通知时，请外接采集与健康探针。
 - **未实测项**：真实 Epomail OAuth 联调、真实上游账号 Cookie 行为、生产规模压测、Docker 构建（若本机 Docker daemon 不可用）需在具备条件的环境完成。

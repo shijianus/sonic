@@ -2,7 +2,11 @@
 import { computed, onMounted } from 'vue'
 import DownloadQualityDialog from '@/components/Dialog/DownloadQualityDialog.vue'
 import GlobalToast from '@/components/Ui/GlobalToast.vue'
+import AccessGate from '@/components/Access/AccessGate.vue'
+import { useAccessStore } from '@/stores/modules/access'
 import { gatewayHealth, dismissGatewayBanner } from '@/utils/gatewayHealth'
+
+const accessStore = useAccessStore()
 
 onMounted(() => {
   try {
@@ -11,6 +15,8 @@ onMounted(() => {
       document.documentElement.classList.add('perf-mode')
     }
   } catch (_) {}
+
+  void accessStore.checkStatus()
 })
 
 const showBanner = computed(() => {
@@ -25,9 +31,12 @@ const isCriticalStreamDegraded = computed(
 </script>
 
 <template>
-  <RouterView />
-  <DownloadQualityDialog />
-  <GlobalToast />
+  <AccessGate v-if="!accessStore.canAccess" />
+  <template v-else>
+    <RouterView />
+    <DownloadQualityDialog />
+    <GlobalToast />
+  </template>
   <Transition name="sonic-banner">
     <div
       v-if="showBanner"

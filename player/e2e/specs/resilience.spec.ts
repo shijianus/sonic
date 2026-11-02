@@ -11,7 +11,7 @@ test.describe('异常与降级', () => {
     await expect(page.getByTestId('song-row-9001')).toBeVisible()
 
     // 9001 的播放地址接口延迟 900ms；等待进入“加载中（可取消）”状态后立即取消
-    await page.getByTestId('song-row-9001').click()
+    await page.getByTestId('song-row-9001').getByRole('heading').click()
     await expect(page.getByTestId('now-playing-title')).toHaveText('Test Song One')
     const toggle = page.getByTestId('player-toggle')
     await expect(toggle).toHaveAttribute('aria-label', 'Cancel')
@@ -30,8 +30,8 @@ test.describe('异常与降级', () => {
     await expect(page.getByTestId('song-row-9001')).toBeVisible()
 
     // 9001 的 URL 慢 900ms；立即切到 9002（快）
-    await page.getByTestId('song-row-9001').click()
-    await page.getByTestId('song-row-9002').click()
+    await page.getByTestId('song-row-9001').getByRole('heading').click()
+    await page.getByTestId('song-row-9002').getByRole('heading').click()
 
     await expect(page.getByTestId('now-playing-title')).toHaveText('Test Song Two')
     await expectPlaying(page)
@@ -81,7 +81,8 @@ test.describe('异常与降级', () => {
     await page.getByTestId('song-row-9308').click()
     const alert = page.getByRole('alert').last()
     await expect(alert).toBeVisible()
-    await expect(alert).toContainText(/降级|degraded/i)
+    await expect(alert).toContainText('The music service is degraded. Please retry later.')
+    await expect(alert).not.toContainText('player.playbackError')
     await expectPaused(page)
   })
 

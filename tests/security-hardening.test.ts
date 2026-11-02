@@ -274,7 +274,7 @@ describe('Asset proxies: active content is never served from the Sonic origin', 
     );
 
     const res = await handleMusicStream({
-      request: cfRequest('https://sonic.epocanvas.tech/api/music/stream?target=https%3A%2F%2Fy.qq.com%2F'),
+      request: cfRequest('https://sonic.epocanvas.tech/api/music/stream?target=https%3A%2F%2Fm701.music.126.net%2Fa.mp3'),
       env: {} as any,
     });
 

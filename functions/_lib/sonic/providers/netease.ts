@@ -1,3 +1,4 @@
+import { fetchWithRuntimeBudget } from '../local-engine';
 // Sonic Provider — NetEase Cloud Music (网易云音乐)
 // Shared Native Encrypted Protocol (`ncm-api` on Linux + pure-TS `linuxapi` & YRC word-level lyrics)
 
@@ -27,16 +28,15 @@ async function fetchNeteaseLyricWithLocalFirst(songId: string, env?: AppEnv, sig
     try {
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (env?.NETEASE_COOKIE) headers.Cookie = String(env.NETEASE_COOKIE).trim();
-      const res = await fetch(
+      const res = await fetchWithRuntimeBudget(
         `${cfg.ncmApiUrl}/lyric/new?id=${encodeURIComponent(songId)}&realIP=${encodeURIComponent(cfg.realIp)}`,
-        { headers, signal: signal || AbortSignal.timeout(cfg.timeoutMs) },
-      );
+        { headers, signal: signal }, { timeoutMs: cfg.timeoutMs });
       if (res.ok) {
         const json = (await res.json()) as any;
         if (json?.yrc?.lyric && isValidLyric(json.yrc.lyric)) return json.yrc.lyric;
         if (json?.lrc?.lyric && isValidLyric(json.lrc.lyric)) return json.lrc.lyric;
       }
-    } catch {}
+    } catch { signal?.throwIfAborted();}
   }
   return fetchDirectNetEaseLyrics(songId, signal);
 }
@@ -80,7 +80,7 @@ export const neteaseProvider: SonicProviderAdapter = {
           resolvedId = match.platformId;
           rawLyric = await fetchNeteaseLyricWithLocalFirst(resolvedId, env, options?.signal);
         }
-      } catch {}
+      } catch { options?.signal?.throwIfAborted();}
     }
 
     if (!rawLyric || !isValidLyric(rawLyric)) return null;
@@ -147,14 +147,14 @@ export const neteaseProvider: SonicProviderAdapter = {
       if (native.tracks.length > 0) {
         return native.tracks;
       }
-    } catch (err) {
+    } catch (err) { options?.signal?.throwIfAborted();
       if (options?.signal?.aborted) throw err;
     }
 
     // 2. Optional Last-Resort Fallback: GDStudio (ONLY when explicitly enabled via SONIC_ENABLE_GDSTUDIO=1)
     if (cfg.enableGdstudio) {
       try {
-        const songs = await searchTracks(env, query, 'netease', count, page);
+        const songs = await searchTracks(env, query, 'netease', count, page, options?.signal);
         if (Array.isArray(songs) && songs.length > 0) {
           return songs.map((s) => {
             const platformId = String(s.id);
@@ -178,7 +178,7 @@ export const neteaseProvider: SonicProviderAdapter = {
             };
           });
         }
-      } catch {}
+      } catch { options?.signal?.throwIfAborted();}
     }
 
     return [];

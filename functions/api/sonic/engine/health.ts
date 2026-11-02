@@ -5,12 +5,15 @@
 
 import { handleOptions, jsonResponse } from '../../../_lib/http';
 import { checkEngineAccess, getRateLimitConfigStatus } from '../../../_lib/sonic/security';
-import { getSonicConfig } from '../../../_lib/sonic/config';
+import { getSonicConfig, isEnvEnabled } from '../../../_lib/sonic/config';
+import { fetchWithRuntimeBudget } from '../../../_lib/sonic/local-engine';
 import { getLicensingAuditSummary } from '../../../_lib/sonic/licensing';
 import { getLocalEngineCircuitSnapshot } from '../../../_lib/sonic/local-engine';
+import { getEngineIdentityReadiness, requireValidEngineIdentity, EngineIdentityError } from '../../../_lib/sonic/engine-identity';
 import {
   getObservabilitySnapshot,
   getReleaseMetadata,
+  getReleaseReadiness,
   recordSqliteMetric,
   redactSensitiveString,
   triggerSonicAlert,
@@ -32,8 +35,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   if (cfg.ncmApiUrl) {
     const t0 = Date.now();
     try {
-      const r = await fetch(`${cfg.ncmApiUrl}/inner/version`, { signal: AbortSignal.timeout(2000) });
+      const r = await fetchWithRuntimeBudget(`${cfg.ncmApiUrl}/inner/version`, {}, { timeoutMs: 2000, signals: [request.signal] });
       ncmSidecarHealthy = r.ok;
+      void r.body?.cancel().catch(() => {});
       ncmSidecarLatencyMs = Date.now() - t0;
     } catch {
       ncmSidecarHealthy = false;
@@ -56,10 +60,17 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
   const configuredDbPath = String(env?.SONIC_RECOMMEND_DB_PATH || '').trim();
   const persistenceExpected =
-    configuredDbPath !== '' && configuredDbPath !== 'memory' && configuredDbPath !== 'off';
+    configuredDbPath !== 'memory' && configuredDbPath !== 'off' && configuredDbPath !== ':memory:' &&
+    (configuredDbPath !== '' || cfg.runtime === 'linux-engine' && release.environment === 'production');
 
-  const diskHealth =
-    typeof env?.SONIC_DISK_HEALTH_PROVIDER === 'function' ? env.SONIC_DISK_HEALTH_PROVIDER() : undefined;
+  let diskHealth: ReturnType<NonNullable<AppEnv['SONIC_DISK_HEALTH_PROVIDER']>> | undefined;
+  try {
+    diskHealth = typeof env?.SONIC_DISK_HEALTH_PROVIDER === 'function' ? env.SONIC_DISK_HEALTH_PROVIDER() : undefined;
+  } catch (error: any) {
+    storageError = redactSensitiveString(error?.message || 'disk_probe_failed');
+    recordSqliteMetric('write_error');
+  }
+  if (persistenceExpected && !diskHealth) storageError = storageError || 'disk_health_unavailable';
 
   if (persistenceExpected && recommendStats.storageKind !== 'sqlite') {
     recordSqliteMetric('memory_fallback');
@@ -75,9 +86,32 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     (!persistenceExpected || recommendStats.storageKind === 'sqlite') &&
     (!persistenceExpected || !diskHealth || diskHealth.ok);
 
-  const ok = storageHealthy;
+  const sidecarRequired = isEnvEnabled(env.SONIC_NCM_REQUIRED, false);
+  const sidecarReady = !sidecarRequired || ncmSidecarHealthy === true;
+  const releaseReadiness = getReleaseReadiness(env);
+  const identityReadiness = getEngineIdentityReadiness(env);
+  let identityVerified = false;
+  try {
+    identityVerified = Boolean(await requireValidEngineIdentity(request, env));
+  } catch (error) {
+    if (!(error instanceof EngineIdentityError)) throw error;
+    identityReadiness.ok = false;
+  }
+  const rateLimit = getRateLimitConfigStatus(env);
+  const rateLimitReady = !rateLimit.requireDistributed || rateLimit.productionCompliant;
+  const draining = Boolean(env.SONIC_DRAIN_STATE?.draining);
+  const ok = storageHealthy && sidecarReady && releaseReadiness.ok && identityReadiness.ok && rateLimitReady && !draining;
+  const degraded = Boolean(cfg.ncmApiUrl && !sidecarRequired && ncmSidecarHealthy === false);
+  const reasons = [
+    ...(!storageHealthy ? [storageError || 'storage_unhealthy'] : []),
+    ...(!sidecarReady ? ['required_sidecar_unavailable'] : []),
+    ...(!releaseReadiness.ok ? [releaseReadiness.error!] : []),
+    ...(!identityReadiness.ok ? ['engine_identity_unavailable'] : []),
+    ...(!rateLimitReady ? ['distributed_rate_limiter_unavailable'] : []),
+    ...(draining ? ['engine_draining'] : []),
+  ];
 
-  if (!ok) {
+  if (!storageHealthy) {
     void triggerSonicAlert(env, {
       code: 'ENGINE_STORAGE_UNHEALTHY',
       severity: 'critical',
@@ -85,6 +119,13 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     });
   }
 
+  if (!sidecarReady || degraded) {
+    void triggerSonicAlert(env, {
+      code: sidecarRequired ? 'ENGINE_REQUIRED_SIDECAR_UNHEALTHY' : 'ENGINE_SIDECAR_DEGRADED',
+      severity: sidecarRequired ? 'critical' : 'warning',
+      summary: sidecarRequired ? 'Required NCM sidecar is unavailable' : 'NCM sidecar unavailable; native provider fallback enabled',
+    });
+  }
   const obs = getObservabilitySnapshot(env);
   const licensing = getLicensingAuditSummary(env);
 
@@ -92,11 +133,17 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     {
       brand: 'Sonic',
       ok,
+      liveness: { ok: true },
+      readiness: {
+        ok, degraded, reasons, draining, deadlineAt: env.SONIC_DRAIN_STATE?.deadlineAt,
+        release: releaseReadiness, identity: { ...identityReadiness, requestVerified: identityVerified },
+      },
       runtime: cfg.runtime,
       release,
       timestamp: new Date().toISOString(),
       ncmSidecar: {
         configured: Boolean(cfg.ncmApiUrl),
+        required: sidecarRequired,
         healthy: ncmSidecarHealthy,
         latencyMs: ncmSidecarLatencyMs,
       },
@@ -118,7 +165,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         policyMode: licensing.policyMode,
         allowedSources: licensing.allowedSources,
       },
-      rateLimit: getRateLimitConfigStatus(env),
+      rateLimit,
       recommendEngine: {
         ...recommendStats,
         storageHealthy,

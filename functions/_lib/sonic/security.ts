@@ -4,6 +4,9 @@
 // 2. Sliding-window rate limiting at both Edge (Pages -> Engine hop protection) and Engine layers
 // 3. SSRF Triple Validation: Protocol (https only), Port (80/443), Host canonicalization (IPv4/IPv6/domain whitelist)
 
+import {
+  getAllowedMediaDomains,
+} from './licensing';
 import type { AppEnv } from '../types';
 import { extractAuthCredentials, readCookie, shouldUseSecureCookie, verifyAuth } from '../auth';
 import { isEnvEnabled } from './config';
@@ -15,23 +18,11 @@ import {
   type RateLimitBackendKind,
 } from './observability';
 
-// Provider-specific media boundaries. Apex domains such as qq.com / 163.com are deliberately
-// absent: they also host mail and other unrelated user content, which would widen the proxy
-// surface far beyond music assets. The hosts below cover every upstream referenced in this tree.
-export const SONIC_ALLOWED_MUSIC_DOMAINS = [
-  'music.126.net',
-  'music.163.com',
-  'y.qq.com',
-  'qqmusic.qq.com',
-  'gtimg.cn',
-  'qpic.cn',
-  'kugou.com',
-  'kuwo.cn',
-  'lrclib.net',
-  'amll.dev',
-  'lyriva.xyz',
-  'gdstudio.xyz',
-];
+// Provider-specific media boundaries are sourced from the licensing registry. Keep this
+// compatibility snapshot for callers that imported the old constant; production call sites
+// should use getAllowedMediaDomains(env, capability) so policy flags and capability boundaries
+// are applied at request time.
+export const SONIC_ALLOWED_MUSIC_DOMAINS = getAllowedMediaDomains();
 
 export function timingSafeEqualStr(a: string, b: string): boolean {
   if (typeof a !== 'string' || typeof b !== 'string' || a.length === 0 || b.length === 0) {
@@ -57,8 +48,12 @@ export function hasValidEngineSecret(request: Request, env?: AppEnv): boolean {
   return false;
 }
 
+export function normalizeEnginePathname(pathname: string): string {
+  return pathname.replace(/\/+$/, '') || '/';
+}
+
 export function requiresEngineAuth(request: Request, env?: AppEnv): boolean {
-  const { pathname } = new URL(request.url);
+  const pathname = normalizeEnginePathname(new URL(request.url).pathname);
   const isEngineSurface =
     pathname === '/api' ||
     pathname.startsWith('/api/') ||
@@ -131,6 +126,9 @@ export const SONIC_STAGING_COOKIE = 'sonic_staging_access';
  * is rejected with 401 before reaching SPA assets or API routes, and search indexing is blocked.
  */
 export function checkStagingAccessGate(request: Request, env?: AppEnv): Response | null {
+  // Invite mode owns the browser access lifecycle. Do not stack the legacy shared
+  // staging token in front of the invite form or OAuth lifecycle routes.
+  if (String(env?.SONIC_ACCESS_MODE || '').trim().toLowerCase() === 'invite') return null;
   const rawToken = env?.SONIC_STAGING_ACCESS_TOKEN ? String(env.SONIC_STAGING_ACCESS_TOKEN).trim() : '';
   if (!rawToken) return null;
 
@@ -990,11 +988,99 @@ export function buildSafeUpstreamResponseHeaders(
 
 export type SafeFetchHostResolver = (hostname: string) => Promise<string[]>;
 
+export interface SafeFetchResponse extends Response {
+  /** Final validated target, exposed only when safeFetch({ includeMetadata: true }) is used. */
+  finalUrl?: URL;
+  /** True when the initial URL or any redirect hop carried a credential/signed query. */
+  sensitive?: boolean;
+}
+
 let safeFetchHostResolver: SafeFetchHostResolver | null = null;
 let activeUpstreamFetches = 0;
+let activeUpstreamBodies = 0;
 
 const MAX_CONCURRENT_UPSTREAM_FETCHES = 64;
+const MAX_ACTIVE_UPSTREAM_BODIES = 64;
 const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
+
+const SENSITIVE_MEDIA_QUERY_NAMES = new Set([
+  'auth',
+  'auth_key',
+  'auth-key',
+  'authorization',
+  'token',
+  'access_token',
+  'access-token',
+  'accesstoken',
+  'refresh_token',
+  'refresh-token',
+  'refreshtoken',
+  'accesskey',
+  'secret',
+  'key',
+  'api_key',
+  'api-key',
+  'apikey',
+  'sign',
+  'signature',
+  'sig',
+  'vkey',
+  'guid',
+  'wmid',
+  'expires',
+  'expire',
+  'expiry',
+  'exp',
+  'nonce',
+  'session',
+  'cookie',
+  'uid',
+  'userid',
+  'user_id',
+  'user-id',
+  'wssecret',
+  'wstime',
+  'ekey',
+  'ckey',
+  'vuutv',
+  'dis_k',
+  'code',
+  'x-amz-signature',
+  'x-amz-credential',
+  'x-amz-security-token',
+  'ossaccesskeyid',
+  'osstoken',
+  'q-signature',
+]);
+
+function decodeQueryName(name: string): string {
+  let current = name;
+  // URLSearchParams performs one decode already. A bounded second pass handles a safely
+  // encoded parameter name without accepting arbitrary recursive input.
+  for (let i = 0; i < 2; i += 1) {
+    try {
+      const decoded = decodeURIComponent(current);
+      if (decoded === current) break;
+      current = decoded;
+    } catch {
+      break;
+    }
+  }
+  return current.trim().toLowerCase();
+}
+
+export function hasSensitiveMediaQuery(target: URL | string): boolean {
+  let url: URL;
+  try {
+    url = typeof target === 'string' ? new URL(target) : target;
+  } catch {
+    return true;
+  }
+  for (const name of url.searchParams.keys()) {
+    if (SENSITIVE_MEDIA_QUERY_NAMES.has(decodeQueryName(name))) return true;
+  }
+  return false;
+}
 
 export function setSafeFetchHostResolver(resolver: SafeFetchHostResolver | null): void {
   safeFetchHostResolver = resolver;
@@ -1003,6 +1089,23 @@ export function setSafeFetchHostResolver(resolver: SafeFetchHostResolver | null)
 export function resetSafeFetchStateForTest(): void {
   safeFetchHostResolver = null;
   activeUpstreamFetches = 0;
+  activeUpstreamBodies = 0;
+}
+
+export class SafeFetchCapacityError extends Error {
+  readonly code: 'UPSTREAM_CONCURRENCY' | 'UPSTREAM_BODY_CONCURRENCY';
+
+  constructor(code: 'UPSTREAM_CONCURRENCY' | 'UPSTREAM_BODY_CONCURRENCY') {
+    super(code === 'UPSTREAM_CONCURRENCY'
+      ? 'Upstream concurrency limit reached'
+      : 'Upstream body concurrency limit reached');
+    this.name = 'SafeFetchCapacityError';
+    this.code = code;
+  }
+}
+
+export function isSafeFetchCapacityError(error: unknown): error is SafeFetchCapacityError {
+  return error instanceof SafeFetchCapacityError;
 }
 
 async function assertResolvedHostIsPublic(url: URL): Promise<void> {
@@ -1061,75 +1164,78 @@ function enforceResponseSize(
   response: Response,
   maxBytes: number,
   idleTimeoutMs: number,
-  externalSignal?: AbortSignal,
+  externalSignal: AbortSignal | undefined,
+  releaseBodySlot: () => void,
 ): Response {
+  const bounded = Number.isFinite(maxBytes) && maxBytes > 0;
   const declared = Number(response.headers.get('content-length') || '');
-  if (Number.isFinite(declared) && declared > maxBytes) {
+  if (bounded && Number.isFinite(declared) && declared > maxBytes) {
     response.body?.cancel().catch(() => {});
     throw new Error(`Upstream response exceeds ${maxBytes} bytes`);
   }
-  if (!response.body) return response;
+  if (!response.body) {
+    releaseBodySlot();
+    return response;
+  }
 
   const reader = response.body.getReader();
   let totalBytes = 0;
-  let cleanedUp = false;
-  const onExternalAbort = () => {
-    if (!cleanedUp) {
-      cleanedUp = true;
-      reader.cancel('client_aborted').catch(() => {});
-    }
+  let terminated = false;
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  let controllerRef: ReadableStreamDefaultController<Uint8Array>;
+  const finish = () => {
+    if (terminated) return;
+    terminated = true;
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
+    releaseBodySlot();
   };
-  if (externalSignal) {
-    if (externalSignal.aborted) {
-      onExternalAbort();
-    } else {
-      externalSignal.addEventListener('abort', onExternalAbort, { once: true });
-    }
-  }
-  const detachAbort = () => {
-    if (externalSignal) externalSignal.removeEventListener('abort', onExternalAbort);
+  const fail = (error: unknown) => {
+    if (terminated) return;
+    finish();
+    // Error the consumer immediately, even if an upstream cancel hook never settles.
+    controllerRef.error(error);
+    void reader.cancel(error).catch(() => {});
   };
-
+  const onExternalAbort = () => fail(externalSignal?.reason || new DOMException('The operation was aborted', 'AbortError'));
+  const armIdleTimer = () => {
+    if (idleTimer !== undefined) clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => fail(new Error(`Upstream body idle timeout after ${idleTimeoutMs}ms`)), idleTimeoutMs);
+  };
   const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controllerRef = controller;
+      armIdleTimer();
+      if (externalSignal?.aborted) onExternalAbort();
+      else externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+    },
     async pull(controller) {
-      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (terminated) return;
       try {
-        const readPromise = reader.read();
-        const idlePromise = new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`Upstream body idle timeout after ${idleTimeoutMs}ms`)),
-            idleTimeoutMs,
-          );
-        });
-        const { done, value } = await Promise.race([readPromise, idlePromise]);
-        if (timer !== undefined) clearTimeout(timer);
+        const { done, value } = await reader.read();
+        if (terminated) return;
         if (done) {
-          cleanedUp = true;
-          detachAbort();
+          finish();
           controller.close();
           return;
         }
         totalBytes += value.byteLength;
-        if (totalBytes > maxBytes) {
-          cleanedUp = true;
-          detachAbort();
-          await reader.cancel().catch(() => {});
-          controller.error(new Error(`Upstream response exceeds ${maxBytes} bytes`));
+        if (bounded && totalBytes > maxBytes) {
+          fail(new Error(`Upstream response exceeds ${maxBytes} bytes`));
           return;
         }
+        // The timer also covers a consumer which stops reading under backpressure; a
+        // maxBytes=0 caller still cannot pin a slot indefinitely with an unread body.
+        if (value.byteLength > 0) armIdleTimer();
         controller.enqueue(value);
-      } catch (err) {
-        if (timer !== undefined) clearTimeout(timer);
-        cleanedUp = true;
-        detachAbort();
-        await reader.cancel().catch(() => {});
-        controller.error(err);
+      } catch (error) {
+        fail(error);
       }
     },
     cancel(reason) {
-      cleanedUp = true;
-      detachAbort();
-      return reader.cancel(reason);
+      if (terminated) return;
+      finish();
+      return reader.cancel(reason).catch(() => {});
     },
   });
 
@@ -1138,6 +1244,31 @@ function enforceResponseSize(
     statusText: response.statusText,
     headers: response.headers,
   });
+}
+
+function setSensitiveCachePolicy(response: Response, sensitive: boolean): Response {
+  if (!sensitive) return response;
+  try {
+    response.headers.set('Cache-Control', 'private, no-store');
+    return response;
+  } catch {
+    const headers = new Headers(response.headers);
+    headers.set('Cache-Control', 'private, no-store');
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  }
+}
+
+function attachSafeFetchMetadata(response: Response, finalUrl: URL, sensitive: boolean): SafeFetchResponse {
+  const out = response as SafeFetchResponse;
+  Object.defineProperties(out, {
+    finalUrl: { configurable: true, enumerable: false, value: new URL(finalUrl.toString()) },
+    sensitive: { configurable: true, enumerable: false, value: sensitive },
+  });
+  return out;
 }
 
 export async function safeFetch(
@@ -1150,8 +1281,9 @@ export async function safeFetch(
     timeoutMs?: number;
     maxBytes?: number;
     bodyIdleTimeoutMs?: number;
+    includeMetadata?: boolean;
   },
-): Promise<Response> {
+): Promise<SafeFetchResponse> {
   const maxRedirects = Math.max(0, options?.maxRedirects ?? 3);
   const timeoutMs = Math.max(1, options?.timeoutMs ?? 15000);
   const maxBytes = options?.maxBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
@@ -1159,9 +1291,10 @@ export async function safeFetch(
   const deadline = Date.now() + timeoutMs;
   let currentUrl = typeof targetUrl === 'string' ? targetUrl : targetUrl.toString();
   let redirectsRemaining = maxRedirects;
+  let sensitive = hasSensitiveMediaQuery(currentUrl);
 
   if (activeUpstreamFetches >= MAX_CONCURRENT_UPSTREAM_FETCHES) {
-    throw new Error('Upstream concurrency limit reached');
+    throw new SafeFetchCapacityError('UPSTREAM_CONCURRENCY');
   }
   activeUpstreamFetches += 1;
 
@@ -1174,6 +1307,7 @@ export async function safeFetch(
       if (!valResult.valid || !valResult.url) {
         throw new Error(`SSRF check rejected: ${valResult.error}`);
       }
+      sensitive = sensitive || hasSensitiveMediaQuery(valResult.url);
       await assertResolvedHostIsPublic(valResult.url);
 
       // Header security: never forward client credentials, cookies or Sonic identity
@@ -1219,7 +1353,10 @@ export async function safeFetch(
       if ([301, 302, 303, 307, 308].includes(resp.status)) {
         const location = resp.headers.get('location');
         if (!location) {
-          return resp;
+          const finalResp = setSensitiveCachePolicy(resp, sensitive);
+          return options?.includeMetadata
+            ? attachSafeFetchMetadata(finalResp, valResult.url, sensitive)
+            : finalResp;
         }
         if (redirectsRemaining <= 0) {
           resp.body?.cancel().catch(() => {});
@@ -1228,6 +1365,7 @@ export async function safeFetch(
         redirectsRemaining -= 1;
 
         const nextUrl = new URL(location, valResult.url);
+        sensitive = sensitive || hasSensitiveMediaQuery(nextUrl);
         if (valResult.url.protocol === 'https:' && nextUrl.protocol === 'http:') {
           resp.body?.cancel().catch(() => {});
           throw new Error('Protocol downgrade from https to http during redirect is forbidden');
@@ -1237,15 +1375,57 @@ export async function safeFetch(
         continue;
       }
 
+      const finalTarget = valResult.url;
+      const finalSensitive = sensitive || hasSensitiveMediaQuery(finalTarget);
+      const finalResp = setSensitiveCachePolicy(resp, finalSensitive);
       const isHead = (init?.method || 'GET').toUpperCase() === 'HEAD';
-      if (isHead || !Number.isFinite(maxBytes) || maxBytes <= 0) {
-        return resp;
+      if (isHead) {
+        if (finalResp.body) {
+          finalResp.body.cancel().catch(() => {});
+          const headResp = new Response(null, {
+            status: finalResp.status,
+            statusText: finalResp.statusText,
+            headers: finalResp.headers,
+          });
+          return options?.includeMetadata
+            ? attachSafeFetchMetadata(headResp, finalTarget, finalSensitive)
+            : headResp;
+        }
+        return options?.includeMetadata
+          ? attachSafeFetchMetadata(finalResp, finalTarget, finalSensitive)
+          : finalResp;
       }
-      return enforceResponseSize(resp, maxBytes, bodyIdleTimeoutMs, init?.signal ?? undefined);
+
+      if (!finalResp.body) {
+        return options?.includeMetadata
+          ? attachSafeFetchMetadata(finalResp, finalTarget, finalSensitive)
+          : finalResp;
+      }
+      if (activeUpstreamBodies >= MAX_ACTIVE_UPSTREAM_BODIES) {
+        finalResp.body.cancel().catch(() => {});
+        throw new SafeFetchCapacityError('UPSTREAM_BODY_CONCURRENCY');
+      }
+      activeUpstreamBodies += 1;
+      let wrapped: Response;
+      try {
+        wrapped = enforceResponseSize(
+          finalResp,
+          maxBytes,
+          bodyIdleTimeoutMs,
+          init?.signal ?? undefined,
+          () => {
+            activeUpstreamBodies = Math.max(0, activeUpstreamBodies - 1);
+          },
+        );
+      } catch (error) {
+        activeUpstreamBodies = Math.max(0, activeUpstreamBodies - 1);
+        throw error;
+      }
+      return options?.includeMetadata
+        ? attachSafeFetchMetadata(wrapped, finalTarget, finalSensitive)
+        : (wrapped as SafeFetchResponse);
     }
   } finally {
-    // Counts upstream header acquisition. Long response bodies are bounded by maxBytes and
-    // intentionally do not hold a slot, so audio downloads cannot exhaust the gate.
     activeUpstreamFetches = Math.max(0, activeUpstreamFetches - 1);
   }
 }

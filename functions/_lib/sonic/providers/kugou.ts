@@ -1,3 +1,4 @@
+import { fetchWithRuntimeBudget } from '../local-engine';
 // Sonic Provider — Kugou Music (酷狗音乐)
 // True word-level KRC decryption & search
 
@@ -87,7 +88,7 @@ export const kugouProvider: SonicProviderAdapter = {
         provider: 'kugou',
         qualityScore,
       };
-    } catch {
+    } catch { options?.signal?.throwIfAborted();
       return null;
     }
   },
@@ -99,10 +100,10 @@ export const kugouProvider: SonicProviderAdapter = {
 
     try {
       const sUrl = `http://mobilecdn.kugou.com/api/v3/search/song?keyword=${encodeURIComponent(query)}&page=${page}&pagesize=${count}`;
-      const sRes = await fetch(sUrl, {
+      const sRes = await fetchWithRuntimeBudget(sUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
-        signal: options?.signal || AbortSignal.timeout(config.timeoutMs),
-      });
+        signal: options?.signal,
+      }, { timeoutMs: config.timeoutMs });
       if (!sRes.ok) return [];
       const sJson = (await sRes.json()) as any;
       const items = Array.isArray(sJson.data?.info) ? sJson.data.info : [];
@@ -158,7 +159,7 @@ export const kugouProvider: SonicProviderAdapter = {
           lyricId: platformId,
         };
       });
-    } catch {
+    } catch { options?.signal?.throwIfAborted();
       return [];
     }
   },

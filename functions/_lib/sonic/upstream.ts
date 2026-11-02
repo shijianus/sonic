@@ -5,19 +5,14 @@
 import { jsonResponse, handleOptions } from '../http';
 import { BRAND_PRODUCT } from '../brand';
 import { getSonicConfig, SONIC_UA } from './config';
-import { callLocalEngineJson } from './local-engine';
+import { callLocalEngineJson, createRuntimeAbortBudget, fetchWithRuntimeBudget } from './local-engine';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from './security';
 import { recordLicensingBlockMetric } from './observability';
-import { callNeteaseLinuxApi, callNeteaseEapi } from './native-protocols';
-import { getSonicCachedJson, putSonicCachedJson } from './cache';
+import { callNeteaseLinuxApi as nativeLinuxApi, callNeteaseEapi as nativeEapi } from './native-protocols';
+import { getSonicCachedJson, putSonicCachedJson, withSonicJsonSingleFlight } from './cache';
+import { getRecommendStore } from './recommend/memory-store';
+import { ingestVerifiedMvCatalog } from './recommend/entity-store';
 import type { AppEnv } from '../types';
-
-function timedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(input, {
-    ...init,
-    signal: init?.signal ?? AbortSignal.timeout(8000),
-  });
-}
 
 function buildUpstreamHeaders(realIp: string): Record<string, string> {
   const headers: Record<string, string> = {
@@ -105,7 +100,56 @@ export async function handleUpstreamEndpoint(
   const rl = await evaluateGatewayRateLimit(request, env, 'upstream');
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
+  request.signal.throwIfAborted();
+  const budget = createRuntimeAbortBudget([request.signal], getSonicConfig(env).timeoutMs);
+  try {
+    const response = await handleUpstreamWithinBudget(endpoint, url, new Request(request, { signal: budget.signal }), env);
+    budget.signal.throwIfAborted();
+    if (response.ok) {
+      const normalized = endpoint.replace(/^\/+|\/+$/g, '');
+      const isMvCatalog = ['mv/all', 'mv/first', 'mv/detail', 'simi/mv', 'top/mv', 'artist/mv', 'personalized/mv'].includes(normalized);
+      const isMvSearch = ['cloudsearch', 'search'].includes(normalized) && url.searchParams.get('type') === '1004';
+      if (isMvCatalog || isMvSearch) {
+        const payload = await response.clone().json().catch(() => null);
+        const entries = isMvSearch ? payload?.result?.mvs : Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.mvs) ? payload.mvs : Array.isArray(payload?.result) ? payload.result : normalized === 'mv/detail' && payload?.data ? [payload.data] : [];
+        if (entries.length) {
+          try { ingestVerifiedMvCatalog(entries, getRecommendStore(env)); }
+          catch { /* Catalog enrichment must not turn a valid provider response into a playback error. */ }
+        }
+      }
+    }
+    return response;
+  } finally {
+    budget.dispose();
+  }
+}
+
+async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: Request, env?: AppEnv): Promise<Response> {
   const cfg = getSonicConfig(env);
+  // JSON is materialized inside the shared flight. Each caller gets a fresh body;
+  // no Response.clone tee can keep a slow subscriber's entire payload buffered.
+  const timedFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
+    request.signal.throwIfAborted();
+    const pairs = (headers: HeadersInit | undefined) => {
+      const result: [string, string][] = [];
+      new Headers(headers).forEach((value, name) => result.push([name, value]));
+      return result;
+    };
+    const key = JSON.stringify([String(input), init.method || 'GET', pairs(init.headers), init.body || '']);
+    const result = await withSonicJsonSingleFlight(key, async (signal) => {
+      const response = await fetchWithRuntimeBudget(input, { ...init, signal: undefined }, { timeoutMs: cfg.timeoutMs, signals: [signal] });
+      return { body: await response.text(), status: response.status, statusText: response.statusText, headers: pairs(response.headers) };
+    }, request.signal);
+    return new Response([204, 205, 304].includes(result.status) ? null : result.body, { status: result.status, statusText: result.statusText, headers: result.headers });
+  };
+  const callNeteaseLinuxApi = (payload: Record<string, any>, providerEnv?: AppEnv) => {
+    const key = JSON.stringify(['linuxapi', payload, cfg.realIp, providerEnv?.NETEASE_COOKIE || '']);
+    return withSonicJsonSingleFlight(key, (signal) => nativeLinuxApi(payload, providerEnv, signal), request.signal);
+  };
+  const callNeteaseEapi = (apiPath: string, payload: Record<string, any>, providerEnv?: AppEnv) => {
+    const key = JSON.stringify(['eapi', apiPath, payload, cfg.realIp, providerEnv?.NETEASE_COOKIE || '']);
+    return withSonicJsonSingleFlight(key, (signal) => nativeEapi(apiPath, payload, providerEnv, signal), request.signal);
+  };
   const normEndpoint = endpoint.replace(/^\/+|\/+$/g, '').toLowerCase();
 
   // Discrepancy 7 fix: graceful response for legacy NetEase login status checks in SPA
@@ -205,7 +249,7 @@ export async function handleUpstreamEndpoint(
           });
         }
       }
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
   }
 
   // 1. Banner
@@ -257,7 +301,7 @@ export async function handleUpstreamEndpoint(
           { headers: { 'Cache-Control': 'public, max-age=1800' } },
         );
       }
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', banners: [] });
   }
 
@@ -290,7 +334,7 @@ export async function handleUpstreamEndpoint(
         total = lRes.total || playlists.length;
         more = lRes.more ?? false;
       }
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
 
     // 2. Fallback: plaintext legacy API
     if (playlists.length === 0) {
@@ -304,7 +348,7 @@ export async function handleUpstreamEndpoint(
           total = data.total || playlists.length;
           more = data.more ?? false;
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
     }
 
     // 3. Supplement from personalized if playlists count is below requested limit
@@ -323,7 +367,7 @@ export async function handleUpstreamEndpoint(
           }
           if (playlists.length >= (parseInt(limit, 10) || 24)) break;
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
     }
 
     const desensitized = (playlists || []).map((p: any) => ({
@@ -362,7 +406,7 @@ export async function handleUpstreamEndpoint(
         { code: 200, brand: 'Sonic', data: desensitizeData(songs) },
         { headers: { 'Cache-Control': 'public, max-age=3600' } },
       );
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', data: [] });
   }
 
@@ -430,7 +474,7 @@ export async function handleUpstreamEndpoint(
         await putSonicCachedJson('upstream', cacheKey, body, 1800, 3600, env);
         return jsonResponse(body, { headers: { 'Cache-Control': 'public, max-age=1800' } });
       }
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
 
     // Fallback: default catalog when no filter applied, or empty array
     if (type === -1 && area === -1 && initial === -1 && offset === 0) {
@@ -480,7 +524,7 @@ export async function handleUpstreamEndpoint(
         await putSonicCachedJson('upstream', cacheKey, body, 86400, 86400 * 2, env);
         return jsonResponse(body, { headers: { 'Cache-Control': 'public, max-age=86400' } });
       }
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
 
     const artists = TOP_ARTISTS_CATALOG.slice(offset, offset + limit);
     return jsonResponse(
@@ -515,7 +559,7 @@ export async function handleUpstreamEndpoint(
             seenIds.add(item.id);
           }
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
     }
 
     // 2. Supplement or primary from mv/first up to limit
@@ -533,7 +577,7 @@ export async function handleUpstreamEndpoint(
           }
           if (mvs.length >= limit) break;
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
     }
 
     // 3. Fallback: supplement from mv/all if still below limit
@@ -551,7 +595,7 @@ export async function handleUpstreamEndpoint(
           }
           if (mvs.length >= limit) break;
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
     }
 
     const desensitized = desensitizeData(mvs.slice(0, limit));
@@ -688,7 +732,7 @@ export async function handleUpstreamEndpoint(
               if (dData?.data?.publishTime && !item.publishTime) item.publishTime = dData.data.publishTime;
               if (dData?.data?.desc && !item.desc) item.desc = dData.data.desc;
               if (dData?.data?.briefDesc && !item.briefDesc) item.briefDesc = dData.data.briefDesc;
-            } catch {}
+            } catch { request.signal.throwIfAborted(); }
           }),
         );
       }
@@ -707,7 +751,7 @@ export async function handleUpstreamEndpoint(
       }
 
       return jsonResponse(resultPayload, { headers: { 'Cache-Control': 'public, max-age=3600' } });
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', data: [], hasMore: false });
   }
 
@@ -725,7 +769,7 @@ export async function handleUpstreamEndpoint(
         { code: 200, brand: 'Sonic', data: desensitizeData(data.data || {}) },
         { headers: { 'Cache-Control': 'public, max-age=7200' } },
       );
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 404, message: 'MV not found' }, { status: 404 });
   }
 
@@ -741,10 +785,9 @@ export async function handleUpstreamEndpoint(
       });
       const data: any = await resp.json();
       const brs = data?.data?.brs || {};
-      let streamUrl = brs[r] || brs['1080'] || brs['720'] || brs['480'] || brs['240'] || Object.values(brs)[0] || '';
-
-      if (!streamUrl) {
-        streamUrl = `https://vodkgeyttp8.vod.126.net/cloudmusic/MjQ3NDQ3MjUw/89a6a279dc2acfcd068b45ce72b1f560/533e4183a709699d566180ed0cd9abe9.mp4`;
+      const streamUrl = brs[r] || brs['1080'] || brs['720'] || brs['480'] || brs['240'] || Object.values(brs)[0] || '';
+      if (!streamUrl || Number(data?.data?.id) !== Number(id)) {
+        return jsonResponse({ code: 404, brand: 'Sonic', data: { id: Number(id), url: '' }, error: { code: 'MV_STREAM_UNAVAILABLE', message: 'The selected MV has no available stream' } }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
       }
 
       return jsonResponse(
@@ -755,16 +798,8 @@ export async function handleUpstreamEndpoint(
         },
         { headers: { 'Cache-Control': 'public, max-age=7200' } },
       );
-    } catch {}
-    return jsonResponse({
-      code: 200,
-      brand: 'Sonic',
-      data: {
-        id: Number(id),
-        url: 'https://vodkgeyttp8.vod.126.net/cloudmusic/MjQ3NDQ3MjUw/89a6a279dc2acfcd068b45ce72b1f560/533e4183a709699d566180ed0cd9abe9.mp4',
-        r: 1080,
-      },
-    });
+    } catch { request.signal.throwIfAborted(); }
+    return jsonResponse({ code: 503, brand: 'Sonic', data: { id: Number(id), url: '' }, error: { code: 'MV_STREAM_UNAVAILABLE', message: 'MV source is temporarily unavailable' } }, { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '3' } });
   }
 
   // 9. Simi MV
@@ -776,7 +811,7 @@ export async function handleUpstreamEndpoint(
         { code: 200, brand: 'Sonic', mvs: desensitizeData(data.data || []) },
         { headers: { 'Cache-Control': 'public, max-age=3600' } },
       );
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', mvs: [] });
   }
 
@@ -872,7 +907,7 @@ export async function handleUpstreamEndpoint(
           { headers: { 'Cache-Control': 'public, max-age=300' } },
         );
       }
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
 
     // 2. Secondary: LinuxApi encrypted protocol fallback
     try {
@@ -918,7 +953,7 @@ export async function handleUpstreamEndpoint(
           { headers: { 'Cache-Control': 'public, max-age=300' } },
         );
       }
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
 
     // 3. Resilient fallback comments if upstream blocked
     const now = Date.now();
@@ -1120,7 +1155,7 @@ export async function handleUpstreamEndpoint(
         },
         { headers: { 'Cache-Control': 'public, max-age=3600' } },
       );
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', list: [] });
   }
 
@@ -1153,7 +1188,7 @@ export async function handleUpstreamEndpoint(
         if (lRes && (lRes.code === 200 || lRes.playlist) && (lRes.playlist?.name || lRes.result?.name)) {
           p = lRes.playlist || lRes.result;
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
 
       // 2. Secondary: ncm-api container if available
       if (!p && cfg.ncmApiUrl) {
@@ -1167,7 +1202,7 @@ export async function handleUpstreamEndpoint(
               p = data.playlist;
             }
           }
-        } catch {}
+        } catch { request.signal.throwIfAborted(); }
       }
 
       // 3. Fallback: plaintext legacy API
@@ -1181,7 +1216,7 @@ export async function handleUpstreamEndpoint(
           if (cand && (cand.name || cand.tracks || cand.trackCount)) {
             p = cand;
           }
-        } catch {}
+        } catch { request.signal.throwIfAborted(); }
       }
 
       if (p && (p.name || p.id)) {
@@ -1219,7 +1254,7 @@ export async function handleUpstreamEndpoint(
             if (Array.isArray(songDetailRes?.songs) && songDetailRes.songs.length > 0) {
               songs = songDetailRes.songs;
             }
-          } catch {}
+          } catch { request.signal.throwIfAborted(); }
         }
         // Fallback to initialTracks slice if song detail call failed
         if (songs.length === 0 && initialTracks.length > 0 && offset < initialTracks.length) {
@@ -1297,7 +1332,7 @@ export async function handleUpstreamEndpoint(
         { code: 200, brand: 'Sonic', playlists: desensitizeData(list) },
         { headers: { 'Cache-Control': 'public, max-age=1800' } },
       );
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', playlists: [] });
   }
 
@@ -1322,7 +1357,7 @@ export async function handleUpstreamEndpoint(
           { code: 200, brand: 'Sonic', hotAlbums: desensitizeData(data.hotAlbums || []), more: data.more ?? false },
           { headers: { 'Cache-Control': 'public, max-age=3600' } },
         );
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
       return jsonResponse({ code: 200, brand: 'Sonic', hotAlbums: [] });
     }
     if (normEndpoint === 'artist/songs') {
@@ -1337,7 +1372,7 @@ export async function handleUpstreamEndpoint(
           { code: 200, brand: 'Sonic', songs: desensitizeData(data.songs || []), more: data.more ?? false },
           { headers: { 'Cache-Control': 'public, max-age=3600' } },
         );
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
       return jsonResponse({ code: 200, brand: 'Sonic', songs: [], more: false });
     }
 
@@ -1361,7 +1396,7 @@ export async function handleUpstreamEndpoint(
         },
         { headers: { 'Cache-Control': 'public, max-age=3600' } },
       );
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 404, message: 'Artist not found' }, { status: 404 });
   }
 
@@ -1392,7 +1427,7 @@ export async function handleUpstreamEndpoint(
         { code: 200, brand: 'Sonic', result: desensitizeData(data.result || {}) },
         { headers: { 'Cache-Control': 'public, max-age=1800' } },
       );
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', result: {} });
   }
 
@@ -1412,7 +1447,7 @@ export async function handleUpstreamEndpoint(
         { code: 200, brand: 'Sonic', songs: desensitizeData(data.songs || []) },
         { headers: { 'Cache-Control': 'public, max-age=3600' } },
       );
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', songs: [] });
   }
 
@@ -1441,7 +1476,7 @@ export async function handleUpstreamEndpoint(
             { headers: { 'Cache-Control': 'public, max-age=3600' } },
           );
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
 
       // 2. Fallback: plaintext legacy API
       try {
@@ -1460,7 +1495,7 @@ export async function handleUpstreamEndpoint(
             { headers: { 'Cache-Control': 'public, max-age=3600' } },
           );
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
     }
     return jsonResponse({ code: 200, brand: 'Sonic', album: {}, songs: [] });
   }
@@ -1490,7 +1525,7 @@ export async function handleUpstreamEndpoint(
           { headers: { 'Cache-Control': 'public, max-age=1800' } },
         );
       }
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', albums: [], total: 0 });
   }
 
@@ -1546,7 +1581,7 @@ export async function handleUpstreamEndpoint(
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
 
       try {
         const eRes = await callNeteaseEapi(
@@ -1569,7 +1604,7 @@ export async function handleUpstreamEndpoint(
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
 
       try {
         const resp = await timedFetch(`https://music.163.com/api/search/get/web?s=${encodeURIComponent(keywords)}&type=1000&limit=${limit}&offset=${offset}`, {
@@ -1584,7 +1619,7 @@ export async function handleUpstreamEndpoint(
           },
           { headers: { 'Cache-Control': 'public, max-age=1800' } },
         );
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
       return jsonResponse({ code: 200, brand: 'Sonic', result: { playlists: [], playlistCount: 0 } });
     }
 
@@ -1608,7 +1643,7 @@ export async function handleUpstreamEndpoint(
           },
           { headers: { 'Cache-Control': 'public, max-age=1800' } },
         );
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
       return jsonResponse({ code: 200, brand: 'Sonic', result: { mvs: [], mvCount: 0 } });
     }
 
@@ -1652,7 +1687,7 @@ export async function handleUpstreamEndpoint(
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
 
       try {
         const eRes = await callNeteaseEapi(
@@ -1689,7 +1724,7 @@ export async function handleUpstreamEndpoint(
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
 
       return jsonResponse({ code: 200, brand: 'Sonic', result: { artists: [], artistCount: 0 } });
     }
@@ -1739,7 +1774,7 @@ export async function handleUpstreamEndpoint(
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
 
       try {
         const eRes = await callNeteaseEapi(
@@ -1781,7 +1816,7 @@ export async function handleUpstreamEndpoint(
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch {}
+      } catch { request.signal.throwIfAborted(); }
 
       return jsonResponse({ code: 200, brand: 'Sonic', result: { albums: [], albumCount: 0 } });
     }
@@ -1809,7 +1844,7 @@ export async function handleUpstreamEndpoint(
         },
         { headers: { 'Cache-Control': 'public, max-age=1800' } },
       );
-    } catch {}
+    } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', result: { songs: [], songCount: 0 } });
   }
 

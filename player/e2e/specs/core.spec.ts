@@ -129,7 +129,7 @@ test.describe('核心播放路径', () => {
     await page.goto('/#/playlist/123')
     await expect(page.getByTestId('song-row-9200')).toBeVisible()
 
-    await page.getByTestId('song-row-9200').click()
+    await page.getByTestId('song-row-9200').getByRole('heading').click()
     await page.locator('#footer-cover').click()
     const lyrics = page.getByTestId('lyrics-container')
     await expect(lyrics).toBeVisible()

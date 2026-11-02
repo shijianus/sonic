@@ -4,14 +4,14 @@ import { test, expect, getAudio, expectPlaying, horizontalOverflow } from '../fi
 test.describe('移动端响应式与可访问性', () => {
   test('移动端搜索结果可见且无横向溢出', async ({ page }) => {
     await page.goto('/#/search?q=sonic')
-    await expect(page.getByTestId('song-row-9001')).toBeVisible()
+    await expect(page.getByTestId('search-song-results').getByTestId('song-row-9001')).toBeVisible()
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
     await expect(page.getByRole('alert')).toHaveCount(0)
   })
 
   test('移动端点击结果可真实播放，再次点击可暂停', async ({ page }) => {
     await page.goto('/#/search?q=sonic')
-    const row = page.getByTestId('song-row-9001')
+    const row = page.getByTestId('search-song-results').getByTestId('song-row-9001')
     await expect(row).toBeVisible()
     await row.click()
     await expectPlaying(page)
@@ -26,8 +26,8 @@ test.describe('移动端响应式与可访问性', () => {
 
   test('移动端核心控件具备可访问名称', async ({ page }) => {
     await page.goto('/#/search?q=sonic')
-    await expect(page.getByTestId('song-row-9001')).toBeVisible()
-    const rows = page.locator('[data-testid^="song-row-"]')
+    await expect(page.getByTestId('search-song-results').getByTestId('song-row-9001')).toBeVisible()
+    const rows = page.getByTestId('search-song-results').locator('[data-testid^="song-row-"]')
     const count = await rows.count()
     expect(count).toBeGreaterThan(0)
     for (let i = 0; i < count; i++) {

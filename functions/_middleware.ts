@@ -5,10 +5,12 @@
 import { handleOptions, jsonResponse } from './_lib/http';
 import {
   getReleaseMetadata,
+  getReleaseReadiness,
   recordHttpRequestMetric,
   redactSensitiveString,
 } from './_lib/sonic/observability';
 import { checkStagingAccessGate } from './_lib/sonic/security';
+import { requireAccess } from './_lib/sonic/access';
 import type { AppEnv } from './_lib/types';
 
 export async function onRequest(context: {
@@ -29,7 +31,8 @@ export async function onRequest(context: {
   const finalizeResponse = (resp: Response): Response => {
     recordHttpRequestMetric(pathname, resp.status, Date.now() - startedAt, env);
     const needRobots = isStaging && !resp.headers.has('X-Robots-Tag');
-    const needRelease = release.releaseCommit !== 'unknown' && !resp.headers.has('X-Sonic-Release');
+    const releaseId = release.releaseId || (release.releaseCommit !== 'unknown' ? release.releaseCommit.slice(0, 12) : '');
+    const needRelease = Boolean(releaseId) && !resp.headers.has('X-Sonic-Release');
     if (!needRobots && !needRelease) {
       return resp;
     }
@@ -38,7 +41,7 @@ export async function onRequest(context: {
       headers.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
     }
     if (needRelease) {
-      headers.set('X-Sonic-Release', release.releaseCommit.slice(0, 12));
+      headers.set('X-Sonic-Release', releaseId);
     }
     return new Response(resp.body, {
       status: resp.status,
@@ -54,6 +57,19 @@ export async function onRequest(context: {
   const stagingDenied = checkStagingAccessGate(request, env);
   if (stagingDenied) {
     return finalizeResponse(stagingDenied);
+  }
+
+  const accessDenied = await requireAccess(request, env);
+  if (accessDenied) {
+    return finalizeResponse(accessDenied);
+  }
+
+  const releaseReadiness = getReleaseReadiness(env);
+  if (!releaseReadiness.ok) {
+    return finalizeResponse(jsonResponse(
+      { brand: 'Sonic', error: { code: 'RELEASE_NOT_READY', message: 'Release metadata is not configured' } },
+      { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '30' } },
+    ));
   }
 
   try {

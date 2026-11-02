@@ -102,10 +102,10 @@ const getQualityBadgeInfo = (song: Song) => {
         </div>
       </div>
       <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-1.5">
+        <div class="flex items-start gap-1.5">
           <p
             :title="song.name"
-            class="song-name line-clamp-1 text-sm font-medium"
+            class="song-name min-w-0 break-words whitespace-normal text-sm font-medium"
             :class="isCurrent(song) ? 'text-sky-400' : ''"
           >
             {{ song.name }}
@@ -119,7 +119,7 @@ const getQualityBadgeInfo = (song: Song) => {
             {{ getQualityBadgeInfo(song).label }}
           </span>
         </div>
-        <p class="song-artist mt-0.5 truncate text-xs">
+        <p class="song-artist mt-0.5 break-words whitespace-normal text-xs">
           {{ song.artist }}<template v-if="song.album"> - 《{{ song.album }}》</template>
         </p>
       </div>
@@ -167,10 +167,10 @@ const getQualityBadgeInfo = (song: Song) => {
         />
       </div>
       <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-1.5">
+        <div class="flex items-start gap-1.5">
           <p
             :title="song.name"
-            class="song-name line-clamp-1 text-sm font-medium"
+            class="song-name min-w-0 break-words whitespace-normal text-sm font-medium"
             :class="isCurrent(song) ? 'text-sky-400' : ''"
           >
             {{ song.name }}
@@ -184,7 +184,7 @@ const getQualityBadgeInfo = (song: Song) => {
             {{ getQualityBadgeInfo(song).label }}
           </span>
         </div>
-        <p class="song-artist mt-0.5 truncate text-xs">
+        <p class="song-artist mt-0.5 break-words whitespace-normal text-xs">
           {{ song.artist }}<template v-if="song.album"> - 《{{ song.album }}》</template>
         </p>
       </div>

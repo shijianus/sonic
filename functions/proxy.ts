@@ -9,11 +9,11 @@ import {
   isBlockedSsrfHost,
   safeFetch,
   validateSafeUrl,
+  hasSensitiveMediaQuery,
 } from "./_lib/sonic/security";
 import type { AppEnv } from "./_lib/types";
 
 const KUWO_HOST_PATTERN = /(^|\.)kuwo\.cn$/i;
-const SENSITIVE_PROXY_QUERY = /[?&](auth|auth_key|vkey|guid|sign|signature|token|access_token|secret|key|wssecret|wstime|vuutv|dis_k)=/i;
 const SAFE_RESPONSE_HEADERS = [
   "content-type",
   "cache-control",
@@ -102,6 +102,7 @@ async function proxyKuwoAudio(targetUrl: string, request: Request, env?: AppEnv)
 
   const init: RequestInit = {
     method: request.method,
+    signal: request.signal,
     headers: {
       "User-Agent": request.headers.get("User-Agent") ?? "Mozilla/5.0",
       Referer: "https://www.kuwo.cn/",
@@ -119,6 +120,7 @@ async function proxyKuwoAudio(targetUrl: string, request: Request, env?: AppEnv)
     maxRedirects: 2,
     timeoutMs: 15000,
     maxBytes: 256 * 1024 * 1024,
+    includeMetadata: true,
   });
 
   if (!upstream.ok && upstream.status !== 206) {
@@ -151,7 +153,8 @@ async function proxyKuwoAudio(targetUrl: string, request: Request, env?: AppEnv)
   headers.set('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'; sandbox");
   const upstreamCc = (upstream.headers.get("cache-control") || "").toLowerCase();
   if (
-    SENSITIVE_PROXY_QUERY.test(normalized.search) ||
+    hasSensitiveMediaQuery(upstream.finalUrl || normalized) ||
+    Boolean(upstream.sensitive) ||
     upstreamCc.includes("private") ||
     upstreamCc.includes("no-store")
   ) {

@@ -67,6 +67,7 @@ export async function onRequest({ request, env, waitUntil }: { request: Request;
       artist,
       q,
       duration,
+      signal: request.signal,
     });
 
     const cacheHeaders = {
@@ -155,6 +156,7 @@ export async function onRequest({ request, env, waitUntil }: { request: Request;
 
     return response;
   } catch (err: any) {
+    request.signal.throwIfAborted();
     console.error('[Sonic Music Lyric Error]', err);
     return errorResponse(err?.message || '获取歌词失败', 502, {
       'Cache-Control': 'public, max-age=30',

@@ -10,6 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type {
   CanonicalTrack,
   EntityRelation,
+  RecommendContributionSource,
   RecommendStore,
   SonicEntity,
   SonicEntityType,
@@ -25,21 +26,31 @@ import {
   toPinyinInfo,
 } from '../functions/_lib/sonic/recommend/text-norm';
 import { canMergeCanonicalTracks, mergeCanonicalTracks } from '../functions/_lib/sonic/recommend/track-canonical';
-import { MemoryRecommendStore } from '../functions/_lib/sonic/recommend/memory-store';
+import { MemoryRecommendStore, normalizeRecommendRetentionDays } from '../functions/_lib/sonic/recommend/memory-store';
+import { upsertTrackMvEntities } from '../functions/_lib/sonic/recommend/entity-store';
 import { recordSqliteMetric, redactSensitiveString } from '../functions/_lib/sonic/observability';
 
 export class SqliteRecommendStore implements RecommendStore {
   public readonly kind = 'sqlite' as const;
   private db: DatabaseSync;
   private writeCounter = 0;
+  private retentionDays: number;
+  private lastRetentionAt = 0;
 
-  constructor(public readonly dbPath: string = ':memory:') {
+  constructor(public readonly dbPath: string = ':memory:', retentionDays: number | string = process.env.SONIC_RECOMMEND_RETENTION_DAYS || 90) {
+    this.retentionDays = normalizeRecommendRetentionDays(retentionDays);
     if (dbPath !== ':memory:') {
       const dir = path.dirname(path.resolve(dbPath));
       fs.mkdirSync(dir, { recursive: true });
     }
     this.db = new DatabaseSync(dbPath);
-    this.initSchema();
+    try {
+      this.initSchema();
+      this.pruneRetention();
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
   }
 
   private initSchema(): void {
@@ -85,7 +96,7 @@ export class SqliteRecommendStore implements RecommendStore {
       );
 
       CREATE TABLE IF NOT EXISTS behavior_events (
-        event_id TEXT PRIMARY KEY,
+        event_id TEXT NOT NULL,
         subject_key TEXT NOT NULL,
         event_type TEXT NOT NULL,
         canonical_track_id TEXT,
@@ -95,7 +106,9 @@ export class SqliteRecommendStore implements RecommendStore {
         query TEXT,
         weight REAL NOT NULL,
         progress_ratio REAL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        track_ref TEXT,
+        PRIMARY KEY (subject_key, event_id)
       );
 
       CREATE INDEX IF NOT EXISTS idx_events_subject_time
@@ -120,6 +133,36 @@ export class SqliteRecommendStore implements RecommendStore {
         hit_count INTEGER NOT NULL DEFAULT 1,
         updated_at INTEGER NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS search_query_contributions (
+        subject_key TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        norm_query TEXT NOT NULL,
+        display_query TEXT NOT NULL,
+        hit_count INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (subject_key, event_id, norm_query),
+        FOREIGN KEY (subject_key, event_id) REFERENCES behavior_events(subject_key, event_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_query_contributions_query
+        ON search_query_contributions(norm_query);
+      CREATE INDEX IF NOT EXISTS idx_query_contributions_time
+        ON search_query_contributions(created_at);
+
+      CREATE TABLE IF NOT EXISTS cooccurrence_contributions (
+        subject_key TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        track_a TEXT NOT NULL,
+        track_b TEXT NOT NULL,
+        weight REAL NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (subject_key, event_id, track_a, track_b),
+        FOREIGN KEY (subject_key, event_id) REFERENCES behavior_events(subject_key, event_id) ON DELETE CASCADE
+      );
+      CREATE INDEX IF NOT EXISTS idx_cooc_contributions_tracks
+        ON cooccurrence_contributions(track_a, track_b);
+      CREATE INDEX IF NOT EXISTS idx_cooc_contributions_time
+        ON cooccurrence_contributions(created_at);
 
       CREATE TABLE IF NOT EXISTS entities (
         entity_id TEXT PRIMARY KEY,
@@ -163,7 +206,7 @@ export class SqliteRecommendStore implements RecommendStore {
         ON entity_relations(child_id, parent_id);
 
       CREATE TABLE IF NOT EXISTS user_entity_feedback (
-        feedback_id TEXT PRIMARY KEY,
+        feedback_id TEXT NOT NULL,
         subject_key TEXT NOT NULL,
         entity_type TEXT NOT NULL,
         entity_id TEXT NOT NULL,
@@ -171,7 +214,8 @@ export class SqliteRecommendStore implements RecommendStore {
         weight REAL NOT NULL,
         progress REAL,
         context_json TEXT,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY (subject_key, feedback_id)
       );
 
       CREATE INDEX IF NOT EXISTS idx_uef_user_time
@@ -199,10 +243,69 @@ export class SqliteRecommendStore implements RecommendStore {
         updated_at INTEGER NOT NULL
       );
     `);
+    this.migrateSubjectEventKeys();
+  }
+
+  private migrateSubjectEventKeys(): void {
+    // SQLite cannot drop an inline PK/UNIQUE constraint. Rebuild only the affected
+    // tables in one write transaction; any unexpected schema/duplicate fails closed.
+    // Inspect indexes as well as table_info: some deployments have event_id UNIQUE.
+    const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const columns = this.db.prepare('PRAGMA table_info(behavior_events)').all() as Array<{ name: string }>;
+      if (!columns.some((c) => c.name === 'track_ref')) this.db.exec('ALTER TABLE behavior_events ADD COLUMN track_ref TEXT');
+      for (const [table, id] of [['behavior_events', 'event_id'], ['user_entity_feedback', 'feedback_id']] as const) {
+        const indexes = this.db.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string; unique: number; partial: number }>;
+        const uniqueColumns = indexes.filter((i) => i.unique).map((i) => ({
+          ...i, columns: (this.db.prepare(`PRAGMA index_info(${quote(i.name)})`).all() as Array<{ name: string }>).map((c) => c.name),
+        }));
+        const hasScoped = uniqueColumns.some((i) => !i.partial && i.columns.length === 2 && i.columns.includes(id) && i.columns.includes('subject_key'));
+        const hasGlobal = uniqueColumns.some((i) => i.columns.length === 1 && i.columns[0] === id);
+        if (hasScoped && !hasGlobal) continue;
+        const schema = this.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) as { sql: string };
+        const ancillary = this.db.prepare("SELECT sql FROM sqlite_master WHERE tbl_name = ? AND type IN ('index', 'trigger') AND sql IS NOT NULL")
+          .all(table) as Array<{ sql: string }>;
+        const replacement = `${table}_subject_key_migration`;
+        let sql = schema.sql.replace(/^CREATE TABLE\s+(?:IF NOT EXISTS\s+)?(?:"[^"]+"|`[^`]+`|\[[^\]]+\]|\w+)/i, `CREATE TABLE ${replacement}`);
+        const idPattern = `(?:"${id}"|\\[${id}\\]|${id})`;
+        sql = sql.replace(new RegExp(`(${idPattern}\\s+TEXT(?:\\s+NOT\\s+NULL)?)\\s+(?:PRIMARY\\s+KEY|UNIQUE)`, 'ig'), '$1');
+        sql = sql.replace(new RegExp(`,\\s*(?:CONSTRAINT\\s+\\w+\\s+)?(?:PRIMARY\\s+KEY|UNIQUE)\\s*\\(\\s*${idPattern}\\s*\\)`, 'ig'), '');
+        if (!hasScoped) sql = sql.replace(/\)(\s*(?:WITHOUT ROWID|STRICT)?\s*;?\s*)$/i, `, UNIQUE(subject_key, ${id}))$1`);
+        this.db.exec(sql);
+        const cols = (this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => quote(c.name)).join(', ');
+        this.db.exec(`INSERT INTO ${replacement} (${cols}) SELECT ${cols} FROM ${table}`);
+        this.db.exec(`DROP TABLE ${table}; ALTER TABLE ${replacement} RENAME TO ${table}`);
+        for (const item of ancillary) {
+          // Standalone global UNIQUE indexes are the other old schema variant.
+          if (/^CREATE\s+UNIQUE\s+INDEX/i.test(item.sql) && new RegExp(`\\(\\s*${idPattern}\\s*\\)`, 'i').test(item.sql)) continue;
+          this.db.exec(item.sql);
+        }
+        const migratedIndexes = this.db.prepare(`PRAGMA index_list(${table})`).all() as Array<{ name: string; unique: number; partial: number }>;
+        const keys = migratedIndexes.filter((i) => i.unique).map((i) => ({
+          ...i, columns: (this.db.prepare(`PRAGMA index_info(${quote(i.name)})`).all() as Array<{ name: string }>).map((c) => c.name),
+        }));
+        if (keys.some((i) => i.columns.length === 1 && i.columns[0] === id) ||
+            !keys.some((i) => !i.partial && i.columns.length === 2 && i.columns.includes(id) && i.columns.includes('subject_key'))) {
+          throw new Error(`Unsupported event-key schema for ${table}; migration rolled back`);
+        }
+      }
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  private beforeWrite(): void {
+    if (++this.writeCounter >= 1500 || Date.now() - this.lastRetentionAt >= 3600_000) {
+      this.pruneRetention();
+    }
   }
 
   upsertTrack(incoming: CanonicalTrack): void {
     if (!incoming?.canonicalTrackId) return;
+    this.beforeWrite();
 
     const existing = this.getTrack(incoming.canonicalTrackId);
     let finalTrack = incoming;
@@ -276,6 +379,7 @@ export class SqliteRecommendStore implements RecommendStore {
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
       .run(finalTrack.canonicalTrackId, titleTokens, artistTokens, albumTokens, pinyinTokens, genreTokens);
+    upsertTrackMvEntities(this, finalTrack);
   }
 
   upsertTracks(tracks: CanonicalTrack[]): void {
@@ -414,11 +518,14 @@ export class SqliteRecommendStore implements RecommendStore {
     if (!event?.eventId || !event?.subjectKey) {
       return { inserted: false, deduplicated: false };
     }
+    this.beforeWrite();
     const stmt = this.db.prepare(`
-      INSERT OR IGNORE INTO behavior_events (
+      INSERT INTO behavior_events (
         event_id, subject_key, event_type, canonical_track_id, artist_key,
-        genres_json, language, query, weight, progress_ratio, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        genres_json, language, query, weight, progress_ratio, created_at, track_ref
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        WHERE NOT EXISTS (SELECT 1 FROM user_entity_feedback WHERE subject_key = ? AND feedback_id = ?)
+      ON CONFLICT(subject_key, event_id) DO NOTHING
     `);
     const info = stmt.run(
       event.eventId,
@@ -432,15 +539,12 @@ export class SqliteRecommendStore implements RecommendStore {
       event.weight,
       event.progressRatio ?? null,
       event.createdAt,
+      event.trackRef ?? null,
+      event.subjectKey,
+      event.eventId,
     );
 
     const inserted = Number(info.changes) > 0;
-    if (inserted) {
-      this.writeCounter += 1;
-      if (this.writeCounter % 1500 === 0) {
-        this.pruneRetention();
-      }
-    }
     return {
       inserted,
       deduplicated: !inserted,
@@ -452,10 +556,12 @@ export class SqliteRecommendStore implements RecommendStore {
     const rows = this.db
       .prepare(
         `SELECT event_id, subject_key, event_type, canonical_track_id, artist_key,
-                genres_json, language, query, weight, progress_ratio, created_at
+                genres_json, language, query, weight, progress_ratio, created_at, track_ref
          FROM behavior_events
          WHERE subject_key = ? AND created_at >= ?
-         ORDER BY created_at DESC
+         ORDER BY created_at DESC,
+           CASE event_type WHEN 'undislike' THEN 4 WHEN 'unfavorite' THEN 3 WHEN 'dislike' THEN 2 WHEN 'favorite' THEN 1 ELSE 0 END DESC,
+           event_id DESC
          LIMIT ?`,
       )
       .all(subjectKey, sinceMs, Math.min(1000, Math.max(1, limit))) as Array<Record<string, any>>;
@@ -465,16 +571,30 @@ export class SqliteRecommendStore implements RecommendStore {
 
   clearUserEvents(subjectKey: string): number {
     if (!subjectKey) return 0;
-    const info1 = this.db.prepare(`DELETE FROM behavior_events WHERE subject_key = ?`).run(subjectKey);
-    const info2 = this.db.prepare(`DELETE FROM user_entity_feedback WHERE subject_key = ?`).run(subjectKey);
-    return (Number(info1.changes) || 0) + (Number(info2.changes) || 0);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const count = this.db.prepare(`SELECT COUNT(*) AS cnt FROM (
+        SELECT event_id AS id FROM behavior_events WHERE subject_key = ?
+        UNION SELECT feedback_id AS id FROM user_entity_feedback WHERE subject_key = ?
+      )`).get(subjectKey, subjectKey) as { cnt: number };
+      this.db.prepare(`DELETE FROM search_query_contributions WHERE subject_key = ?`).run(subjectKey);
+      this.db.prepare(`DELETE FROM cooccurrence_contributions WHERE subject_key = ?`).run(subjectKey);
+      this.db.prepare(`DELETE FROM behavior_events WHERE subject_key = ?`).run(subjectKey);
+      this.db.prepare(`DELETE FROM user_entity_feedback WHERE subject_key = ?`).run(subjectKey);
+      this.db.prepare(`DELETE FROM user_radar_profiles WHERE subject_key = ?`).run(subjectKey);
+      this.db.exec('COMMIT');
+      return Number(count.cnt);
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
 
   getAllRecentEvents(sinceMs: number, limit = 10000): StoredBehaviorEvent[] {
     const rows = this.db
       .prepare(
         `SELECT event_id, subject_key, event_type, canonical_track_id, artist_key,
-                genres_json, language, query, weight, progress_ratio, created_at
+                genres_json, language, query, weight, progress_ratio, created_at, track_ref
          FROM behavior_events
          WHERE created_at >= ?
          ORDER BY created_at DESC
@@ -485,8 +605,22 @@ export class SqliteRecommendStore implements RecommendStore {
     return rows.map((r) => this.rowToEvent(r));
   }
 
-  incrementCooccurrence(trackA: string, trackB: string, delta: number): void {
-    if (!trackA || !trackB || trackA === trackB || delta <= 0) return;
+  incrementCooccurrence(trackA: string, trackB: string, delta: number, source?: RecommendContributionSource): void {
+    if (!trackA || !trackB || trackA === trackB || !Number.isFinite(delta) || delta <= 0) return;
+    this.beforeWrite();
+    if (source) {
+      if (!source.subjectKey || !source.eventId) return;
+      const [a, b] = [trackA, trackB].sort();
+      this.db.prepare(`INSERT INTO cooccurrence_contributions
+        (subject_key, event_id, track_a, track_b, weight, created_at)
+        SELECT subject_key, event_id, ?, ?, ?, created_at FROM behavior_events
+        WHERE subject_key = ? AND event_id = ? AND created_at >= ?
+        ON CONFLICT(subject_key, event_id, track_a, track_b) DO NOTHING`)
+        .run(a, b, Math.min(200, delta), source.subjectKey, source.eventId, Date.now() - this.retentionDays * 86400_000);
+      return;
+    }
+    // Legacy/admin callers have no reliable owner; do not guess or mix them with
+    // attributable contributions, which must remain independently removable.
     const now = Date.now();
     const stmt = this.db.prepare(`
       INSERT INTO track_cooccurrence (track_a, track_b, weight, updated_at)
@@ -500,73 +634,84 @@ export class SqliteRecommendStore implements RecommendStore {
   }
 
   getCooccurringTracks(trackId: string, limit = 20): Array<{ canonicalTrackId: string; weight: number }> {
-    const rows = this.db
-      .prepare(
-        `SELECT track_b AS canonicalTrackId, weight
-         FROM track_cooccurrence
-         WHERE track_a = ?
-         ORDER BY weight DESC
-         LIMIT ?`,
-      )
-      .all(trackId, limit) as Array<{ canonicalTrackId: string; weight: number }>;
-    return rows;
+    const cutoff = Date.now() - this.retentionDays * 86400_000;
+    return this.db.prepare(`
+      SELECT neighbor AS canonicalTrackId, MIN(200.0, SUM(weight)) AS weight FROM (
+        SELECT track_b AS neighbor, weight FROM track_cooccurrence WHERE track_a = ? AND updated_at >= ?
+        UNION ALL
+        SELECT track_b, weight FROM cooccurrence_contributions WHERE track_a = ? AND created_at >= ?
+        UNION ALL
+        SELECT track_a, weight FROM cooccurrence_contributions WHERE track_b = ? AND created_at >= ?
+      ) GROUP BY neighbor ORDER BY weight DESC LIMIT ?
+    `).all(trackId, cutoff, trackId, cutoff, trackId, cutoff, limit) as Array<{ canonicalTrackId: string; weight: number }>;
   }
 
-  recordSearchQuery(normQuery: string, displayQuery: string, clicked = false): void {
+  recordSearchQuery(normQuery: string, displayQuery: string, clicked = false, source?: RecommendContributionSource): void {
     const key = normQuery.trim();
     if (!key || key.length > 64) return;
+    this.beforeWrite();
     const inc = clicked ? 3 : 1;
-    const now = Date.now();
-    this.db
-      .prepare(
-        `INSERT INTO search_queries (norm_query, display_query, hit_count, updated_at)
-         VALUES (?, ?, ?, ?)
-         ON CONFLICT(norm_query) DO UPDATE SET
-           hit_count = search_queries.hit_count + excluded.hit_count,
-           updated_at = excluded.updated_at`,
-      )
-      .run(key, displayQuery.trim(), inc, now);
+    if (source) {
+      if (!source.subjectKey || !source.eventId) return;
+      this.db.prepare(`INSERT INTO search_query_contributions
+        (subject_key, event_id, norm_query, display_query, hit_count, created_at)
+        SELECT subject_key, event_id, ?, ?, ?, created_at FROM behavior_events
+        WHERE subject_key = ? AND event_id = ? AND created_at >= ?
+        ON CONFLICT(subject_key, event_id, norm_query) DO NOTHING`)
+        .run(key, displayQuery.trim(), inc, source.subjectKey, source.eventId, Date.now() - this.retentionDays * 86400_000);
+      return;
+    }
+    this.db.prepare(`INSERT INTO search_queries (norm_query, display_query, hit_count, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(norm_query) DO UPDATE SET
+        hit_count = search_queries.hit_count + excluded.hit_count, updated_at = excluded.updated_at`)
+      .run(key, displayQuery.trim(), inc, Date.now());
   }
 
   getTopSearchQueries(prefix: string, limit = 8): Array<{ query: string; count: number }> {
     const pNorm = compactNormalize(prefix);
-    const rows = pNorm
-      ? (this.db
-          .prepare(
-            `SELECT display_query AS query, hit_count AS count
-             FROM search_queries
-             WHERE norm_query LIKE ? OR display_query LIKE ?
-             ORDER BY hit_count DESC, updated_at DESC
-             LIMIT ?`,
-          )
-          .all(`${pNorm}%`, `%${prefix.trim()}%`, limit) as Array<{ query: string; count: number }>)
-      : (this.db
-          .prepare(
-            `SELECT display_query AS query, hit_count AS count
-             FROM search_queries
-             ORDER BY hit_count DESC, updated_at DESC
-             LIMIT ?`,
-          )
-          .all(limit) as Array<{ query: string; count: number }>);
-    return rows;
+    const cutoff = Date.now() - this.retentionDays * 86400_000;
+    // Pick the display only from remaining contributions; deleting an owner must
+    // not leave their exact query text as the display for another user's key.
+    return this.db.prepare(`WITH contributions AS (
+        SELECT norm_query, display_query, hit_count, updated_at FROM search_queries WHERE updated_at >= ?
+        UNION ALL
+        SELECT norm_query, display_query, hit_count, created_at FROM search_query_contributions WHERE created_at >= ?
+      ), totals AS (
+        SELECT norm_query, SUM(hit_count) AS count, MAX(updated_at) AS updated_at FROM contributions GROUP BY norm_query
+      ) SELECT (SELECT display_query FROM contributions c WHERE c.norm_query = t.norm_query
+          ORDER BY updated_at DESC, display_query LIMIT 1) AS query, count
+        FROM totals t
+        WHERE ? = '' OR norm_query LIKE ? OR EXISTS (
+          SELECT 1 FROM contributions c WHERE c.norm_query = t.norm_query AND c.display_query LIKE ?
+        ) ORDER BY count DESC, updated_at DESC LIMIT ?`)
+      .all(cutoff, cutoff, pNorm, `${pNorm}%`, `%${prefix.trim()}%`, limit) as Array<{ query: string; count: number }>;
   }
 
   getStats(): { trackCount: number; entityCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string } {
     const tRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM canonical_tracks`).get() as { cnt: number };
     const entRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM entities`).get() as { cnt: number };
-    const eRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM behavior_events`).get() as { cnt: number };
-    const cRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM track_cooccurrence`).get() as { cnt: number };
+    const eRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM (
+      SELECT subject_key, event_id AS id FROM behavior_events
+      UNION SELECT subject_key, feedback_id AS id FROM user_entity_feedback
+    )`).get() as { cnt: number };
+    const cutoff = Date.now() - this.retentionDays * 86400_000;
+    const cRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM (
+      SELECT MIN(track_a, track_b) AS a, MAX(track_a, track_b) AS b FROM track_cooccurrence WHERE updated_at >= ?
+      UNION SELECT track_a, track_b FROM cooccurrence_contributions WHERE created_at >= ?
+    )`).get(cutoff, cutoff) as { cnt: number };
     return {
       trackCount: Number(tRow?.cnt || 0),
       entityCount: Number(entRow?.cnt || 0),
       eventCount: Number(eRow?.cnt || 0),
-      cooccurrencePairs: Math.floor(Number(cRow?.cnt || 0) / 2),
+      cooccurrencePairs: Number(cRow?.cnt || 0),
       storageKind: this.kind,
     };
   }
 
   upsertEntity(entity: SonicEntity): void {
     if (!entity?.id || !entity?.type) return;
+    this.beforeWrite();
     const stmt = this.db.prepare(`
       INSERT INTO entities (
         entity_id, entity_type, title, subtitle, artist_id, artist_name,
@@ -640,6 +785,7 @@ export class SqliteRecommendStore implements RecommendStore {
 
   upsertEntityRelation(rel: EntityRelation): void {
     if (!rel?.parentId || !rel?.childId) return;
+    this.beforeWrite();
     const relationId = rel.relationId || `${rel.parentId}:::${rel.childId}:::${rel.relationType}`;
     const stmt = this.db.prepare(`
       INSERT INTO entity_relations (
@@ -706,11 +852,14 @@ export class SqliteRecommendStore implements RecommendStore {
     if (!feedback?.feedbackId || !feedback?.subjectKey || !feedback?.entityId) {
       return { inserted: false, deduplicated: false };
     }
+    this.beforeWrite();
     const stmt = this.db.prepare(`
-      INSERT OR IGNORE INTO user_entity_feedback (
+      INSERT INTO user_entity_feedback (
         feedback_id, subject_key, entity_type, entity_id, action,
         weight, progress, context_json, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
+        WHERE NOT EXISTS (SELECT 1 FROM behavior_events WHERE subject_key = ? AND event_id = ?)
+      ON CONFLICT(subject_key, feedback_id) DO NOTHING
     `);
     const info = stmt.run(
       feedback.feedbackId,
@@ -721,7 +870,9 @@ export class SqliteRecommendStore implements RecommendStore {
       feedback.weight,
       feedback.progress ?? null,
       feedback.context ? JSON.stringify(feedback.context) : null,
-      feedback.createdAt || Date.now(),
+      feedback.createdAt,
+      feedback.subjectKey,
+      feedback.feedbackId,
     );
     const inserted = Number(info.changes) > 0;
     return {
@@ -736,7 +887,9 @@ export class SqliteRecommendStore implements RecommendStore {
       .prepare(
         `SELECT * FROM user_entity_feedback
          WHERE subject_key = ? AND created_at >= ?
-         ORDER BY created_at DESC
+         ORDER BY created_at DESC,
+           CASE action WHEN 'undislike' THEN 4 WHEN 'unfavorite' THEN 3 WHEN 'dislike' THEN 2 WHEN 'favorite' THEN 1 ELSE 0 END DESC,
+           feedback_id DESC
          LIMIT ?`,
       )
       .all(subjectKey, sinceMs, Math.min(1000, Math.max(1, limit))) as Array<Record<string, any>>;
@@ -759,12 +912,36 @@ export class SqliteRecommendStore implements RecommendStore {
     return Number(info.changes) || 0;
   }
 
-  pruneRetention(retentionDays = 90): void {
-    const cutoff = Date.now() - retentionDays * 24 * 3600 * 1000;
+  pruneRetention(retentionDays = this.retentionDays): void {
+    const days = normalizeRecommendRetentionDays(retentionDays);
+    const now = Date.now();
+    const cutoff = now - days * 24 * 3600 * 1000;
+    this.db.exec('SAVEPOINT sonic_recommend_retention');
     try {
+      this.db.prepare(`DELETE FROM search_query_contributions WHERE created_at < ? OR NOT EXISTS (
+        SELECT 1 FROM behavior_events e WHERE e.subject_key = search_query_contributions.subject_key
+          AND e.event_id = search_query_contributions.event_id AND e.created_at >= ?
+      )`).run(cutoff, cutoff);
+      this.db.prepare(`DELETE FROM cooccurrence_contributions WHERE created_at < ? OR NOT EXISTS (
+        SELECT 1 FROM behavior_events e WHERE e.subject_key = cooccurrence_contributions.subject_key
+          AND e.event_id = cooccurrence_contributions.event_id AND e.created_at >= ?
+      )`).run(cutoff, cutoff);
       this.db.prepare(`DELETE FROM behavior_events WHERE created_at < ?`).run(cutoff);
       this.db.prepare(`DELETE FROM user_entity_feedback WHERE created_at < ?`).run(cutoff);
-    } catch {}
+      this.db.prepare(`DELETE FROM search_queries WHERE updated_at < ?`).run(cutoff);
+      this.db.prepare(`DELETE FROM track_cooccurrence WHERE updated_at < ?`).run(cutoff);
+      this.db.prepare(`DELETE FROM user_radar_profiles WHERE updated_at < ?`).run(cutoff);
+      this.db.exec('RELEASE sonic_recommend_retention');
+      this.retentionDays = days;
+      this.lastRetentionAt = now;
+      this.writeCounter = 0;
+    } catch (error) {
+      try {
+        this.db.exec('ROLLBACK TO sonic_recommend_retention; RELEASE sonic_recommend_retention');
+      } catch {}
+      recordSqliteMetric('write_error');
+      throw error;
+    }
   }
 
   close(): void {
@@ -814,6 +991,7 @@ export class SqliteRecommendStore implements RecommendStore {
       subjectKey: String(r.subject_key),
       type: r.event_type,
       canonicalTrackId: r.canonical_track_id ? String(r.canonical_track_id) : undefined,
+      trackRef: r.track_ref ? String(r.track_ref) : undefined,
       artistKey: r.artist_key ? String(r.artist_key) : undefined,
       genres,
       language: r.language ? (String(r.language) as any) : undefined,
@@ -860,6 +1038,7 @@ export class SqliteRecommendStore implements RecommendStore {
 
   saveUserRadarProfile(subjectKey: string, payloadJson: string): void {
     if (!subjectKey || !payloadJson) return;
+    this.beforeWrite();
     try {
       const stmt = this.db.prepare(`
         INSERT INTO user_radar_profiles (subject_key, payload_json, updated_at)
@@ -871,6 +1050,7 @@ export class SqliteRecommendStore implements RecommendStore {
       stmt.run(subjectKey, payloadJson, Date.now());
     } catch (err: any) {
       recordSqliteMetric('write_error');
+      throw new RecommendStorePersistenceError(this.dbPath, err);
     }
   }
 
@@ -883,8 +1063,9 @@ export class SqliteRecommendStore implements RecommendStore {
       const row = stmt.get(subjectKey) as any;
       if (!row) return null;
       return { payloadJson: String(row.payload_json), updatedAt: Number(row.updated_at) };
-    } catch {
-      return null;
+    } catch (err: any) {
+      recordSqliteMetric('read_error');
+      throw new RecommendStorePersistenceError(this.dbPath, err);
     }
   }
 }
@@ -919,16 +1100,13 @@ export function createServerRecommendStore(dbPath?: string): RecommendStore {
     (dbPath ?? process.env.SONIC_RECOMMEND_DB_PATH ?? '').trim() ||
     path.resolve(process.cwd(), 'data', 'sonic-recommend.sqlite');
 
+  const retentionDays = normalizeRecommendRetentionDays(process.env.SONIC_RECOMMEND_RETENTION_DAYS);
   if (effectivePath === 'memory' || effectivePath === 'off') {
-    return new MemoryRecommendStore();
+    return new MemoryRecommendStore(retentionDays);
   }
 
   try {
-    const store = new SqliteRecommendStore(effectivePath);
-    store.pruneRetention(
-      Math.max(7, parseInt(String(process.env.SONIC_RECOMMEND_RETENTION_DAYS || '90'), 10) || 90),
-    );
-    return store;
+    return new SqliteRecommendStore(effectivePath, retentionDays);
   } catch (err: any) {
     recordSqliteMetric('memory_fallback');
     if (!allowMemoryFallback()) {
@@ -937,7 +1115,7 @@ export function createServerRecommendStore(dbPath?: string): RecommendStore {
     console.warn(
       `[Sonic Recommend] Failed to open SQLite store at ${effectivePath} (${redactSensitiveString(err?.message || 'error')}); falling back to MemoryRecommendStore`,
     );
-    return new MemoryRecommendStore();
+    return new MemoryRecommendStore(retentionDays);
   }
 }
 

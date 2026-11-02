@@ -65,14 +65,18 @@ export function executeSmartSuggest(
       out.push(item);
     };
 
-    if (identity?.personalizationEnabled) {
+    if (identity?.personalizationEnabled && identity.mode !== 'public') {
       const prof = buildUserPreferenceProfile(identity, store);
       for (const q of prof.recentQueries.slice(0, 3)) {
         add({ text: q, type: 'query', subLabel: '最近搜索', score: 95 });
       }
     }
-    for (const topQ of store.getTopSearchQueries('', 4)) {
-      add({ text: topQ.query, type: 'query', subLabel: '热门搜索', score: 85 });
+    // Public suggestions must not expose raw user queries. Query aggregates are only
+    // suitable for private/opt-in identities; public users receive catalog-curated items.
+    if (identity?.mode !== 'public') {
+      for (const topQ of store.getTopSearchQueries('', 4)) {
+        add({ text: topQ.query, type: 'query', subLabel: '热门搜索', score: 85 });
+      }
     }
     for (const preset of ['周杰伦', '华语 R&B', '陈奕迅', '粤语金曲', 'Taylor Swift']) {
       add({ text: preset, type: 'query', subLabel: '精选热搜', score: 75 });
@@ -117,13 +121,15 @@ export function executeSmartSuggest(
     });
   }
 
-  for (const qItem of store.getTopSearchQueries(trimmed, 5)) {
-    pushUnique({
-      text: qItem.query,
-      type: 'query',
-      subLabel: '历史热搜',
-      score: 80 + Math.min(15, qItem.count),
-    });
+  if (identity?.mode !== 'public') {
+    for (const qItem of store.getTopSearchQueries(trimmed, 5)) {
+      pushUnique({
+        text: qItem.query,
+        type: 'query',
+        subLabel: '历史热搜',
+        score: 80 + Math.min(15, qItem.count),
+      });
+    }
   }
 
   for (const g of exp.inferredGenres) {
@@ -291,10 +297,7 @@ export async function executeSmartSearch(
   let degradedReason: string | undefined;
   let circuitState: CircuitState | undefined;
 
-  // Record anonymized aggregate search query popularity
-  if (exp.compact) {
-    store.recordSearchQuery(exp.compact, query, false);
-  }
+  // Query popularity is recorded by opted-in behavior events with erasure attribution.
 
   // 1. Local Canonical Store & FTS5 Recall (across raw query + alias/typo/pinyin expanded queries)
   const localStart = Date.now();

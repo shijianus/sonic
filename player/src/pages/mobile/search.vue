@@ -12,6 +12,7 @@ import { Swiper, SwiperSlide } from 'swiper/vue'
 import { EffectCreative } from 'swiper/modules'
 import Button from '@/components/Ui/Button.vue'
 import StyleRadarSection from '@/components/Recommend/StyleRadarSection.vue'
+import MobileSearchError from '@/components/Search/MobileSearchError.vue'
 import 'swiper/css'
 import 'swiper/css/effect-creative'
 import {
@@ -38,6 +39,28 @@ const creativeEffect = {
 }
 
 type SearchTab = 'song' | 'playlist' | 'mv'
+type SearchErrorKind = '' | 'network' | 'rateLimited' | 'upstream'
+
+// Match desktop search feedback, retaining failures until a fallback returns results.
+const classifySearchError = (error: unknown): SearchErrorKind => {
+  const err = error as any
+  const status = Number(err?.response?.status ?? err?.status ?? 0)
+  if (status === 429) return 'rateLimited'
+  if (status > 0) return 'upstream'
+  if (err?.name === 'TypeError' || /failed to fetch|network|offline|timeout/i.test(String(err?.message || ''))) {
+    return 'network'
+  }
+  return 'upstream'
+}
+
+// Some providers wrap HTTP failures in a 200 JSON response.
+const checkSearchPayload = (payload: any) => {
+  if (payload?.error || Number(payload?.code) >= 400) {
+    const status = Number(payload?.status ?? payload?.code)
+    const rateLimited = /rate.limit/i.test(String(payload?.error?.code || ''))
+    throw Object.assign(new Error('Search provider failed'), { status: rateLimited ? 429 : status || 502 })
+  }
+}
 
 const { t } = useI18n()
 const { setPlaylist, play } = useAudio()
@@ -116,6 +139,8 @@ const {
   mvTotal,
 } = toRefs(state)
 
+const searchErrors = reactive<Record<SearchTab, SearchErrorKind>>({ song: '', playlist: '', mv: '' })
+
 import {
   exploreTags,
   type ExploreTagItem,
@@ -157,9 +182,13 @@ const clearSelectedTags = () => {
 }
 
 const fetchDefault = async () => {
-  const res = await searchDefault()
-  const def = (res as any)?.data?.realkeyword || (res as any)?.data?.showKeyword || ''
-  state.placeholder = def || ''
+  try {
+    const res = await searchDefault()
+    const def = (res as any)?.data?.realkeyword || (res as any)?.data?.showKeyword || ''
+    state.placeholder = def || ''
+  } catch {
+    state.placeholder = ''
+  }
 }
 
 const fetchHot = async () => {
@@ -211,6 +240,9 @@ let searchAbort: AbortController | null = null
 let searchGeneration = 0
 const resetResults = () => {
   suppressPagingFetch = true
+  searchErrors.song = ''
+  searchErrors.playlist = ''
+  searchErrors.mv = ''
   state.songs = []
   state.playlists = []
   state.mvs = []
@@ -248,14 +280,20 @@ const fetchSongs = async (signal: AbortSignal, generation: number) => {
     return
   }
 
+  let lastError: unknown = null
   // 1. 优先调用 Sonic 统一多源 SHA 聚合与音质分级搜索网关
   try {
-    const sonicRes = await fetch(
+    const response = await fetch(
       `/api/sonic/search/nexus?q=${encodeURIComponent(term)}&page=${state.songPage}&count=${state.songPageSize}`,
       { signal }
-    ).then((r) => r.json())
+    )
+    if (!response.ok) {
+      throw Object.assign(new Error(`Sonic HTTP ${response.status}`), { status: response.status })
+    }
+    const sonicRes = await response.json()
     if (signal.aborted || generation !== searchGeneration) return
-    const tracks = sonicRes?.data?.tracks || []
+    checkSearchPayload(sonicRes)
+    const tracks = Array.isArray(sonicRes?.data?.tracks) ? sonicRes.data.tracks : []
     if (tracks.length > 0) {
       state.songs = tracks.map((t: any) => ({
         id: t.platformId || t.id,
@@ -273,6 +311,14 @@ const fetchSongs = async (signal: AbortSignal, generation: number) => {
         sha: t.sha || '',
         qualityBadge: t.qualityBadge || undefined,
         qualities: t.qualities || [],
+        sources: t.sources || [],
+        streamType: t.streamType || (t.platform === 'netease' && t.isVip ? 'trial' : undefined),
+        trialDuration: t.trialDuration,
+        resolvedSource: t.resolvedSource,
+        resolvedId: t.resolvedId,
+        resolvedPlatformId: t.resolvedPlatformId,
+        resolvedTitle: t.resolvedTitle,
+        resolvedArtist: t.resolvedArtist,
         liked: false,
       }))
       state.songTotal = sonicRes?.data?.total || tracks.length
@@ -280,7 +326,7 @@ const fetchSongs = async (signal: AbortSignal, generation: number) => {
     }
   } catch (err) {
     if (signal.aborted || generation !== searchGeneration) return
-    console.warn('[Sonic Mobile Search] Nexus gateway warning:', err)
+    lastError = err
   }
 
   // 2. 备用兜底检索通道
@@ -292,14 +338,18 @@ const fetchSongs = async (signal: AbortSignal, generation: number) => {
       offset: (state.songPage - 1) * state.songPageSize,
     }, signal)
     if (signal.aborted || generation !== searchGeneration) return
+    checkSearchPayload(res)
     const { songs, total } = transformSearchSongs(res as Record<string, unknown>)
     state.songs = songs
     state.songTotal = total
-  } catch {
+    if (songs.length > 0) return
+  } catch (err) {
     if (signal.aborted || generation !== searchGeneration) return
     state.songs = []
     state.songTotal = 0
+    lastError = err
   }
+  if (lastError) searchErrors.song = classifySearchError(lastError)
 }
 
 const fetchPlaylists = async (signal: AbortSignal, generation: number) => {
@@ -312,13 +362,15 @@ const fetchPlaylists = async (signal: AbortSignal, generation: number) => {
       offset: (state.playlistPage - 1) * state.playlistPageSize,
     }, signal)
     if (signal.aborted || generation !== searchGeneration) return
+    checkSearchPayload(res)
     const { playlists, total } = transformSearchPlaylists(res as Record<string, unknown>)
     state.playlists = playlists
     state.playlistTotal = total
-  } catch {
+  } catch (err) {
     if (signal.aborted || generation !== searchGeneration) return
     state.playlists = []
     state.playlistTotal = 0
+    searchErrors.playlist = classifySearchError(err)
   }
 }
 
@@ -332,13 +384,15 @@ const fetchMVs = async (signal: AbortSignal, generation: number) => {
       offset: (state.mvPage - 1) * state.mvPageSize,
     }, signal)
     if (signal.aborted || generation !== searchGeneration) return
+    checkSearchPayload(res)
     const { mvs, total } = transformSearchMVs(res as Record<string, unknown>)
     state.mvs = mvs
     state.mvTotal = total
-  } catch {
+  } catch (err) {
     if (signal.aborted || generation !== searchGeneration) return
     state.mvs = []
     state.mvTotal = 0
+    searchErrors.mv = classifySearchError(err)
   }
 }
 
@@ -353,6 +407,9 @@ const searchAll = async () => {
   const controller = new AbortController()
   searchAbort = controller
   const generation = ++searchGeneration
+  searchErrors.song = ''
+  searchErrors.playlist = ''
+  searchErrors.mv = ''
   state.hasSearched = true
   state.loading = true
   try {
@@ -497,6 +554,7 @@ const mapToStoreSong = (s: SongData): Song => ({
   qualityBadge: s.qualityBadge,
   resolvedSource: (s as any).resolvedSource,
   resolvedId: (s as any).resolvedId,
+  resolvedPlatformId: (s as any).resolvedPlatformId,
   resolvedTitle: (s as any).resolvedTitle,
   resolvedArtist: (s as any).resolvedArtist,
 })
@@ -794,7 +852,7 @@ watch(
       <swiper
         v-else
         class="h-full w-full"
-        :initial-slide="0"
+        :initial-slide="tabs.findIndex(item => item.key === tab)"
         :modules="[EffectCreative]"
         effect="creative"
         :creative-effect="creativeEffect"
@@ -821,8 +879,9 @@ watch(
               </Button>
             </div>
 
+            <MobileSearchError v-if="searchErrors.song" :kind="searchErrors.song" @retry="searchAll" />
             <div
-              v-if="hasSearched && songs.length === 0"
+              v-else-if="hasSearched && songs.length === 0"
               class="empty-state flex flex-col items-center py-16"
             >
               <div class="empty-icon mb-4 flex h-20 w-20 items-center justify-center rounded-full">
@@ -831,7 +890,7 @@ watch(
               <p class="empty-title text-sm font-medium">{{ t('search.empty') }}</p>
             </div>
 
-            <MobileSongList v-else :songs="songs" variant="compact" :show-index="true" />
+            <MobileSongList v-else data-testid="search-song-results" :songs="songs" variant="compact" :show-index="true" />
 
             <Pagination
               v-if="songTotal > songPageSize"
@@ -856,8 +915,9 @@ watch(
               </p>
             </div>
 
+            <MobileSearchError v-if="searchErrors.playlist" :kind="searchErrors.playlist" @retry="searchAll" />
             <div
-              v-if="hasSearched && playlists.length === 0"
+              v-else-if="hasSearched && playlists.length === 0"
               class="empty-state flex flex-col items-center py-16"
             >
               <div class="empty-icon mb-4 flex h-20 w-20 items-center justify-center rounded-full">
@@ -922,8 +982,9 @@ watch(
               </p>
             </div>
 
+            <MobileSearchError v-if="searchErrors.mv" :kind="searchErrors.mv" @retry="searchAll" />
             <div
-              v-if="hasSearched && mvs.length === 0"
+              v-else-if="hasSearched && mvs.length === 0"
               class="empty-state flex flex-col items-center py-16"
             >
               <div class="empty-icon mb-4 flex h-20 w-20 items-center justify-center rounded-full">

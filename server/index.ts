@@ -12,15 +12,21 @@ import dns from 'node:dns/promises';
 import {
   checkEngineAccess,
   checkStagingAccessGate,
+  normalizeEnginePathname,
   setSafeFetchHostResolver,
 } from '../functions/_lib/sonic/security';
 import {
   getReleaseMetadata,
+  getReleaseReadiness,
+  classifyRouteGroup,
+  recordStreamBodyMetric,
   recordHttpRequestMetric,
   redactSensitiveString,
 } from '../functions/_lib/sonic/observability';
 import { handleOptions } from '../functions/_lib/http';
-import { toWebRequest } from './request-adapter';
+import { checkEngineIdentityAccess } from '../functions/_lib/sonic/engine-identity';
+import { requireAccess } from '../functions/_lib/sonic/access';
+import { toWebRequest, abortWebRequest } from './request-adapter';
 
 // Route handlers shared directly from `functions/`
 import { onRequest as handleProxy } from '../functions/proxy';
@@ -50,11 +56,18 @@ import { onRequest as handleSonicRecommendForYou } from '../functions/api/sonic/
 import { onRequest as handleSonicRecommendTrending } from '../functions/api/sonic/recommend/trending';
 import { onRequest as handleSonicRecommendSimilar } from '../functions/api/sonic/recommend/similar';
 import { onRequest as handleSonicRecommendDiscover } from '../functions/api/sonic/recommend/discover';
+import { onRequest as handleSonicRadarAlbum } from '../functions/api/sonic/recommend/radar-album';
 import { onRequest as handleSonicEvents } from '../functions/api/sonic/events';
 import { onRequest as handleSonicLyricsNexus } from '../functions/api/sonic/lyrics/nexus';
 import { onRequest as handleSonicLyricsSync } from '../functions/api/sonic/lyrics/sync';
 import { onRequest as handleSonicLyricsPlatform } from '../functions/api/sonic/lyrics/[platform]';
+import { onRequest as handleAccountLibrary } from '../functions/api/account/library';
+import { onRequest as handleAccessInvite } from '../functions/api/access/invite';
+import { onRequest as handleAccessSession } from '../functions/api/access/session';
+import { onRequest as handleAccessLogout } from '../functions/api/access/logout';
 import { createServerRecommendStore, probeDiskHealth } from './recommend-sqlite';
+import { createServerAccountStore } from './account-store';
+import { createServerAccessStore } from './access-store';
 import type { RecommendStore } from '../functions/_lib/sonic/recommend/types';
 
 const MIME_TYPES: Record<string, string> = {
@@ -79,6 +92,34 @@ const MIME_TYPES: Record<string, string> = {
 
 let serverRecommendStore: RecommendStore | null = null;
 let serverRecommendDbKey = '';
+let serverAccountStore: ReturnType<typeof createServerAccountStore> | null = null;
+let serverAccountDbKey = '';
+let serverAccessStore: ReturnType<typeof createServerAccessStore> | null = null;
+let serverAccessDbKey = '';
+
+function getOrInitServerAccountStore(dbPath?: string) {
+  const desiredKey = (dbPath ?? process.env.SONIC_ACCOUNT_DB_PATH ?? '').trim();
+  if (!desiredKey || desiredKey === 'memory' || desiredKey === 'off') {
+    throw new Error('SONIC_ACCOUNT_DB_PATH must be a dedicated persistent database path');
+  }
+  if (!serverAccountStore || serverAccountDbKey !== desiredKey) {
+    serverAccountStore?.close();
+    serverAccountStore = createServerAccountStore(desiredKey);
+    serverAccountDbKey = desiredKey;
+  }
+  return serverAccountStore;
+}
+
+function getOrInitServerAccessStore(dbPath?: string, seedCodes?: string) {
+  const desiredKey = (dbPath ?? process.env.SONIC_ACCESS_DB_PATH ?? '').trim();
+  if (!desiredKey || desiredKey === 'memory' || desiredKey === 'off') throw new Error('SONIC_ACCESS_DB_PATH must be a dedicated persistent database path');
+  if (!serverAccessStore || serverAccessDbKey !== desiredKey) {
+    serverAccessStore?.close();
+    serverAccessStore = createServerAccessStore(desiredKey, seedCodes ?? process.env.SONIC_INVITE_CODES ?? '');
+    serverAccessDbKey = desiredKey;
+  }
+  return serverAccessStore;
+}
 
 function getOrInitServerRecommendStore(dbPath?: string): RecommendStore {
   const desiredKey = (dbPath ?? process.env.SONIC_RECOMMEND_DB_PATH ?? '').trim() || 'default';
@@ -97,6 +138,12 @@ function buildRuntimeEnv(overrides?: Partial<AppEnv>): AppEnv {
   if (!env.RECOMMEND_STORE) {
     env.RECOMMEND_STORE = getOrInitServerRecommendStore(env.SONIC_RECOMMEND_DB_PATH);
   }
+  if (!env.ACCOUNT_STORE && env.SONIC_ACCOUNT_DB_PATH) {
+    env.ACCOUNT_STORE = getOrInitServerAccountStore(env.SONIC_ACCOUNT_DB_PATH);
+  }
+  if (!env.SONIC_ACCESS_STORE && env.SONIC_ACCESS_DB_PATH && String(env.SONIC_ACCESS_MODE || '').toLowerCase() === 'invite') {
+    env.SONIC_ACCESS_STORE = getOrInitServerAccessStore(env.SONIC_ACCESS_DB_PATH, env.SONIC_INVITE_CODES);
+  }
   if (!env.SONIC_DISK_HEALTH_PROVIDER) {
     const minFreeMb = Math.max(1, parseInt(String(env.SONIC_MIN_FREE_DISK_MB || '64'), 10) || 64);
     env.SONIC_DISK_HEALTH_PROVIDER = () =>
@@ -112,7 +159,11 @@ setSafeFetchHostResolver(async (hostname: string) => {
   return records.map((record) => record.address);
 });
 
-async function sendWebResponse(res: http.ServerResponse, webResp: Response, isHead: boolean): Promise<void> {
+async function sendWebResponse(res: http.ServerResponse, webResp: Response, isHead: boolean, mediaBody = false): Promise<void> {
+  if (res.destroyed) {
+    void webResp.body?.cancel().catch(() => {});
+    return;
+  }
   const outHeaders: Record<string, string | string[]> = {};
   webResp.headers.forEach((value, key) => {
     const lower = key.toLowerCase();
@@ -124,35 +175,45 @@ async function sendWebResponse(res: http.ServerResponse, webResp: Response, isHe
     }
     outHeaders[lower] = value;
   });
-
   res.writeHead(webResp.status, webResp.statusText || undefined, outHeaders);
-
   if (isHead || !webResp.body) {
-    if (webResp.body) {
-      webResp.body.cancel().catch(() => {});
-    }
+    void webResp.body?.cancel().catch(() => {});
     res.end();
     return;
   }
 
   const nodeStream = Readable.fromWeb(webResp.body as any);
-  res.on('close', () => {
-    if (!nodeStream.destroyed) {
-      nodeStream.destroy();
-    }
+  if (mediaBody) recordStreamBodyMetric('started', 'http');
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = (outcome: 'completed' | 'cancelled' | 'error' | 'timeout') => {
+      if (settled) return;
+      settled = true;
+      res.removeListener('close', onClose);
+      res.removeListener('finish', onFinish);
+      if (mediaBody) recordStreamBodyMetric(outcome, 'http');
+      resolve();
+    };
+    const onClose = () => {
+      finish(res.writableFinished ? 'completed' : 'cancelled');
+      if (!nodeStream.destroyed) nodeStream.destroy();
+    };
+    const onFinish = () => finish('completed');
+    const onError = (error: any) => {
+      finish(error?.name === 'TimeoutError' ? 'timeout' : 'error');
+      // A truncated media body cannot be reported as a clean EOF.
+      res.destroy();
+    };
+    res.once('close', onClose);
+    res.once('finish', onFinish);
+    nodeStream.once('error', onError);
+    nodeStream.pipe(res);
   });
-  nodeStream.on('error', () => {
-    if (!res.headersSent) {
-      res.writeHead(502);
-    }
-    res.end();
-  });
-  nodeStream.pipe(res);
 }
 
 async function dispatchFunctionRoute(request: Request, env: AppEnv): Promise<Response | null> {
   const url = new URL(request.url);
-  const pathname = url.pathname.replace(/\/+$/, '') || '/';
+  const pathname = normalizeEnginePathname(url.pathname);
   const waitUntil = (p: Promise<any>) => {
     p.catch(() => {});
   };
@@ -175,6 +236,10 @@ async function dispatchFunctionRoute(request: Request, env: AppEnv): Promise<Res
   if (pathname === '/api/auth/user') return handleAuthUser({ request, env });
   if (pathname === '/api/auth/logout') return handleAuthLogout({ request, env });
   if (pathname === '/api/auth/revoke') return handleAuthRevoke({ request, env });
+  if (pathname === '/api/access/invite' || pathname === '/api/access/redeem') return handleAccessInvite({ request, env });
+  if (pathname === '/api/access/session' || pathname === '/api/access/status') return handleAccessSession({ request, env });
+  if (pathname === '/api/access/logout') return handleAccessLogout({ request, env });
+  if (pathname === '/api/account/library') return handleAccountLibrary({ request, env });
 
   // Music routes & aliases
   if (pathname === '/api/cover' || pathname === '/api/music/cover') {
@@ -211,6 +276,9 @@ async function dispatchFunctionRoute(request: Request, env: AppEnv): Promise<Res
   }
   if (pathname === '/api/sonic/recommend/discover') {
     return handleSonicRecommendDiscover({ request, env, waitUntil });
+  }
+  if (pathname === '/api/sonic/recommend/radar-album') {
+    return handleSonicRadarAlbum({ request, env });
   }
   if (pathname === '/api/sonic/events') {
     return handleSonicEvents({ request, env, waitUntil });
@@ -326,7 +394,46 @@ async function serveStaticAsset(staticRoot: string, pathname: string, isHead: bo
   }
 }
 
+interface ServerDrainState { draining: boolean; deadlineAt?: number; activeRequests: number; }
+const serverDrainers = new WeakMap<http.Server, (timeoutMs?: number) => Promise<void>>();
+
+export function drainSonicServer(server: http.Server, timeoutMs?: number): Promise<void> {
+  const drain = serverDrainers.get(server);
+  return drain ? drain(timeoutMs) : new Promise((resolve) => server.close(() => resolve()));
+}
+
+export async function shutdownSonicServer(server: http.Server, store: { close?: () => void } | null = serverRecommendStore as any, timeoutMs?: number): Promise<void> {
+  await drainSonicServer(server, timeoutMs);
+  store?.close?.();
+  if (serverAccountStore) {
+    serverAccountStore.close();
+    serverAccountStore = null;
+    serverAccountDbKey = '';
+  }
+  if (serverAccessStore) {
+    serverAccessStore.close();
+    serverAccessStore = null;
+    serverAccessDbKey = '';
+  }
+}
+
+export function withRecommendStartupLock<T>(dbPath: string | undefined, initialize: () => T): T {
+  const configured = (dbPath ?? process.env.SONIC_RECOMMEND_DB_PATH ?? '').trim();
+  if (configured === 'memory' || configured === 'off' || configured === ':memory:') return initialize();
+  const resolved = path.resolve(configured || path.join(process.cwd(), 'data', 'sonic-recommend.sqlite'));
+  const lock = `${resolved}.maintenance-lock`;
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  fs.mkdirSync(lock); // Existing restore lock must fail closed, without deleting its owner.
+  try {
+    return initialize();
+  } finally {
+    fs.rmdirSync(lock);
+  }
+}
+
 export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist'), envOverrides?: Partial<AppEnv>) {
+  const drainState: ServerDrainState = { draining: false, activeRequests: 0 };
+  const activeRequests = new Map<http.ServerResponse, Request>();
   const server = http.createServer(async (req, res) => {
     const startedAt = Date.now();
     const requestId = crypto.randomUUID();
@@ -353,12 +460,23 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
     });
 
     try {
-      const webReq = toWebRequest(req);
+      const webReq = toWebRequest(req, res);
+      activeRequests.set(res, webReq);
+      drainState.activeRequests = activeRequests.size;
+      const removeActive = () => {
+        activeRequests.delete(res);
+        drainState.activeRequests = activeRequests.size;
+        res.removeListener('finish', removeActive);
+        res.removeListener('close', removeActive);
+      };
+      res.once('finish', removeActive);
+      res.once('close', removeActive);
       const env = buildRuntimeEnv(envOverrides);
+      env.SONIC_DRAIN_STATE = drainState;
       activeEnv = env;
       const release = getReleaseMetadata(env);
-      if (release.releaseCommit !== 'unknown') {
-        res.setHeader('X-Sonic-Release', release.releaseCommit.slice(0, 12));
+      if (release.releaseId || release.releaseCommit !== 'unknown') {
+        res.setHeader('X-Sonic-Release', release.releaseId || release.releaseCommit.slice(0, 12));
       }
       if (
         release.environment === 'staging' ||
@@ -379,6 +497,12 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
         return;
       }
 
+      const accessDenied = await requireAccess(webReq, env);
+      if (accessDenied) {
+        await sendWebResponse(res, accessDenied, webReq.method === 'HEAD');
+        return;
+      }
+
       // Mandatory top-level authentication gate on `engine-sonic.*` and internal engine paths (Condition 2c)
       const engineDenied = checkEngineAccess(webReq, env);
       if (engineDenied) {
@@ -386,9 +510,26 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
         return;
       }
 
+      const identityDenied = await checkEngineIdentityAccess(webReq, env);
+      if (identityDenied) {
+        await sendWebResponse(res, identityDenied, webReq.method === 'HEAD');
+        return;
+      }
+
+      const pathname = normalizeEnginePathname(new URL(webReq.url).pathname);
+      const releaseReadiness = getReleaseReadiness(env);
+      if (pathname !== '/api/sonic/engine/health' && (drainState.draining || !releaseReadiness.ok)) {
+        await sendWebResponse(res, new Response(JSON.stringify({
+          brand: 'Sonic', error: {
+            code: drainState.draining ? 'ENGINE_DRAINING' : 'RELEASE_METADATA_REQUIRED',
+            message: drainState.draining ? 'Engine is draining' : 'Release metadata is missing or invalid',
+          },
+        }), { status: 503, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': '5', Connection: 'close' } }), webReq.method === 'HEAD');
+        return;
+      }
       const apiResp = await dispatchFunctionRoute(webReq, env);
       if (apiResp) {
-        await sendWebResponse(res, apiResp, webReq.method === 'HEAD');
+        await sendWebResponse(res, apiResp, webReq.method === 'HEAD', classifyRouteGroup(pathname) === 'stream');
         return;
       }
 
@@ -396,6 +537,7 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
       const staticResp = await serveStaticAsset(staticRoot, url.pathname, webReq.method === 'HEAD');
       await sendWebResponse(res, staticResp, webReq.method === 'HEAD');
     } catch (err: any) {
+      if (res.destroyed) return;
       console.error(
         JSON.stringify({
           type: 'unhandled_error',
@@ -418,6 +560,28 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
     }
   });
 
+  let drainPromise: Promise<void> | undefined;
+  serverDrainers.set(server, (overrideTimeoutMs) => {
+    if (drainPromise) return drainPromise;
+    const configured = Number(overrideTimeoutMs ?? envOverrides?.SONIC_SHUTDOWN_TIMEOUT_MS ?? process.env.SONIC_SHUTDOWN_TIMEOUT_MS);
+    const timeoutMs = Number.isFinite(configured) && configured > 0 ? configured : 60_000;
+    drainState.draining = true;
+    drainState.deadlineAt = Date.now() + timeoutMs;
+    drainPromise = new Promise<void>((resolve) => {
+      const timer = setTimeout(() => {
+        for (const [response, request] of activeRequests) {
+          abortWebRequest(request);
+          response.destroy();
+        }
+        server.closeAllConnections();
+      }, timeoutMs);
+      timer.unref();
+      server.close(() => { clearTimeout(timer); resolve(); });
+      server.closeIdleConnections();
+    });
+    return drainPromise;
+  });
+
   // Bound slow-client and idle-connection resource consumption.
   server.headersTimeout = 15_000;
   server.requestTimeout = 30_000;
@@ -436,7 +600,8 @@ if (isMain) {
   // Fail fast when the production database cannot be opened: binding the port while
   // silently using an in-memory store would report healthy and lose data on restart.
   try {
-    getOrInitServerRecommendStore();
+    if (!getReleaseReadiness(process.env as AppEnv).ok) throw new Error('Release metadata is missing or invalid');
+    withRecommendStartupLock(process.env.SONIC_RECOMMEND_DB_PATH, () => getOrInitServerRecommendStore());
   } catch (err: any) {
     console.error(`[Sonic Local Engine] Fatal: ${err?.message || err}`);
     process.exit(1);
@@ -453,16 +618,17 @@ if (isMain) {
     );
   });
 
-  const shutdown = (sig: string) => {
-    console.log(`[Sonic Local Engine] Received ${sig}, shutting down gracefully...`);
-    server.close(() => {
-      try {
-        (serverRecommendStore as any)?.close?.();
-      } catch {}
+  let shutdownStarted = false;
+  const shutdown = async (sig: string) => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    console.log(`[Sonic Local Engine] Received ${sig}, draining active requests...`);
+    try {
+      await shutdownSonicServer(server);
+    } finally {
       process.exit(0);
-    });
-    setTimeout(() => process.exit(0), 5000).unref();
+    }
   };
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
-  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+  process.on('SIGINT', () => { void shutdown('SIGINT'); });
 }

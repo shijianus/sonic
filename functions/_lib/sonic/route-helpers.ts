@@ -9,7 +9,8 @@ import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorRespons
 import { isSourceEnabledByPolicy } from './licensing';
 import { recordLicensingBlockMetric, redactSensitiveString } from './observability';
 import { extractAuthCredentials } from '../auth';
-import { callLocalEngineJson } from './local-engine';
+import { checkEngineIdentityAccess } from './engine-identity';
+import { callLocalEngineJson, createRuntimeAbortBudget } from './local-engine';
 
 export { handleOptions };
 
@@ -122,6 +123,8 @@ export function sonicError(code: string, message: string, status = 400, meta?: P
 export async function guardGatewayRequest(request: Request, env: any, scope: string): Promise<Response | null> {
   const engineDenied = checkEngineAccess(request, env);
   if (engineDenied) return engineDenied;
+  const identityDenied = await checkEngineIdentityAccess(request, env);
+  if (identityDenied) return identityDenied;
 
   const method = request.method.toUpperCase();
   if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
@@ -327,6 +330,7 @@ export async function handleSingleProviderLyricsRequest(
       request,
       timeoutMs: Math.min(config.engineTimeoutMs, config.timeoutMs),
     });
+    request.signal.throwIfAborted();
     circuitState = engineRes.circuitState;
     if (engineRes.ok && engineRes.data?.brand === 'Sonic' && engineRes.data?.data) {
       const body = engineRes.data;
@@ -363,10 +367,13 @@ export async function handleSingleProviderLyricsRequest(
       });
     }
 
+  const budget = createRuntimeAbortBudget([request.signal], config.timeoutMs);
   const startTime = Date.now();
   try {
-    const timeoutSignal = AbortSignal.timeout(config.timeoutMs);
+    const timeoutSignal = budget.signal;
+    timeoutSignal.throwIfAborted();
     const result = await adapter.getLyrics(params, { env, signal: timeoutSignal });
+    timeoutSignal.throwIfAborted();
     const latencyMs = Date.now() - startTime;
     const via = config.runtime === 'linux-engine' ? 'local-engine' : 'cf-direct';
 
@@ -445,6 +452,7 @@ export async function handleSingleProviderLyricsRequest(
       ),
     });
   } catch (err: any) {
+    request.signal.throwIfAborted();
     const latencyMs = Date.now() - startTime;
     return sonicError('PROVIDER_ERROR', err?.message || `Failed to fetch lyrics from ${p}`, 502, {
       provider: p,
@@ -452,6 +460,8 @@ export async function handleSingleProviderLyricsRequest(
       ...(degraded ? { degraded: true, degradedReason, circuitState } : {}),
       attempts: [...attemptsPrefix, { provider: p, ok: false, ms: latencyMs, error: err?.message }],
     });
+  } finally {
+    budget.dispose();
   }
 }
 
@@ -557,6 +567,7 @@ export async function handleNexusSearchRequest(
       ),
     });
   } catch (err: any) {
+    request.signal.throwIfAborted();
     const latencyMs = Date.now() - startTime;
     return sonicError('SEARCH_ERROR', err?.message || 'Nexus search failed', 502, {
       provider: 'nexus',
@@ -660,6 +671,7 @@ export async function handleSingleProviderSearchRequest(
       request,
       timeoutMs: Math.min(config.engineTimeoutMs, config.timeoutMs),
     });
+    request.signal.throwIfAborted();
     circuitState = engineRes.circuitState;
     if (engineRes.ok && engineRes.data?.brand === 'Sonic' && engineRes.data?.data) {
       const body = engineRes.data;
@@ -696,10 +708,13 @@ export async function handleSingleProviderSearchRequest(
     });
   }
 
+  const budget = createRuntimeAbortBudget([request.signal], config.timeoutMs);
   const startTime = Date.now();
   try {
-    const timeoutSignal = AbortSignal.timeout(config.timeoutMs);
+    const timeoutSignal = budget.signal;
+    timeoutSignal.throwIfAborted();
     const tracks = await adapter.search(query, { page, count, env, signal: timeoutSignal, platform: p });
+    timeoutSignal.throwIfAborted();
     const latencyMs = Date.now() - startTime;
     const via = config.runtime === 'linux-engine' ? 'local-engine' : 'cf-direct';
     const attemptName = config.runtime === 'linux-engine' && (p === 'netease' || p === 'qq' || p === 'kugou' || p === 'kuwo')
@@ -742,6 +757,7 @@ export async function handleSingleProviderSearchRequest(
       ),
     });
   } catch (err: any) {
+    request.signal.throwIfAborted();
     const latencyMs = Date.now() - startTime;
     return sonicError('PROVIDER_SEARCH_ERROR', err?.message || `Search failed on ${p}`, 502, {
       provider: p,
@@ -749,5 +765,7 @@ export async function handleSingleProviderSearchRequest(
       ...(degraded ? { degraded: true, degradedReason, circuitState } : {}),
       attempts: [...attemptsPrefix, { provider: p, ok: false, ms: latencyMs, error: err?.message }],
     });
+  } finally {
+    budget.dispose();
   }
 }

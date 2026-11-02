@@ -26,9 +26,19 @@ export interface AppEnv {
   SONIC_RUNTIME?: 'cf-pages' | 'linux-engine' | string;
   SONIC_LOCAL_ENGINE_URL?: string;
   SONIC_ENGINE_SECRET?: string;
+  SONIC_ENGINE_IDENTITY_SECRET?: string;
+  SONIC_REQUIRE_ENGINE_IDENTITY?: string;
   SONIC_REQUIRE_ENGINE_AUTH?: string;
   SONIC_REQUIRE_AUTH?: string;
   SONIC_ENGINE_TIMEOUT_MS?: string;
+  SONIC_SHUTDOWN_TIMEOUT_MS?: string;
+  SONIC_STREAM_FIRST_BYTE_TIMEOUT_MS?: string;
+  SONIC_STREAM_IDLE_TIMEOUT_MS?: string;
+  SONIC_STREAM_TOTAL_TIMEOUT_MS?: string;
+  SONIC_CACHE_MAX_BYTES?: string;
+  SONIC_NCM_REQUIRED?: string;
+  SONIC_REQUIRE_RELEASE_METADATA?: string;
+  SONIC_DRAIN_STATE?: { draining: boolean; deadlineAt?: number; activeRequests: number };
   SONIC_CB_FAILURE_THRESHOLD?: string;
   SONIC_CB_COOLDOWN_MS?: string;
   SONIC_NCM_API_URL?: string;
@@ -72,11 +82,25 @@ export interface AppEnv {
   // Release Metadata, Staging Gate & Observability / Alerting
   SONIC_ENV?: 'production' | 'staging' | 'development' | 'test' | string;
   SONIC_RELEASE_COMMIT?: string;
+  SONIC_RELEASE_ID?: string;
+  SONIC_SOURCE_DIGEST?: string;
+  SONIC_RELEASE_DIRTY?: string;
   SONIC_BUILD_TIME?: string;
   SONIC_STAGING_ACCESS_TOKEN?: string;
+  SONIC_ACCESS_MODE?: 'open' | 'legacy-staging' | 'invite' | string;
+  SONIC_ACCESS_SECRET?: string;
+  SONIC_ACCESS_SESSION_MAX_AGE_SEC?: string;
+  SONIC_INVITE_CODES?: string;
+  SONIC_INVITE_KV?: any;
   SONIC_ALERT_WEBHOOK_URL?: string;
   SONIC_ALERT_COOLDOWN_SEC?: string;
   SONIC_ALERT_5XX_THRESHOLD?: string;
+  SONIC_ALERT_WINDOW_SEC?: string;
+  SONIC_ALERT_MIN_REQUESTS?: string;
+  SONIC_ALERT_5XX_WARNING_RATIO?: string;
+  SONIC_ALERT_5XX_PAGING_RATIO?: string;
+  SONIC_ALERT_P95_WARNING_MS?: string;
+  SONIC_ALERT_P95_PAGING_MS?: string;
   SONIC_ALERT_ALLOW_LOCALHOST?: string;
   SONIC_MIN_FREE_DISK_MB?: string;
   SONIC_DISK_HEALTH_PROVIDER?: () => {
@@ -93,8 +117,10 @@ export interface AppEnv {
   // Intelligent Recommendation & Smart Search Engine
   RECOMMEND_STORE?: any;
   SONIC_RECOMMEND_DB_PATH?: string;
+  SONIC_ACCOUNT_DB_PATH?: string;
+  SONIC_ACCESS_DB_PATH?: string;
+  SONIC_ACCESS_STORE?: any;
   SONIC_RECOMMEND_RETENTION_DAYS?: string;
-  SONIC_RECOMMEND_OFFLINE?: string;
   SONIC_GORSE_URL?: string;
   SONIC_GORSE_API_KEY?: string;
   SONIC_MEILISEARCH_URL?: string;

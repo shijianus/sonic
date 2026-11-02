@@ -202,6 +202,10 @@ const getQualityBadgeInfo = (song: Song) => {
     flex: 1 1 auto;
   }
 
+  .song-inline-artist {
+    display: flex;
+  }
+
   .song-col-artist,
   .song-col-album,
   .song-col-duration {
@@ -412,12 +416,12 @@ const getQualityBadgeInfo = (song: Song) => {
                 ></div>
               </div>
               <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2">
+                <div class="flex min-w-0 flex-wrap items-center gap-2">
                   <h3
                     :title="song.name"
-                    class="text-primary line-clamp-1 text-base font-medium transition-colors group-hover:text-sky-300"
+                    class="text-primary min-w-0 break-words whitespace-normal text-base font-medium transition-colors group-hover:text-sky-300"
                   >
-                    <span class="line-clamp-1">{{ song.name }}</span>
+                    {{ song.name }}
                   </h3>
                   <!-- 试听标记徽章 (当曲目为试听切片时透明展示) -->
                   <span
@@ -437,15 +441,15 @@ const getQualityBadgeInfo = (song: Song) => {
                     {{ getQualityBadgeInfo(song)!.label }}
                   </span>
                 </div>
-                <div class="mt-0.5 flex items-center gap-2 md:hidden">
-                  <span class="text-primary/60 truncate text-xs">{{ song.artist }}</span>
+                <div class="song-inline-artist mt-0.5 flex items-center gap-2 md:hidden">
+                  <span class="text-primary/60 break-words whitespace-normal text-xs">{{ song.artist }}</span>
                 </div>
               </div>
             </div>
 
-            <div class="song-col-artist col-span-2 hidden overflow-hidden md:block">
+            <div class="song-col-artist col-span-2 hidden min-w-0 break-words whitespace-normal md:block">
               <template v-if="song.artists && song.artists.length > 0">
-                <span class="text-primary/80 truncate text-sm">
+                <span class="text-primary/80 break-words whitespace-normal text-sm">
                   <template v-for="(ar, idx) in song.artists" :key="ar.id">
                     <RouterLink
                       v-if="ar.id"
@@ -464,26 +468,26 @@ const getQualityBadgeInfo = (song: Song) => {
                 <RouterLink
                   :to="`/artist/${song.artistId}`"
                   :title="song.artist"
-                  class="text-primary/80 truncate text-sm transition-colors hover:text-sky-400"
+                  class="text-primary/80 break-words whitespace-normal text-sm transition-colors hover:text-sky-400"
                 >
                   {{ song.artist }}
                 </RouterLink>
               </template>
-              <span v-else :title="song.artist" class="text-primary/80 truncate text-sm">
+              <span v-else :title="song.artist" class="text-primary/80 break-words whitespace-normal text-sm">
                 {{ song.artist }}
               </span>
             </div>
 
-            <div class="song-col-album col-span-2 hidden overflow-hidden text-center md:block">
+            <div class="song-col-album col-span-2 hidden min-w-0 break-words whitespace-normal text-center md:block">
               <RouterLink
                 v-if="song.albumId"
                 :to="`/album/${song.albumId}`"
                 :title="song.album || '-'"
-                class="text-primary/60 hover:text-primary truncate text-sm transition-colors"
+                class="text-primary/60 hover:text-primary break-words whitespace-normal text-sm transition-colors"
               >
                 {{ song.album || '-' }}
               </RouterLink>
-              <span v-else :title="song.album || '-'" class="text-primary/60 truncate text-sm">
+              <span v-else :title="song.album || '-'" class="text-primary/60 break-words whitespace-normal text-sm">
                 {{ song.album || '-' }}
               </span>
             </div>

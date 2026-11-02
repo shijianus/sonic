@@ -3,6 +3,8 @@ import { defineAsyncComponent } from 'vue'
 import GlassSelect from '@/components/Ui/GlassSelect.vue'
 import GlassCheckbox from '@/components/Ui/GlassCheckbox.vue'
 import PrivacyDataSection from '@/components/Settings/PrivacyDataSection.vue'
+import AccessStatusCard from '@/components/Access/AccessStatusCard.vue'
+import AccountSyncCard from '@/components/Account/AccountSyncCard.vue'
 import { useSettingsStore } from '@/stores/modules/settings'
 import { useGlobalStore } from '@/stores/modules/global'
 import { useAuthStore } from '@/stores/modules/auth'
@@ -425,6 +427,14 @@ onMounted(() => {
             </span>
           </div>
         </div>
+      </div>
+
+      <div class="mt-6">
+        <AccessStatusCard />
+      </div>
+
+      <div class="mt-6">
+        <AccountSyncCard />
       </div>
 
       <div class="mt-6">

@@ -38,5 +38,8 @@ data/
 *.db
 *.db-*
 
-# 发布证据日志需要入库（仅限交接目录）
-!reports/handoff/evidence/*.log
+# Generated release evidence, local gray-test payloads and package archives
+reports/release-readiness/artifacts/
+reports/release-readiness/evidence/
+reports/release-readiness/latest-*.json
+graytest/

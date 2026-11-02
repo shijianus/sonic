@@ -135,6 +135,7 @@ export async function handleNexusLyricsRequest(
       ),
     });
   } catch (err: any) {
+    request.signal.throwIfAborted();
     console.error('[Sonic Nexus Lyrics Error]', err);
     return sonicError('INTERNAL_ERROR', err?.message || 'Failed to resolve nexus lyrics', 502, {
       latencyMs: Date.now() - startTime,

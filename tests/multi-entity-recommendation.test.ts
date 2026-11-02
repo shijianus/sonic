@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,6 +38,14 @@ describe('Sonic 歌集 (Album/Playlist) 与 MV 多实体推荐与信号传播全
     tempDbPath = path.join(tempDbDir, 'recommend-test.sqlite');
     sqliteStore = new SqliteRecommendStore(tempDbPath);
     ensureMultiEntityCatalogSeeded(sqliteStore);
+    // Fixed provider-verified catalog fixtures. A popular audio track alone must
+    // no longer fabricate an Official MV; video IDs belong to the server catalog.
+    for (const store of [memStore, sqliteStore]) {
+      for (const [trackId, mvId] of [['186016', '550001'], ['347230', '33894312']]) {
+        const track = store.getTrack(trackId)!;
+        store.upsertTrack({ ...track, mvSourceIds: { netease: mvId } });
+      }
+    }
 
     envMem = {
       RECOMMEND_STORE: memStore,
@@ -47,6 +55,11 @@ describe('Sonic 歌集 (Album/Playlist) 与 MV 多实体推荐与信号传播全
       RECOMMEND_STORE: sqliteStore,
       SONIC_RECOMMEND_OFFLINE: '1',
     };
+  });
+
+  afterEach(() => {
+    sqliteStore.close();
+    fs.rmSync(tempDbDir, { recursive: true, force: true });
   });
 
   describe('1. 实体模型统一与 SQLite/Memory 双存储 CRUD 验证', () => {

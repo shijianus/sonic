@@ -16,6 +16,8 @@ import I18n from '@/languages'
 import Button from '@/components/Ui/Button.vue'
 import GlassSelect from '@/components/Ui/GlassSelect.vue'
 import PrivacyDataSection from '@/components/Settings/PrivacyDataSection.vue'
+import AccessStatusCard from '@/components/Access/AccessStatusCard.vue'
+import AccountSyncCard from '@/components/Account/AccountSyncCard.vue'
 import { BRAND_FULL } from '@/config/brand'
 
 const settings = useSettingsStore()
@@ -351,6 +353,10 @@ onMounted(() => {
         </div>
       </div>
     </section>
+
+    <AccessStatusCard class="mb-4" />
+
+    <AccountSyncCard class="mb-4" />
 
     <PrivacyDataSection class="mb-4" />
 

@@ -108,9 +108,9 @@ onUnmounted(() => {
       </button>
       <div class="min-w-0 flex-1">
         <div class="flex items-start gap-3">
-          <div class="min-w-0">
-            <div class="flex items-center gap-1.5 min-w-0">
-              <p class="text-primary truncate text-sm font-medium">{{ currentSong.name }}</p>
+          <div class="min-w-0 flex-1">
+            <div class="flex items-start gap-1.5 min-w-0">
+              <p data-testid="now-playing-title" class="text-primary min-w-0 break-words whitespace-normal text-sm font-medium">{{ currentSong.name }}</p>
               <span
                 v-if="currentSong?.streamType === 'trial'"
                 :title="t('player.trialTooltip')"
@@ -119,7 +119,7 @@ onUnmounted(() => {
                 {{ t('player.trialBadge') }}
               </span>
             </div>
-            <p class="text-primary/70 truncate text-xs">{{ currentSong.artist || '' }}</p>
+            <p class="text-primary/70 break-words whitespace-normal text-xs">{{ currentSong.artist || '' }}</p>
           </div>
           <div v-if="footerLyrics.enabled" class="min-w-0 flex-1 text-right">
             <p
@@ -142,14 +142,17 @@ onUnmounted(() => {
           <span class="text-primary/75 text-[11px]">{{ formattedDuration }}</span>
         </div>
       </div>
+      <!-- Loading remains cancellable through the existing togglePlay action. -->
       <Button
+        data-testid="player-toggle"
         size="icon-lg"
         rounded="full"
-        :icon="isPlaying ? 'mdi--pause' : 'mdi--play'"
-        :loading="isLoading"
-        icon-class="h-5 w-5"
-        :title="isPlaying ? $t('player.pause') : $t('player.play')"
-        :aria-label="isPlaying ? $t('player.pause') : $t('player.play')"
+        class="shrink-0"
+        :icon="isLoading ? 'icon-[mdi--loading]' : isPlaying ? 'icon-[mdi--pause]' : 'icon-[mdi--play]'"
+        :icon-class="['h-5 w-5', { 'animate-spin': isLoading }]"
+        :aria-busy="isLoading"
+        :title="isLoading ? $t('common.cancel') : isPlaying ? $t('player.pause') : $t('player.play')"
+        :aria-label="isLoading ? $t('common.cancel') : isPlaying ? $t('player.pause') : $t('player.play')"
         @click="togglePlay"
       />
       <Button
@@ -157,7 +160,7 @@ onUnmounted(() => {
         rounded="full"
         icon="icon-[mdi--skip-next]"
         icon-class="h-5 w-5"
-        class="ml-1"
+        class="ml-1 shrink-0"
         :title="$t('player.next')"
         :aria-label="$t('player.next')"
         @click="next"

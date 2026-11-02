@@ -1,3 +1,4 @@
+import { fetchWithRuntimeBudget } from '../local-engine';
 // Sonic Provider — AMLL TTML (api.amll.dev)
 // High-precision Timed Text Markup Language Word-Level Lyrics
 
@@ -75,10 +76,10 @@ export async function fetchAmllByIds(
 
   try {
     const url = `${baseUrl}/v1/lyrics/get?${queryParts.join('&')}`;
-    const resp = await fetch(url, {
+    const resp = await fetchWithRuntimeBudget(url, {
       headers: { 'User-Agent': SONIC_UA, Accept: 'application/json' },
-      signal: signal || AbortSignal.timeout(6000),
-    });
+      signal: signal,
+    }, { timeoutMs: 6000 });
     if (!resp.ok) return null;
     const json = (await resp.json()) as AmllGetResponse;
     const rawTtml = json.data?.lyrics || json.data?.ttml;
@@ -99,7 +100,7 @@ export async function fetchAmllByIds(
       sourceId: String(data.id || data.filename || ''),
       matchLevel: 'HIGH_CONFIDENCE',
     };
-  } catch {
+  } catch { signal?.throwIfAborted();
     return null;
   }
 }
@@ -119,10 +120,10 @@ export async function fetchAmllBySearch(
 
   try {
     const searchUrl = `${baseUrl}/v1/lyrics/search?q=${encodeURIComponent(query)}&pageSize=5`;
-    const searchResp = await fetch(searchUrl, {
+    const searchResp = await fetchWithRuntimeBudget(searchUrl, {
       headers: { 'User-Agent': SONIC_UA, Accept: 'application/json' },
-      signal: signal || AbortSignal.timeout(6000),
-    });
+      signal: signal,
+    }, { timeoutMs: 6000 });
     if (!searchResp.ok) return null;
     const searchJson = (await searchResp.json()) as AmllSearchResponse;
     const results = Array.isArray(searchJson.data)
@@ -164,10 +165,10 @@ export async function fetchAmllBySearch(
 
     const getParam = best.id ? `id=${best.id}` : `filename=${encodeURIComponent(best.filename)}`;
     const getUrl = `${baseUrl}/v1/lyrics/get?${getParam}`;
-    const getResp = await fetch(getUrl, {
+    const getResp = await fetchWithRuntimeBudget(getUrl, {
       headers: { 'User-Agent': SONIC_UA, Accept: 'application/json' },
-      signal: signal || AbortSignal.timeout(6000),
-    });
+      signal: signal,
+    }, { timeoutMs: 6000 });
     if (!getResp.ok) return null;
     const getJson = (await getResp.json()) as AmllGetResponse;
     const rawTtml = getJson.data?.lyrics || getJson.data?.ttml;
@@ -188,7 +189,7 @@ export async function fetchAmllBySearch(
       sourceId: String(data.id || data.filename || best.id || best.filename || ''),
       matchLevel: 'MEDIUM',
     };
-  } catch {
+  } catch { signal?.throwIfAborted();
     return null;
   }
 }

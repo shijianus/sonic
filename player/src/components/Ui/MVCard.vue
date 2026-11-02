@@ -246,21 +246,25 @@ const handleClick = async (event: MouseEvent) => {
           margin-left: 6px;
         "></div>
       </div>
-      <p style="
+      <p class="mv-clone-name" style="
         margin-top: 20px;
         font-size: 18px;
         font-weight: 600;
         color: white;
         text-align: center;
         max-width: 80%;
-      ">${props.name}</p>
-      <p style="
+      "></p>
+      <p class="mv-clone-artist" style="
         margin-top: 8px;
         font-size: 14px;
         color: rgba(255,255,255,0.7);
-      ">${props.artist}</p>
+      "></p>
     </div>
   `
+  const cloneName = clone.querySelector('.mv-clone-name')
+  if (cloneName) cloneName.textContent = props.name
+  const cloneArtist = clone.querySelector('.mv-clone-artist')
+  if (cloneArtist) cloneArtist.textContent = props.artist
   clone.style.cssText = `
     position: fixed;
     z-index: 9999;

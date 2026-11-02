@@ -748,38 +748,7 @@ html.dark .song-cover {
 }
 
 :root.dark .mv-cover,
-html.dark /* ── 跳动音频均衡器动画 (移动端海报正在播放指示器) ── */
-@keyframes banner-eq-1 {
-  0%, 100% { height: 3px; }
-  50% { height: 11px; }
-}
-@keyframes banner-eq-2 {
-  0%, 100% { height: 9px; }
-  50% { height: 4px; }
-}
-@keyframes banner-eq-3 {
-  0%, 100% { height: 4px; }
-  50% { height: 12px; }
-}
-@keyframes banner-eq-4 {
-  0%, 100% { height: 10px; }
-  50% { height: 3px; }
-}
-
-.animate-equalizer-1 {
-  animation: banner-eq-1 0.8s ease-in-out infinite;
-}
-.animate-equalizer-2 {
-  animation: banner-eq-2 0.7s ease-in-out infinite 0.15s;
-}
-.animate-equalizer-3 {
-  animation: banner-eq-3 0.9s ease-in-out infinite 0.3s;
-}
-.animate-equalizer-4 {
-  animation: banner-eq-4 0.75s ease-in-out infinite 0.1s;
-}
-
-.mv-cover {
+html.dark .mv-cover {
   box-shadow:
     0 10px 15px -3px rgba(0, 0, 0, 0.3),
     0 4px 6px -2px rgba(0, 0, 0, 0.2);

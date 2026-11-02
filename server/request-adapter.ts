@@ -68,14 +68,52 @@ export function sanitizeInboundHeaders(
   return headers;
 }
 
-export function toWebRequest(req: http.IncomingMessage): Request {
+const requestControllers = new WeakMap<Request, AbortController>();
+
+export function abortWebRequest(request: Request, reason = new DOMException('Server draining', 'AbortError')): void {
+  requestControllers.get(request)?.abort(reason);
+}
+
+export function toWebRequest(req: http.IncomingMessage, res?: http.ServerResponse): Request {
   const method = (req.method || 'GET').toUpperCase();
   const hasBody = method !== 'GET' && method !== 'HEAD';
+  const controller = new AbortController();
+  const cleanup = () => {
+    req.removeListener('aborted', onDisconnect);
+    req.removeListener('close', onRequestClose);
+    req.socket?.removeListener('close', onDisconnect);
+    res?.removeListener('close', onResponseClose);
+    res?.removeListener('finish', cleanup);
+    controller.signal.removeEventListener('abort', cleanup);
+  };
+  const onDisconnect = () => controller.abort(new DOMException('Client disconnected', 'AbortError'));
+  // Since Node 16, request.close also means a fully received request. It is NOT
+  // a disconnected response socket: a GET/POST can still be waiting on upstream.
+  const onRequestClose = () => { if (req.aborted || !req.complete) onDisconnect(); };
+  const onResponseClose = () => {
+    if (!res?.writableFinished) onDisconnect();
+    cleanup();
+  };
+  req.once('aborted', onDisconnect);
+  req.once('close', onRequestClose);
+  req.socket?.once('close', onDisconnect);
+  res?.once('close', onResponseClose);
+  res?.once('finish', cleanup);
+  controller.signal.addEventListener('abort', cleanup, { once: true });
 
-  return new Request(`${ENGINE_INTERNAL_ORIGIN}${requestPathAndQuery(req.url)}`, {
-    method,
-    headers: sanitizeInboundHeaders(req.headers, req.socket?.remoteAddress),
-    body: hasBody ? (Readable.toWeb(req) as any) : undefined,
-    duplex: hasBody ? 'half' : undefined,
-  } as RequestInit);
+  try {
+    const request = new Request(`${ENGINE_INTERNAL_ORIGIN}${requestPathAndQuery(req.url)}`, {
+      method,
+      headers: sanitizeInboundHeaders(req.headers, req.socket?.remoteAddress),
+      body: hasBody ? (Readable.toWeb(req) as any) : undefined,
+      duplex: hasBody ? 'half' : undefined,
+      signal: controller.signal,
+    } as RequestInit);
+    requestControllers.set(request, controller);
+    if (req.aborted || req.socket?.destroyed) onDisconnect();
+    return request;
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }

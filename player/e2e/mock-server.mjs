@@ -133,6 +133,22 @@ async function handleApi(req, res, url) {
   const p = url.pathname
   const q = url.searchParams
 
+  if (process.env.E2E_ACCESS_MODE === 'invite' && (p === '/api/access/session' || p === '/api/access/status')) {
+    return sendJson(res, { brand: 'Sonic', ok: false, access: false, mode: 'invite', error: { code: 'ACCESS_REQUIRED' } }, 401)
+  }
+  if (p === '/api/access/session' || p === '/api/access/status') return sendJson(res, { brand: 'Sonic', ok: true, access: true, mode: 'open' })
+  if (p === '/api/access/invite' || p === '/api/access/redeem') {
+    if (process.env.E2E_ACCESS_MODE === 'invite') {
+      const chunks = []
+      for await (const chunk of req) chunks.push(chunk)
+      const body = JSON.parse(Buffer.concat(chunks).toString() || '{}')
+      if (body.code !== 'E2E-INVITE') return sendJson(res, { ok: false, error: { code: 'INVITE_INVALID' } }, 401)
+      return sendJson(res, { brand: 'Sonic', ok: true, access: true, mode: 'invite' }, 200, { 'Set-Cookie': 'sonic_access=e2e; HttpOnly; SameSite=Lax; Path=/' })
+    }
+    return sendJson(res, { ok: false, error: { code: 'ACCESS_MODE_NOT_INVITE' } }, 404)
+  }
+  if (p === '/api/access/logout') return sendJson(res, { brand: 'Sonic', ok: true, access: true, mode: 'open' })
+
   if (p === '/api/sonic/engine/health') return sendJson(res, { ok: true, storageKind: 'memory' })
 
   if (p === '/api/sonic/search/smart') {

@@ -9,6 +9,7 @@ import { useSettingsStore } from './settings'
 import { useToastStore } from './toast'
 import i18n from '@/languages'
 import { downloadedMusicDB, localMusicDB } from '@/utils/indexedDB'
+import { musicStreamUrl, songSourceCandidates, songPlaybackSource, songSourcePair, streamSourcePair } from '@/utils/audioUtils'
 import { inspectGatewayHeaders, markStreamFailure, gatewayHealth } from '@/utils/gatewayHealth'
 import piniaPersistConfig from '../persist'
 
@@ -63,6 +64,13 @@ let switchingQuality = false
 const restoredBlobUrls = new Set<string>()
 /** 播放操作代次：新的切歌/重试会使旧的异步结果失效 */
 let playbackGeneration = 0
+const metadataControllers = new Set<AbortController>()
+const advancePlaybackGeneration = () => {
+  playbackGeneration += 1
+  for (const controller of metadataControllers) controller.abort()
+  metadataControllers.clear()
+  return playbackGeneration
+}
 /** 起播看门狗：上游返回响应头后挂起不发送音频时，媒体元素不会触发 error，需主动收敛错误态 */
 let startupWatchdog: ReturnType<typeof setTimeout> | null = null
 const STARTUP_WATCHDOG_MS = 15000
@@ -81,10 +89,15 @@ const armStartupWatchdog = (onTimeout: () => void) => {
     onTimeout()
   }, STARTUP_WATCHDOG_MS)
 }
-/** 同一首歌曲的播放地址请求共享结果，避免切歌预加载重复请求 */
-const pendingUrlRequests = new Map<string, Promise<string>>()
-/** 记录每首歌曲尝试切源的序号，支持多源 failover 轮询 */
+/** 同一首歌曲、同一来源的播放地址请求共享结果，避免切歌预加载重复请求 */
+const pendingUrlRequests = new Map<string, { promise: Promise<string>; generation: number; version: number }>()
+const songUrlRequestVersions = new Map<string, number>()
+const streamMetadataProbes = new WeakMap<Song, { url: string; generation: number; promise: Promise<void> }>()
+const songPlaybackKey = (song: Song) => JSON.stringify([song.id, song.source || song.platform || song.sources?.[0]?.platform || ''])
+/** 仅对已验证来源进行有限次数的重试，绝不猜测跨平台 ID */
+const MAX_SOURCE_RETRIES = 4
 const songSourceAttemptMap = new Map<string, number>()
+const sourceRetryLimit = (song: Song) => Math.min(MAX_SOURCE_RETRIES, Math.max(3, songSourceCandidates(song).length + 1))
 /** 媒体错误监听器最近一次上报的歌曲与时间，避免 play() 拒绝后重复上报、互相覆盖 */
 let lastMediaErrorReport: { songId: string | number | null; at: number } | null = null
 
@@ -467,12 +480,13 @@ export const useAudioStore = defineStore('audio', {
 
         const failedSrc = audio.currentSrc || audio.src || ''
         const failedSongId = this.audio.currentSong?.id ?? null
+        const failedGeneration = playbackGeneration
         const currentSong = this.audio.currentSong
 
         // 核心容灾：优先静默换源（Failover）轮询候选音轨或跨平台平替源，轮换穷尽前绝不轻易向用户报错！
-        const songKey = String(failedSongId || '')
+        const songKey = currentSong ? songPlaybackKey(currentSong) : ''
         const currentAttempts = songSourceAttemptMap.get(songKey) || 0
-        const maxAttempts = Math.min(4, Math.max(3, (currentSong?.sources?.length || 1) + 1))
+        const maxAttempts = currentSong ? sourceRetryLimit(currentSong) : 0
 
         if (failedSongId && !currentSong?.isLocal && currentAttempts < maxAttempts) {
           console.warn(
@@ -487,16 +501,27 @@ export const useAudioStore = defineStore('audio', {
         }
 
         // 候选源全部尝试失败后，发起诊断分析具体失败原因
+        if (failedGeneration !== playbackGeneration || this.audio.currentSong?.id !== failedSongId) return
         let diagnosticNetworkFailure = false
         if (failedSrc && failedSrc.includes('/api/music/stream')) {
+          let diagnosticResponse: Response | undefined
           try {
             const diagRes = await fetch(failedSrc, {
               method: 'GET',
               headers: { Range: 'bytes=0-0' },
+              signal: AbortSignal.timeout(5000),
             })
-            if (this.audio.currentSong?.id !== failedSongId) return
+            diagnosticResponse = diagRes
+            if (failedGeneration !== playbackGeneration || this.audio.currentSong?.id !== failedSongId) return
             inspectGatewayHeaders(diagRes.headers)
-            if (diagRes.status === 503 || diagRes.status === 404) {
+            if (diagRes.status === 503) {
+              const message = i18n.global.t('player.playbackError.degraded')
+              this.audio.error = message
+              markStreamFailure('stream-degraded-fail', message)
+              lastMediaErrorReport = { songId: failedSongId, at: Date.now() }
+              this._reportPlaybackError(e, message)
+              return
+            } else if (diagRes.status === 404) {
               this.audio.error = '当前曲目暂无可用音源或受版权限制'
               markStreamFailure('track-fail', this.audio.error)
               lastMediaErrorReport = { songId: failedSongId, at: Date.now() }
@@ -517,9 +542,13 @@ export const useAudioStore = defineStore('audio', {
             }
           } catch {
             diagnosticNetworkFailure = true
+          } finally {
+            // Diagnosis only needs headers; never leave another media stream open.
+            void diagnosticResponse?.body?.cancel().catch(() => {})
           }
         }
 
+        if (failedGeneration !== playbackGeneration || this.audio.currentSong?.id !== failedSongId) return
         lastMediaErrorReport = { songId: failedSongId, at: Date.now() }
         this._reportPlaybackError(
           diagnosticNetworkFailure ? new Error('network fetch failed') : audio.error || e
@@ -529,9 +558,13 @@ export const useAudioStore = defineStore('audio', {
     },
 
     /** 播放歌曲（自动获取缺失的播放地址） */
-    async playSong(song?: Song, index?: number, force = false) {
+    async playSong(song?: Song, index?: number, force = false): Promise<void> {
       this.initAudio()
-      const generation = ++playbackGeneration
+      if (this.audio.error && this.audio.currentSong && !this.audio.currentSong.isLocal &&
+        (!song || songPlaybackKey(song) === songPlaybackKey(this.audio.currentSong))) {
+        return this.retryCurrentSong()
+      }
+      const generation = advancePlaybackGeneration()
 
       const targetSong = song || this.audio.currentSong
       if (targetSong && targetSong.url?.startsWith('blob:')) {
@@ -653,9 +686,15 @@ export const useAudioStore = defineStore('audio', {
         this.audio.isLoading = true
         this._armStartupWatchdog(generation, targetSongId)
 
-        // 若无 URL 则拉取（本地音乐除外）
-        if (!this.audio.currentSong.url && !this.audio.currentSong.isLocal) {
-          await this._fetchAndApplyUrl(this.audio.currentSong)
+        const currentSong = this.audio.currentSong
+        const gateway = musicStreamUrl(currentSong.url)
+        const requestedPair = streamSourcePair(currentSong.url)
+        const sourcePair = songPlaybackSource(currentSong)
+        const wrongPair = gateway && !gateway.searchParams.has('target') && !gateway.searchParams.has('url') &&
+          (!requestedPair || !sourcePair || requestedPair.platform !== sourcePair.platform || requestedPair.platformId !== sourcePair.platformId)
+        // Repair a mapper's legacy default-source URL before loading a foreign provider ID.
+        if ((!currentSong.url || wrongPair) && !currentSong.isLocal) {
+          await this._fetchAndApplyUrl(currentSong)
         }
 
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
@@ -675,9 +714,8 @@ export const useAudioStore = defineStore('audio', {
         this._loadAudioSrc(this.audio.currentSong.url || '', isSwitchingSong)
         this._probeStreamMetadata(this.audio.currentSong)
         await this.audio.audio.play()
-        clearStartupWatchdog()
-
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
+        clearStartupWatchdog()
 
         // 添加到播放历史
         this.addToHistory(this.audio.currentSong)
@@ -690,9 +728,9 @@ export const useAudioStore = defineStore('audio', {
         // 播放失败时优先尝试自动刷新地址并切换候选源重试，若重试成功则无缝起播不弹窗
         const id = this.audio.currentSong?.id ?? null
         if (id && !this.audio.currentSong.isLocal) {
-          const songKey = String(id)
+          const songKey = songPlaybackKey(this.audio.currentSong)
           const currentAttempts = songSourceAttemptMap.get(songKey) || 0
-          const maxAttempts = Math.min(4, Math.max(3, (this.audio.currentSong?.sources?.length || 1) + 1))
+          const maxAttempts = sourceRetryLimit(this.audio.currentSong)
           if (currentAttempts < maxAttempts) {
             try {
               await this.refreshAndReplay(true)
@@ -713,31 +751,48 @@ export const useAudioStore = defineStore('audio', {
      * 刷新当前歌曲的播放地址并重试播放
      * 用于链接过期、流断开或音源 403/404 场景的多源自动 failover 与恢复
      */
-    async refreshAndReplay(tryNextSource = false) {
+    async refreshAndReplay(tryNextSource = false): Promise<void> {
       if (!this.audio.currentSong || !this.audio.audio) return
       if (this.audio.currentSong.isLocal) return
 
-      const generation = ++playbackGeneration
+      const generation = advancePlaybackGeneration()
       const targetSongId = this.audio.currentSong.id
       this.audio.isLoading = true
+      this.audio.isPaused = false
       try {
         await this._fetchAndApplyUrl(this.audio.currentSong, true, tryNextSource)
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId || !this.audio.currentSong.url) return
-        this._loadAudioSrc(this.audio.currentSong!.url || '', true)
-        await this.audio.audio!.play()
-        clearStartupWatchdog()
+        this._loadAudioSrc(this.audio.currentSong.url, true)
+        await this.audio.audio.play()
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
+        clearStartupWatchdog()
         this.audio.error = null
         this._dismissPlaybackErrorToast()
       } catch (e) {
         // 已切歌/暂停导致的取消失败不提示，由新播放代次负责状态
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
         clearStartupWatchdog()
+        this.audio.isPlaying = false
+        const song = this.audio.currentSong
+        if (song && (songSourceAttemptMap.get(songPlaybackKey(song)) || 0) < sourceRetryLimit(song)) {
+          await this.refreshAndReplay(true)
+          return
+        }
         console.error('Refresh url failed:', e)
         if (!mediaErrorAlreadyReported(targetSongId)) this._reportPlaybackError(e as Error)
       } finally {
         if (generation === playbackGeneration) this.audio.isLoading = false
       }
+    },
+
+    /** 用户重试保留队列身份，但重新解析音源，不复用已过期的直连/品质 URL。 */
+    async retryCurrentSong(): Promise<void> {
+      const song = this.audio.currentSong
+      if (!song) return
+      this.clearError()
+      songSourceAttemptMap.delete(songPlaybackKey(song))
+      if (song.isLocal) return this.playSong(song, this.audio.currentIndex, true)
+      return this.refreshAndReplay()
     },
 
     /**
@@ -790,96 +845,93 @@ export const useAudioStore = defineStore('audio', {
      * @param forceFresh 是否强制跳过内存 Promise 缓存重新请求
      * @param tryNextSource 是否在发生错误时轮询切换下一个候选音源平台
      */
-    async _fetchAndApplyUrl(targetSong?: Song, forceFresh = false, tryNextSource = false) {
+    async _fetchAndApplyUrl(targetSong?: Song, forceFresh = false, tryNextSource = false): Promise<void> {
       const song = targetSong || this.audio.currentSong
       if (!song) return
+      const generation = playbackGeneration
       const settingsStore = useSettingsStore()
-      const requestKey = `${String(song.id)}:${settingsStore.audioQuality}`
-      if (forceFresh) {
-        pendingUrlRequests.delete(requestKey)
-        song.url = ''
+      const songKey = songPlaybackKey(song)
+      const candidates = songSourceCandidates(song)
+      let chosen = songPlaybackSource(song)
+      if (tryNextSource) {
+        const attempt = songSourceAttemptMap.get(songKey) || 0
+        if (attempt >= sourceRetryLimit(song)) throw new Error('Audio source retry limit reached')
+        songSourceAttemptMap.set(songKey, attempt + 1)
+        if (candidates.length && chosen) {
+          const current = candidates.findIndex(pair => pair.platform === chosen!.platform && pair.platformId === chosen!.platformId)
+          chosen = candidates[(current + 1) % candidates.length]
+        }
       }
-      let request = pendingUrlRequests.get(requestKey)
-      if (!request) {
-        request = (async () => {
-          let url = ''
-          const songKey = String(song.id)
-          let attemptIdx = songSourceAttemptMap.get(songKey) || 0
-          if (tryNextSource) {
-            attemptIdx += 1
-            songSourceAttemptMap.set(songKey, attemptIdx)
-          }
-
-          if (!tryNextSource) {
+      const fresh = forceFresh || tryNextSource
+      const requestKey = JSON.stringify([songKey, chosen?.platform, chosen?.platformId, settingsStore.audioQuality, fresh])
+      let flight = pendingUrlRequests.get(requestKey)
+      if (fresh || flight?.generation !== generation) flight = undefined
+      if (!flight) {
+        const version = (songUrlRequestVersions.get(songKey) || 0) + 1
+        songUrlRequestVersions.set(songKey, version)
+        const promise = (async () => {
+          // Unmapped aggregate IDs are not provider IDs. Fail closed instead of playing another song.
+          if (!chosen) throw new Error('No verified audio source mapping')
+          const params = new URLSearchParams({ id: chosen.platformId, source: chosen.platform })
+          const title = String(song.name || '').trim()
+          const artist = String(song.artist || song.artists?.map((a: { name: string }) => a.name).join(' / ') || '').trim()
+          if (title) params.set('title', title)
+          if (artist) params.set('artist', artist)
+          if (song.duration) params.set('duration', String(Math.round(song.duration > 1000 ? song.duration / 1000 : song.duration)))
+          params.set('quality', settingsStore.audioQuality)
+          if (fresh) params.set('nocache', '1')
+          const gatewayUrl = `/api/music/stream?${params.toString()}`
+          // A retry must not reuse a stale URL from url, streamUrl, qualities or song/url/v1.
+          if (fresh) return gatewayUrl
+          const ownUrl = song.qualities?.find((q: { level: string; streamUrl?: string }) => q.level === settingsStore.audioQuality)?.streamUrl || song.streamUrl || song.url || ''
+          if (ownUrl && !musicStreamUrl(ownUrl)) return ownUrl
+          if (ownUrl) return gatewayUrl
+          // Only the legacy NetEase endpoint understands bare numeric IDs. All other
+          // providers use the source-aware gateway directly.
+          if (chosen.platform === 'netease') {
             try {
               const res: any = await songUrlV1({
-                id: String(song.id),
+                id: chosen.platformId,
                 title: song.name,
                 artist: song.artist,
                 level: settingsStore.audioQuality,
               })
-              url = res?.data?.[0]?.url || res?.data?.data?.[0]?.url || res?.url || ''
+              const url = res?.data?.[0]?.url || res?.data?.data?.[0]?.url || res?.url || ''
+              if (url && !musicStreamUrl(url)) return url
             } catch {}
           }
-
-          // Sonic 多源聚合网关智能兜底与多候选源 failover
-          if (!url) {
-            const songTitle = String(song.name || (song as any).title || '').trim()
-            let songArtist = String(song.artist || '').trim()
-            if (!songArtist && Array.isArray((song as any).artists)) {
-              songArtist = (song as any).artists
-                .map((a: any) => (typeof a === 'object' && a ? a.name || '' : String(a)))
-                .filter(Boolean)
-                .join(' / ')
-            }
-            const titleParam = songTitle ? `&title=${encodeURIComponent(songTitle)}` : ''
-            const artistParam = songArtist ? `&artist=${encodeURIComponent(songArtist)}` : ''
-            const rawDur = song.duration || (song as any).dt || 0
-            const durSec = rawDur ? `&duration=${Math.round(rawDur > 1000 ? rawDur / 1000 : rawDur)}` : ''
-
-            const platformRotation = ['netease', 'qq', 'kugou', 'kuwo']
-            let fallbackSource = 'netease'
-            let fallbackId = String(song.id)
-            if (song.sources && song.sources.length > 0) {
-              const chosen = song.sources[attemptIdx % song.sources.length]
-              if (chosen) {
-                fallbackSource = chosen.platform || fallbackSource
-                fallbackId = String(chosen.platformId || fallbackId)
-              }
-            } else if (attemptIdx > 0) {
-              // 歌曲无多源聚类且重试时，自动轮换到其它主流音源平台检索
-              fallbackSource = platformRotation[attemptIdx % platformRotation.length]
-            }
-
-            // 自带流地址（仅在初次非换源重试时复用）
-            const ownStreamUrl = !tryNextSource
-              ? (song.qualities?.find((q: { streamUrl?: string }) => q.streamUrl)?.streamUrl || song.streamUrl || song.url || '')
-              : ''
-            const retryParam = attemptIdx > 0 ? `&retry=${attemptIdx}&ts=${Date.now()}` : ''
-            url =
-              ownStreamUrl ||
-              `/api/music/stream?id=${encodeURIComponent(fallbackId)}&source=${encodeURIComponent(fallbackSource)}${titleParam}${artistParam}${durSec}${retryParam}`
-          }
-          return url
+          return gatewayUrl
         })()
-        pendingUrlRequests.set(requestKey, request)
-        void request.then(() => {
-          if (pendingUrlRequests.get(requestKey) === request) pendingUrlRequests.delete(requestKey)
-        }, () => {
-          if (pendingUrlRequests.get(requestKey) === request) pendingUrlRequests.delete(requestKey)
-        })
+        flight = { promise, generation, version }
+        pendingUrlRequests.set(requestKey, flight)
+        const owned = flight
+        void promise.finally(() => {
+          if (pendingUrlRequests.get(requestKey) === owned) pendingUrlRequests.delete(requestKey)
+        }).catch(() => {})
       }
-      const url = await request
-
-      song.url = url
-      // 同步到播放列表对应项
-      const idx = this.audio.playlist.findIndex((p: { id: string | number }) => p.id === song.id)
-      if (idx !== -1) {
-        this.audio.playlist[idx].url = url
+      const url = await flight.promise
+      // Guard the mutation itself, not merely the later audio.play(): a stopped or
+      // superseded request must not overwrite a newer URL on the same Song object.
+      if (generation !== playbackGeneration || flight.version !== songUrlRequestVersions.get(songKey)) return
+      const pair = chosen!
+      const bindingChanged = song.resolvedSource !== pair.platform || String(song.resolvedPlatformId ?? song.resolvedId ?? '') !== pair.platformId
+      const patch: Partial<Song> = {
+        url,
+        resolvedSource: pair.platform,
+        resolvedId: pair.platformId,
+        resolvedPlatformId: pair.platformId,
+        ...(bindingChanged ? { resolvedTitle: undefined, resolvedArtist: undefined } : {}),
       }
-
-      // 异步探测流类型与强绑定真实解析音源元数据（保障曲目、音频、歌词三者强同步）
-      this._probeStreamMetadata(song)
+      Object.assign(song, patch)
+      for (const item of [this.audio.currentSong, ...this.audio.playlist]) {
+        if (item && songPlaybackKey(item) === songKey) Object.assign(item, patch)
+      }
+      if (bindingChanged && typeof window !== 'undefined' && this.audio.currentSong && songPlaybackKey(this.audio.currentSong) === songKey) {
+        window.dispatchEvent(new CustomEvent('sonic:stream-resolved', { detail: {
+          songId: song.id, url, resolvedSource: pair.platform, resolvedId: pair.platformId, resolvedPlatformId: pair.platformId,
+        } }))
+      }
+      void this._probeStreamMetadata(song)
     },
 
     /**
@@ -887,70 +939,56 @@ export const useAudioStore = defineStore('audio', {
      * 读取网关返回的真实平台 (X-Sonic-Resolved-Source) 与真实 ID (X-Sonic-Resolved-Id)
      */
     _probeStreamMetadata(song: Song) {
-      if (!song || !song.url || !song.url.startsWith('/api/music/stream') || typeof fetch === 'undefined') return
+      if (!song?.url || !musicStreamUrl(song.url) || typeof fetch === 'undefined') return
       const targetUrl = song.url
-      const songId = song.id
-      fetch(targetUrl, { method: 'HEAD' })
+      const generation = playbackGeneration
+      const songKey = songPlaybackKey(song)
+      const previous = streamMetadataProbes.get(song)
+      if (previous?.url === targetUrl && previous.generation === generation) return previous.promise
+      const controller = new AbortController()
+      metadataControllers.add(controller)
+      const timeout = setTimeout(() => controller.abort(), 8000)
+      const promise = fetch(targetUrl, { method: 'HEAD', signal: controller.signal })
         .then((res) => {
-          const streamType = res.headers.get('x-sonic-stream-type') as any
-          const trialDur = res.headers.get('x-sonic-trial-duration')
-          const rSource = res.headers.get('x-sonic-resolved-source')
-          const rId = res.headers.get('x-sonic-resolved-id')
-          const rTitleRaw = res.headers.get('x-sonic-resolved-title')
-          const rArtistRaw = res.headers.get('x-sonic-resolved-artist')
-          const rTitle = rTitleRaw ? decodeURIComponent(rTitleRaw) : ''
-          const rArtist = rArtistRaw ? decodeURIComponent(rArtistRaw) : ''
-
-          let changed = false
-          if (streamType && (streamType === 'trial' || streamType === 'full') && song.streamType !== streamType) {
-            song.streamType = streamType
-            changed = true
+          if (!res.ok || controller.signal.aborted || generation !== playbackGeneration || song.url !== targetUrl) return
+          const streamType = res.headers.get('x-sonic-stream-type')
+          const trialDuration = Number(res.headers.get('x-sonic-trial-duration'))
+          const pair = songSourcePair(res.headers.get('x-sonic-resolved-source'), res.headers.get('x-sonic-resolved-id'))
+          const decode = (value: string | null) => {
+            try { return value ? decodeURIComponent(value) : undefined } catch { return undefined }
           }
-          if (trialDur) {
-            song.trialDuration = parseInt(trialDur, 10)
+          const patch: Partial<Song> = {}
+          if (streamType === 'trial' || streamType === 'full') {
+            patch.streamType = streamType
+            patch.trialDuration = streamType === 'trial' && Number.isFinite(trialDuration) && trialDuration > 0 ? trialDuration : undefined
           }
-          if (rSource && song.resolvedSource !== rSource) {
-            song.resolvedSource = rSource
-            changed = true
+          // Metadata is atomic: a provider header without its own ID cannot inherit
+          // the old provider's ID. Stable Song.id/name/artist are never overwritten.
+          if (pair) {
+            patch.resolvedSource = pair.platform
+            patch.resolvedId = pair.platformId
+            patch.resolvedPlatformId = pair.platformId
+            patch.resolvedTitle = decode(res.headers.get('x-sonic-resolved-title'))
+            patch.resolvedArtist = decode(res.headers.get('x-sonic-resolved-artist'))
           }
-          if (rId && String(song.resolvedId || '') !== String(rId)) {
-            song.resolvedId = rId
-            changed = true
+          const changed = Object.entries(patch).some(([key, value]) => song[key as keyof Song] !== value)
+          Object.assign(song, patch)
+          for (const item of [this.audio.currentSong, ...this.audio.playlist]) {
+            if (item && songPlaybackKey(item) === songKey && item.url === targetUrl) Object.assign(item, patch)
           }
-          if (rTitle && song.resolvedTitle !== rTitle) {
-            song.resolvedTitle = rTitle
-            changed = true
-          }
-          if (rArtist && song.resolvedArtist !== rArtist) {
-            song.resolvedArtist = rArtist
-            changed = true
-          }
-
-          const idx = this.audio.playlist.findIndex((p: { id: string | number }) => p.id === songId)
-          if (idx !== -1) {
-            if (song.streamType) this.audio.playlist[idx].streamType = song.streamType
-            if (song.trialDuration) this.audio.playlist[idx].trialDuration = song.trialDuration
-            if (song.resolvedSource) this.audio.playlist[idx].resolvedSource = song.resolvedSource
-            if (song.resolvedId) this.audio.playlist[idx].resolvedId = song.resolvedId
-            if (song.resolvedTitle) this.audio.playlist[idx].resolvedTitle = song.resolvedTitle
-            if (song.resolvedArtist) this.audio.playlist[idx].resolvedArtist = song.resolvedArtist
-          }
-
-          if (changed && typeof window !== 'undefined') {
-            window.dispatchEvent(
-              new CustomEvent('sonic:stream-resolved', {
-                detail: {
-                  songId,
-                  resolvedSource: rSource,
-                  resolvedId: rId,
-                  resolvedTitle: rTitle,
-                  resolvedArtist: rArtist,
-                },
-              }),
-            )
+          if (changed && typeof window !== 'undefined' && this.audio.currentSong && songPlaybackKey(this.audio.currentSong) === songKey && this.audio.currentSong.url === targetUrl) {
+            window.dispatchEvent(new CustomEvent('sonic:stream-resolved', { detail: {
+              songId: song.id, url: targetUrl, ...patch,
+            } }))
           }
         })
         .catch(() => {})
+        .finally(() => {
+          clearTimeout(timeout)
+          metadataControllers.delete(controller)
+        })
+      streamMetadataProbes.set(song, { url: targetUrl, generation, promise })
+      return promise
     },
 
     /**
@@ -986,7 +1024,7 @@ export const useAudioStore = defineStore('audio', {
         this.audio.isLoading = false
         this.audio.isPlaying = false
         // 放弃本次起播：使在途 playSong 失效并停止媒体元素，避免迟到的数据自动起播。
-        playbackGeneration += 1
+        advancePlaybackGeneration()
         try {
           audio.pause()
         } catch {}
@@ -1000,11 +1038,13 @@ export const useAudioStore = defineStore('audio', {
       // 用户在异步取流/起播期间暂停时，必须让在途的 playSong/refreshAndReplay 失效，
       // 否则迟到的 audio.play() 会在用户已暂停后重新起播。
       if (this.audio.isPlaying || this.audio.isLoading) {
-        playbackGeneration += 1
+        advancePlaybackGeneration()
+        clearStartupWatchdog()
         this.audio.isLoading = false
-      }
-      if (this.audio.isPlaying) {
+        this.audio._isWaiting = false
         this.audio.audio.pause()
+        this.audio.isPlaying = false
+        this.audio.isPaused = true
       }
     },
 
@@ -1319,12 +1359,14 @@ export const useAudioStore = defineStore('audio', {
       }
       const br = brMap[targetLevel] || '320'
 
-      if (!newUrl) {
-        const ownStreamUrl = song.qualities?.find((q: { streamUrl?: string }) => q.streamUrl)?.streamUrl || song.url || ''
-        const fallbackSource = song.sources?.[0]?.platform || 'netease'
-        newUrl =
-          ownStreamUrl ||
-          `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=${encodeURIComponent(fallbackSource)}&br=${br}&title=${encodeURIComponent(song.name || '')}&artist=${encodeURIComponent(song.artist || '')}`
+      if (!newUrl || musicStreamUrl(newUrl)) {
+        const pair = songPlaybackSource(song)
+        if (!pair) throw new Error('No verified audio source mapping')
+        const params = new URLSearchParams({
+          id: pair.platformId, source: pair.platform, br,
+          title: song.name || '', artist: song.artist || '',
+        })
+        newUrl = `/api/music/stream?${params.toString()}`
       }
 
       const badgeMap: Record<string, string> = {
@@ -1603,7 +1645,8 @@ export const useAudioStore = defineStore('audio', {
     // 停止播放
     stop() {
       // 停止同样需要让在途的异步起播失效，避免取流完成后自动恢复播放
-      playbackGeneration += 1
+      advancePlaybackGeneration()
+      clearStartupWatchdog()
       this.audio.isLoading = false
       if (this.audio.audio) {
         this.audio.audio.pause()
@@ -1667,12 +1710,7 @@ export const useAudioStore = defineStore('audio', {
           {
             label: i18n.global.t('common.retry'),
             primary: true,
-            handler: () => {
-              this.clearError()
-              if (this.audio.currentSong) {
-                this.playSong(this.audio.currentSong, this.audio.currentIndex, true)
-              }
-            },
+            handler: () => this.retryCurrentSong(),
           },
           {
             label: i18n.global.t('player.next'),
@@ -1703,7 +1741,7 @@ export const useAudioStore = defineStore('audio', {
 
     // 销毁音频播放器
     destroy() {
-      playbackGeneration += 1
+      advancePlaybackGeneration()
       clearStartupWatchdog()
       if (this.audio.audio) {
         this.audio.audio.pause()

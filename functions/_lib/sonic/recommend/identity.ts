@@ -4,6 +4,8 @@ import type { AppEnv } from '../../types';
 import { base64UrlToString, extractAuthCredentials, verifyAuth } from '../../auth';
 import type { ClientContextHints, UserIdentityContext } from './types';
 import { deterministicHash16 } from './track-canonical';
+import { requireValidEngineIdentity } from '../engine-identity';
+import { hasPersonalizationOptOut } from '../personalization';
 
 const ANON_ID_REGEX = /^anon_[a-zA-Z0-9_-]{8,64}$/;
 
@@ -54,21 +56,10 @@ export function parseClientContextHints(request: Request): ClientContextHints | 
 }
 
 export async function resolveUserIdentity(request: Request, env?: AppEnv): Promise<UserIdentityContext> {
-  const url = new URL(request.url);
-  const headerPref = (request.headers.get('x-sonic-personalization') || '').trim().toLowerCase();
-  const queryPref = (url.searchParams.get('personalize') || url.searchParams.get('personalization') || '')
-    .trim()
-    .toLowerCase();
+  const verifiedEngineIdentity = await requireValidEngineIdentity(request, env);
 
   // Explicit opt-out ALWAYS forces public zero-tracking mode, even if authenticated
-  if (
-    headerPref === 'off' ||
-    headerPref === '0' ||
-    headerPref === 'false' ||
-    queryPref === 'off' ||
-    queryPref === '0' ||
-    queryPref === 'false'
-  ) {
+  if (hasPersonalizationOptOut(request)) {
     return {
       mode: 'public',
       subjectKey: null,
@@ -78,6 +69,11 @@ export async function resolveUserIdentity(request: Request, env?: AppEnv): Promi
   }
 
   const clientHints = parseClientContextHints(request);
+  if (verifiedEngineIdentity) return {
+    ...verifiedEngineIdentity,
+    personalizationEnabled: verifiedEngineIdentity.personalizationEnabled || Boolean(clientHints),
+    clientHints,
+  };
 
   // 1. Check verified HMAC user session
   if (env) {

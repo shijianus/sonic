@@ -1,12 +1,11 @@
 /**
- * EpoCanvas Sonic - 统一认证与账户管理 Store
- *
- * 全权委托 epocanvas-mail (EpoMail) 进行身份认证、多账号与个人资料管理。
- * 支持 /api/auth/user 校验、OAuth 统一跳转、本地会话同步与跨标签页状态协同。
+ * EpoCanvas Sonic - EpoMail OAuth account state.
+ * Access invites are intentionally independent from this store.
  */
 import { defineStore } from 'pinia'
 import { httpGet, httpPost } from '@/utils/http'
 import piniaPersistConfig from '../persist'
+import { useLibraryStore } from './library'
 
 export interface UserInfo {
   id: string
@@ -34,165 +33,93 @@ export const useAuthStore = defineStore('auth', {
   }),
 
   getters: {
-    userName: (state): string => {
-      if (state.user?.name) return state.user.name
-      if (state.user?.email) return state.user.email.split('@')[0]
-      return 'Guest'
-    },
-    userEmail: (state): string => state.user?.email || '',
-    userAvatar: (state): string => state.user?.avatar || '',
-    userInitial: (state): string => {
-      const name = state.user?.name || state.user?.email || 'U'
-      return name.charAt(0).toUpperCase()
-    },
-    userRole: (state): string => state.user?.role || 'user',
+    userName: state => state.user?.name || state.user?.email?.split('@')[0] || 'Guest',
+    userEmail: state => state.user?.email || '',
+    userAvatar: state => state.user?.avatar || '',
+    userInitial: state => (state.user?.name || state.user?.email || 'U').charAt(0).toUpperCase(),
+    userRole: state => state.user?.role || 'user',
   },
 
   actions: {
-    /** 获取 EpoMail 宿主基址 (自适应本地开发 3001 端口与生产环境) */
+    async activateLibraryForUser(userId: string, force = false): Promise<boolean> {
+      try {
+        return await useLibraryStore().activateAccount(userId, force)
+      } catch {
+        return false
+      }
+    },
+
+    deactivateLibrary(): void {
+      try {
+        useLibraryStore().deactivateAccount()
+      } catch {}
+    },
+
     getEpomailBaseUrl(): string {
       if (typeof window === 'undefined') return 'https://mail.epocanvas.com'
-      const isLocalDev =
-        window.location.hostname === 'localhost' ||
-        window.location.hostname === '127.0.0.1'
-      if (isLocalDev && (window.location.port === '5089' || window.location.port === '5173')) {
+      const local = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+      if (local && (window.location.port === '5089' || window.location.port === '5173')) {
         return `http://${window.location.hostname}:3001`
       }
       return 'https://mail.epocanvas.com'
     },
 
-    /** 获取 EpoMail 个人中心与账号设置 URL */
     getEpomailProfileUrl(): string {
-      const base = this.getEpomailBaseUrl()
-      return `${base}/#/settings/profile`
+      return `${this.getEpomailBaseUrl()}/#/settings/profile`
     },
 
-    /** 获取 EpoMail 邮箱收件箱 URL */
     getEpomailInboxUrl(): string {
-      const base = this.getEpomailBaseUrl()
-      return `${base}/#/inbox`
+      return `${this.getEpomailBaseUrl()}/#/inbox`
     },
 
-    /** 检查当前登录状态，从 /api/auth/user 或 EpoMail 本地会话同步 */
+    /** Server verification is authoritative; cached profile data never grants account access. */
     async checkAuth(force = false): Promise<UserInfo | null> {
-      // 避免短时间内过于频繁的无谓请求 (5 秒限频，除非强制刷新)
       const now = Date.now()
-      if (!force && this.isAuthenticated && this.user && now - this.lastSyncTime < 5000) {
-        return this.user
-      }
-
+      if (!force && this.isAuthenticated && this.user && now - this.lastSyncTime < 5000) return this.user
       this.isLoading = true
       try {
-        const res = await httpGet<{ ok: boolean; user?: UserInfo }>('/auth/user')
-        if (res && res.ok && res.user) {
-          this.user = res.user
+        const response = await httpGet<{ ok: boolean; user?: UserInfo }>('/auth/user')
+        if (response?.ok && response.user) {
+          this.user = response.user
           this.isAuthenticated = true
           this.lastSyncTime = now
           this.isLoading = false
-          return this.user
+          void this.activateLibraryForUser(response.user.id, force)
+          return response.user
         }
-      } catch (_) {
-        // 后端 401 或请求失败，尝试从共享的 EpoMail 本地凭证感知会话
+      } catch {
+        // A network/API failure must not turn stale local profile data into a verified user.
       }
-
-      // 联动检测：检查当前域的 localStorage 中是否存在 epocanvas-mail 凭证
-      try {
-        if (typeof window !== 'undefined') {
-          // 优先检查 Sonic 规范的 EpoMail 会话缓存 (sonic_epomail_session)
-          const sonicSessionRaw = localStorage.getItem('sonic_epomail_session')
-          if (sonicSessionRaw) {
-            try {
-              const sess = JSON.parse(sonicSessionRaw)
-              if (sess && (sess.email || sess.id)) {
-                this.user = {
-                  id: String(sess.id || sess.email),
-                  email: sess.email || '',
-                  name: sess.name || (sess.email ? sess.email.split('@')[0] : 'User'),
-                  avatar: sess.avatar || '',
-                  role: sess.role || 'user',
-                  expiresAt: sess.expiresAt,
-                }
-                this.isAuthenticated = true
-                this.lastSyncTime = now
-                this.isLoading = false
-                return this.user
-              }
-            } catch (_) {}
-          }
-
-          const loginEmail = localStorage.getItem('loginEmail')
-          const token = localStorage.getItem('token')
-          const sessionsRaw = localStorage.getItem('epo_sessions')
-
-          if (loginEmail && token) {
-            let nickName = loginEmail.split('@')[0]
-            let role = 'user'
-            if (sessionsRaw) {
-              try {
-                const sessions = JSON.parse(sessionsRaw)
-                if (Array.isArray(sessions) && sessions.length > 0) {
-                  const match = sessions.find(
-                    (s: any) => (s.email || '').toLowerCase() === loginEmail.toLowerCase()
-                  ) || sessions[0]
-                  if (match?.name) nickName = match.name
-                  if (match?.roleName) role = match.roleName
-                }
-              } catch (_) {}
-            }
-
-            // 合成本地 EpoMail 会话展示状态
-            this.user = {
-              id: loginEmail,
-              email: loginEmail,
-              name: nickName,
-              role,
-            }
-            this.isAuthenticated = true
-            this.lastSyncTime = now
-            this.isLoading = false
-            return this.user
-          }
-        }
-      } catch (_) {}
-
       this.user = null
       this.isAuthenticated = false
       this.lastSyncTime = now
       this.isLoading = false
+      this.deactivateLibrary()
       return null
     },
 
-    /** 发起 EpoMail OAuth 统一登录 */
-    login() {
-      if (typeof window === 'undefined') return
-      // 直接跳转至服务端 OAuth 入口，由服务端签发 PKCE 重定向至 epocanvas-mail
-      window.location.href = '/api/auth/login'
+    login(): void {
+      if (typeof window !== 'undefined') window.location.href = '/api/auth/login'
     },
 
-    /** 退出登录并清除会话 */
     async logout(): Promise<void> {
       this.isLoading = true
       try {
         await httpPost('/auth/logout')
-      } catch (_) {}
-
-      // 清理本地状态
+      } catch {}
       this.user = null
       this.isAuthenticated = false
       this.lastSyncTime = 0
+      this.deactivateLibrary()
       this.isLoading = false
     },
 
-    /** 打开 EpoMail 个人中心页面 */
-    openProfile() {
-      if (typeof window === 'undefined') return
-      window.open(this.getEpomailProfileUrl(), '_blank', 'noopener,noreferrer')
+    openProfile(): void {
+      if (typeof window !== 'undefined') window.open(this.getEpomailProfileUrl(), '_blank', 'noopener,noreferrer')
     },
 
-    /** 打开 EpoMail Webmail 邮箱页面 */
-    openInbox() {
-      if (typeof window === 'undefined') return
-      window.open(this.getEpomailInboxUrl(), '_blank', 'noopener,noreferrer')
+    openInbox(): void {
+      if (typeof window !== 'undefined') window.open(this.getEpomailInboxUrl(), '_blank', 'noopener,noreferrer')
     },
   },
 

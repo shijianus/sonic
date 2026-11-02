@@ -48,6 +48,7 @@ export interface CanonicalTrack {
   qualities?: SonicQualityOption[];
   streamType?: 'full' | 'trial' | 'unavailable';
   sourceIds: Record<string, string>; // { netease: "186016", qq: "003aAPGv1I6t8A", ... }
+  mvSourceIds?: Record<string, string>; // Provider-verified MV IDs; never populated from behavior payloads
   availableSources: SonicSearchSource[];
   externalPopularity: number; // [0, 100] from upstream rank/chart — NEVER conflated with internal plays
   featureVersion: number;
@@ -95,8 +96,10 @@ export interface SonicBehaviorEventInput {
   action?: SonicEntityAction;
   entity_type?: SonicEntityType;
   entityType?: SonicEntityType;
-  entity_id?: string;
-  entityId?: string;
+  entity_id?: string | number;
+  entityId?: string | number;
+  entity_source?: string;
+  entitySource?: string;
   timestamp?: number; // Unix ms
   track?: Partial<SonicSearchTrack> & {
     id?: string | number;
@@ -134,6 +137,7 @@ export interface StoredBehaviorEvent {
   subjectKey: string; // 'usr:<hash>' or 'anon:<id>'
   type: SonicEventType;
   canonicalTrackId?: string;
+  trackRef?: string; // Unresolved provider:id reference; not a global catalog identity
   artistKey?: string;
   genres?: string[];
   language?: InferredLanguage;
@@ -421,6 +425,12 @@ export interface MixedFeedResponse {
   };
 }
 
+// Attribution must reference a retained event, never a guessed historical owner.
+export interface RecommendContributionSource {
+  subjectKey: string;
+  eventId: string;
+}
+
 export interface RecommendStore {
   readonly kind: 'sqlite' | 'memory';
   upsertTrack(track: CanonicalTrack): void;
@@ -433,9 +443,9 @@ export interface RecommendStore {
   getUserEvents(subjectKey: string, limit?: number, sinceMs?: number): StoredBehaviorEvent[];
   clearUserEvents(subjectKey: string): number;
   getAllRecentEvents(sinceMs: number, limit?: number): StoredBehaviorEvent[];
-  incrementCooccurrence(trackA: string, trackB: string, delta: number): void;
+  incrementCooccurrence(trackA: string, trackB: string, delta: number, source?: RecommendContributionSource): void;
   getCooccurringTracks(trackId: string, limit?: number): Array<{ canonicalTrackId: string; weight: number }>;
-  recordSearchQuery(normQuery: string, displayQuery: string, clicked?: boolean): void;
+  recordSearchQuery(normQuery: string, displayQuery: string, clicked?: boolean, source?: RecommendContributionSource): void;
   getTopSearchQueries(prefix: string, limit?: number): Array<{ query: string; count: number }>;
   getStats(): { trackCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string };
 

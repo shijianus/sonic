@@ -65,6 +65,70 @@ export async function syncTrackToGorse(track: CanonicalTrack, env?: AppEnv): Pro
   }
 }
 
+interface GorseSubjectState {
+  tail: Promise<unknown>;
+  pending: number;
+  blockedUntil: number;
+  deletion?: Promise<GorseErasureStatus>;
+}
+export type GorseErasureStatus = 'not-configured' | 'deleted' | 'failed';
+const gorseSubjects = new Map<string, GorseSubjectState>();
+const GORSE_ERASURE_GUARD_MS = 10 * 60 * 1000;
+
+function gorseSubjectState(baseUrl: string, subjectKey: string): GorseSubjectState | null {
+  const now = Date.now();
+  for (const [key, state] of gorseSubjects) {
+    if (!state.pending && !state.deletion && state.blockedUntil <= now) gorseSubjects.delete(key);
+  }
+  const key = JSON.stringify([baseUrl, subjectKey]);
+  let state = gorseSubjects.get(key);
+  if (!state) {
+    // Refuse external writes when busy rather than evicting an active erasure guard.
+    if (gorseSubjects.size >= 2000) return null;
+    state = { tail: Promise.resolve(), pending: 0, blockedUntil: 0 };
+    gorseSubjects.set(key, state);
+  }
+  return state;
+}
+
+// DELETE user removes that user's feedback as well; item/catalog records are shared.
+// Serialize with in-flight feedback in this process, then leave a bounded tombstone
+// so delayed callbacks cannot recreate it. Other processes need the same erasure barrier.
+export async function deleteGorseUserData(subjectKey: string, env?: AppEnv): Promise<GorseErasureStatus> {
+  if (!String(env?.SONIC_GORSE_URL || '').trim()) return 'not-configured';
+  const baseUrl = cleanBaseUrl(env?.SONIC_GORSE_URL);
+  if (!baseUrl || !subjectKey) return 'failed';
+  const state = gorseSubjectState(baseUrl, subjectKey);
+  if (!state) return 'failed';
+  if (state.deletion) return state.deletion;
+  state.blockedUntil = Date.now() + GORSE_ERASURE_GUARD_MS;
+  const precedingWrites = state.tail;
+  const deletion = (async (): Promise<GorseErasureStatus> => {
+    await precedingWrites;
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (env?.SONIC_GORSE_API_KEY) headers['X-API-Key'] = String(env.SONIC_GORSE_API_KEY);
+    try {
+      const response = await fetch(`${baseUrl}/api/user/${encodeURIComponent(subjectKey)}`, {
+        method: 'DELETE', headers, signal: AbortSignal.timeout(2000), redirect: 'error',
+      });
+      // Gorse returns RowAffected, including 0 for an already absent user. Do not
+      // treat an arbitrary proxy's 200/404, or asynchronous 202, as completion.
+      if (response.status === 204) return 'deleted';
+      if (response.status !== 200) return 'failed';
+      const body = await response.json() as { RowAffected?: unknown };
+      return Number.isSafeInteger(body?.RowAffected) && Number(body.RowAffected) >= 0 ? 'deleted' : 'failed';
+    } catch {
+      return 'failed';
+    }
+  })();
+  state.deletion = deletion;
+  try { return await deletion; }
+  finally {
+    state.deletion = undefined;
+    state.blockedUntil = Date.now() + GORSE_ERASURE_GUARD_MS;
+  }
+}
+
 export async function syncFeedbackToGorse(
   subjectKey: string,
   canonicalTrackId: string,
@@ -76,28 +140,30 @@ export async function syncFeedbackToGorse(
   if (!baseUrl || !subjectKey || !canonicalTrackId) return false;
   const feedbackType = mapEventToGorseFeedback(eventType);
   if (!feedbackType) return false;
-
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (env?.SONIC_GORSE_API_KEY) headers['X-API-Key'] = String(env.SONIC_GORSE_API_KEY);
-
-  try {
-    const resp = await fetch(`${baseUrl}/api/feedback`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify([
-        {
-          FeedbackType: feedbackType,
-          UserId: subjectKey,
-          ItemId: canonicalTrackId,
+  const state = gorseSubjectState(baseUrl, subjectKey);
+  if (!state || state.blockedUntil > Date.now() || state.pending >= 100) return false;
+  state.pending++;
+  const write = state.tail.then(async () => {
+    if (state.blockedUntil > Date.now()) return false;
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (env?.SONIC_GORSE_API_KEY) headers['X-API-Key'] = String(env.SONIC_GORSE_API_KEY);
+    try {
+      const resp = await fetch(`${baseUrl}/api/feedback`, {
+        method: 'POST', headers,
+        body: JSON.stringify([{
+          FeedbackType: feedbackType, UserId: subjectKey, ItemId: canonicalTrackId,
           Timestamp: new Date(timestampMs).toISOString(),
-        },
-      ]),
-      signal: AbortSignal.timeout(1500),
-    });
-    return resp.ok;
-  } catch {
-    return false;
-  }
+        }]),
+        signal: AbortSignal.timeout(1500), redirect: 'error',
+      });
+      return resp.ok;
+    } catch {
+      return false;
+    }
+  });
+  state.tail = write.catch(() => false);
+  try { return await write; }
+  finally { state.pending--; }
 }
 
 export async function fetchGorseRecommendations(

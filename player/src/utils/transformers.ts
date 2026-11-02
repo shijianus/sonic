@@ -48,6 +48,14 @@ export interface SongData {
   streamType?: 'full' | 'trial' | 'unavailable'
   trialDuration?: number
   sources?: Array<{ platform: string; platformId: string | number; duration?: number }>
+  source?: string
+  platform?: string
+  platformId?: string | number
+  resolvedSource?: string
+  resolvedId?: string | number
+  resolvedPlatformId?: string | number
+  resolvedTitle?: string
+  resolvedArtist?: string
 }
 
 export interface ArtistData {
@@ -339,6 +347,14 @@ export function transformSong(item: Record<string, unknown>): SongData {
     streamType: (item?.streamType as any) || (song?.streamType as any) || undefined,
     trialDuration: (item?.trialDuration as number) || (song?.trialDuration as number) || undefined,
     sources: (item?.sources as any[]) || (song?.sources as any[]) || undefined,
+    source: (item?.source ?? song?.source) as string | undefined,
+    platform: (item?.platform ?? song?.platform) as string | undefined,
+    platformId: (item?.platformId ?? song?.platformId) as string | number | undefined,
+    resolvedSource: (item?.resolvedSource ?? song?.resolvedSource) as string | undefined,
+    resolvedId: (item?.resolvedId ?? song?.resolvedId) as string | number | undefined,
+    resolvedPlatformId: (item?.resolvedPlatformId ?? song?.resolvedPlatformId) as string | number | undefined,
+    resolvedTitle: (item?.resolvedTitle ?? song?.resolvedTitle) as string | undefined,
+    resolvedArtist: (item?.resolvedArtist ?? song?.resolvedArtist) as string | undefined,
   }
 }
 

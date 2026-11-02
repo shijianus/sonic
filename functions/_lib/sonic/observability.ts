@@ -4,6 +4,7 @@
 
 import type { AppEnv } from '../types';
 import { isEnvEnabled } from './config';
+import { COMPILED_RELEASE } from './compiled-release';
 
 export type RouteMetricGroup =
   | 'overall'
@@ -19,31 +20,134 @@ export type RouteMetricGroup =
 export type RateLimitBackendKind = 'native' | 'kv' | 'memory' | 'auth-gate' | 'fail-closed';
 
 const MAX_LATENCY_SAMPLES = 512;
+const ROUTE_GROUPS: RouteMetricGroup[] = ['overall', 'search', 'stream', 'lyrics', 'recommend', 'auth', 'cover', 'engine', 'other'];
+
+interface RequestCounts {
+  total: number;
+  status2xx: number;
+  status3xx: number;
+  status4xx: number;
+  status5xx: number;
+}
+
+function emptyCounts(): RequestCounts {
+  return { total: 0, status2xx: 0, status3xx: 0, status4xx: 0, status5xx: 0 };
+}
+
+function countRequest(counts: RequestCounts, status: number): void {
+  counts.total += 1;
+  if (status >= 500) counts.status5xx += 1;
+  else if (status >= 400) counts.status4xx += 1;
+  else if (status >= 300) counts.status3xx += 1;
+  else if (status >= 200) counts.status2xx += 1;
+}
+
+function boundedNumber(raw: unknown, fallback: number, min: number, max: number): number {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+}
+
+function getAlertPolicy(env?: AppEnv) {
+  const warningRatio = boundedNumber(env?.SONIC_ALERT_5XX_WARNING_RATIO, 0.02, 0, 1);
+  const pagingRatio = boundedNumber(env?.SONIC_ALERT_5XX_PAGING_RATIO, 0.05, 0, 1);
+  const warningMs = boundedNumber(env?.SONIC_ALERT_P95_WARNING_MS, 0, 0, 3_600_000);
+  const pagingMs = boundedNumber(env?.SONIC_ALERT_P95_PAGING_MS, 0, 0, 3_600_000);
+  return {
+    windowSec: Math.floor(boundedNumber(env?.SONIC_ALERT_WINDOW_SEC, 300, 10, 3600)),
+    minRequests: Math.floor(boundedNumber(env?.SONIC_ALERT_MIN_REQUESTS, 100, 1, 1_000_000)),
+    min5xx: Math.floor(boundedNumber(env?.SONIC_ALERT_5XX_THRESHOLD, 5, 1, 1_000_000)),
+    // A zero threshold disables that severity; paging cannot precede an enabled warning.
+    warningRatio,
+    pagingRatio: pagingRatio > 0 ? Math.max(warningRatio, pagingRatio) : 0,
+    warningP95Ms: warningMs,
+    pagingP95Ms: pagingMs > 0 ? Math.max(warningMs, pagingMs) : 0,
+  };
+}
+
+type GroupCounts = Record<RouteMetricGroup, number>;
+interface RequestBucket {
+  counts: RequestCounts;
+  groups: Partial<GroupCounts>;
+}
+interface RequestWindow {
+  windowSec: number;
+  lastSec: number;
+  startedAtMs: number;
+  buckets: Array<RequestBucket | undefined>;
+  counts: RequestCounts;
+  groups: GroupCounts;
+}
+
+let requestWindow: RequestWindow | undefined;
+let lastP95EvaluationAtMs = -Infinity;
+
+// One bucket per second, at most 3600 buckets, with no timers or per-request history.
+// The oldest partial second is excluded. Counts and timed latency samples share this boundary.
+function advanceRequestWindow(windowSec: number, now: number): RequestWindow {
+  const nowSec = Math.floor(now / 1000);
+  if (!requestWindow || requestWindow.windowSec !== windowSec || nowSec < requestWindow.lastSec) {
+    lastP95EvaluationAtMs = -Infinity;
+    requestWindow = {
+      windowSec,
+      lastSec: nowSec,
+      startedAtMs: now,
+      buckets: new Array(windowSec),
+      counts: emptyCounts(),
+      groups: Object.fromEntries(ROUTE_GROUPS.map(group => [group, 0])) as GroupCounts,
+    };
+  }
+  const window = requestWindow;
+  const elapsed = nowSec - window.lastSec;
+  if (elapsed >= windowSec) {
+    window.buckets.fill(undefined);
+    window.counts = emptyCounts();
+    for (const group of ROUTE_GROUPS) window.groups[group] = 0;
+  } else {
+    for (let second = window.lastSec + 1; second <= nowSec; second += 1) {
+      const index = second % windowSec;
+      const expired = window.buckets[index];
+      if (!expired) continue;
+      for (const key of Object.keys(expired.counts) as Array<keyof RequestCounts>) window.counts[key] -= expired.counts[key];
+      for (const group of ROUTE_GROUPS) window.groups[group] -= expired.groups[group] || 0;
+      window.buckets[index] = undefined;
+    }
+  }
+  window.lastSec = nowSec;
+  return window;
+}
+
+function windowStart(window: RequestWindow): number {
+  return Math.max(window.startedAtMs, (window.lastSec - window.windowSec + 1) * 1000);
+}
 
 interface RollingSamples {
   values: number[];
+  recordedAtMs: number[];
   cursor: number;
   totalCount: number;
   max: number;
 }
 
 function createRollingSamples(): RollingSamples {
-  return { values: [], cursor: 0, totalCount: 0, max: 0 };
+  return { values: [], recordedAtMs: [], cursor: 0, totalCount: 0, max: 0 };
 }
 
-function pushSample(ring: RollingSamples, valueMs: number): void {
+function pushSample(ring: RollingSamples, valueMs: number, now: number): void {
   const clean = Math.max(0, Math.round(Number.isFinite(valueMs) ? valueMs : 0));
   ring.totalCount += 1;
   if (clean > ring.max) ring.max = clean;
   if (ring.values.length < MAX_LATENCY_SAMPLES) {
     ring.values.push(clean);
+    ring.recordedAtMs.push(now);
   } else {
     ring.values[ring.cursor] = clean;
+    ring.recordedAtMs[ring.cursor] = now;
     ring.cursor = (ring.cursor + 1) % MAX_LATENCY_SAMPLES;
   }
 }
 
-function summarizeSamples(ring: RollingSamples): {
+function summarizeSamples(ring: RollingSamples, sinceMs?: number, now = Date.now(), count = ring.totalCount): {
   count: number;
   sampleWindow: number;
   p50Ms: number;
@@ -51,18 +155,19 @@ function summarizeSamples(ring: RollingSamples): {
   p99Ms: number;
   maxMs: number;
 } {
-  if (ring.values.length === 0) {
-    return { count: 0, sampleWindow: 0, p50Ms: 0, p95Ms: 0, p99Ms: 0, maxMs: 0 };
+  const sorted = ring.values.filter((_, index) => sinceMs === undefined ||
+    ring.recordedAtMs[index] >= sinceMs && ring.recordedAtMs[index] <= now).sort((a, b) => a - b);
+  if (sorted.length === 0) {
+    return { count, sampleWindow: 0, p50Ms: 0, p95Ms: 0, p99Ms: 0, maxMs: 0 };
   }
-  const sorted = [...ring.values].sort((a, b) => a - b);
   const pick = (q: number) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * q) - 1))];
   return {
-    count: ring.totalCount,
+    count,
     sampleWindow: sorted.length,
     p50Ms: pick(0.5),
     p95Ms: pick(0.95),
     p99Ms: pick(0.99),
-    maxMs: ring.max,
+    maxMs: sinceMs === undefined ? ring.max : sorted[sorted.length - 1],
   };
 }
 
@@ -81,6 +186,7 @@ interface ObservabilityState {
     resolvedOk: number;
     proxied200: number;
     proxied206: number;
+    body: Record<'engine' | 'http', { started: number; active: number; completed: number; cancelled: number; error: number; timeout: number }>;
     errors: {
       '403': number;
       '404': number;
@@ -123,6 +229,7 @@ interface ObservabilityState {
     lastAlertAt?: string;
     lastAlertCode?: string;
     cooldownUntilByCode: Map<string, number>;
+    inFlight: Set<string>;
   };
 }
 
@@ -153,6 +260,10 @@ function createInitialState(): ObservabilityState {
       resolvedOk: 0,
       proxied200: 0,
       proxied206: 0,
+      body: {
+        engine: { started: 0, active: 0, completed: 0, cancelled: 0, error: 0, timeout: 0 },
+        http: { started: 0, active: 0, completed: 0, cancelled: 0, error: 0, timeout: 0 },
+      },
       errors: {
         '403': 0,
         '404': 0,
@@ -199,6 +310,7 @@ function createInitialState(): ObservabilityState {
       suppressedByCooldown: 0,
       failedCount: 0,
       cooldownUntilByCode: new Map<string, number>(),
+      inFlight: new Set<string>(),
     },
   };
 }
@@ -208,6 +320,8 @@ let lastDegradedLogAtMs = 0;
 
 export function resetObservabilityForTest(): void {
   state = createInitialState();
+  requestWindow = undefined;
+  lastP95EvaluationAtMs = -Infinity;
   lastDegradedLogAtMs = 0;
 }
 
@@ -221,6 +335,9 @@ export function redactSensitiveString(raw: unknown): string {
     .replace(/sonic_live_[A-Za-z0-9._-]+/g, 'sonic_live_[REDACTED]')
     .replace(/solara_live_[A-Za-z0-9._-]+/g, 'solara_live_[REDACTED]')
     .replace(/Bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+    .replace(/((?:authorization|x-sonic-engine-key|x-sonic-staging-token|x-api-key)\s*[=:]\s*)[^\r\n,;]+/gi, '$1[REDACTED]')
+    .replace(/((?:set-cookie|cookie)\s*:\s*)[^\r\n]+/gi, '$1[REDACTED]')
+    .replace(/((?:[a-z0-9_-]*(?:secret|password)|access[_-]?token|refresh[_-]?token)\s*=\s*)[^\s&;,"']+/gi, '$1[REDACTED]')
     .replace(/(sonic_session|sonic_oauth_state|sonic_oauth_verifier|sonic_staging_access)=[^;\s"']+/gi, '$1=[REDACTED]')
     .replace(SENSITIVE_PARAM_PATTERN, '$1[REDACTED]')
     .slice(0, 512);
@@ -238,34 +355,68 @@ export function classifyRouteGroup(pathname: string): RouteMetricGroup {
   return 'other';
 }
 
-export function getReleaseMetadata(env?: AppEnv): {
+export interface ReleaseMetadata {
   version: string;
   releaseCommit: string;
   environment: string;
   buildTime?: string;
-} {
+  releaseId?: string;
+  sourceDigest?: string;
+  dirty: boolean;
+}
+
+export function getReleaseMetadata(env?: AppEnv): ReleaseMetadata {
   const e = (env || {}) as Record<string, any>;
   const procEnv = typeof process !== 'undefined' && process.env ? process.env : {};
-  const rawCommit = String(
-    e.SONIC_RELEASE_COMMIT ||
-      e.CF_PAGES_COMMIT_SHA ||
-      procEnv.SONIC_RELEASE_COMMIT ||
-      procEnv.CF_PAGES_COMMIT_SHA ||
-      'unknown',
-  ).trim();
-  const rawEnv = String(
-    e.SONIC_ENV ||
-      (e.CF_PAGES_BRANCH === 'main' ? 'production' : e.CF_PAGES_BRANCH ? 'staging' : '') ||
-      procEnv.SONIC_ENV ||
-      procEnv.NODE_ENV ||
-      'development',
-  ).trim();
-  const buildTime = String(e.SONIC_BUILD_TIME || procEnv.SONIC_BUILD_TIME || '').trim() || undefined;
+  const compiled = COMPILED_RELEASE as ReleaseMetadata & { baseCommit: string } | null;
+  const rawCommit = String(compiled ? compiled.baseCommit : e.SONIC_RELEASE_COMMIT || e.CF_PAGES_COMMIT_SHA || procEnv.SONIC_RELEASE_COMMIT || procEnv.CF_PAGES_COMMIT_SHA || 'unknown').trim();
+  const rawEnv = String(e.SONIC_ENV || (e.CF_PAGES_BRANCH === 'main' ? 'production' : e.CF_PAGES_BRANCH ? 'staging' : '') || procEnv.SONIC_ENV || procEnv.NODE_ENV || 'development').trim();
+  const buildTime = String(compiled ? compiled.buildTime || '' : e.SONIC_BUILD_TIME || procEnv.SONIC_BUILD_TIME || '').trim();
+  const releaseId = String(compiled ? compiled.releaseId || '' : e.SONIC_RELEASE_ID || procEnv.SONIC_RELEASE_ID || '').trim();
+  const sourceDigest = String(compiled ? compiled.sourceDigest || '' : e.SONIC_SOURCE_DIGEST || procEnv.SONIC_SOURCE_DIGEST || '').trim();
   return {
     version: '2.2.0',
-    releaseCommit: /^[a-f0-9]{7,40}$/i.test(rawCommit) ? rawCommit : rawCommit.slice(0, 40) || 'unknown',
+    releaseCommit: /^[a-f0-9]{7,40}$/i.test(rawCommit) ? rawCommit : 'unknown',
     environment: rawEnv || 'development',
-    ...(buildTime ? { buildTime } : {}),
+    ...(buildTime && Number.isFinite(Date.parse(buildTime)) ? { buildTime } : {}),
+    ...(releaseId && /^[a-z0-9][a-z0-9._-]{0,127}$/i.test(releaseId) ? { releaseId } : {}),
+    ...(/^[a-f0-9]{64}$/i.test(sourceDigest) ? { sourceDigest } : {}),
+    dirty: compiled ? compiled.dirty === true : isEnvEnabled(e.SONIC_RELEASE_DIRTY ?? procEnv.SONIC_RELEASE_DIRTY, false),
+  };
+}
+
+export function getReleaseReadiness(env?: AppEnv): { required: boolean; ok: boolean; error?: string } {
+  const release = getReleaseMetadata(env);
+  const required = isEnvEnabled(env?.SONIC_REQUIRE_RELEASE_METADATA, release.environment.toLowerCase() === 'production');
+  const valid = release.releaseCommit !== 'unknown' && Boolean(release.buildTime) &&
+    (!release.dirty || Boolean(release.releaseId && release.sourceDigest));
+  return { required, ok: !required || valid, ...(!valid ? { error: 'release_metadata_missing_or_invalid' } : {}) };
+}
+
+function alertSeverity(value: number, warning: number, paging: number): 'warning' | 'critical' | undefined {
+  if (paging > 0 && value > paging) return 'critical';
+  if (warning > 0 && value > warning) return 'warning';
+  return undefined;
+}
+
+function getWindowSnapshot(env?: AppEnv, now = Date.now()) {
+  const policy = getAlertPolicy(env);
+  const window = advanceRequestWindow(policy.windowSec, now);
+  const fromMs = windowStart(window);
+  const latency = Object.fromEntries(ROUTE_GROUPS.map(group => [group,
+    summarizeSamples(state.latency[group], fromMs, now, window.groups[group]),
+  ])) as Record<RouteMetricGroup, ReturnType<typeof summarizeSamples>>;
+  return {
+    windowSec: policy.windowSec,
+    bucketSec: 1,
+    from: new Date(fromMs).toISOString(),
+    to: new Date(now).toISOString(),
+    observedSec: Math.max(0, (now - fromMs) / 1000),
+    requests: {
+      ...window.counts,
+      errorRate5xx: window.counts.total > 0 ? window.counts.status5xx / window.counts.total : 0,
+    },
+    latency,
   };
 }
 
@@ -275,33 +426,57 @@ export function recordHttpRequestMetric(
   durationMs: number,
   env?: AppEnv,
 ): void {
-  state.requests.total += 1;
-  if (status >= 500) state.requests.status5xx += 1;
-  else if (status >= 400) state.requests.status4xx += 1;
-  else if (status >= 300) state.requests.status3xx += 1;
-  else if (status >= 200) state.requests.status2xx += 1;
-
+  const now = Date.now();
+  const policy = getAlertPolicy(env);
+  const window = advanceRequestWindow(policy.windowSec, now);
   const group = classifyRouteGroup(pathname);
-  pushSample(state.latency.overall, durationMs);
-  pushSample(state.latency[group], durationMs);
-
-  // Automatic 5xx spike alert check
-  if (status >= 500 && env?.SONIC_ALERT_WEBHOOK_URL) {
-    const threshold = Math.max(
-      1,
-      parseInt(String(env.SONIC_ALERT_5XX_THRESHOLD || '5'), 10) || 5,
-    );
-    const rate = state.requests.total > 0 ? state.requests.status5xx / state.requests.total : 0;
-    if (state.requests.status5xx >= threshold && rate >= 0.1) {
-      void triggerSonicAlert(env, {
-        code: 'HIGH_5XX_ERROR_RATE',
-        severity: 'critical',
-        summary: `Sonic 5xx threshold breached (${state.requests.status5xx}/${state.requests.total}, ${(
-          rate * 100
-        ).toFixed(1)}%) on route group ${group}`,
-      });
-    }
+  const index = window.lastSec % window.windowSec;
+  const bucket = window.buckets[index] ||= { counts: emptyCounts(), groups: {} };
+  countRequest(state.requests, status);
+  countRequest(window.counts, status);
+  countRequest(bucket.counts, status);
+  for (const key of ['overall', group] as RouteMetricGroup[]) {
+    window.groups[key] += 1;
+    bucket.groups[key] = (bucket.groups[key] || 0) + 1;
+    pushSample(state.latency[key], durationMs, now);
   }
+
+  if (!env?.SONIC_ALERT_WEBHOOK_URL || window.counts.total < policy.minRequests) return;
+  const rate = window.counts.status5xx / window.counts.total;
+  const severity = alertSeverity(rate, policy.warningRatio, policy.pagingRatio);
+  if (severity && window.counts.status5xx >= policy.min5xx) {
+    void triggerSonicAlert(env, {
+      code: 'HIGH_5XX_ERROR_RATE',
+      severity,
+      summary: `Sonic rolling ${policy.windowSec}s 5xx rate ${window.counts.status5xx}/${window.counts.total} (${(rate * 100).toFixed(2)}%)`,
+    });
+  }
+
+  // Percentiles cost a bounded sort. Evaluate at most once/second, only if explicitly enabled.
+  if ((!policy.warningP95Ms && !policy.pagingP95Ms) || now - lastP95EvaluationAtMs < 1000) return;
+  lastP95EvaluationAtMs = now;
+  for (const key of ROUTE_GROUPS) {
+    if (window.groups[key] < policy.minRequests) continue;
+    const sample = summarizeSamples(state.latency[key], windowStart(window), now, window.groups[key]);
+    if (sample.sampleWindow < Math.min(policy.minRequests, MAX_LATENCY_SAMPLES)) continue;
+    const latencySeverity = alertSeverity(sample.p95Ms, policy.warningP95Ms, policy.pagingP95Ms);
+    if (!latencySeverity) continue;
+    void triggerSonicAlert(env, {
+      code: `HIGH_P95_LATENCY_${key.toUpperCase()}`,
+      severity: latencySeverity,
+      summary: `Sonic ${key} rolling ${policy.windowSec}s P95 ${sample.p95Ms}ms (${sample.sampleWindow} recent samples, ${sample.count} requests)`,
+    });
+  }
+}
+
+export function recordStreamBodyMetric(
+  kind: 'started' | 'completed' | 'cancelled' | 'error' | 'timeout',
+  scope: 'engine' | 'http' = 'engine',
+): void {
+  const body = state.stream.body[scope];
+  body[kind] += 1;
+  if (kind === 'started') body.active += 1;
+  else body.active = Math.max(0, body.active - 1);
 }
 
 export function recordStreamMetric(
@@ -434,6 +609,8 @@ export function getObservabilitySnapshot(env?: AppEnv) {
       ...state.requests,
       errorRate5xx,
     },
+    // Cumulative counters above remain backwards compatible; alarms use only this window.
+    window: getWindowSnapshot(env, now),
     latency: {
       overall: summarizeSamples(state.latency.overall),
       search: summarizeSamples(state.latency.search),
@@ -448,6 +625,7 @@ export function getObservabilitySnapshot(env?: AppEnv) {
       resolvedOk: state.stream.resolvedOk,
       proxied200: state.stream.proxied200,
       proxied206: state.stream.proxied206,
+      body: { engine: { ...state.stream.body.engine }, http: { ...state.stream.body.http } },
       errors: { ...state.stream.errors },
     },
     oauth: {
@@ -471,7 +649,8 @@ export function getObservabilitySnapshot(env?: AppEnv) {
     },
     sqlite: { ...state.sqlite },
     alerts: {
-      configured: Boolean(env?.SONIC_ALERT_WEBHOOK_URL),
+      configured: Boolean(normalizeAlertWebhookUrl(env?.SONIC_ALERT_WEBHOOK_URL, isEnvEnabled(env?.SONIC_ALERT_ALLOW_LOCALHOST, false))),
+      policy: getAlertPolicy(env),
       sentCount: state.alerts.sentCount,
       suppressedByCooldown: state.alerts.suppressedByCooldown,
       failedCount: state.alerts.failedCount,
@@ -512,6 +691,17 @@ function normalizeAlertWebhookUrl(raw: unknown, allowLocalhost: boolean): string
   }
 }
 
+function redactAlertText(raw: unknown, env?: AppEnv): string {
+  let text = String(raw ?? '');
+  // Also scrub configured secrets when an exception/note contains an unlabelled value.
+  for (const [key, value] of Object.entries(env || {})) {
+    if (/(?:SECRET|TOKEN|COOKIE|API_KEY|WEBHOOK_URL)(?:_|$)/i.test(key) && typeof value === 'string' && value.length >= 4) {
+      text = text.split(value).join('[REDACTED]');
+    }
+  }
+  return redactSensitiveString(text);
+}
+
 export async function triggerSonicAlert(
   env: AppEnv | undefined,
   alert: {
@@ -528,25 +718,36 @@ export async function triggerSonicAlert(
   }
 
   const now = Date.now();
-  const cooldownSec = Math.max(
-    0,
-    parseInt(String(env?.SONIC_ALERT_COOLDOWN_SEC ?? '300'), 10) || 300,
-  );
-  const safeCode = alert.code.replace(/[^A-Z0-9_-]/gi, '_').slice(0, 64);
-  const until = state.alerts.cooldownUntilByCode.get(safeCode) || 0;
-  if (!alert.bypassCooldown && cooldownSec > 0 && now < until) {
-    state.alerts.suppressedByCooldown += 1;
+  const cooldownSec = Math.floor(boundedNumber(env?.SONIC_ALERT_COOLDOWN_SEC, 300, 0, 86400));
+  const safeCode = redactAlertText(alert.code, env).replace(/[^A-Z0-9_-]/gi, '_').slice(0, 64) || 'SONIC_ALERT';
+  const key = `${safeCode}:${alert.severity}`;
+  const alerts = state.alerts;
+  const until = alerts.cooldownUntilByCode.get(key) || 0;
+  if (alerts.inFlight.has(key) || alerts.inFlight.size >= 16 ||
+    !alert.bypassCooldown && cooldownSec > 0 && now < until) {
+    alerts.suppressedByCooldown += 1;
     return { sent: false, reason: 'cooldown_active' };
   }
 
-  state.alerts.cooldownUntilByCode.set(safeCode, now + cooldownSec * 1000);
-  const release = getReleaseMetadata(env);
-  const redactedSummary = redactSensitiveString(alert.summary);
+  // Bound state even if callers supply different codes. Reserve before awaiting to coalesce bursts.
+  if (alerts.cooldownUntilByCode.size >= 128 && !alerts.cooldownUntilByCode.has(key)) {
+    alerts.cooldownUntilByCode.delete(alerts.cooldownUntilByCode.keys().next().value!);
+  }
+  alerts.cooldownUntilByCode.set(key, now + cooldownSec * 1000);
+  alerts.inFlight.add(key);
+  const metadata = getReleaseMetadata(env);
+  const release = {
+    ...metadata,
+    environment: redactAlertText(metadata.environment, env),
+    ...(metadata.releaseId ? { releaseId: redactAlertText(metadata.releaseId, env) } : {}),
+  };
+  const redactedSummary = redactAlertText(alert.summary, env);
   const timestamp = new Date(now).toISOString();
+  const window = getWindowSnapshot(env, now);
 
   const payload = {
     brand: 'Sonic',
-    alertVersion: '1.0',
+    alertVersion: '1.1',
     severity: alert.severity,
     code: safeCode,
     summary: redactedSummary,
@@ -554,10 +755,11 @@ export async function triggerSonicAlert(
     timestamp,
     release,
     metrics: {
-      requests: state.requests,
-      p95Ms: summarizeSamples(state.latency.overall).p95Ms,
-      streamErrors: state.stream.errors,
-      sqlite: state.sqlite,
+      requests: { ...state.requests },
+      window,
+      p95Ms: window.latency.overall.p95Ms,
+      streamErrors: { ...state.stream.errors },
+      sqlite: { ...state.sqlite },
       rateLimitDegraded: state.rateLimit.degradedEvents,
     },
   };
@@ -571,25 +773,23 @@ export async function triggerSonicAlert(
       },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(5000),
+      redirect: 'manual',
     });
     resp.body?.cancel?.().catch(() => {});
     if (!resp.ok) {
-      state.alerts.failedCount += 1;
+      alerts.failedCount += 1;
       return { sent: false, reason: `webhook_http_${resp.status}`, status: resp.status };
     }
-    state.alerts.sentCount += 1;
-    state.alerts.lastAlertAt = timestamp;
-    state.alerts.lastAlertCode = safeCode;
+    alerts.sentCount += 1;
+    alerts.lastAlertAt = timestamp;
+    alerts.lastAlertCode = safeCode;
     return { sent: true, reason: 'delivered', status: resp.status };
-  } catch (err: any) {
-    state.alerts.failedCount += 1;
-    console.warn(
-      JSON.stringify({
-        type: 'alert_delivery_failed',
-        code: safeCode,
-        error: redactSensitiveString(err?.message || 'network_error'),
-      }),
-    );
+  } catch {
+    alerts.failedCount += 1;
+    // Fetch error messages may contain a credential-bearing webhook path, not just query params.
+    console.warn(JSON.stringify({ type: 'alert_delivery_failed', code: safeCode, error: 'network_error' }));
     return { sent: false, reason: 'network_error' };
+  } finally {
+    alerts.inFlight.delete(key);
   }
 }

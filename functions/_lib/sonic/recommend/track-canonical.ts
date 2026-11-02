@@ -169,10 +169,15 @@ export function toCanonicalTrack(
     pushSource({ platform: plat, platformId: pid, duration: duration || undefined });
   }
 
-  const canonicalTrackId =
-    typeof raw?.canonicalTrackId === 'string' && raw.canonicalTrackId.startsWith('trk_')
-      ? raw.canonicalTrackId
-      : computeCanonicalTrackId(cleanTitle, canonicalArtist, edition);
+  // This constructor is used by SERVER catalog/search imports, never behavior
+  // ingestion. IDs are derived from metadata rather than caller-selected keys.
+  const canonicalTrackId = computeCanonicalTrackId(cleanTitle, canonicalArtist, edition);
+  const mvSourceIds: Record<string, string> = {};
+  const mvId = raw?.mvId ?? raw?.mvid ?? raw?.mv;
+  if ((typeof mvId === 'string' || typeof mvId === 'number') &&
+      /^[a-zA-Z0-9_-]{1,128}$/.test(String(mvId)) && String(mvId) !== '0') {
+    mvSourceIds[primaryProvider] = String(mvId);
+  }
 
   const rawCover = String(raw?.coverUrl || raw?.cover || '').trim();
   const cleanCover = rawCover
@@ -220,6 +225,7 @@ export function toCanonicalTrack(
     qualities: Array.isArray(raw?.qualities) ? raw.qualities : undefined,
     streamType: raw?.streamType || 'full',
     sourceIds,
+    ...(Object.keys(mvSourceIds).length ? { mvSourceIds } : {}),
     availableSources,
     externalPopularity: Math.max(0, Math.min(100, rankScore)),
     featureVersion: FEATURE_VERSION,
@@ -311,6 +317,7 @@ export function mergeCanonicalTracks(existing: CanonicalTrack, incoming: Canonic
     qualityBadge: existing.qualityBadge === 'SQ' || incoming.qualityBadge === 'SQ' ? 'SQ' : existing.qualityBadge || incoming.qualityBadge,
     streamType: bestStreamType,
     sourceIds: mergedSourceIds,
+    mvSourceIds: { ...incoming.mvSourceIds, ...existing.mvSourceIds },
     availableSources: mergedSources,
     externalPopularity: Math.max(existing.externalPopularity, incoming.externalPopularity),
     firstSeenAt: Math.min(existing.firstSeenAt, incoming.firstSeenAt),

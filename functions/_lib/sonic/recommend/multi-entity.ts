@@ -24,6 +24,8 @@ import { compactNormalize, extractQueryGenres } from './text-norm';
 import { deterministicHash16, isPlayableTrack } from './track-canonical';
 import { getRecommendStore } from './memory-store';
 import { ensureCatalogSeeded } from './seed-catalog';
+import { computeAlbumEntityId, isTrustedCatalogEntity, upsertTrackMvEntities } from './entity-store';
+import { collectUserPreferenceSignals } from './event-state';
 
 export const DEFAULT_PROPAGATION_COEFFICIENTS: PropagationCoefficients = {
   albumToTrack: 0.40,
@@ -152,8 +154,7 @@ export function ensureMultiEntityCatalogSeeded(store: RecommendStore, env?: AppE
   }
 
   for (const [key, g] of albumGroups.entries()) {
-    const albHash = deterministicHash16(`alb:${key}`);
-    const albumId = `alb_${albHash}`;
+    const albumId = computeAlbumEntityId(g.tracks[0].cleanAlbum, g.artistName);
     const primaryCover = g.tracks[0]?.coverUrl || '';
     const allTags = Array.from(new Set(g.tracks.flatMap((t) => [...(t.genres || []), ...(t.tags || [])])));
     const avgPop = Math.round(g.tracks.reduce((s, t) => s + (t.externalPopularity || 0), 0) / g.tracks.length);
@@ -267,51 +268,9 @@ export function ensureMultiEntityCatalogSeeded(store: RecommendStore, env?: AppE
     });
   }
 
-  // Create MVs for top tracks (with video_of relation to track)
-  const topTracksForMv = tracks
-    .filter((t) => isPlayableTrack(t) && t.externalPopularity >= 88)
-    .slice(0, 25);
-
-  for (const t of topTracksForMv) {
-    const mvHash = deterministicHash16(`mv:${t.canonicalTrackId}`);
-    const mvId = `mv_${mvHash}`;
-    entitiesToUpsert.push({
-      id: mvId,
-      type: 'mv',
-      title: `${t.cleanTitle || t.title} (Official MV)`,
-      subtitle: `${t.canonicalArtist} · 官方音乐录影带`,
-      artistName: t.canonicalArtist,
-      coverUrl: t.coverUrl,
-      source: 'sonic',
-      sourceId: t.canonicalTrackId,
-      tags: [...t.genres, 'mv', 'video'],
-      language: t.language,
-      duration: t.duration || 240,
-      externalPopularity: t.externalPopularity,
-      createdAt: t.firstSeenAt || now,
-      updatedAt: now,
-      payload: {
-        mvId,
-        relatedTrackId: t.canonicalTrackId,
-        artist: t.canonicalArtist,
-        cleanTitle: t.cleanTitle,
-        duration: t.duration,
-        hasVideo: true,
-        resolution: '1080p',
-      },
-    });
-
-    relationsToUpsert.push({
-      relationId: `${mvId}:::${t.canonicalTrackId}:::video_of`,
-      parentId: mvId,
-      parentType: 'mv',
-      childId: t.canonicalTrackId,
-      childType: 'track',
-      relationType: 'video_of',
-      weight: 1.0,
-      createdAt: now,
-    });
-  }
+  // A popular audio track is not proof that an official video exists. Only
+  // provider-verified MV references may seed video entities and video_of edges.
+  for (const track of tracks) upsertTrackMvEntities(store, track);
 
   if (store.upsertEntities) {
     store.upsertEntities(entitiesToUpsert);
@@ -358,60 +317,33 @@ export function buildMultiEntityPreferenceProfile(
   const HALF_LIFE_MS = 7 * 24 * 3600 * 1000; // 7 days exponential half-life
   const lambda = Math.LN2 / HALF_LIFE_MS;
 
-  // 1. Ingest standard track behavior events
-  const trackEvents = store.getUserEvents(identity.subjectKey, 300, nowMs - 60 * 24 * 3600 * 1000);
-  for (const ev of trackEvents) {
+  // Legacy and mixed rows share one chronological state fold. Repeated favorites
+  // are one state, and reversals remove their old positive/negative contribution.
+  const { signals } = collectUserPreferenceSignals(store, identity.subjectKey, nowMs - 90 * 24 * 3600 * 1000);
+  for (const ev of signals) {
     profile.hasSignals = true;
-    const dt = Math.max(0, nowMs - ev.createdAt);
-    const decay = Math.exp(-lambda * dt);
-    const effWeight = ev.weight * decay;
-
-    if (ev.canonicalTrackId) {
-      if (ev.weight <= -4.0) {
-        profile.blockedEntityIds.add(ev.canonicalTrackId);
-      } else {
-        const cur = profile.directEntityScores.get(ev.canonicalTrackId) || 0;
-        profile.directEntityScores.set(ev.canonicalTrackId, cur + effWeight);
-      }
+    const effWeight = ev.weight * Math.exp(-lambda * Math.max(0, nowMs - ev.createdAt));
+    if (ev.entityId) {
+      if (ev.type === 'dislike') profile.blockedEntityIds.add(ev.entityId);
+      else profile.directEntityScores.set(ev.entityId, (profile.directEntityScores.get(ev.entityId) || 0) + effWeight);
     }
     if (ev.artistKey) {
       const arNorm = compactNormalize(ev.artistKey);
       profile.topArtists.set(arNorm, (profile.topArtists.get(arNorm) || 0) + effWeight);
     }
-    if (ev.genres?.length) {
-      for (const g of ev.genres) {
-        profile.genreAffinities.set(g, (profile.genreAffinities.get(g) || 0) + effWeight);
-      }
-    }
-  }
-
-  // 2. Ingest multi-entity feedback (albums, playlists, MVs, etc.)
-  const entityFeedbacks = store.getUserEntityFeedbacks
-    ? store.getUserEntityFeedbacks(identity.subjectKey, 300, nowMs - 60 * 24 * 3600 * 1000)
-    : [];
-
-  for (const fb of entityFeedbacks) {
-    profile.hasSignals = true;
-    const dt = Math.max(0, nowMs - fb.createdAt);
-    const decay = Math.exp(-lambda * dt);
-    const effWeight = fb.weight * decay;
-
-    if (fb.weight <= -4.0) {
-      profile.blockedEntityIds.add(fb.entityId);
-    } else {
-      const cur = profile.directEntityScores.get(fb.entityId) || 0;
-      profile.directEntityScores.set(fb.entityId, cur + effWeight);
+    for (const genre of ev.genres || []) {
+      profile.genreAffinities.set(genre, (profile.genreAffinities.get(genre) || 0) + effWeight);
     }
   }
 
   // 3. Bidirectional Soft Signal Propagation across Entity Graph
   for (const [entityId, directScore] of profile.directEntityScores.entries()) {
-    if (directScore <= 0) continue;
+    if (directScore <= 0 || profile.blockedEntityIds.has(entityId)) continue;
 
     // A. If entity is Album or Playlist -> Propagate positive score down to child Tracks
     const childRels = store.getEntityRelations ? store.getEntityRelations(entityId, 'children') : [];
     for (const rel of childRels) {
-      if (rel.childType === 'track') {
+      if (rel.childType === 'track' && (rel.parentType === 'album' || rel.parentType === 'playlist')) {
         const propFactor = rel.parentType === 'album' ? coef.albumToTrack : coef.playlistToTrack;
         const addScore = directScore * propFactor * (rel.weight || 1.0);
         const cur = profile.propagatedEntityScores.get(rel.childId) || 0;
@@ -439,8 +371,8 @@ export function buildMultiEntityPreferenceProfile(
 
     // C. If entity is MV -> Propagate to related Track and same-artist MVs
     if (entityId.startsWith('mv_')) {
-      const mvChildRels = store.getEntityRelations ? store.getEntityRelations(entityId, 'children') : [];
-      for (const rel of mvChildRels) {
+      // Already read above for this entity; do not repeat the SQLite query.
+      for (const rel of childRels) {
         if (rel.childType === 'track') {
           const addScore = directScore * coef.mvToTrack * (rel.weight || 1.0);
           const cur = profile.propagatedEntityScores.get(rel.childId) || 0;
@@ -827,7 +759,7 @@ export async function getMultiEntityRecommendationsForYou(
   if (allowedTypes.has('mv')) {
     const mvs = store.listEntities ? store.listEntities('mv', 200) : [];
     for (const mv of mvs) {
-      if (profile.blockedEntityIds.has(mv.id) || excludeSet.has(mv.id)) continue;
+      if (!isTrustedCatalogEntity(mv) || profile.blockedEntityIds.has(mv.id) || excludeSet.has(mv.id)) continue;
       const direct = profile.directEntityScores.get(mv.id) || 0;
       const prop = profile.propagatedEntityScores.get(mv.id) || 0;
       const arAffinity = mv.artistName ? profile.topArtists.get(compactNormalize(mv.artistName)) || 0 : 0;

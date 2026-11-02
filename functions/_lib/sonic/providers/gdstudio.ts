@@ -38,7 +38,7 @@ export const gdstudioProvider: SonicProviderAdapter = {
         types: 'lyric',
         id: platformId,
         source: source === 'qq' ? 'tencent' : source,
-      });
+      }, options?.signal);
 
       let rawLyric = '';
       if (typeof u === 'object' && u !== null && typeof u.lyric === 'string') {
@@ -95,7 +95,7 @@ export const gdstudioProvider: SonicProviderAdapter = {
         provider: 'gdstudio',
         qualityScore,
       };
-    } catch {
+    } catch { options?.signal?.throwIfAborted();
       return null;
     }
   },
@@ -109,7 +109,7 @@ export const gdstudioProvider: SonicProviderAdapter = {
 
     try {
 
-      const songs = await searchTracks(env, query, source, count, page);
+      const songs = await searchTracks(env, query, source, count, page, options?.signal);
       if (!Array.isArray(songs) || songs.length === 0) return [];
 
       return songs.map((s) => {
@@ -139,7 +139,7 @@ export const gdstudioProvider: SonicProviderAdapter = {
           source: s.source || source,
         };
       });
-    } catch {
+    } catch { options?.signal?.throwIfAborted();
       return [];
     }
   },

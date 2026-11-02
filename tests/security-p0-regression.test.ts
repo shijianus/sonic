@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import {
   checkEngineAccess,
   requiresEngineAuth,
@@ -31,12 +32,17 @@ function nodeRequest(
   headers: Record<string, string> = {},
   socketAddress = '203.0.113.50',
 ): Request {
-  return toWebRequest({
+  const incoming = Object.assign(new EventEmitter(), {
     url,
     method: 'GET',
     headers,
-    socket: { remoteAddress: socketAddress },
-  } as any);
+    complete: true,
+    socket: Object.assign(new EventEmitter(), { remoteAddress: socketAddress }),
+  });
+  const response = new EventEmitter();
+  const request = toWebRequest(incoming as any, response as any);
+  response.emit('finish');
+  return request;
 }
 
 describe('P0-2: Linux engine enforces service auth regardless of Host', () => {

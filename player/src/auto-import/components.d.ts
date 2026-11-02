@@ -11,6 +11,10 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
+    AccessGate: typeof import('./../components/Access/AccessGate.vue')['default']
+    AccessInviteForm: typeof import('./../components/Access/AccessInviteForm.vue')['default']
+    AccessStatusCard: typeof import('./../components/Access/AccessStatusCard.vue')['default']
+    AccountSyncCard: typeof import('./../components/Account/AccountSyncCard.vue')['default']
     AddToPlaylistDialog: typeof import('./../components/Dialog/AddToPlaylistDialog.vue')['default']
     ArtistCard: typeof import('./../components/Ui/ArtistCard.vue')['default']
     Artplayer: typeof import('./../components/Artplayer.vue')['default']
@@ -32,6 +36,7 @@ declare module 'vue' {
     MiniPlayerMobile: typeof import('./../components/Mobile/MiniPlayerMobile.vue')['default']
     MobileDrawer: typeof import('./../components/Mobile/MobileDrawer.vue')['default']
     MobileHomeSkeleton: typeof import('./../components/MobileHomeSkeleton.vue')['default']
+    MobileSearchError: typeof import('./../components/Search/MobileSearchError.vue')['default']
     MobileSongList: typeof import('./../components/Mobile/MobileSongList.vue')['default']
     MusicProgress: typeof import('./../components/Ui/MusicProgress.vue')['default']
     MusicRadarSection: typeof import('./../components/Recommend/MusicRadarSection.vue')['default']

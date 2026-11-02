@@ -759,7 +759,7 @@ onUnmounted(() => {
     </div>
 
     <div
-      class="player-left-panel flex w-full flex-col items-center justify-center px-4 pt-20 pb-8 lg:w-1/2 lg:px-8 lg:pt-24 lg:pb-12"
+      class="player-left-panel custom-scrollbar flex min-h-0 min-w-0 w-full flex-col items-center overflow-x-hidden overflow-y-auto px-4 pt-20 pb-8 lg:w-1/2 lg:px-8 lg:pt-24 lg:pb-12"
       :class="{ 'hidden lg:flex': state.showMobileLyrics }"
     >
       <!-- 专辑封面区域 -->
@@ -822,10 +822,10 @@ onUnmounted(() => {
       </div>
 
       <!-- 歌曲信息（两种模式共享） -->
-      <div class="song-info mb-4 text-center lg:mb-6">
-        <div class="flex items-center justify-center gap-2 mb-1">
+      <div class="song-info mb-4 w-full min-w-0 shrink-0 text-center lg:mb-6">
+        <div class="mb-1 flex min-w-0 flex-wrap items-center justify-center gap-2">
           <h2
-            class="song-title text-primary line-clamp-1 text-xl font-bold sm:text-2xl lg:text-3xl"
+            class="song-title text-primary min-w-0 break-words whitespace-normal text-xl font-bold sm:text-2xl lg:text-3xl"
           >
             {{ currentSong?.name || t('player.unknownSong') }}
           </h2>
@@ -837,10 +837,10 @@ onUnmounted(() => {
             {{ t('player.trialBadge') }}
           </span>
         </div>
-        <p class="text-primary/60 text-sm sm:text-base lg:text-lg">
+        <p class="song-artist text-primary/60 break-words whitespace-normal text-sm sm:text-base lg:text-lg">
           {{ currentSong?.artist || t('player.unknownArtist') }}
         </p>
-        <p v-if="currentSong?.album" class="text-primary/35 mt-0.5 text-xs sm:text-sm">
+        <p v-if="currentSong?.album" class="text-primary/35 mt-0.5 break-words whitespace-normal text-xs sm:text-sm">
           {{ currentSong.album }}
         </p>
       </div>
@@ -994,7 +994,7 @@ onUnmounted(() => {
     </div>
 
     <div
-      class="player-right-panel hidden w-1/2 flex-col px-6 pt-20 pb-8 lg:flex lg:px-8 lg:pt-24 lg:pb-12"
+      class="player-right-panel hidden min-h-0 min-w-0 w-1/2 flex-col px-6 pt-20 pb-8 lg:flex lg:px-8 lg:pt-24 lg:pb-12"
       :class="{ 'flex! w-full': state.showMobileLyrics }"
     >
       <div
@@ -1090,6 +1090,19 @@ onUnmounted(() => {
 
 <style scoped>
 @reference "../style/tailwind.css";
+
+.player-left-panel > * {
+  flex-shrink: 0;
+}
+
+.player-left-panel > :first-child {
+  margin-top: auto;
+}
+
+.player-left-panel > :last-child {
+  margin-bottom: auto;
+}
+
 .bg-layer {
   transform: scale(1.5);
   filter: blur(48px) saturate(1.3);

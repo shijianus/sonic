@@ -32,7 +32,7 @@ import {
   interpolateWordTimestamps,
   getUniversalLyrics,
 } from '../music';
-import { callLocalEngineJson, type CircuitState } from './local-engine';
+import { callLocalEngineJson, createRuntimeAbortBudget, type CircuitState } from './local-engine';
 import { titlesMatchStrictly, artistsMatchStrictly } from './native-protocols';
 
 export interface NexusLyricsResult {
@@ -50,9 +50,32 @@ export interface NexusLyricsResult {
 export async function resolveNexusLyrics(
   params: SonicQueryParams,
   env?: AppEnv,
-  options?: { request?: Request },
+  options?: { request?: Request; signal?: AbortSignal },
+): Promise<NexusLyricsResult> {
+  const budget = createRuntimeAbortBudget([options?.signal, options?.request?.signal], getSonicConfig(env).timeoutMs);
+  try {
+    budget.signal.throwIfAborted();
+    const result = await resolveNexusLyricsWithinBudget(params, env, { ...options, signal: budget.signal, parentSignal: options?.signal });
+    options?.signal?.throwIfAborted();
+    options?.request?.signal.throwIfAborted();
+    return result;
+  } finally {
+    budget.dispose();
+  }
+}
+
+async function resolveNexusLyricsWithinBudget(
+  params: SonicQueryParams,
+  env: AppEnv | undefined,
+  options: { request?: Request; signal: AbortSignal; parentSignal?: AbortSignal },
 ): Promise<NexusLyricsResult> {
   const config = getSonicConfig(env);
+  const signal = options.signal;
+  const throwIfClientAborted = () => {
+    options.parentSignal?.throwIfAborted();
+    options.request?.signal.throwIfAborted();
+    if (signal.aborted && signal.reason?.name !== 'TimeoutError') signal.throwIfAborted();
+  };
   const attempts: SonicAttempt[] = [];
   let degraded = false;
   let degradedReason: string | undefined;
@@ -168,8 +191,10 @@ export async function resolveNexusLyrics(
       };
     }>(`/api/sonic/lyrics/nexus?${q.toString()}`, env, {
       request: options?.request,
+      signal,
       timeoutMs: Math.min(config.engineTimeoutMs, config.timeoutMs),
     });
+    throwIfClientAborted();
     circuitState = engineRes.circuitState;
 
     if (engineRes.ok && engineRes.data?.data) {
@@ -256,14 +281,14 @@ export async function resolveNexusLyrics(
   }
 
   // ① Platform Native Lyrics (Highest Priority: when platform + platformId is provided)
-  if (params.platform && params.platformId) {
+  if (!signal.aborted && params.platform && params.platformId) {
     const pStart = Date.now();
     const platName = params.platform.toLowerCase();
     const adapter = getProvider(platName) || (config.enableGdstudio ? getProvider('gdstudio') : undefined);
 
     if (adapter && adapter.getLyrics && adapter.isEnabled(env)) {
       try {
-        const timeoutSignal = AbortSignal.timeout(config.timeoutMs);
+        const timeoutSignal = signal;
         const nativeResult = await adapter.getLyrics(params, { env, signal: timeoutSignal });
         if (nativeResult && nativeResult.data && (nativeResult.data.instrumental || nativeResult.data.syncedLyrics.length > 0)) {
           // 自适应校验：防止因直连 ID 错位返回完全不相干歌曲的歌词（如错误 ID "Aku Tergoda" 替代 "夜に駆ける"）
@@ -303,28 +328,29 @@ export async function resolveNexusLyrics(
           recordAttempt(String(adapter.name), false, pStart, 'No native lyrics returned');
         }
       } catch (err: any) {
+        throwIfClientAborted();
         recordAttempt(String(adapter.name), false, pStart, err?.message || 'Platform native error');
       }
     }
   }
 
   // ①b First-Party Synthetic Test Media Lyrics (when enabled and title matches synthetic catalog)
-  if (!interpolatedFallback && config.enableSynthetic && params.title && syntheticProvider.getLyrics) {
+  if (!signal.aborted && !interpolatedFallback && config.enableSynthetic && params.title && syntheticProvider.getLyrics) {
     const synStart = Date.now();
     try {
-      const synRes = await syntheticProvider.getLyrics(params, { env });
+      const synRes = await syntheticProvider.getLyrics(params, { env, signal });
       if (synRes && synRes.data.syncedLyrics.length > 0) {
         recordAttempt('synthetic', true, synStart);
         interpolatedFallback = synRes;
       }
-    } catch {}
+    } catch { throwIfClientAborted(); }
   }
 
   // ② AMLL TTML by Platform ID (High Confidence)
-  if (config.enableAmll && (params.ncmMusicId || params.qqMusicId || params.appleMusicId || params.spotifyId || params.isrc || params.platformId)) {
+  if (!signal.aborted && config.enableAmll && (params.ncmMusicId || params.qqMusicId || params.appleMusicId || params.spotifyId || params.isrc || params.platformId)) {
     const aStart = Date.now();
     try {
-      const amllSignal = AbortSignal.timeout(config.timeoutMs);
+      const amllSignal = signal;
       const amllById = await fetchAmllByIds(params, amllSignal, config.upstreamAmll);
       if (amllById) {
         const amllTitle = amllById.metadata.songName || '';
@@ -379,15 +405,16 @@ export async function resolveNexusLyrics(
         recordAttempt('amll', false, aStart, 'Not found by ID');
       }
     } catch (err: any) {
+      throwIfClientAborted();
       recordAttempt('amll', false, aStart, err?.message || 'AMLL ID error');
     }
   }
 
   // ③ AMLL TTML by Search (Medium Confidence)
-  if (config.enableAmll && (params.title || params.artist)) {
+  if (!signal.aborted && config.enableAmll && (params.title || params.artist)) {
     const sStart = Date.now();
     try {
-      const amllSignal = AbortSignal.timeout(config.timeoutMs);
+      const amllSignal = signal;
       const amllBySearch = await fetchAmllBySearch(params, amllSignal, config.upstreamAmll);
       if (amllBySearch) {
         const lines = parseTtmlLyrics(amllBySearch.ttml);
@@ -428,15 +455,16 @@ export async function resolveNexusLyrics(
         recordAttempt('amll', false, sStart, 'Not found by search');
       }
     } catch (err: any) {
+      throwIfClientAborted();
       recordAttempt('amll', false, sStart, err?.message || 'AMLL search error');
     }
   }
 
   // ④ Kugou KRC True Word-Level Lyrics (Highest Multi-language Syllable Precision)
-  if (config.enableKugou && (params.title || params.artist || params.platformId)) {
+  if (!signal.aborted && config.enableKugou && (params.title || params.artist || params.platformId)) {
     const kStart = Date.now();
     try {
-      const kSignal = AbortSignal.timeout(config.timeoutMs);
+      const kSignal = signal;
       const kugouResult = await kugouProvider.getLyrics(params, { env, signal: kSignal });
       if (kugouResult && (kugouResult.data.instrumental || kugouResult.data.syncedLyrics.length > 0)) {
         recordAttempt('kugou', true, kStart);
@@ -450,15 +478,16 @@ export async function resolveNexusLyrics(
         recordAttempt('kugou', false, kStart, 'No lyrics from Kugou');
       }
     } catch (err: any) {
+      throwIfClientAborted();
       recordAttempt('kugou', false, kStart, err?.message || 'Kugou KRC error');
     }
   }
 
   // ⑤ LRCLIB Instrumental Pre-check & Synced LRC Fallback
-  if (config.enableLrclib) {
+  if (!signal.aborted && config.enableLrclib) {
     const lStart = Date.now();
     try {
-      const lrcSignal = AbortSignal.timeout(config.timeoutMs);
+      const lrcSignal = signal;
       const lrcResult = await lrclibProvider.getLyrics!(params, { env, signal: lrcSignal });
       if (lrcResult) {
         recordAttempt('lrclib', true, lStart);
@@ -475,28 +504,32 @@ export async function resolveNexusLyrics(
         recordAttempt('lrclib', false, lStart, 'Not found in LRCLIB');
       }
     } catch (err: any) {
+      throwIfClientAborted();
       recordAttempt('lrclib', false, lStart, err?.message || 'LRCLIB error');
     }
   }
 
   // ⑥ Other Connected Multi-sources (Universal Native Engine)
-  if (env && (params.title || params.artist || params.platformId)) {
+  if (!signal.aborted && env && (params.title || params.artist || params.platformId)) {
     const uStart = Date.now();
     try {
       const uSource = (params.platform === 'qq' || params.platform === 'tencent') ? 'tencent' : 'netease';
       const uTimeoutMs = Math.min(config.timeoutMs, 6000);
-      const uPromise = getUniversalLyrics(env, {
-        id: params.platformId || '',
-        source: uSource,
-        title: params.title || '',
-        artist: params.artist || '',
-        duration: params.duration,
-      });
-      const timeoutPromise = new Promise<null>((_, reject) =>
-        setTimeout(() => reject(new Error('Universal engine timeout')), uTimeoutMs)
-      );
-
-      const uResult = await Promise.race([uPromise, timeoutPromise]);
+      const universalBudget = createRuntimeAbortBudget([signal], uTimeoutMs);
+      let uResult: Awaited<ReturnType<typeof getUniversalLyrics>>;
+      try {
+        uResult = await getUniversalLyrics(env, {
+          id: params.platformId || '',
+          source: uSource,
+          title: params.title || '',
+          artist: params.artist || '',
+          duration: params.duration,
+          signal: universalBudget.signal,
+        });
+        universalBudget.signal.throwIfAborted();
+      } finally {
+        universalBudget.dispose();
+      }
 
       if (uResult && (uResult.lines.length > 0 || isInstrumentalText(uResult.title || '') || isInstrumentalText((uResult as any).lyric || ''))) {
         const sonicLines = internalLinesToSonicLines(uResult.lines);
@@ -526,15 +559,16 @@ export async function resolveNexusLyrics(
         recordAttempt('universal', false, uStart, 'Universal engine returned empty lines');
       }
     } catch (err: any) {
+      throwIfClientAborted();
       recordAttempt('universal', false, uStart, err?.message || 'Universal engine error');
     }
   }
 
   // ⑥b Optional Last-Resort Third-Party Lyriva Fallback (DISABLED BY DEFAULT: SONIC_ENABLE_LYRIVA=false)
-  if (config.enableLyriva && (params.title || params.artist || params.platformId)) {
+  if (!signal.aborted && config.enableLyriva && (params.title || params.artist || params.platformId)) {
     const lyrivaStart = Date.now();
     try {
-      const lyrivaSignal = AbortSignal.timeout(config.timeoutMs);
+      const lyrivaSignal = signal;
       const lyrivaResult = await lyrivaProvider.getLyrics(params, { env, signal: lyrivaSignal });
       if (lyrivaResult && (lyrivaResult.data.instrumental || lyrivaResult.data.syncedLyrics.length > 0)) {
         recordAttempt('lyriva', true, lyrivaStart, undefined, 'third-party');
@@ -548,8 +582,14 @@ export async function resolveNexusLyrics(
         recordAttempt('lyriva', false, lyrivaStart, 'No synced lyrics from Lyriva', 'third-party');
       }
     } catch (err: any) {
+      throwIfClientAborted();
       recordAttempt('lyriva', false, lyrivaStart, err?.message || 'Lyriva fallback error', 'third-party');
     }
+  }
+
+  throwIfClientAborted();
+  if (signal.aborted && signal.reason?.name === 'TimeoutError') {
+    recordAttempt('nexus', false, Date.now(), signal.reason.message || 'Lyrics total timeout');
   }
 
   // ⑦ Return best interpolated fallback if available (words[] guaranteed populated)

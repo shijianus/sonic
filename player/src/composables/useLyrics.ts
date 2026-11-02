@@ -1,5 +1,6 @@
 import { reactive, ref, computed, toRefs } from 'vue'
 import { useAudioStore } from '@/stores/modules/audio'
+import { resolvedSongSource, songPlaybackSource, songSourcePair } from '@/utils/audioUtils'
 import i18n from '@/languages'
 import {
   type LyricWord,
@@ -278,11 +279,8 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
     }
 
     const rawId = targetSong?.id ?? idOrSong
-    if (!rawId) {
-      state.lyricsOriginal = []
-      state.lyricsTrans = []
-      state.lyricsRoma = []
-      lastCacheKey.value = null
+    if (rawId === undefined || rawId === null || rawId === '') {
+      clearLyrics()
       return
     }
 
@@ -301,31 +299,44 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
 
     const album = String(targetSong?.album?.name || targetSong?.album || targetSong?.al?.name || '').trim()
     const duration = targetSong?.duration || targetSong?.dt || 0
-    const source = String(targetSong?.source || targetSong?.platform || 'netease').toLowerCase()
-    const cleanId = String(rawId).replace(/^[a-z0-9_-]+:/i, '')
-
-    // 强绑定：优先读取流网关强校验绑定的真实音频来源、真实歌曲 ID 与曲名歌手，杜绝脱节
-    const effectiveSource = String(targetSong?.resolvedSource || source).toLowerCase()
-    const effectiveId = targetSong?.resolvedId ? String(targetSong.resolvedId).replace(/^[a-z0-9_-]+:/i, '') : cleanId
-    const effectiveTitle = String(targetSong?.resolvedTitle || rawTitle).trim()
-    const effectiveArtist = String(targetSong?.resolvedArtist || rawArtist).trim()
+    const identitySong = targetSong || { id: rawId }
+    const resolvedPair = resolvedSongSource(identitySong)
+    const effectivePair = songPlaybackSource(identitySong)
+    const effectiveSource = effectivePair?.platform || ''
+    const effectiveId = effectivePair?.platformId || ''
+    const effectiveTitle = String((resolvedPair && targetSong?.resolvedTitle) || rawTitle).trim()
+    const effectiveArtist = String((resolvedPair && targetSong?.resolvedArtist) || rawArtist).trim()
     const title = effectiveTitle
     const artist = effectiveArtist
+    const sourceKey = (song: any) => {
+      const pair = songPlaybackSource(song)
+      return JSON.stringify([pair?.platform, pair?.platformId])
+    }
+    const requestedSourceKey = sourceKey(identitySong)
 
-    const cacheKey = `${effectiveSource}_${effectiveId}_${effectiveTitle}_${effectiveArtist}`
-    if (!force && lastCacheKey.value === cacheKey) return
+    const cacheKey = JSON.stringify([String(rawId), effectiveSource, effectiveId, effectiveTitle, effectiveArtist, album, duration])
+    // Deduplicate only the same source-bound request, never another source of the same song.
+    if (!force && inFlightKey === cacheKey && inFlightPromise) return await inFlightPromise
+    if (!force && lastCacheKey.value === cacheKey) {
+      if (inFlightPromise) {
+        currentFetchSeq++
+        activeAbortController?.abort()
+        activeAbortController = null
+        inFlightPromise = null
+        inFlightKey = null
+        loading.value = false
+      }
+      return
+    }
     if (!force && lyricCache.has(cacheKey)) {
+      // A cached selection must also invalidate the pending uncached selection.
+      clearLyrics()
       const cached = lyricCache.get(cacheKey)!
       state.lyricsOriginal = cached.ori
       state.lyricsTrans = cached.tran
       state.lyricsRoma = cached.roma
       lastCacheKey.value = cacheKey
       return
-    }
-
-    // 去重并发请求：多个组件同时切歌时复用同一个进行中的 Promise
-    if (!force && inFlightKey === cacheKey && inFlightPromise) {
-      return await inFlightPromise
     }
 
     thisSeq = ++currentFetchSeq
@@ -339,6 +350,10 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
     const abortController = new AbortController()
     activeAbortController = abortController
     const abortSignal = abortController.signal
+    // Resolving/renewing the same provider ID's transport URL does not change its
+    // lyrics. Invalidating that shared request would leave no replacement to finish.
+    const isCurrentRequest = () => thisSeq === currentFetchSeq && !abortSignal.aborted &&
+      sourceKey(identitySong) === requestedSourceKey
 
     state.lyricsOriginal = []
     state.lyricsTrans = []
@@ -362,23 +377,17 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
       if (effectiveId) {
         nexusParams.set('platform', effectiveSource)
         nexusParams.set('platformId', effectiveId)
-        if (effectiveSource === 'netease' || effectiveSource === 'ncm' || /^\d+$/.test(effectiveId)) {
+        if (effectiveSource === 'netease') {
           nexusParams.set('ncmMusicId', effectiveId)
-        } else if (effectiveSource === 'qq' || effectiveSource === 'tencent' || /^00[a-zA-Z0-9]{12}$/.test(effectiveId)) {
+        } else if (effectiveSource === 'qq') {
           nexusParams.set('qqMusicId', effectiveId)
         }
       }
 
-      if (Array.isArray(targetSong?.sources)) {
-        for (const s of targetSong.sources) {
-          const sId = String(s.platformId || s.id || '').replace(/^[a-z0-9_-]+:/i, '')
-          if ((s.platform === 'netease' || s.platform === 'ncm') && !nexusParams.has('ncmMusicId') && sId) {
-            nexusParams.set('ncmMusicId', sId)
-          }
-          if ((s.platform === 'qq' || s.platform === 'tencent') && !nexusParams.has('qqMusicId') && sId) {
-            nexusParams.set('qqMusicId', sId)
-          }
-        }
+      for (const source of identitySong.sources || []) {
+        const pair = songSourcePair(source.platform, source.platformId)
+        if (pair?.platform === 'netease' && !nexusParams.has('ncmMusicId')) nexusParams.set('ncmMusicId', pair.platformId)
+        if (pair?.platform === 'qq' && !nexusParams.has('qqMusicId')) nexusParams.set('qqMusicId', pair.platformId)
       }
       nexusParams.set('prefer', 'word')
 
@@ -402,18 +411,20 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
       }
     } catch {}
 
+    if (!isCurrentRequest()) return
+
     // ═══════ ② 次选 /api/music/lyric 多源通用引擎保障 ═══════
     if (ori.length === 0) {
       try {
         const musicParams = new URLSearchParams()
-        if (cleanId) musicParams.set('id', cleanId)
-        if (source) musicParams.set('source', source)
+        if (effectiveId) musicParams.set('id', effectiveId)
+        if (effectiveSource) musicParams.set('source', effectiveSource)
         if (title) musicParams.set('title', title)
         if (artist) musicParams.set('artist', artist)
         if (album) musicParams.set('album', album)
         if (duration) musicParams.set('duration', String(duration))
 
-        const musicRes = await fetch(`/api/music/lyric?${musicParams.toString()}`).then(r => r.json()) as any
+        const musicRes = await fetch(`/api/music/lyric?${musicParams.toString()}`, { signal: abortSignal }).then(r => r.json()) as any
         if (musicRes?.isPureMusic) {
           ori = [{ time: 0, text: i18n.global.t('song.pureMusic') }]
         } else if (Array.isArray(musicRes?.lines) && musicRes.lines.length > 0) {
@@ -435,10 +446,15 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
       } catch {}
     }
 
-    // ═══════ ③ 经典 /api/lyric 保底查询 ═══════
-    if (ori.length === 0 && cleanId) {
+    if (!isCurrentRequest()) return
+
+    // ═══════ ③ 经典 /api/lyric 保底查询（仍携带同一来源与 ID） ═══════
+    if (ori.length === 0 && effectiveId && effectiveSource) {
       try {
-        const classicRes = await fetch(`/api/lyric?id=${encodeURIComponent(cleanId)}`).then(r => r.json()) as any
+        const classicParams = new URLSearchParams({ id: effectiveId, source: effectiveSource })
+        if (title) classicParams.set('title', title)
+        if (artist) classicParams.set('artist', artist)
+        const classicRes = await fetch(`/api/lyric?${classicParams.toString()}`, { signal: abortSignal }).then(r => r.json()) as any
         const raw = classicRes?.lrc?.lyric || classicRes?.lyric || classicRes?.rawLyric || ''
         if (raw) {
           ori = processLinesToWords(parseAnyLrc(raw), title, artist)
@@ -450,15 +466,12 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
       } catch {}
     }
 
-      if (thisSeq !== currentFetchSeq || abortSignal.aborted) return
+      if (!isCurrentRequest()) return
 
-      // 防抖校验：核对当前播放器中的正在播放歌曲是否仍为当前请求歌曲
+      // 同一 Song.id 下的音源切换也会让旧歌词请求失效。
       try {
-        const audioStore = useAudioStore()
-        const curNow = audioStore.getCurrentSong
-        if (curNow && targetSong?.id && String(curNow.id) !== String(targetSong.id)) {
-          return
-        }
+        const curNow = useAudioStore().getCurrentSong
+        if (curNow && targetSong?.id && (String(curNow.id) !== String(targetSong.id) || sourceKey(curNow) !== requestedSourceKey)) return
       } catch {}
 
       state.lyricsOriginal = ori.length > 0 ? ori : [{ time: 0, text: i18n.global.t('song.noLyrics') }]
@@ -466,11 +479,12 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
       state.lyricsRoma = roma
       lastCacheKey.value = cacheKey
 
-      lyricCache.set(cacheKey, {
-        ori: state.lyricsOriginal,
-        tran: state.lyricsTrans,
-        roma: state.lyricsRoma,
-      })
+      if (ori.length > 0) {
+        lyricCache.set(cacheKey, { ori: state.lyricsOriginal, tran: state.lyricsTrans, roma: state.lyricsRoma })
+      } else {
+        // A transient miss is not a permanent cached lyric result.
+        lastCacheKey.value = null
+      }
     }
 
     inFlightKey = cacheKey
@@ -511,8 +525,8 @@ if (typeof window !== 'undefined') {
     try {
       const audioStore = useAudioStore()
       const cur = audioStore.getCurrentSong
-      if (cur && String(cur.id) === String(detail.songId)) {
-        fetchLyrics(cur, true)
+      if (cur && String(cur.id) === String(detail.songId) && (!detail.url || cur.url === detail.url)) {
+        fetchLyrics(cur)
       }
     } catch {}
   })

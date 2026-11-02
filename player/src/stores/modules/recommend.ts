@@ -352,9 +352,10 @@ export const useRecommendStore = defineStore('recommend', {
         delete headers['X-Sonic-Personalization']
       }
       const ok = await deleteSonicEvents(headers)
+      if (!ok) return false
       this.dislikedTracks = []
       this.anonId = this.personalizationEnabled ? generateAnonId() : ''
-      return ok
+      return true
     },
   },
 

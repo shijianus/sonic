@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -40,6 +40,9 @@ import { onRequest as onEventsRequest } from '../functions/api/sonic/events'
 describe('CFSolara 智能音乐推荐与混合搜索引擎全链路测试', () => {
   let store: MemoryRecommendStore
   let env: any
+  let httpStore: SqliteRecommendStore | undefined
+
+  afterEach(() => { httpStore?.close(); httpStore = undefined })
 
   beforeEach(() => {
     resetMemoryRecommendStoreForTest()
@@ -702,6 +705,8 @@ describe('CFSolara 智能音乐推荐与混合搜索引擎全链路测试', () =
     })
 
     it('POST / DELETE /api/sonic/events 遵循隐私开关与单批清空语义', async () => {
+      httpStore = new SqliteRecommendStore(':memory:')
+      env = { ...env, RECOMMEND_STORE: httpStore }
       // 1. 隐私关闭时不记录任何事件
       const optOutResp = await onEventsRequest({
         request: new Request('https://cfsolara.test/api/sonic/events', {

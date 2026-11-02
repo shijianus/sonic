@@ -21,6 +21,7 @@ export interface ContentSourcePolicyEntry {
   statusLabelZh: string;
   defaultEnabledInStandardMode: boolean;
   allowedDomains: string[];
+  allowedDomainsByCapability?: Partial<Record<ContentCapability, string[]>>;
   envSwitch: string;
   conditionsOrBlockers: string;
 }
@@ -45,7 +46,13 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     authorizationStatus: 'PENDING_CONFIRMATION',
     statusLabelZh: '待确认',
     defaultEnabledInStandardMode: true,
-    allowedDomains: ['music.126.net', '163.com', 'music.163.com'],
+    allowedDomains: ['music.126.net', 'vod.126.net', 'music.163.com'],
+    allowedDomainsByCapability: {
+      audio: ['music.126.net', 'vod.126.net'],
+      cover: ['music.126.net'],
+      lyrics: ['music.163.com'],
+      catalog: ['music.163.com'],
+    },
     envSwitch: 'SONIC_ENABLE_NETEASE',
     conditionsOrBlockers:
       '商业音乐平台音源/歌词/封面/榜单；缺少项目负责人书面确认的商业 API 或内容授权协议，受控内测 strict-allowlist 模式下默认禁用。',
@@ -57,7 +64,13 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     authorizationStatus: 'PENDING_CONFIRMATION',
     statusLabelZh: '待确认',
     defaultEnabledInStandardMode: true,
-    allowedDomains: ['qq.com', 'y.qq.com', 'gtimg.cn', 'qpic.cn'],
+    allowedDomains: ['qqmusic.qq.com', 'y.qq.com', 'y.gtimg.cn', 'qpic.cn'],
+    allowedDomainsByCapability: {
+      audio: ['qqmusic.qq.com'],
+      cover: ['y.gtimg.cn', 'qpic.cn'],
+      lyrics: ['y.qq.com'],
+      catalog: ['y.qq.com'],
+    },
     envSwitch: 'SONIC_ENABLE_QQ',
     conditionsOrBlockers:
       '商业音乐平台音源/QRC 歌词/专辑与歌手封面；缺少项目负责人书面确认的授权依据，受控内测 strict-allowlist 模式下默认禁用。',
@@ -70,6 +83,12 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     statusLabelZh: '待确认',
     defaultEnabledInStandardMode: true,
     allowedDomains: ['kugou.com'],
+    allowedDomainsByCapability: {
+      audio: ['kugou.com'],
+      lyrics: ['kugou.com'],
+      cover: ['kugou.com'],
+      catalog: ['kugou.com'],
+    },
     envSwitch: 'SONIC_ENABLE_KUGOU',
     conditionsOrBlockers:
       '商业音乐平台音源/KRC 逐字歌词/封面；缺少项目负责人书面确认的授权依据，受控内测 strict-allowlist 模式下默认禁用。',
@@ -82,6 +101,12 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     statusLabelZh: '待确认',
     defaultEnabledInStandardMode: true,
     allowedDomains: ['kuwo.cn'],
+    allowedDomainsByCapability: {
+      audio: ['kuwo.cn'],
+      lyrics: ['kuwo.cn'],
+      cover: ['kuwo.cn'],
+      catalog: ['kuwo.cn'],
+    },
     envSwitch: 'SONIC_ENABLE_KUWO',
     conditionsOrBlockers:
       '商业音乐平台音源/歌词/封面；缺少项目负责人书面确认的授权依据，受控内测 strict-allowlist 模式下默认禁用。',
@@ -94,6 +119,9 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     statusLabelZh: '待确认',
     defaultEnabledInStandardMode: true,
     allowedDomains: ['amll.dev'],
+    allowedDomainsByCapability: {
+      lyrics: ['amll.dev'],
+    },
     envSwitch: 'SONIC_ENABLE_AMLL',
     conditionsOrBlockers:
       '社区贡献 TTML 逐字歌词库；歌词文本本身受词曲著作权保护，需项目负责人确认内测/生产使用边界后方可对外部开放。',
@@ -106,6 +134,9 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     statusLabelZh: '待确认',
     defaultEnabledInStandardMode: true,
     allowedDomains: ['lrclib.net'],
+    allowedDomainsByCapability: {
+      lyrics: ['lrclib.net'],
+    },
     envSwitch: 'SONIC_ENABLE_LRCLIB',
     conditionsOrBlockers:
       '社区公开 LRC 接口；虽无鉴权门槛，但歌词著作权与公开分发合规性需项目负责人确认，strict-allowlist 模式下默认禁用。',
@@ -169,16 +200,21 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
       'gdstudio.xyz',
       'music-api.gdstudio.xyz',
       'music.126.net',
-      '126.net',
-      '163.com',
+      'vod.126.net',
       'music.163.com',
-      'qq.com',
+      'qqmusic.qq.com',
       'y.qq.com',
-      'gtimg.cn',
+      'y.gtimg.cn',
       'qpic.cn',
       'kugou.com',
       'kuwo.cn',
     ],
+    allowedDomainsByCapability: {
+      audio: ['gdstudio.xyz', 'music-api.gdstudio.xyz', 'music.126.net', 'vod.126.net', 'qqmusic.qq.com', 'kugou.com', 'kuwo.cn'],
+      cover: ['gdstudio.xyz', 'music-api.gdstudio.xyz', 'music.126.net', 'y.gtimg.cn', 'qpic.cn', 'kugou.com', 'kuwo.cn'],
+      lyrics: ['gdstudio.xyz', 'music-api.gdstudio.xyz', 'music.163.com', 'y.qq.com', 'kugou.com', 'kuwo.cn'],
+      catalog: ['gdstudio.xyz', 'music-api.gdstudio.xyz', 'music.163.com', 'y.qq.com', 'kugou.com', 'kuwo.cn'],
+    },
     envSwitch: 'SONIC_ENABLE_GDSTUDIO',
     conditionsOrBlockers:
       '外部聚合音源接口，用于本地 VPS 爬虫离线或边缘独立部署时的全量音频、歌词、封面与检索回退。',
@@ -263,10 +299,15 @@ export interface EffectiveContentFlags {
   allowedSources: string[];
 }
 
+export function isProductionEnvironment(env?: AppEnv): boolean {
+  return String((env as Record<string, unknown> | undefined)?.SONIC_ENV || '').trim().toLowerCase() === 'production';
+}
+
 export function evaluateContentFlags(env?: AppEnv): EffectiveContentFlags {
   const e = (env || {}) as Record<string, any>;
   const policyMode = getContentPolicyMode(env);
   const allowSet = getExplicitAllowedSources(env);
+  const production = isProductionEnvironment(env);
 
   if (policyMode === 'strict-allowlist') {
     // Under strict-allowlist:
@@ -284,7 +325,7 @@ export function evaluateContentFlags(env?: AppEnv): EffectiveContentFlags {
     const syntheticExplicit = parseBoolFlag(e.SONIC_ENABLE_SYNTHETIC_TEST_SOURCE, false);
     const flags = {
       policyMode,
-      enableSynthetic: checkStrict('synthetic', e.SONIC_ENABLE_SYNTHETIC_TEST_SOURCE, syntheticExplicit),
+      enableSynthetic: !production && checkStrict('synthetic', e.SONIC_ENABLE_SYNTHETIC_TEST_SOURCE, syntheticExplicit),
       enableNetease: checkStrict('netease', e.SONIC_ENABLE_NETEASE),
       enableQq: checkStrict('qq', e.SONIC_ENABLE_QQ),
       enableKugou: checkStrict('kugou', e.SONIC_ENABLE_KUGOU),
@@ -313,7 +354,8 @@ export function evaluateContentFlags(env?: AppEnv): EffectiveContentFlags {
   const flags: EffectiveContentFlags = {
     policyMode,
     enableSynthetic:
-      parseBoolFlag(e.SONIC_ENABLE_SYNTHETIC_TEST_SOURCE, false) || allowSet.has('synthetic'),
+      !production &&
+      (parseBoolFlag(e.SONIC_ENABLE_SYNTHETIC_TEST_SOURCE, false) || allowSet.has('synthetic')),
     enableNetease: filterByOptionalAllowSet('netease', parseBoolFlag(e.SONIC_ENABLE_NETEASE, true)),
     enableQq: filterByOptionalAllowSet('qq', parseBoolFlag(e.SONIC_ENABLE_QQ, true)),
     enableKugou: filterByOptionalAllowSet('kugou', parseBoolFlag(e.SONIC_ENABLE_KUGOU, true)),
@@ -403,34 +445,30 @@ export function isSourceEnabledByPolicy(source: string, env?: AppEnv): boolean {
   }
 }
 
-export function getAllowedMediaDomains(env?: AppEnv): string[] {
+export function getAllowedMediaDomains(
+  env?: AppEnv,
+  capability?: ContentCapability,
+): string[] {
   const f = evaluateContentFlags(env);
   const domains = new Set<string>();
 
-  if (f.enableNetease) {
-    CONTENT_SOURCE_LICENSING_REGISTRY.netease.allowedDomains.forEach((d) => domains.add(d));
-  }
-  if (f.enableQq) {
-    CONTENT_SOURCE_LICENSING_REGISTRY.qq.allowedDomains.forEach((d) => domains.add(d));
-  }
-  if (f.enableKugou) {
-    CONTENT_SOURCE_LICENSING_REGISTRY.kugou.allowedDomains.forEach((d) => domains.add(d));
-  }
-  if (f.enableKuwo) {
-    CONTENT_SOURCE_LICENSING_REGISTRY.kuwo.allowedDomains.forEach((d) => domains.add(d));
-  }
-  if (f.enableAmll) {
-    CONTENT_SOURCE_LICENSING_REGISTRY.amll.allowedDomains.forEach((d) => domains.add(d));
-  }
-  if (f.enableLrclib) {
-    CONTENT_SOURCE_LICENSING_REGISTRY.lrclib.allowedDomains.forEach((d) => domains.add(d));
-  }
-  if (f.enableGdstudio) {
-    CONTENT_SOURCE_LICENSING_REGISTRY.gdstudio.allowedDomains.forEach((d) => domains.add(d));
-  }
-  if (f.enableLyriva) {
-    CONTENT_SOURCE_LICENSING_REGISTRY.lyriva.allowedDomains.forEach((d) => domains.add(d));
-  }
+  const addSourceDomains = (id: string): void => {
+    const entry = CONTENT_SOURCE_LICENSING_REGISTRY[id];
+    if (!entry || (capability && !entry.capabilities.includes(capability))) return;
+    const scoped = capability && entry.allowedDomainsByCapability
+      ? entry.allowedDomainsByCapability[capability] || []
+      : entry.allowedDomains;
+    for (const domain of scoped) domains.add(domain);
+  };
+
+  if (f.enableNetease) addSourceDomains('netease');
+  if (f.enableQq) addSourceDomains('qq');
+  if (f.enableKugou) addSourceDomains('kugou');
+  if (f.enableKuwo) addSourceDomains('kuwo');
+  if (f.enableAmll) addSourceDomains('amll');
+  if (f.enableLrclib) addSourceDomains('lrclib');
+  if (f.enableGdstudio) addSourceDomains('gdstudio');
+  if (f.enableLyriva) addSourceDomains('lyriva');
 
   // Optional operator-approved test CDN domains (HTTPS public hostnames only; SSRF validator still runs)
   const extraRaw = String(env?.SONIC_AUTHORIZED_TEST_DOMAINS || '').trim();

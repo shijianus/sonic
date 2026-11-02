@@ -55,12 +55,18 @@ export interface Song {
   streamType?: 'full' | 'trial' | 'unavailable'
   /** 试听时长（秒） */
   trialDuration?: number
+  /** 原始平台与平台内 ID；不替换队列使用的稳定 id */
+  source?: string
+  platform?: string
+  platformId?: string | number
   /** 候选音源列表（跨源自动兜底） */
   sources?: Array<{ platform: string; platformId: string | number; duration?: number }>
   /** 流解析网关强校验绑定的真实音频来源 (如 netease / qq / kugou) */
   resolvedSource?: string
   /** 流解析网关强校验绑定的真实单曲 ID */
   resolvedId?: string | number
+  /** resolvedId 的兼容别名，始终与 resolvedSource 成对使用 */
+  resolvedPlatformId?: string | number
   /** 流解析网关强校验绑定的真实曲目名 */
   resolvedTitle?: string
   /** 流解析网关强校验绑定的真实歌手名 */

@@ -10,13 +10,21 @@ import { buildNeteaseEapiParams, buildNeteaseLinuxApiParams } from './crypto';
 import { normalizeArtistString, normalizeText, normalizeCjkText, calcLevenshteinSimilarity } from './utils';
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
 import { safeFetch } from './security';
-import { callLocalEngineJson, getLocalEngineCircuitSnapshot, type CircuitState } from './local-engine';
+import { callLocalEngineJson, getLocalEngineCircuitSnapshot, createRuntimeAbortBudget, fetchWithRuntimeBudget, type CircuitState } from './local-engine';
 import { getSyntheticTrackSpec, getSyntheticWavTotalBytes } from './synthetic-media';
 
 const DESKTOP_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1';
+
+// A caller's signal supplements, rather than replaces, the provider's deadline.
+async function nativeFetch(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 8000, signal?: AbortSignal): Promise<Response> {
+  signal?.throwIfAborted();
+  const response = await fetchWithRuntimeBudget(input, init, { timeoutMs, signals: [signal] });
+  if (!response.ok) void response.body?.cancel().catch(() => {});
+  return response;
+}
 
 function providerLabel(base: string, env?: AppEnv): string {
   return getSonicConfig(env).runtime === 'linux-engine' ? `local-${base}` : base;
@@ -54,7 +62,7 @@ export async function callNeteaseLinuxApi(
     cookieParts.push(String(env.NETEASE_COOKIE).trim());
   }
 
-  const resp = await fetch('https://music.163.com/api/linux/forward', {
+  const resp = await nativeFetch('https://music.163.com/api/linux/forward', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -65,8 +73,7 @@ export async function callNeteaseLinuxApi(
       Cookie: cookieParts.join('; '),
     },
     body: `eparams=${eparams}`,
-    signal: signal || AbortSignal.timeout(cfg.timeoutMs),
-  });
+  }, cfg.timeoutMs, signal);
   if (!resp.ok) {
     throw new Error(`NetEase linuxapi HTTP ${resp.status}`);
   }
@@ -95,7 +102,7 @@ export async function callNeteaseEapi(
   }
 
   const eapiEndpoint = `https://interface3.music.163.com/eapi${apiPath.replace(/^\/api/, '')}`;
-  const resp = await fetch(eapiEndpoint, {
+  const resp = await nativeFetch(eapiEndpoint, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
@@ -106,8 +113,7 @@ export async function callNeteaseEapi(
       Cookie: cookieParts.join('; '),
     },
     body: `params=${params}`,
-    signal: signal || AbortSignal.timeout(cfg.timeoutMs),
-  });
+  }, cfg.timeoutMs, signal);
   if (!resp.ok) {
     throw new Error(`NetEase eapi HTTP ${resp.status}`);
   }
@@ -175,10 +181,10 @@ export async function searchNeteaseNative(
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (env?.NETEASE_COOKIE) headers.Cookie = String(env.NETEASE_COOKIE).trim();
       const u = `${cfg.ncmApiUrl}/cloudsearch?keywords=${encodeURIComponent(query)}&type=1&limit=${count}&offset=${offset}&realIP=${encodeURIComponent(cfg.realIp)}`;
-      const res = await fetch(u, {
+      const res = await nativeFetch(u, {
         headers,
-        signal: signal || AbortSignal.timeout(cfg.timeoutMs),
-      });
+        signal,
+      }, cfg.timeoutMs);
       if (res.ok) {
         const json = (await res.json()) as any;
         const songs = json?.result?.songs;
@@ -189,7 +195,7 @@ export async function searchNeteaseNative(
           };
         }
       }
-    } catch {}
+    } catch { signal?.throwIfAborted(); }
   }
 
   // 2. Pure-TS encrypted `linuxapi` (`cloudsearch/pc`) — works identically on Linux & Cloudflare Workers
@@ -220,15 +226,15 @@ export async function resolveNeteaseCoverUrl(id: string, env?: AppEnv, signal?: 
 
   if (cfg.ncmApiUrl) {
     try {
-      const res = await fetch(`${cfg.ncmApiUrl}/song/detail?ids=${encodeURIComponent(cleanId)}&realIP=${encodeURIComponent(cfg.realIp)}`, {
-        signal: signal || AbortSignal.timeout(4500),
-      });
+      const res = await nativeFetch(`${cfg.ncmApiUrl}/song/detail?ids=${encodeURIComponent(cleanId)}&realIP=${encodeURIComponent(cfg.realIp)}`, {
+        signal,
+      }, 4500);
       if (res.ok) {
         const json = (await res.json()) as any;
         const pic = json?.songs?.[0]?.al?.picUrl;
         if (pic) return toHttpsIfSafe(String(pic));
       }
-    } catch {}
+    } catch { signal?.throwIfAborted(); }
   }
 
   try {
@@ -243,11 +249,11 @@ export async function resolveNeteaseCoverUrl(id: string, env?: AppEnv, signal?: 
         },
       },
       env,
-      signal || AbortSignal.timeout(4500),
+      signal,
     );
     const pic = json?.songs?.[0]?.al?.picUrl || json?.songs?.[0]?.album?.picUrl;
     if (pic) return toHttpsIfSafe(String(pic));
-  } catch {}
+  } catch { signal?.throwIfAborted(); }
 
   try {
     const eJson = await callNeteaseEapi(
@@ -257,29 +263,28 @@ export async function resolveNeteaseCoverUrl(id: string, env?: AppEnv, signal?: 
         ids: JSON.stringify([Number(cleanId)]),
       },
       env,
-      signal || AbortSignal.timeout(4500),
+      signal,
     );
     const pic = eJson?.songs?.[0]?.al?.picUrl;
     if (pic) return toHttpsIfSafe(String(pic));
-  } catch {}
+  } catch { signal?.throwIfAborted(); }
 
   try {
-    const dRes = await fetch(
+    const dRes = await nativeFetch(
       `https://music.163.com/api/song/detail/?id=${encodeURIComponent(cleanId)}&ids=%5B${encodeURIComponent(cleanId)}%5D`,
       {
         headers: {
           'User-Agent': DESKTOP_UA,
           Referer: 'https://music.163.com/',
         },
-        signal: signal || AbortSignal.timeout(4500),
-      },
-    );
+        signal,
+      }, 4500);
     if (dRes.ok) {
       const dJson = (await dRes.json()) as any;
       const pic = dJson?.songs?.[0]?.album?.picUrl || dJson?.songs?.[0]?.al?.picUrl || dJson?.songs?.[0]?.artists?.[0]?.picUrl;
       if (pic) return toHttpsIfSafe(String(pic));
     }
-  } catch {}
+  } catch { signal?.throwIfAborted(); }
 
   return '';
 }
@@ -303,7 +308,7 @@ export async function resolveQQCoverUrl(idOrMid: string, env?: AppEnv, signal?: 
         param: isNumeric ? { song_id: Number(clean) } : { song_mid: clean },
       },
     };
-    const res = await fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+    const res = await nativeFetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -312,8 +317,8 @@ export async function resolveQQCoverUrl(idOrMid: string, env?: AppEnv, signal?: 
         'User-Agent': DESKTOP_UA,
       },
       body: JSON.stringify(body),
-      signal: signal || AbortSignal.timeout(4000),
-    });
+      signal,
+    }, 4000);
     if (res.ok) {
       const json = (await res.json()) as any;
       const albumMid = json?.songinfo?.data?.track_info?.album?.mid;
@@ -325,7 +330,7 @@ export async function resolveQQCoverUrl(idOrMid: string, env?: AppEnv, signal?: 
         return `https://y.gtimg.cn/music/photo_new/T001R300x300M000${singerMid}.jpg`;
       }
     }
-  } catch {}
+  } catch { signal?.throwIfAborted(); }
 
   // 2. Fallback: treat `clean` itself as `albummid` (proxyImage GET will verify 200 image/*)
   if (/^[0-9A-Za-z]{10,20}$/.test(clean)) {
@@ -348,10 +353,10 @@ export async function resolveKugouCoverUrl(hash: string, env?: AppEnv, signal?: 
       'User-Agent': MOBILE_UA,
     };
     if (env?.KUGOU_COOKIE) headers.Cookie = String(env.KUGOU_COOKIE).trim();
-    const res = await fetch(`https://m.kugou.com/app/i/getSongInfo.php?cmd=playInfo&hash=${encodeURIComponent(cleanHash)}`, {
+    const res = await nativeFetch(`https://m.kugou.com/app/i/getSongInfo.php?cmd=playInfo&hash=${encodeURIComponent(cleanHash)}`, {
       headers,
-      signal: signal || AbortSignal.timeout(4500),
-    });
+      signal,
+    }, 4500);
     if (res.ok) {
       const json = (await res.json()) as any;
       const rawImg = json?.album_img || json?.imgUrl || '';
@@ -359,7 +364,7 @@ export async function resolveKugouCoverUrl(hash: string, env?: AppEnv, signal?: 
         return toHttpsIfSafe(String(rawImg).replace('{size}', '400'));
       }
     }
-  } catch {}
+  } catch { signal?.throwIfAborted(); }
   return '';
 }
 
@@ -372,10 +377,10 @@ export async function searchKuwoNative(
   try {
     const pn = Math.max(0, page - 1);
     const url = `http://search.kuwo.cn/r.s?client=kt&all=${encodeURIComponent(query)}&pn=${pn}&rn=${count}&uid=794762570&ver=kwplayer_ar_9.2.2.1&vipver=1&show_copyright_off=1&newver=1&ft=music&cluster=0&strategy=2012&encoding=utf8&rformat=json&vermerge=1&mobi=1`;
-    const res = await fetch(url, {
+    const res = await nativeFetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
-      signal: signal || AbortSignal.timeout(6000),
-    });
+      signal,
+    }, 6000);
     if (!res.ok) return [];
     const rawText = await res.text();
     let json: any = null;
@@ -416,6 +421,7 @@ export async function searchKuwoNative(
       })
       .filter((x: SonicSearchTrack | null): x is SonicSearchTrack => Boolean(x));
   } catch {
+    signal?.throwIfAborted();
     return [];
   }
 }
@@ -424,10 +430,10 @@ export async function fetchKuwoLyricsNative(rid: string, signal?: AbortSignal): 
   const cleanRid = rid.replace(/^kuwo:/i, '').replace(/^MUSIC_/i, '').trim();
   if (!/^\d+$/.test(cleanRid)) return '';
   try {
-    const res = await fetch(`https://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=${encodeURIComponent(cleanRid)}`, {
+    const res = await nativeFetch(`https://m.kuwo.cn/newh5/singles/songinfoandlrc?musicId=${encodeURIComponent(cleanRid)}`, {
       headers: { Referer: 'https://m.kuwo.cn/', 'User-Agent': MOBILE_UA },
-      signal: signal || AbortSignal.timeout(5000),
-    });
+      signal,
+    }, 5000);
     if (!res.ok) return '';
     const json = (await res.json()) as any;
     const lrclist = json?.data?.lrclist;
@@ -441,6 +447,7 @@ export async function fetchKuwoLyricsNative(rid: string, signal?: AbortSignal): 
       })
       .join('\n');
   } catch {
+    signal?.throwIfAborted();
     return '';
   }
 }
@@ -489,6 +496,7 @@ async function resolveNeteaseSingleStream(
   songId: string,
   quality: string,
   env?: AppEnv,
+  signal?: AbortSignal,
 ): Promise<{
   url: string;
   isTrial: boolean;
@@ -509,7 +517,7 @@ async function resolveNeteaseSingleStream(
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (env?.NETEASE_COOKIE) headers.Cookie = String(env.NETEASE_COOKIE).trim();
       const u = `${cfg.ncmApiUrl}/song/url/v1?id=${encodeURIComponent(cleanId)}&level=${encodeURIComponent(level)}&realIP=${encodeURIComponent(cfg.realIp)}`;
-      const res = await fetch(u, { headers, signal: AbortSignal.timeout(cfg.timeoutMs) });
+      const res = await nativeFetch(u, { headers, signal }, cfg.timeoutMs);
       if (res.ok) {
         const json = (await res.json()) as any;
         const item = json?.data?.[0];
@@ -528,7 +536,7 @@ async function resolveNeteaseSingleStream(
           };
         }
       }
-    } catch {}
+    } catch { signal?.throwIfAborted(); }
   }
 
   // 2. Pure-TS `eapi` `/api/song/enhance/player/url/v1`
@@ -540,6 +548,7 @@ async function resolveNeteaseSingleStream(
       encodeType,
     },
     env,
+    signal,
   );
   const item = eJson?.data?.[0];
   if (item?.url && typeof item.url === 'string') {
@@ -562,6 +571,7 @@ async function resolveNeteaseSingleStream(
 async function resolveQQSingleStream(
   mid: string,
   env?: AppEnv,
+  signal?: AbortSignal,
 ): Promise<{ url: string; via: string } | null> {
   const cleanMid = mid.replace(/^(qq|tencent):/i, '').trim();
   if (!cleanMid) return null;
@@ -573,7 +583,7 @@ async function resolveQQSingleStream(
   };
   if (env?.QQ_COOKIE) headers.Cookie = String(env.QQ_COOKIE).trim();
 
-  const res = await fetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
+  const res = await nativeFetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -591,8 +601,8 @@ async function resolveQQSingleStream(
         },
       },
     }),
-    signal: AbortSignal.timeout(5000),
-  });
+    signal,
+  }, 5000);
   if (!res.ok) return null;
   const json = (await res.json()) as any;
   const info = json?.req_0?.data?.midurlinfo?.[0];
@@ -609,6 +619,7 @@ async function resolveQQSingleStream(
 async function resolveKugouSingleStream(
   hash: string,
   env?: AppEnv,
+  signal?: AbortSignal,
 ): Promise<{ url: string; size?: number; via: string } | null> {
   const cleanHash = hash.replace(/^kugou:/i, '').trim().toLowerCase();
   if (!cleanHash) return null;
@@ -618,10 +629,10 @@ async function resolveKugouSingleStream(
   };
   if (env?.KUGOU_COOKIE) headers.Cookie = String(env.KUGOU_COOKIE).trim();
 
-  const res = await fetch(`https://m.kugou.com/app/i/getSongInfo.php?cmd=playInfo&hash=${encodeURIComponent(cleanHash)}`, {
+  const res = await nativeFetch(`https://m.kugou.com/app/i/getSongInfo.php?cmd=playInfo&hash=${encodeURIComponent(cleanHash)}`, {
     headers,
-    signal: AbortSignal.timeout(5000),
-  });
+    signal,
+  }, 5000);
   if (!res.ok) return null;
   const json = (await res.json()) as any;
   if (!json?.url || typeof json.url !== 'string') return null;
@@ -635,20 +646,20 @@ async function resolveKugouSingleStream(
 async function resolveKuwoSingleStream(
   rid: string,
   env?: AppEnv,
+  signal?: AbortSignal,
 ): Promise<{ url: string; size?: number; via: string } | null> {
   const cleanRid = rid.replace(/^kuwo:/i, '').replace(/^MUSIC_/i, '').trim();
   if (!/^\d+$/.test(cleanRid)) return null;
 
-  const antiRes = await fetch(
+  const antiRes = await nativeFetch(
     `http://antiserver.kuwo.cn/anti.s?type=convert_url&rid=${encodeURIComponent(cleanRid)}&format=mp3&response=url`,
     {
       headers: {
         'User-Agent': 'okhttp/3.10.0',
         Referer: 'https://www.kuwo.cn/',
       },
-      signal: AbortSignal.timeout(5000),
-    },
-  );
+      signal,
+    }, 5000);
   if (!antiRes.ok) return null;
   const rawUrl = (await antiRes.text()).trim();
   if (!rawUrl.startsWith('http')) return null;
@@ -665,6 +676,7 @@ async function resolveKuwoSingleStream(
     finalUrl,
     {
       headers: { Range: 'bytes=0-0', Referer: 'https://www.kuwo.cn/', 'User-Agent': DESKTOP_UA },
+      signal,
     },
     {
       allowHttp: false,
@@ -688,6 +700,7 @@ async function resolveKuwoSingleStream(
       via: viaLabel(env, 'kuwo-antiserver'),
     };
   } catch {
+    signal?.throwIfAborted();
     return null;
   }
 }
@@ -734,6 +747,7 @@ export async function probeStreamPhysicalQuality(
   timeoutMs = 2000,
   expectedDurationSec?: number,
   nominalBitrateKbps = 320,
+  signal?: AbortSignal,
 ): Promise<{ streamType: 'full' | 'trial' | 'unavailable'; totalBytes: number; ratio: number }> {
   try {
     const headers: Record<string, string> = {
@@ -741,7 +755,7 @@ export async function probeStreamPhysicalQuality(
       'User-Agent': DESKTOP_UA,
     };
     if (referer) headers.Referer = referer;
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+    const res = await nativeFetch(url, { headers }, timeoutMs, signal);
     const cr = res.headers.get('content-range') || '';
     const cl = res.headers.get('content-length') || '';
     res.body?.cancel?.().catch(() => {});
@@ -760,6 +774,7 @@ export async function probeStreamPhysicalQuality(
       ratio: evaluation.ratio,
     };
   } catch {
+    signal?.throwIfAborted();
     return { streamType: 'unavailable', totalBytes: 0, ratio: 0 };
   }
 }
@@ -829,13 +844,31 @@ export interface ResolveStreamOptions {
   allowTrial?: boolean;
   nocache?: boolean;
   request?: Request;
+  signal?: AbortSignal;
 }
 
 export async function resolvePlayableStream(
   opts: ResolveStreamOptions,
   env?: AppEnv,
 ): Promise<ResolvedStreamInfo | null> {
+  const budget = createRuntimeAbortBudget([opts.signal, opts.request?.signal], getSonicConfig(env).timeoutMs);
+  try {
+    budget.signal.throwIfAborted();
+    const result = await resolvePlayableStreamWithinBudget({ ...opts, signal: budget.signal }, env);
+    budget.signal.throwIfAborted();
+    return result;
+  } finally {
+    budget.dispose();
+  }
+}
+
+async function resolvePlayableStreamWithinBudget(
+  opts: ResolveStreamOptions,
+  env?: AppEnv,
+): Promise<ResolvedStreamInfo | null> {
   const cfg = getSonicConfig(env);
+  const signal = opts.signal;
+  signal?.throwIfAborted();
   let cleanId = String(opts.id || '').trim();
   let cleanSource = String(opts.source || 'netease').toLowerCase().trim();
   if (cleanId.includes(':')) {
@@ -890,7 +923,7 @@ export async function resolvePlayableStream(
     engineRes = await callLocalEngineJson<{ ok: boolean; data?: ResolvedStreamInfo; attempts?: SonicAttempt[]; error?: string }>(
       `/api/sonic/resolve/stream?${q.toString()}`,
       env,
-      { request: opts.request, timeoutMs: cfg.engineTimeoutMs },
+      { request: opts.request, signal, timeoutMs: cfg.engineTimeoutMs },
     );
     circuitState = engineRes.circuitState;
 
@@ -906,9 +939,8 @@ export async function resolvePlayableStream(
         circuitState: 'CLOSED',
         attempts: mergedAttempts,
       };
-      if (!opts.nocache) {
-        await putSonicCachedJson('stream-url-v1', cacheId, finalInfo, 480, 1200, env);
-      }
+      signal?.throwIfAborted();
+      await putSonicCachedJson('stream-url-v1', cacheId, finalInfo, 480, 1200, env);
       return finalInfo;
     }
 
@@ -924,8 +956,8 @@ export async function resolvePlayableStream(
         error: degradedReason,
       });
 
-      // Check stale cache (up to 20 min) before hitting CF direct fallback
-      const staleHit = await getSonicCachedJson<ResolvedStreamInfo>('stream-url-v1', cacheId, env, { allowStale: true });
+      // A playback retry must not silently replay the failed signed URL from stale cache.
+      const staleHit = opts.nocache ? null : await getSonicCachedJson<ResolvedStreamInfo>('stream-url-v1', cacheId, env, { allowStale: true });
       if (staleHit?.value?.url) {
         return {
           ...staleHit.value,
@@ -958,7 +990,7 @@ export async function resolvePlayableStream(
           let origin = 'https://sonic.internal';
           try {
             if (opts.request) origin = new URL(opts.request.url).origin;
-          } catch {}
+          } catch { signal?.throwIfAborted(); }
           const totalBytes = spec ? getSyntheticWavTotalBytes(spec) : 0;
           attempts.push({ provider: pLabel, via: viaLabel(env, 'synthetic-pcm'), ok: true, ms: Date.now() - pStart });
           return {
@@ -989,7 +1021,7 @@ export async function resolvePlayableStream(
           error: 'Synthetic track ID not found',
         });
       } else if (cleanSource === 'netease' && cfg.enableNetease) {
-        const ne = await resolveNeteaseSingleStream(cleanId, quality, env);
+        const ne = await resolveNeteaseSingleStream(cleanId, quality, env, signal);
         if (ne?.url && !ne.isTrial) {
           attempts.push({ provider: pLabel, via: ne.via, ok: true, ms: Date.now() - pStart });
           const out: ResolvedStreamInfo = {
@@ -1011,7 +1043,8 @@ export async function resolvePlayableStream(
             resolvedTitle: opts.title || undefined,
             resolvedArtist: opts.artist || undefined,
           };
-          if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+          signal?.throwIfAborted();
+          await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
           return out;
         } else if (ne?.url && ne.isTrial) {
           attempts.push({
@@ -1047,9 +1080,9 @@ export async function resolvePlayableStream(
           attempts.push({ provider: pLabel, via: viaLabel(env), ok: false, ms: Date.now() - pStart, error: 'No direct URL returned' });
         }
       } else if (cleanSource === 'qq' && cfg.enableQq) {
-        const qq = await resolveQQSingleStream(cleanId, env);
+        const qq = await resolveQQSingleStream(cleanId, env, signal);
         if (qq?.url) {
-          const probe = await probeStreamPhysicalQuality(qq.url, 'https://y.qq.com/', 2000, opts.durationSec, nominalBr);
+          const probe = await probeStreamPhysicalQuality(qq.url, 'https://y.qq.com/', 2000, opts.durationSec, nominalBr, signal);
           const isFull = probe.streamType === 'full';
           attempts.push({ provider: pLabel, via: qq.via, ok: true, ms: Date.now() - pStart });
           const out: ResolvedStreamInfo = {
@@ -1072,7 +1105,8 @@ export async function resolvePlayableStream(
             resolvedArtist: opts.artist || undefined,
           };
           if (isFull) {
-            if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+            signal?.throwIfAborted();
+          await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
             return out;
           } else if (allowTrial) {
             trialCandidate = out;
@@ -1080,9 +1114,9 @@ export async function resolvePlayableStream(
         }
         attempts.push({ provider: pLabel, via: viaLabel(env, 'qq-vkey'), ok: false, ms: Date.now() - pStart, error: 'Empty vkey purl (region or VIP restricted)' });
       } else if (cleanSource === 'kugou' && cfg.enableKugou) {
-        const kg = await resolveKugouSingleStream(cleanId, env);
+        const kg = await resolveKugouSingleStream(cleanId, env, signal);
         if (kg?.url) {
-          const probe = await probeStreamPhysicalQuality(kg.url, 'https://m.kugou.com/', 2000, opts.durationSec, nominalBr);
+          const probe = await probeStreamPhysicalQuality(kg.url, 'https://m.kugou.com/', 2000, opts.durationSec, nominalBr, signal);
           const sizeEval = typeof kg.size === 'number' ? evaluateStreamTypeByRelativeBytes(kg.size, opts.durationSec, nominalBr) : null;
           const isFull = probe.streamType === 'full' || sizeEval?.streamType === 'full';
           attempts.push({ provider: pLabel, via: kg.via, ok: true, ms: Date.now() - pStart });
@@ -1106,7 +1140,8 @@ export async function resolvePlayableStream(
             resolvedArtist: opts.artist || undefined,
           };
           if (isFull) {
-            if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+            signal?.throwIfAborted();
+          await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
             return out;
           } else if (allowTrial) {
             trialCandidate = out;
@@ -1114,7 +1149,7 @@ export async function resolvePlayableStream(
         }
         attempts.push({ provider: pLabel, via: viaLabel(env, 'kugou-playinfo'), ok: false, ms: Date.now() - pStart, error: 'Empty playInfo url (VIP or region restricted)' });
       } else if (cleanSource === 'kuwo' && cfg.enableKuwo) {
-        const kw = await resolveKuwoSingleStream(cleanId, env);
+        const kw = await resolveKuwoSingleStream(cleanId, env, signal);
         if (kw?.url) {
           attempts.push({ provider: pLabel, via: kw.via, ok: true, ms: Date.now() - pStart });
           const out: ResolvedStreamInfo = {
@@ -1136,12 +1171,14 @@ export async function resolvePlayableStream(
             resolvedTitle: opts.title || undefined,
             resolvedArtist: opts.artist || undefined,
           };
-          if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+          signal?.throwIfAborted();
+          await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
           return out;
         }
         attempts.push({ provider: pLabel, via: viaLabel(env, 'kuwo-antiserver'), ok: false, ms: Date.now() - pStart, error: 'Restricted or rejected 181KB region prompt' });
       }
     } catch (err: any) {
+      signal?.throwIfAborted();
       attempts.push({ provider: pLabel, via: viaLabel(env), ok: false, ms: Date.now() - pStart, error: err?.message || 'Native stream error' });
     }
   }
@@ -1154,8 +1191,10 @@ export async function resolvePlayableStream(
     cleanSource === 'kugou' ||
     cleanSource === 'kuwo';
   const allowExternal =
-    cfg.enableGdstudio ||
-    (isCommercialSource && isSourceEnabledByPolicy(cleanSource, env) && (degraded || Boolean(engineRes?.skippedByCircuit) || !engineRes?.ok));
+    cfg.enableGdstudio &&
+    isCommercialSource &&
+    isSourceEnabledByPolicy(cleanSource, env) &&
+    (degraded || Boolean(engineRes?.skippedByCircuit) || !engineRes?.ok);
 
   if (allowExternal && cleanId) {
     const gdStart = Date.now();
@@ -1172,6 +1211,7 @@ export async function resolvePlayableStream(
         gdUrl,
         {
           headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
+          signal,
         },
         {
           allowHttp: false,
@@ -1202,11 +1242,13 @@ export async function resolvePlayableStream(
             resolvedTitle: opts.title || undefined,
             resolvedArtist: opts.artist || undefined,
           };
-          if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+          signal?.throwIfAborted();
+          await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
           return out;
         }
       }
     } catch (err: any) {
+      signal?.throwIfAborted();
       attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: err?.message });
     }
   }
@@ -1216,13 +1258,12 @@ export async function resolvePlayableStream(
   let trackArtist = opts.artist || '';
   if (!trackTitle && cleanId && cleanSource === 'netease') {
     try {
-      const dRes = await fetch(
+      const dRes = await nativeFetch(
         `https://music.163.com/api/song/detail/?id=${encodeURIComponent(cleanId)}&ids=%5B${encodeURIComponent(cleanId)}%5D`,
         {
           headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.163.com/' },
-          signal: AbortSignal.timeout(2000),
-        },
-      );
+          signal,
+        }, 2000);
       if (dRes.ok) {
         const dJson = (await dRes.json()) as any;
         const songObj = dJson?.songs?.[0];
@@ -1233,7 +1274,7 @@ export async function resolvePlayableStream(
           }
         }
       }
-    } catch {}
+    } catch { signal?.throwIfAborted(); }
   }
   const searchKeywords = [trackTitle, trackArtist].filter(Boolean).join(' ').trim();
   if (cfg.enableFreeCrossMatch && searchKeywords && trackTitle) {
@@ -1246,7 +1287,7 @@ export async function resolvePlayableStream(
       const sStart = Date.now();
       const label = providerLabel('netease', env);
       try {
-        const neSearch = await searchNeteaseNative(searchKeywords, 5, 1, env);
+        const neSearch = await searchNeteaseNative(searchKeywords, 5, 1, env, signal);
         const match = neSearch.tracks.find(
           (t) =>
             titlesMatchStrictly(trackTitle, t.title) &&
@@ -1254,9 +1295,9 @@ export async function resolvePlayableStream(
             (!opts.durationSec || !t.duration || Math.abs(t.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec),
         );
         if (match) {
-          const neStream = await resolveNeteaseSingleStream(match.platformId, quality, env);
+          const neStream = await resolveNeteaseSingleStream(match.platformId, quality, env, signal);
           if (neStream?.url && !neStream.isTrial) {
-            const probe = await probeStreamPhysicalQuality(neStream.url, undefined, 2000, match.duration || opts.durationSec, nominalBr);
+            const probe = await probeStreamPhysicalQuality(neStream.url, undefined, 2000, match.duration || opts.durationSec, nominalBr, signal);
             if (probe.streamType === 'full') {
               attempts.push({ provider: label, via: `${neStream.via}:free-match`, ok: true, ms: Date.now() - sStart });
               const out: ResolvedStreamInfo = {
@@ -1278,13 +1319,15 @@ export async function resolvePlayableStream(
                 resolvedTitle: match.title,
                 resolvedArtist: match.artist,
               };
-              if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+              signal?.throwIfAborted();
+          await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
               return out;
             }
           }
         }
         attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: 'No verified free full-length match' });
       } catch (err: any) {
+        signal?.throwIfAborted();
         attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: err?.message });
       }
     }
@@ -1295,10 +1338,9 @@ export async function resolvePlayableStream(
       const label = providerLabel('kugou', env);
       try {
         const timeoutRemaining = Math.min(3000, Math.max(500, budgetMs - (Date.now() - matchStart)));
-        const kgRes = await fetch(
+        const kgRes = await nativeFetch(
           `http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword=${encodeURIComponent(searchKeywords)}&page=1&pagesize=5&showtype=1`,
-          { headers: { 'User-Agent': DESKTOP_UA }, signal: AbortSignal.timeout(timeoutRemaining) },
-        );
+          { headers: { 'User-Agent': DESKTOP_UA }, signal }, timeoutRemaining);
         if (kgRes.ok) {
           const kgJson = (await kgRes.json()) as any;
           const freeItem = (kgJson?.data?.info || []).find(
@@ -1309,9 +1351,9 @@ export async function resolvePlayableStream(
               (!opts.durationSec || !it.duration || Math.abs(it.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec),
           );
           if (freeItem?.hash) {
-            const kgStream = await resolveKugouSingleStream(freeItem.hash, env);
+            const kgStream = await resolveKugouSingleStream(freeItem.hash, env, signal);
             if (kgStream?.url) {
-              const probe = await probeStreamPhysicalQuality(kgStream.url, 'https://m.kugou.com/', 2000, freeItem.duration || opts.durationSec, nominalBr);
+              const probe = await probeStreamPhysicalQuality(kgStream.url, 'https://m.kugou.com/', 2000, freeItem.duration || opts.durationSec, nominalBr, signal);
               if (probe.streamType === 'full') {
                 attempts.push({ provider: label, via: `${kgStream.via}:free-match`, ok: true, ms: Date.now() - sStart });
                 const out: ResolvedStreamInfo = {
@@ -1332,7 +1374,8 @@ export async function resolvePlayableStream(
                   resolvedTitle: String(freeItem.songname || trackTitle),
                   resolvedArtist: String(freeItem.singername || trackArtist),
                 };
-                if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+                signal?.throwIfAborted();
+          await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
                 return out;
               }
             }
@@ -1340,6 +1383,7 @@ export async function resolvePlayableStream(
         }
         attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: 'No verified free full-length match' });
       } catch (err: any) {
+        signal?.throwIfAborted();
         attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: err?.message });
       }
     }
@@ -1349,7 +1393,7 @@ export async function resolvePlayableStream(
       const sStart = Date.now();
       const label = providerLabel('kuwo', env);
       try {
-        const kwTracks = await searchKuwoNative(searchKeywords, 4, 1);
+        const kwTracks = await searchKuwoNative(searchKeywords, 4, 1, signal);
         for (const kt of kwTracks) {
           if (isBudgetExceeded()) break;
           if (
@@ -1357,9 +1401,9 @@ export async function resolvePlayableStream(
             artistsMatchStrictly(trackArtist, kt.artist, cfg.crossMatchArtistSimilarity) &&
             (!opts.durationSec || !kt.duration || Math.abs(kt.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec)
           ) {
-            const kwStream = await resolveKuwoSingleStream(kt.platformId, env);
+            const kwStream = await resolveKuwoSingleStream(kt.platformId, env, signal);
             if (kwStream?.url) {
-              const probe = await probeStreamPhysicalQuality(kwStream.url, 'https://www.kuwo.cn/', 2000, kt.duration || opts.durationSec, nominalBr);
+              const probe = await probeStreamPhysicalQuality(kwStream.url, 'https://www.kuwo.cn/', 2000, kt.duration || opts.durationSec, nominalBr, signal);
               if (probe.streamType === 'full') {
                 attempts.push({ provider: label, via: `${kwStream.via}:free-match`, ok: true, ms: Date.now() - sStart });
                 const out: ResolvedStreamInfo = {
@@ -1381,7 +1425,8 @@ export async function resolvePlayableStream(
                   resolvedTitle: kt.title,
                   resolvedArtist: kt.artist,
                 };
-                if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+                signal?.throwIfAborted();
+          await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
                 return out;
               }
             }
@@ -1389,6 +1434,7 @@ export async function resolvePlayableStream(
         }
         attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: 'No verified full-length free stream' });
       } catch (err: any) {
+        signal?.throwIfAborted();
         attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: err?.message });
       }
     }
@@ -1412,6 +1458,7 @@ export async function resolvePlayableStream(
           gdUrl,
           {
             headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
+          signal,
           },
           {
             allowHttp: false,
@@ -1442,7 +1489,8 @@ export async function resolvePlayableStream(
               resolvedTitle: trackTitle || undefined,
               resolvedArtist: trackArtist || undefined,
             };
-            if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+            signal?.throwIfAborted();
+          await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
             return out;
           }
         }
@@ -1461,6 +1509,7 @@ export async function resolvePlayableStream(
           gdSearchUrl,
           {
             headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
+          signal,
           },
           {
             allowHttp: false,
@@ -1512,6 +1561,7 @@ export async function resolvePlayableStream(
                 gdUrl2,
                 {
                   headers: { 'User-Agent': DESKTOP_UA, Referer: 'https://music.gdstudio.xyz/' },
+          signal,
                 },
                 {
                   allowHttp: false,
@@ -1542,7 +1592,8 @@ export async function resolvePlayableStream(
                     resolvedTitle: matchedTitle,
                     resolvedArtist: matchedArtist,
                   };
-                  if (!opts.nocache) await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
+                  signal?.throwIfAborted();
+          await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
                   return out;
                 }
               }
@@ -1555,6 +1606,7 @@ export async function resolvePlayableStream(
 
       attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: 'External source did not return a playable stream' });
     } catch (err: any) {
+      signal?.throwIfAborted();
       attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: err?.message });
     }
   }

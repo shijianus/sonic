@@ -79,6 +79,22 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     ).toBe(true)
   })
 
+  it('推荐画像删除失败时保留本地画像和匿名身份以便重试', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('unavailable', { status: 503 }))
+
+    const rec = useRecommendStore()
+    rec.ensureAnonId()
+    const previousAnonId = rec.anonId
+    rec.dislikeSong({ id: 1000, name: '保留', artist: '测试' })
+
+    const ok = await rec.clearAllRecommendationProfile()
+
+    expect(ok).toBe(false)
+    expect(rec.anonId).toBe(previousAnonId)
+    expect(rec.dislikedCount).toBe(1)
+  })
+
+
   it('事件批量发送失败后整批回到队首,随下一次批量一起重试', async () => {
     vi.useFakeTimers()
     try {

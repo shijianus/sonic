@@ -1,3 +1,4 @@
+import { fetchWithRuntimeBudget } from '../local-engine';
 // Sonic Provider — LRCLIB (lrclib.net)
 // Community-driven synced LRC lyrics with instrumental detection & search
 
@@ -51,10 +52,10 @@ export const lrclibProvider: SonicProviderAdapter = {
         url = `${baseUrl}/api/search?q=${encodeURIComponent(q)}`;
       }
 
-      const resp = await fetch(url, {
+      const resp = await fetchWithRuntimeBudget(url, {
         headers: { 'User-Agent': SONIC_UA },
-        signal: signal || AbortSignal.timeout(config.timeoutMs),
-      });
+        signal: signal,
+      }, { timeoutMs: config.timeoutMs });
       if (!resp.ok) return null;
       const json = (await resp.json()) as any;
 
@@ -194,7 +195,7 @@ export const lrclibProvider: SonicProviderAdapter = {
       }
 
       return null;
-    } catch {
+    } catch { options?.signal?.throwIfAborted();
       return null;
     }
   },
@@ -206,10 +207,10 @@ export const lrclibProvider: SonicProviderAdapter = {
 
     try {
       const url = `${baseUrl}/api/search?q=${encodeURIComponent(query)}`;
-      const resp = await fetch(url, {
+      const resp = await fetchWithRuntimeBudget(url, {
         headers: { 'User-Agent': SONIC_UA },
-        signal: signal || AbortSignal.timeout(config.timeoutMs),
-      });
+        signal: signal,
+      }, { timeoutMs: config.timeoutMs });
       if (!resp.ok) return [];
       const items = (await resp.json()) as LrclibTrackItem[];
       if (!Array.isArray(items)) return [];
@@ -239,7 +240,7 @@ export const lrclibProvider: SonicProviderAdapter = {
           lyricId: platformId,
         };
       });
-    } catch {
+    } catch { options?.signal?.throwIfAborted();
       return [];
     }
   },

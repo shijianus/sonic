@@ -140,17 +140,24 @@ const handleClick = async (event: MouseEvent) => {
         box-shadow: 0 20px 60px rgba(0,0,0,0.4);
         object-fit: cover;
       " />
-      <h2 style="
+      <h2 class="hero-clone-title" style="
         margin-top: 24px;
         font-size: 24px;
         font-weight: bold;
         color: white;
         text-align: center;
         max-width: 80%;
-      ">${props.title}</h2>
-      ${props.subtitle ? `<p style="margin-top: 8px; font-size: 14px; color: rgba(255,255,255,0.7);">${props.subtitle}</p>` : ''}
+      "></h2>
+      <p class="hero-clone-subtitle" style="margin-top: 8px; font-size: 14px; color: rgba(255,255,255,0.7);"></p>
     </div>
   `
+  const cloneTitle = clone.querySelector('.hero-clone-title')
+  if (cloneTitle) cloneTitle.textContent = props.title
+  const cloneSubtitle = clone.querySelector('.hero-clone-subtitle') as HTMLElement | null
+  if (cloneSubtitle) {
+    cloneSubtitle.textContent = props.subtitle || ''
+    cloneSubtitle.hidden = !props.subtitle
+  }
   clone.style.cssText = `
     position: fixed;
     z-index: 9999;

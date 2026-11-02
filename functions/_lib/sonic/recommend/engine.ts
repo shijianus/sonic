@@ -40,7 +40,10 @@ import {
 import { getRecommendStore } from './memory-store';
 import { computeCatalogPopularity, exponentialTimeDecay } from './popularity';
 import { ensureCatalogSeeded } from './seed-catalog';
+import { normalizeBehaviorEventInput, resolveEventEntity, resolveEventTrack } from './entity-store';
+import { collectUserPreferenceSignals } from './event-state';
 import {
+  deleteGorseUserData,
   fetchGorseNeighbors,
   fetchGorseRecommendations,
   fetchListenBrainzSimilarArtists,
@@ -154,125 +157,76 @@ export async function ingestBehaviorEvents(
     .map((e) => e.canonicalTrackId!)
     .slice(0, 4);
 
-  for (const rawEv of inputs.slice(0, 50)) {
-    if (!rawEv) continue;
-    const evType = rawEv.type || (rawEv.action as any);
-    if (!evType && !rawEv.action) continue;
-
-    const ts =
-      typeof rawEv.timestamp === 'number' && Number.isFinite(rawEv.timestamp)
-        ? Math.min(now + 60_000, Math.max(now - 90 * DAY_MS, rawEv.timestamp))
-        : now;
-
-    // Multi-entity feedback handling (album, playlist, mv, or track with explicit entityType)
-    const entityType = rawEv.entity_type || rawEv.entityType;
-    const entityId = rawEv.entity_id || rawEv.entityId;
-    const entityAction = rawEv.action || (rawEv.type as any);
-
-    if (entityType && entityId && store.recordEntityFeedback) {
-      const fbWeight = computeEventCredibilityWeight(rawEv);
-      if (!(entityAction === 'skip' && fbWeight === 0)) {
-        const fbFallbackSeed = `${identity.subjectKey}:${entityType}:${entityId}:${entityAction}:${Math.floor(ts / 2000)}`;
-        const feedbackId =
-          rawEv.eventId && /^[a-zA-Z0-9_.:-]{6,96}$/.test(rawEv.eventId)
-            ? rawEv.eventId
-            : `fb_${deterministicHash16(fbFallbackSeed)}`;
-
-        const fbRes = store.recordEntityFeedback({
-          feedbackId,
-          subjectKey: identity.subjectKey,
-          entityType,
-          entityId,
-          action: entityAction,
-          weight: fbWeight,
-          progress: rawEv.progress ?? rawEv.progressRatio,
-          context: rawEv.context,
-          createdAt: ts,
-        });
-
-        if (fbRes.deduplicated) {
-          deduplicated += 1;
-          continue;
-        }
-        if (fbRes.inserted) {
-          accepted += 1;
-        }
-      }
-      // If entity is not a track and not accompanied by a track payload, finish here
-      if (entityType !== 'track' && !rawEv.track) {
-        continue;
-      }
-    }
-
-    let canonicalTrack: CanonicalTrack | null = null;
-    if (rawEv.track) {
-      canonicalTrack = toCanonicalTrack(rawEv.track, { nowMs: ts });
-      if (canonicalTrack) {
-        store.upsertTrack(canonicalTrack);
-      } else if (rawEv.track.canonicalTrackId || rawEv.track.id) {
-        canonicalTrack = store.getTrack(String(rawEv.track.canonicalTrackId || rawEv.track.id));
-      }
-    }
-
+  for (const input of inputs.slice(0, 50)) {
+    const normalized = normalizeBehaviorEventInput(input);
+    if (normalized.error) continue;
+    const rawEv = normalized.event;
+    const ts = typeof rawEv.timestamp === 'number'
+      ? Math.min(now + 60_000, Math.max(now - 90 * DAY_MS, rawEv.timestamp)) : now;
     const weight = computeEventCredibilityWeight(rawEv);
-    // Skip zero-weight non-events (such as network_stall skip) from polluting profile
-    if (rawEv.type === 'skip' && weight === 0) {
+    if (rawEv.type === 'skip' && weight === 0) continue;
+
+    const entityType = rawEv.entityType || 'track';
+    const cleanQuery = rawEv.query?.trim().slice(0, 80) || undefined;
+    const { track: canonicalTrack, trackRef } = resolveEventTrack(store, rawEv);
+    const entity = entityType !== 'track' ? resolveEventEntity(store, rawEv) : null;
+    const fallbackSeed = JSON.stringify([
+      entityType, rawEv.entityId || canonicalTrack?.canonicalTrackId || trackRef || cleanQuery || '',
+      rawEv.type, Math.floor(ts / 2000),
+    ]);
+    const eventId = typeof rawEv.eventId === 'string' && /^[a-zA-Z0-9_.:-]{6,96}$/.test(rawEv.eventId)
+      ? rawEv.eventId : `ev_${deterministicHash16(fallbackSeed)}`;
+
+    // Exactly one stored row per input. An MV's embedded "track" often carries
+    // the VIDEO id, not an audio id; never create a second song event from it.
+    if (entity && store.recordEntityFeedback) {
+      const result = store.recordEntityFeedback({
+        feedbackId: eventId, subjectKey: identity.subjectKey, entityType,
+        entityId: entity.entityId, action: rawEv.type as any, weight,
+        progress: rawEv.progress ?? rawEv.progressRatio, context: rawEv.context, createdAt: ts,
+      });
+      if (result.inserted) accepted++;
+      if (result.deduplicated) deduplicated++;
       continue;
     }
-
-    const cleanQuery = rawEv.query ? rawEv.query.trim().slice(0, 80) : undefined;
-    if (cleanQuery && (rawEv.type === 'search' || rawEv.type === 'search_click')) {
-      store.recordSearchQuery(compactNormalize(cleanQuery), cleanQuery, rawEv.type === 'search_click');
-    }
-
-    const fallbackIdSeed = `${identity.subjectKey}:${rawEv.type || rawEv.action}:${canonicalTrack?.canonicalTrackId || cleanQuery || ''}:${Math.floor(ts / 2000)}`;
-    const eventId =
-      rawEv.eventId && /^[a-zA-Z0-9_.:-]{6,96}$/.test(rawEv.eventId)
-        ? rawEv.eventId
-        : `ev_${deterministicHash16(fallbackIdSeed)}`;
+    if (entityType !== 'track') continue;
 
     const inferredQueryGenres = cleanQuery ? extractQueryGenres(cleanQuery).genres : [];
-    const storedEv: StoredBehaviorEvent = {
-      eventId,
-      subjectKey: identity.subjectKey,
-      type: rawEv.type || (rawEv.action as any) || 'play_complete',
-      canonicalTrackId: canonicalTrack?.canonicalTrackId,
-      artistKey: canonicalTrack?.canonicalArtist || undefined,
+    const res = store.recordEvent({
+      eventId, subjectKey: identity.subjectKey, type: rawEv.type,
+      canonicalTrackId: canonicalTrack?.canonicalTrackId, trackRef,
+      artistKey: canonicalTrack?.canonicalArtist, language: canonicalTrack?.language,
       genres: canonicalTrack?.genres?.length ? canonicalTrack.genres : inferredQueryGenres.length ? inferredQueryGenres : undefined,
-      language: canonicalTrack?.language,
-      query: cleanQuery,
-      weight,
-      progressRatio: rawEv.progressRatio,
+      query: cleanQuery, weight,
+      progressRatio: rawEv.progress ?? rawEv.progressRatio ??
+        (rawEv.durationSeconds > 0 && rawEv.playedSeconds !== undefined ? Math.min(1, rawEv.playedSeconds / rawEv.durationSeconds) : undefined),
       createdAt: ts,
-    };
-
-    const res = store.recordEvent(storedEv);
-    if (res.deduplicated) {
-      deduplicated += 1;
-      continue;
+    });
+    if (res.deduplicated) { deduplicated++; continue; }
+    if (!res.inserted) continue;
+    accepted++;
+    // Side effects run after the subject-scoped insert so retries cannot amplify
+    // aggregate queries or co-occurrence. State toggles are folded, not plays.
+    if (cleanQuery && (rawEv.type === 'search' || rawEv.type === 'search_click')) {
+      store.recordSearchQuery(compactNormalize(cleanQuery), cleanQuery, rawEv.type === 'search_click', {
+        subjectKey: identity.subjectKey, eventId,
+      });
     }
-    if (res.inserted) {
-      accepted += 1;
-
-      // Update Item-to-Item session co-occurrence graph on real positive engagement
-      if (canonicalTrack && weight >= 1.1) {
-        const curId = canonicalTrack.canonicalTrackId;
-        for (const prevId of recentPositiveTracks) {
-          if (prevId !== curId) {
-            store.incrementCooccurrence(prevId, curId, Math.min(2.5, weight * 0.5));
-          }
-        }
-        if (!recentPositiveTracks.includes(curId)) {
-          recentPositiveTracks.unshift(curId);
-          if (recentPositiveTracks.length > 4) recentPositiveTracks.pop();
-        }
+    if (canonicalTrack && weight >= 1.1 && !['favorite', 'unfavorite', 'dislike', 'undislike'].includes(rawEv.type)) {
+      const curId = canonicalTrack.canonicalTrackId;
+      for (const prevId of recentPositiveTracks) {
+        if (prevId !== curId) store.incrementCooccurrence(prevId, curId, Math.min(2.5, weight * 0.5), {
+          subjectKey: identity.subjectKey, eventId,
+        });
       }
-
-      // Optional non-blocking Stage 2 Gorse feedback sync
-      if (canonicalTrack && isGorseEnabled(env)) {
-        syncTrackToGorse(canonicalTrack, env).catch(() => {});
-        syncFeedbackToGorse(identity.subjectKey, canonicalTrack.canonicalTrackId, rawEv.type, ts, env).catch(() => {});
+      if (!recentPositiveTracks.includes(curId)) {
+        recentPositiveTracks.unshift(curId);
+        if (recentPositiveTracks.length > 4) recentPositiveTracks.pop();
       }
+    }
+    if (canonicalTrack && isGorseEnabled(env)) {
+      syncTrackToGorse(canonicalTrack, env).catch(() => {});
+      syncFeedbackToGorse(identity.subjectKey, canonicalTrack.canonicalTrackId, rawEv.type, ts, env).catch(() => {});
     }
   }
 
@@ -312,11 +266,11 @@ export function buildUserPreferenceProfile(
   }
 
   // Fold server-persisted events in chronological order (oldest -> newest) so favorite/unfavorite & dislike/undislike state transitions accurately
-  const eventsDesc = identity.subjectKey
-    ? store.getUserEvents(identity.subjectKey, 350, nowMs - 90 * DAY_MS)
-    : [];
-  const eventsAsc = [...eventsDesc].reverse();
-  profile.totalEvents = eventsAsc.length;
+  const folded = identity.subjectKey
+    ? collectUserPreferenceSignals(store, identity.subjectKey, nowMs - 90 * DAY_MS)
+    : { signals: [], totalEvents: 0 };
+  const eventsAsc = folded.signals.filter((e) => e.entityType === 'track');
+  profile.totalEvents = folded.totalEvents;
 
   // Track which searched queries/tracks were subsequently played/liked (amplifying confirmed search intent)
   const confirmedTrackIds = new Set<string>();
@@ -403,31 +357,15 @@ export function buildUserPreferenceProfile(
   }
 
   // Fold multi-entity feedback signals (albums, playlists, MVs)
-  const entityFeedbacks = (identity.subjectKey && store.getUserEntityFeedbacks)
-    ? store.getUserEntityFeedbacks(identity.subjectKey, 200, nowMs - 90 * DAY_MS)
-    : [];
-  profile.totalEvents += entityFeedbacks.length;
-
-  for (const ef of [...entityFeedbacks].reverse()) {
+  for (const ef of folded.signals.filter((e) => e.entityType !== 'track')) {
     const ageMs = Math.max(0, nowMs - ef.createdAt);
     const shortDecay = exponentialTimeDecay(ageMs, 24 * HOUR_MS);
     const longDecay = exponentialTimeDecay(ageMs, 21 * DAY_MS);
     const effWeight = ef.weight;
+    if (effWeight > 0) profile.hasPlayHistory = true;
 
-    if (ef.action === 'dislike' || effWeight <= -4.0) {
-      profile.blockedTrackIds.add(ef.entityId);
-    } else if (ef.action === 'undislike') {
-      profile.blockedTrackIds.delete(ef.entityId);
-    } else if (ef.action === 'favorite') {
-      if (ef.entityType === 'track') {
-        profile.likedTrackIds.add(ef.entityId);
-      }
-      profile.hasPlayHistory = true;
-    }
-
-    const ent = store.getEntity ? store.getEntity(ef.entityId) : null;
-    if (ent?.artistName) {
-      const ar = resolveCanonicalArtist(ent.artistName);
+    if (ef.artistKey) {
+      const ar = resolveCanonicalArtist(ef.artistKey);
       if (effWeight > 0) {
         profile.longTermArtists[ar] = (profile.longTermArtists[ar] || 0) + effWeight * 0.4 * longDecay;
         profile.shortTermArtists[ar] = (profile.shortTermArtists[ar] || 0) + effWeight * 0.4 * shortDecay;
@@ -769,7 +707,7 @@ export async function getRecommendationsForYou(
       title: options.seedTitle,
       artist: options.seedArtist || '',
     });
-    if (seedTrack) store.upsertTrack(seedTrack);
+    // Query hints are an ephemeral anchor, not permission to modify the catalog.
   }
 
   // Top user artists & genres
@@ -1273,8 +1211,7 @@ export async function getSimilarRecommendations(
     });
     if (constructed) {
       const existing = store.findTrackByTitleArtist(constructed.cleanTitle, constructed.canonicalArtist, constructed.edition);
-      seed = existing || constructed;
-      store.upsertTrack(seed);
+      seed = existing || constructed; // Unverified request metadata remains request-local.
     }
   }
 
@@ -1489,15 +1426,42 @@ export async function getDiscoverRecommendations(
   };
 }
 
-export function clearUserRecommendationData(identity: UserIdentityContext, env?: AppEnv): {
+export interface RecommendationErasureResult {
   cleared: boolean;
   removedEvents: number;
   storageKind: string;
-} {
+  localCleared: boolean;
+  aggregateScope: 'subject-attributed-only';
+  legacyAggregates: 'retained-until-expiry';
+  external: { gorse: 'not-configured' | 'pending' | 'deleted' | 'failed'; retryable: boolean };
+}
+
+// Synchronous compatibility helper: local deletion only. External work must be awaited
+// through clearUserRecommendationDataAndExternal before acknowledging a complete wipe.
+export function clearUserRecommendationData(identity: UserIdentityContext, env?: AppEnv): RecommendationErasureResult {
   const store = getRecommendStore(env);
-  if (!identity.subjectKey) {
-    return { cleared: false, removedEvents: 0, storageKind: store.kind };
-  }
-  const removedEvents = store.clearUserEvents(identity.subjectKey);
-  return { cleared: true, removedEvents, storageKind: store.kind };
+  const externalConfigured = Boolean(String(env?.SONIC_GORSE_URL || '').trim());
+  const result: RecommendationErasureResult = {
+    cleared: false, removedEvents: 0, storageKind: store.kind, localCleared: false,
+    aggregateScope: 'subject-attributed-only', legacyAggregates: 'retained-until-expiry',
+    external: { gorse: externalConfigured ? 'pending' : 'not-configured', retryable: externalConfigured },
+  };
+  if (!identity.subjectKey) return result;
+  result.removedEvents = store.clearUserEvents(identity.subjectKey);
+  result.localCleared = true;
+  result.cleared = !externalConfigured;
+  return result;
+}
+
+export async function clearUserRecommendationDataAndExternal(
+  identity: UserIdentityContext, env?: AppEnv,
+): Promise<RecommendationErasureResult> {
+  // Initiate the barrier before synchronous deletion, blocking pending feedback work.
+  if (!identity.subjectKey) return clearUserRecommendationData(identity, env);
+  const externalDeletion = deleteGorseUserData(identity.subjectKey, env);
+  const result = clearUserRecommendationData(identity, env);
+  const gorse = await externalDeletion;
+  result.external = { gorse, retryable: gorse === 'failed' };
+  result.cleared = result.localCleared && gorse !== 'failed';
+  return result;
 }

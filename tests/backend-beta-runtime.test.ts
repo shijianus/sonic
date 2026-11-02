@@ -1,0 +1,447 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import http from 'node:http';
+import net from 'node:net';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { getEventListeners } from 'node:events';
+import type { AddressInfo } from 'node:net';
+import { toWebRequest } from '../server/request-adapter';
+import { createSonicServer, drainSonicServer, shutdownSonicServer, withRecommendStartupLock } from '../server/index';
+import { createServerRecommendStore } from '../server/recommend-sqlite';
+import { MemoryRecommendStore } from '../functions/_lib/sonic/recommend/memory-store';
+import {
+  callLocalEngineJson, callLocalEngineStream, getLocalEngineCircuitSnapshot,
+  resetLocalEngineCircuitForTest, fetchWithRuntimeBudget,
+} from '../functions/_lib/sonic/local-engine';
+import { resolvePlayableStream, callNeteaseLinuxApi } from '../functions/_lib/sonic/native-protocols';
+import { handleUpstreamEndpoint } from '../functions/_lib/sonic/upstream';
+import {
+  putSonicCachedJson, getSonicCachedJson, getSonicMemoryCacheStats,
+  clearSonicMemoryCacheForTest, withSonicJsonSingleFlight,
+} from '../functions/_lib/sonic/cache';
+import { getObservabilitySnapshot, resetObservabilityForTest, getReleaseReadiness } from '../functions/_lib/sonic/observability';
+import { onRequest as health } from '../functions/api/sonic/engine/health';
+import { resetRateLimitsForTest } from '../functions/_lib/sonic/security';
+import { handleNexusLyricsRequest } from '../functions/api/sonic/lyrics/nexus';
+import { neteaseProvider } from '../functions/_lib/sonic/providers/netease';
+
+const key = 'runtime-test-service-key-32-characters-long';
+const engineEnv = { SONIC_LOCAL_ENGINE_URL: 'https://engine.example.com', SONIC_ENGINE_SECRET: key, SONIC_CB_FAILURE_THRESHOLD: '1', SONIC_CB_COOLDOWN_MS: '100' };
+const cleanup: Array<() => Promise<void> | void> = [];
+const realFetch = globalThis.fetch;
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((a, b) => { resolve = a; reject = b; });
+  return { promise, resolve, reject };
+}
+async function listen(server: http.Server) {
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  cleanup.push(() => new Promise<void>((resolve) => { server.close(() => resolve()); server.closeAllConnections(); }));
+  return (server.address() as AddressInfo).port;
+}
+function nodeGet(port: number, requestPath: string) {
+  return new Promise<{ status: number; body: string }>((resolve, reject) => {
+    const request = http.get({ host: '127.0.0.1', port, path: requestPath, headers: { 'X-Sonic-Engine-Key': key } }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => body += chunk);
+      response.on('end', () => resolve({ status: response.statusCode!, body }));
+      response.on('error', reject);
+    });
+    request.on('error', reject);
+  });
+}
+beforeEach(() => {
+  resetLocalEngineCircuitForTest(); resetObservabilityForTest(); clearSonicMemoryCacheForTest(); resetRateLimitsForTest();
+});
+afterEach(async () => {
+  vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks();
+  while (cleanup.length) await cleanup.pop()!();
+  clearSonicMemoryCacheForTest();
+});
+
+describe('backend beta request cancellation', () => {
+  it('keeps complete IncomingMessage close alive, aborts socket disconnect, and removes listeners after finish', async () => {
+    const requests: Request[] = [];
+    let raw: http.IncomingMessage;
+    const reached = deferred<void>();
+    const server = http.createServer((req, res) => {
+      raw = req;
+      const request = toWebRequest(req, res);
+      requests.push(request);
+      req.resume();
+      req.on('end', () => { reached.resolve(); if (req.url === '/ok') setTimeout(() => res.end('ok'), 25); });
+    });
+    const port = await listen(server);
+    const client = http.get(`http://127.0.0.1:${port}/pending`);
+    client.on('error', () => {});
+    await reached.promise;
+    await wait(20);
+    expect(raw!.complete).toBe(true);
+    expect(requests[0].signal.aborted).toBe(false);
+    client.destroy();
+    await vi.waitFor(() => expect(requests[0].signal.aborted).toBe(true));
+    expect(raw!.listenerCount('aborted')).toBe(0);
+    await nodeGet(port, '/ok');
+    expect(requests[1].signal.aborted).toBe(false);
+    expect(raw!.listenerCount('aborted')).toBe(0);
+  });
+
+  it('cancels native provider resolution before response headers on a real HTTP client disconnect', async () => {
+    const started = deferred<AbortSignal>();
+    const aborted = deferred<void>();
+    const fetchMock = vi.fn((_input: any, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const signal = init.signal!;
+      started.resolve(signal);
+      signal.addEventListener('abort', () => { aborted.resolve(); reject(signal.reason); }, { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const server = createSonicServer(os.tmpdir(), { SONIC_ENV: 'test', SONIC_ENGINE_SECRET: key, SONIC_RECOMMEND_DB_PATH: 'memory', RECOMMEND_STORE: new MemoryRecommendStore(), SONIC_ENABLE_GDSTUDIO: '0' });
+    const port = await listen(server);
+    const client = http.get({ host: '127.0.0.1', port, path: '/api/sonic/resolve/stream?id=123&source=netease&nocache=1', headers: { 'X-Sonic-Engine-Key': key } });
+    client.on('error', () => {});
+    const signal = await started.promise;
+    expect(signal.aborted).toBe(false);
+    client.destroy();
+    await aborted.promise;
+    expect(signal.aborted).toBe(true);
+    await wait(10);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['search', 'lyrics'])('cancels real HTTP nexus %s work through the adapter and legacy fallback boundaries', async (kind) => {
+    const started = deferred<AbortSignal>();
+    const aborted = deferred<void>();
+    const fetchMock = vi.fn((_input: any, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      started.resolve(init.signal!);
+      init.signal!.addEventListener('abort', () => { aborted.resolve(); reject(init.signal!.reason); }, { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const server = createSonicServer(os.tmpdir(), {
+      SONIC_ENV: 'test', SONIC_ENGINE_SECRET: key, SONIC_RECOMMEND_DB_PATH: 'memory', RECOMMEND_STORE: new MemoryRecommendStore(),
+      SONIC_ENABLE_NETEASE: kind === 'search' ? '1' : '0', SONIC_ENABLE_KUGOU: kind === 'lyrics' ? '1' : '0',
+      SONIC_ENABLE_QQ: '0', SONIC_ENABLE_GDSTUDIO: '0', SONIC_ENABLE_AMLL: '0', SONIC_ENABLE_LRCLIB: '0', SONIC_ENABLE_LYRIVA: '0',
+    });
+    const port = await listen(server);
+    const requestPath = kind === 'search' ? '/api/sonic/search/nexus?q=runtime-disconnect&nocache=1' : '/api/sonic/lyrics/nexus?title=runtime-disconnect&artist=runtime&nocache=1';
+    const client = http.get({ host: '127.0.0.1', port, path: requestPath, headers: { 'X-Sonic-Engine-Key': key } });
+    client.on('error', () => {});
+    const signal = await started.promise;
+    client.destroy();
+    await aborted.promise;
+    expect(signal.aborted).toBe(true);
+    await wait(20);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('combines a provider deadline with a caller signal and does not launch fallback after cancellation', async () => {
+    const parent = new AbortController();
+    const started = deferred<void>();
+    const fetchMock = vi.fn((_input: any, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      started.resolve();
+      init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const result = resolvePlayableStream({ id: '123', source: 'netease', signal: parent.signal, nocache: true }, { SONIC_ENABLE_GDSTUDIO: '0' });
+    await started.promise;
+    const assertion = expect(result).rejects.toMatchObject({ name: 'AbortError' });
+    parent.abort();
+    await assertion;
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(getEventListeners(parent.signal, 'abort')).toHaveLength(0);
+
+    const timeout = callNeteaseLinuxApi({ url: 'test' }, { SONIC_TIMEOUT_MS: '500' }, new AbortController().signal);
+    await expect(timeout).rejects.toMatchObject({ name: 'TimeoutError' });
+  });
+});
+
+describe('backend beta lyrics timeout contract', () => {
+  it.each([false, true])('returns HTTP 200 with prior lyrics=%s after the total budget expires and starts no fallback', async (withPriorLyrics) => {
+    vi.useFakeTimers();
+    const parent = new AbortController();
+    const env = {
+      SONIC_ENV: 'test', SONIC_TIMEOUT_MS: '500', SONIC_ENABLE_AMLL: '1',
+      SONIC_ENABLE_KUGOU: '1', SONIC_ENABLE_LRCLIB: '1', SONIC_ENABLE_LYRIVA: '1',
+      SONIC_ENABLE_GDSTUDIO: '0', RECOMMEND_STORE: new MemoryRecommendStore(),
+    };
+    if (withPriorLyrics) {
+      vi.spyOn(neteaseProvider, 'getLyrics').mockResolvedValue({
+        provider: 'netease', matchLevel: 'MEDIUM', matchScore: 60, qualityScore: 50,
+        data: {
+          provider: 'netease', level: 'word', sourceQuality: 'interpolated',
+          track: { title: 'runtime-timeout', artist: 'runtime', album: '' },
+          plainLyrics: 'Keep this lyric', syncedLyrics: [{ text: 'Keep this lyric', startMs: 0, durationMs: 3000, words: [] }],
+          rawTtml: '', ttmlMetadata: {}, instrumental: false, sourceId: '123', sourceUrl: '',
+        },
+      });
+    }
+    let providerSignal!: AbortSignal;
+    const fetchMock = vi.fn((_input: any, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      providerSignal = init.signal!;
+      providerSignal.addEventListener('abort', () => reject(providerSignal.reason), { once: true });
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const endpoint = withPriorLyrics
+      ? 'https://sonic.test/api/sonic/lyrics/nexus?title=runtime-timeout&artist=runtime&platform=netease&platformId=123&nocache=1'
+      : 'https://sonic.test/api/sonic/lyrics/nexus?title=runtime-timeout&artist=runtime&nocache=1';
+    const request = new Request(endpoint, { signal: parent.signal });
+    const pending = handleNexusLyricsRequest(request, env);
+    await vi.advanceTimersByTimeAsync(501);
+    const response = await pending;
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.data.level).toBe(withPriorLyrics ? 'word' : 'none');
+    expect(body.data.plainLyrics).toBe(withPriorLyrics ? 'Keep this lyric' : '');
+    expect(body.data.syncedLyrics).toHaveLength(withPriorLyrics ? 1 : 0);
+    expect(body.meta.attempts.some((attempt: any) => attempt.ok === false && /timeout/i.test(attempt.error || ''))).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(providerSignal.aborted).toBe(true);
+    expect(parent.signal.aborted).toBe(false);
+    expect(getEventListeners(request.signal, 'abort')).toHaveLength(0);
+    if (withPriorLyrics) expect(body.data.syncedLyrics[0].words.length).toBeGreaterThan(0);
+  });
+});
+
+describe('backend beta circuit generations and body lifecycle', () => {
+  it.each(['json', 'stream'])('does not let an older %s success close a newer OPEN generation', async (kind) => {
+    const older = deferred<Response>();
+    let calls = 0;
+    vi.stubGlobal('fetch', vi.fn(() => ++calls === 1 ? older.promise : Promise.resolve(new Response('outage', { status: 530 }))));
+    const pending = kind === 'json' ? callLocalEngineJson('/a', engineEnv) : callLocalEngineStream('/a', engineEnv);
+    await callLocalEngineJson('/b', engineEnv);
+    expect(getLocalEngineCircuitSnapshot(engineEnv).state).toBe('OPEN');
+    older.resolve(new Response(kind === 'json' ? '{"ok":true}' : 'audio'));
+    const result = await pending;
+    if ('response' in result) await result.response!.text();
+    expect(result.ok).toBe(true);
+    expect(getLocalEngineCircuitSnapshot(engineEnv).state).toBe('OPEN');
+  });
+
+  it('permits only the current half-open probe to recover after body EOF', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('bad', { status: 530 })));
+    await callLocalEngineJson('/fail', engineEnv);
+    await vi.advanceTimersByTimeAsync(101);
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; } })));
+    vi.stubGlobal('fetch', fetchMock);
+    const probe = await callLocalEngineStream('/probe', engineEnv);
+    expect(getLocalEngineCircuitSnapshot(engineEnv).state).toBe('HALF_OPEN');
+    expect((await callLocalEngineJson('/blocked', engineEnv)).skippedByCircuit).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const read = probe.response!.text();
+    controller.enqueue(new TextEncoder().encode('audio')); controller.close();
+    await read;
+    expect(getLocalEngineCircuitSnapshot(engineEnv).state).toBe('CLOSED');
+    expect(getObservabilitySnapshot().stream.body.engine).toMatchObject({ started: 1, completed: 1, active: 0 });
+  });
+
+  it('does not count a client AbortError as a failure and releases a cancelled half-open probe', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('bad', { status: 530 })));
+    await callLocalEngineJson('/fail', engineEnv);
+    await vi.advanceTimersByTimeAsync(101);
+    const parent = new AbortController();
+    vi.stubGlobal('fetch', vi.fn((_input, init: RequestInit) => new Promise((_resolve, reject) => {
+      init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+    })));
+    const result = callLocalEngineJson('/probe', engineEnv, { request: new Request('https://client.test', { signal: parent.signal }) });
+    parent.abort();
+    expect((await result).error).toContain('cancelled');
+    expect(getLocalEngineCircuitSnapshot(engineEnv).consecutiveFailures).toBe(1);
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{"ok":true}')));
+    expect((await callLocalEngineJson('/next', engineEnv)).ok).toBe(true);
+    expect(getLocalEngineCircuitSnapshot(engineEnv).state).toBe('CLOSED');
+  });
+
+  it('lets a healthy stream pass the former 8s cutoff and counts success only at EOF', async () => {
+    vi.useFakeTimers();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; } }))));
+    const stream = await callLocalEngineStream('/audio', engineEnv);
+    const reader = stream.response!.body!.getReader();
+    const chunk = reader.read(); controller.enqueue(new Uint8Array([1])); await chunk;
+    expect(getObservabilitySnapshot().stream.body.engine.completed).toBe(0);
+    await vi.advanceTimersByTimeAsync(9_000);
+    const next = reader.read(); controller.enqueue(new Uint8Array([2])); await next;
+    controller.close(); await reader.read();
+    expect(getObservabilitySnapshot().stream.body.engine).toMatchObject({ completed: 1, timeout: 0, active: 0 });
+  });
+
+  it.each(['first-byte', 'idle', 'total', 'body-error', 'cancel'])('settles body once for %s and cleans parent listeners', async (mode) => {
+    vi.useFakeTimers();
+    const parent = new AbortController();
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const cancelled = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream<Uint8Array>({ start(c) { controller = c; }, cancel: cancelled }))));
+    const stream = await callLocalEngineStream('/audio', { ...engineEnv, SONIC_STREAM_FIRST_BYTE_TIMEOUT_MS: '20', SONIC_STREAM_IDLE_TIMEOUT_MS: '30', SONIC_STREAM_TOTAL_TIMEOUT_MS: '100' }, { signal: parent.signal });
+    const reader = stream.response!.body!.getReader();
+    if (mode !== 'first-byte') { const first = reader.read(); controller.enqueue(new Uint8Array([1])); await first; }
+    if (mode === 'cancel') { await reader.cancel(); }
+    else {
+      const reading = reader.read();
+      if (mode === 'total') {
+        await vi.advanceTimersByTimeAsync(20);
+        controller.enqueue(new Uint8Array([2]));
+        await reading;
+        // No pending pull: idle is paused by downstream backpressure, total is not.
+        await vi.advanceTimersByTimeAsync(81);
+        await expect(reader.read()).rejects.toMatchObject({ name: 'TimeoutError', message: 'Request total timeout (100ms)' });
+      } else {
+        const assertion = expect(reading).rejects.toBeDefined();
+        if (mode === 'body-error') controller.error(new Error('truncated'));
+        else await vi.advanceTimersByTimeAsync(mode === 'idle' ? 31 : 21);
+        await assertion;
+      }
+    }
+    const metrics = getObservabilitySnapshot().stream.body.engine;
+    expect(metrics.active).toBe(0);
+    expect(metrics.completed).toBe(0);
+    expect(metrics.cancelled + metrics.error + metrics.timeout).toBe(1);
+    expect(getEventListeners(parent.signal, 'abort')).toHaveLength(0);
+    if (mode === 'cancel') expect(getLocalEngineCircuitSnapshot(engineEnv).consecutiveFailures).toBe(0);
+    else expect(getLocalEngineCircuitSnapshot(engineEnv).state).toBe('OPEN');
+  });
+
+  it('enforces JSON timeout during the body even after response headers arrived', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream())));
+    const pending = callLocalEngineJson('/slow', engineEnv, { timeoutMs: 20 });
+    await vi.advanceTimersByTimeAsync(21);
+    expect((await pending).error).toContain('timeout');
+  });
+});
+
+describe('backend beta bounded cache and singleflight', () => {
+  it('accounts UTF-8 and resident strings, evicts LRU, and removes replaced large entries', async () => {
+    const env = { SONIC_CACHE_MAX_BYTES: '1100' };
+    await putSonicCachedJson('beta', 'a', '汉'.repeat(80), 30, 30, env);
+    await putSonicCachedJson('beta', 'b', '汉'.repeat(80), 30, 30, env);
+    await getSonicCachedJson('beta', 'a', env);
+    await putSonicCachedJson('beta', 'c', '汉'.repeat(80), 30, 30, env);
+    expect(getSonicMemoryCacheStats().bytes).toBeLessThanOrEqual(1100);
+    expect(await getSonicCachedJson('beta', 'b', env)).toBeNull();
+    await putSonicCachedJson('beta', 'a', 'x'.repeat(600_000), 30, 30, env);
+    expect(await getSonicCachedJson('beta', 'a', env)).toBeNull();
+    clearSonicMemoryCacheForTest();
+    expect(getSonicMemoryCacheStats().bytes).toBe(0);
+  });
+
+  it('coalesces callers, isolates subscriber cancellation, and aborts upstream when the last caller leaves', async () => {
+    const value = deferred<number>();
+    let signal!: AbortSignal;
+    const load = vi.fn((s: AbortSignal) => { signal = s; return value.promise; });
+    const parent = new AbortController();
+    const a = withSonicJsonSingleFlight('shared', load, parent.signal);
+    const b = withSonicJsonSingleFlight('shared', load);
+    await Promise.resolve();
+    const assertion = expect(a).rejects.toMatchObject({ name: 'AbortError' });
+    parent.abort(); await assertion;
+    expect(signal.aborted).toBe(false);
+    value.resolve(7); expect(await b).toBe(7); expect(load).toHaveBeenCalledTimes(1);
+    expect(getEventListeners(parent.signal, 'abort')).toHaveLength(0);
+    const last = new AbortController();
+    const c = withSonicJsonSingleFlight('last', (s) => { signal = s; return new Promise(() => {}); }, last.signal);
+    await Promise.resolve(); const cancelled = expect(c).rejects.toBeDefined(); last.abort(); await cancelled;
+    expect(signal.aborted).toBe(true); expect(getSonicMemoryCacheStats().inFlight).toBe(0);
+  });
+
+  it('coalesces a real hotspot in commercial upstream JSON calls', async () => {
+    const payload = deferred<Response>();
+    const fetchMock = vi.fn(() => payload.promise);
+    vi.stubGlobal('fetch', fetchMock);
+    const url = new URL('https://sonic.test/api/banner');
+    const a = handleUpstreamEndpoint('banner', url, new Request(url), {});
+    const b = handleUpstreamEndpoint('banner', url, new Request(url), {});
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    payload.resolve(new Response('{"banners":[]}'));
+    expect((await a).status).toBe(200); expect((await b).status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('backend beta readiness, drain and maintenance', () => {
+  const base = { SONIC_ENV: 'test', SONIC_RUNTIME: 'linux-engine', SONIC_ENGINE_SECRET: key, SONIC_RECOMMEND_DB_PATH: 'memory', RECOMMEND_STORE: new MemoryRecommendStore() };
+  const healthRequest = () => new Request('https://engine.test/api/sonic/engine/health', { headers: { 'X-Sonic-Engine-Key': key } });
+  it('distinguishes optional sidecar degradation, required sidecar, storage, and release failures', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('offline', { status: 503 })));
+    const optional = await health({ request: healthRequest(), env: { ...base, SONIC_NCM_API_URL: 'http://ncm:3000' } });
+    expect(optional.status).toBe(200); expect((await optional.json()).readiness.degraded).toBe(true);
+    expect((await health({ request: healthRequest(), env: { ...base, SONIC_NCM_REQUIRED: '1' } })).status).toBe(503);
+    expect((await health({ request: healthRequest(), env: { ...base, SONIC_ENV: 'production', SONIC_RELEASE_COMMIT: 'unknown' } })).status).toBe(503);
+    const brokenDisk = await health({ request: healthRequest(), env: { ...base, SONIC_RECOMMEND_DB_PATH: 'not-used.sqlite', SONIC_DISK_HEALTH_PROVIDER: () => { throw new Error('EIO'); } } });
+    expect(brokenDisk.status).toBe(503);
+    const release = { SONIC_ENV: 'production', SONIC_RELEASE_COMMIT: 'a'.repeat(40), SONIC_BUILD_TIME: '2026-11-02T00:00:00Z', SONIC_RELEASE_DIRTY: '1' };
+    expect(getReleaseReadiness(release).ok).toBe(false);
+    expect(getReleaseReadiness({ ...release, SONIC_RELEASE_ID: 'beta-123', SONIC_SOURCE_DIGEST: 'b'.repeat(64) }).ok).toBe(true);
+  });
+
+  it('reports draining readiness and refuses new work on an existing HTTP connection while its current request drains', async () => {
+    const started = deferred<void>(); const body = deferred<Response>();
+    vi.stubGlobal('fetch', vi.fn(() => { started.resolve(); return body.promise; }));
+    const server = createSonicServer(os.tmpdir(), base);
+    const port = await listen(server);
+    const socket = net.connect(port, '127.0.0.1');
+    cleanup.push(() => socket.destroy());
+    let output = '';
+    socket.setEncoding('utf8'); socket.on('data', (chunk) => output += chunk); socket.on('error', () => {});
+    await new Promise<void>((resolve) => socket.once('connect', resolve));
+    socket.write(`GET /api/banner HTTP/1.1\r\nHost: localhost\r\nX-Sonic-Engine-Key: ${key}\r\n\r\n`);
+    await started.promise;
+    const drained = drainSonicServer(server, 1000);
+    socket.write(`GET /api/sonic/engine/health HTTP/1.1\r\nHost: localhost\r\nX-Sonic-Engine-Key: ${key}\r\n\r\nGET /api/banner HTTP/1.1\r\nHost: localhost\r\nX-Sonic-Engine-Key: ${key}\r\nConnection: close\r\n\r\n`);
+    await wait(20);
+    body.resolve(new Response('{"banners":[]}'));
+    await drained;
+    await vi.waitFor(() => expect(output).toContain('ENGINE_DRAINING'));
+    expect(output).toContain('engine_draining');
+    expect(output).toContain('HTTP/1.1 200');
+    expect(output.match(/HTTP\/1.1 503/g)).toHaveLength(2);
+  });
+
+  it('aborts outstanding work at the configured drain deadline and closes a temporary SQLite store afterward', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sonic-runtime-db-'));
+    cleanup.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const store: any = createServerRecommendStore(path.join(dir, 'test.sqlite'));
+    const close = vi.spyOn(store, 'close');
+    cleanup.push(() => store.close());
+    const started = deferred<AbortSignal>();
+    vi.stubGlobal('fetch', vi.fn((_input, init: RequestInit) => new Promise((_resolve, reject) => {
+      started.resolve(init.signal!); init.signal!.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+    })));
+    const server = createSonicServer(os.tmpdir(), { ...base, RECOMMEND_STORE: store, SONIC_RECOMMEND_DB_PATH: path.join(dir, 'test.sqlite') });
+    const port = await listen(server);
+    const client = http.get({ host: '127.0.0.1', port, path: '/api/banner', headers: { 'X-Sonic-Engine-Key': key } });
+    client.on('error', () => {});
+    const signal = await started.promise;
+    const shutdown = shutdownSonicServer(server, store, 60);
+    expect(close).not.toHaveBeenCalled(); expect(signal.aborted).toBe(false);
+    await shutdown;
+    expect(signal.aborted).toBe(true); expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('holds the same maintenance lock during startup, preserves a restore lock, and cleans up failed initialization', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sonic-runtime-lock-'));
+    cleanup.push(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const db = path.join(dir, 'test.sqlite'); const lock = `${db}.maintenance-lock`;
+    withRecommendStartupLock(db, () => expect(fs.existsSync(lock)).toBe(true));
+    expect(fs.existsSync(lock)).toBe(false);
+    expect(() => withRecommendStartupLock(db, () => { throw new Error('init-failed'); })).toThrow('init-failed');
+    expect(fs.existsSync(lock)).toBe(false);
+    fs.mkdirSync(lock);
+    expect(() => withRecommendStartupLock(db, () => {})).toThrow();
+    expect(fs.existsSync(lock)).toBe(true);
+    expect(withRecommendStartupLock('memory', () => 42)).toBe(42);
+  });
+
+  it('applies an idle deadline to a real slow response body after receiving headers', async () => {
+    vi.stubGlobal('fetch', realFetch);
+    const upstream = http.createServer((_req, res) => { res.writeHead(200); res.write('first'); });
+    const port = await listen(upstream);
+    const response = await fetchWithRuntimeBudget(`http://127.0.0.1:${port}/slow`, {}, { timeoutMs: 1000, firstByteTimeoutMs: 300, bodyIdleTimeoutMs: 30 });
+    await expect(response.text()).rejects.toMatchObject({ name: 'TimeoutError', message: 'Upstream body idle timeout' });
+  });
+});

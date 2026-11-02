@@ -39,12 +39,11 @@ function svgResponse(degraded = false): Response {
 import {
   safeFetch,
   validateSafeUrl,
+  hasSensitiveMediaQuery,
 } from '../../_lib/sonic/security';
 import { getAllowedMediaDomains, isSourceEnabledByPolicy } from '../../_lib/sonic/licensing';
 import { recordLicensingBlockMetric } from '../../_lib/sonic/observability';
 import { jsonResponse } from '../../_lib/http';
-
-const SENSITIVE_COVER_QUERY = /[?&](auth|auth_key|vkey|guid|sign|signature|token|access_token|secret|key|wssecret|wstime|vuutv|dis_k)=/i;
 
 function getRefererForHost(hostname: string): string {
   const h = hostname.toLowerCase();
@@ -55,9 +54,9 @@ function getRefererForHost(hostname: string): string {
   return '';
 }
 
-async function proxyImage(imageUrl: string, providerTag = 'direct', env?: AppEnv): Promise<Response | null> {
+async function proxyImage(imageUrl: string, providerTag = 'direct', env?: AppEnv, request?: Request): Promise<Response | null> {
   try {
-    const allowedDomains = getAllowedMediaDomains(env);
+    const allowedDomains = getAllowedMediaDomains(env, 'cover');
     if (allowedDomains.length === 0) return null;
 
     const valResult = validateSafeUrl(imageUrl, {
@@ -76,17 +75,21 @@ async function proxyImage(imageUrl: string, providerTag = 'direct', env?: AppEnv
 
     const upstream = await safeFetch(
       valResult.url,
-      { headers },
+      { headers, method: request?.method || 'GET', signal: request?.signal },
       {
         allowHttp: false,
         allowedDomains,
         maxRedirects: 3,
         timeoutMs: 6000,
         maxBytes: 16 * 1024 * 1024,
+        includeMetadata: true,
       },
     );
 
-    if (!upstream.ok) return null;
+    if (!upstream.ok) {
+      void upstream.body?.cancel().catch(() => {});
+      return null;
+    }
 
     const contentType = upstream.headers.get('content-type') || 'image/jpeg';
     const baseType = contentType.split(';')[0].trim().toLowerCase();
@@ -110,7 +113,8 @@ async function proxyImage(imageUrl: string, providerTag = 'direct', env?: AppEnv
     respHeaders.set('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
     const upstreamCc = (upstream.headers.get('cache-control') || '').toLowerCase();
     const isSensitive =
-      SENSITIVE_COVER_QUERY.test(valResult.url.search) ||
+      Boolean(upstream.sensitive) ||
+      hasSensitiveMediaQuery(upstream.finalUrl || valResult.url) ||
       upstreamCc.includes('private') ||
       upstreamCc.includes('no-store');
     respHeaders.set('Cache-Control', isSensitive ? 'private, no-store' : 'public, max-age=86400, s-maxage=604800');
@@ -174,7 +178,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
   // 1. Direct URL Proxy Mode (bypasses CORS & anti-hotlinking referer restrictions)
   if (targetUrl) {
-    const proxied = await proxyImage(targetUrl, `${pPrefix}proxy`, env);
+    const proxied = await proxyImage(targetUrl, `${pPrefix}proxy`, env, request);
     if (proxied) return proxied;
     if (cfg.contentPolicy === 'strict-allowlist') {
       recordLicensingBlockMetric('direct-cover-url');
@@ -191,7 +195,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   // 2. ID-based Native Resolution
   if (cleanId) {
     if (cleanId.startsWith('http://') || cleanId.startsWith('https://')) {
-      const proxied = await proxyImage(cleanId, `${pPrefix}url`, env);
+      const proxied = await proxyImage(cleanId, `${pPrefix}url`, env, request);
       if (proxied) return proxied;
     }
 
@@ -200,9 +204,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       cfg.enableNetease &&
       (source === 'netease' || source === 'ncm' || source === 'sonic' || (source === 'gdstudio' && /^\d+$/.test(cleanId)))
     ) {
-      const picUrl = await resolveNeteaseCoverUrl(cleanId, env);
+      const picUrl = await resolveNeteaseCoverUrl(cleanId, env, request.signal);
       if (picUrl) {
-        const proxied = await proxyImage(picUrl, `${pPrefix}netease`, env);
+        const proxied = await proxyImage(picUrl, `${pPrefix}netease`, env, request);
         if (proxied) return proxied;
       }
 
@@ -210,7 +214,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         try {
           const picData = await fetchMusicProvider(env, { types: 'pic', id: cleanId, source: 'netease' });
           if (picData?.url && typeof picData.url === 'string') {
-            const proxied = await proxyImage(picData.url, 'gdstudio', env);
+            const proxied = await proxyImage(picData.url, 'gdstudio', env, request);
             if (proxied) return proxied;
           }
         } catch {}
@@ -219,21 +223,21 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
     // 2.2 QQ Music Native (`albummid` direct + `songmid` -> `albummid` lookup)
     if (cfg.enableQq && (source === 'qq' || source === 'tencent')) {
-      const qqPicUrl = await resolveQQCoverUrl(cleanId, env);
+      const qqPicUrl = await resolveQQCoverUrl(cleanId, env, request.signal);
       if (qqPicUrl) {
-        const proxied = await proxyImage(qqPicUrl, `${pPrefix}qq`, env);
+        const proxied = await proxyImage(qqPicUrl, `${pPrefix}qq`, env, request);
         if (proxied) return proxied;
       }
       const singerPhotoUrl = `https://y.gtimg.cn/music/photo_new/T001R300x300M000${cleanId}.jpg`;
-      const proxiedSinger = await proxyImage(singerPhotoUrl, `${pPrefix}qq-singer`, env);
+      const proxiedSinger = await proxyImage(singerPhotoUrl, `${pPrefix}qq-singer`, env, request);
       if (proxiedSinger) return proxiedSinger;
     }
 
     // 2.3 Kugou Native (`getSongInfo` hash lookup)
     if (cfg.enableKugou && source === 'kugou') {
-      const kgPicUrl = await resolveKugouCoverUrl(cleanId, env);
+      const kgPicUrl = await resolveKugouCoverUrl(cleanId, env, request.signal);
       if (kgPicUrl) {
-        const proxied = await proxyImage(kgPicUrl, `${pPrefix}kugou`, env);
+        const proxied = await proxyImage(kgPicUrl, `${pPrefix}kugou`, env, request);
         if (proxied) return proxied;
       }
     }
@@ -253,7 +257,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           const aItem = aJson?.result?.artists?.[0];
           const artPic = aItem?.img1v1Url || aItem?.picUrl;
           if (artPic) {
-            const proxied = await proxyImage(String(artPic).replace('http://', 'https://'), `${pPrefix}netease-artist`, env);
+            const proxied = await proxyImage(String(artPic).replace('http://', 'https://'), `${pPrefix}netease-artist`, env, request);
             if (proxied) return proxied;
           }
         }
@@ -273,7 +277,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       const aItem = artJson?.result?.artists?.[0];
       const artPic = aItem?.img1v1Url || aItem?.picUrl;
       if (artPic) {
-        const proxied = await proxyImage(String(artPic).replace('http://', 'https://'), `${pPrefix}netease-artist`, env);
+        const proxied = await proxyImage(String(artPic).replace('http://', 'https://'), `${pPrefix}netease-artist`, env, request);
         if (proxied) return proxied;
       }
     } catch {}

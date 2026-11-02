@@ -15,6 +15,7 @@ import Pinia from '@/stores'
 // svg icon
 import 'virtual:svg-icons-register'
 import { useGlobalStore } from '@/stores/modules/global'
+import { useAuthStore } from '@/stores/modules/auth'
 import { storeToRefs } from 'pinia'
 import { watch } from 'vue'
 import { useWindowSize, useDebounceFn, usePreferredDark } from '@vueuse/core'
@@ -34,6 +35,9 @@ Object.entries(animationDirectives).forEach(([name, directive]) => {
 })
 
 app.mount('#app')
+
+const authStore = useAuthStore()
+void authStore.checkAuth()
 
 const globalStore = useGlobalStore()
 const { theme, lang } = storeToRefs(globalStore)

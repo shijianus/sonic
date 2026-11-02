@@ -27,10 +27,10 @@ const handleClearRecommendProfile = async () => {
   if (isClearingRecommend.value) return
   isClearingRecommend.value = true
   try {
-    await recommendStore.clearAllRecommendationProfile()
+    const ok = await recommendStore.clearAllRecommendationProfile()
     toastStore.show({
-      message: t('recommend.privacy.recommendProfileCleared'),
-      type: 'success',
+      message: ok ? t('recommend.privacy.recommendProfileCleared') : t('recommend.privacy.recommendProfileClearFailed'),
+      type: ok ? 'success' : 'error',
     })
   } finally {
     isClearingRecommend.value = false
@@ -52,21 +52,30 @@ const clearAllLocalData = async () => {
   if (isClearing.value) return
   isClearing.value = true
   try {
-    await recommendStore.clearAllRecommendationProfile()
-  } catch {}
-  try {
-    localStorage.clear()
-    sessionStorage.clear()
-  } catch {
-    // 隐私模式等场景下存储可能不可用，继续尝试清理 IndexedDB
+    const recommendOk = await recommendStore.clearAllRecommendationProfile()
+    let localStorageOk = true
+    let musicDatabaseOk = true
+    try {
+      localStorage.clear()
+      sessionStorage.clear()
+    } catch {
+      localStorageOk = false
+    }
+    try {
+      await deleteMusicDatabase()
+    } catch {
+      musicDatabaseOk = false
+    }
+    const ok = recommendOk && localStorageOk && musicDatabaseOk
+    toastStore.show({
+      message: ok ? t('components.settings.privacyCleared') : t('components.settings.privacyClearFailed'),
+      type: ok ? 'success' : 'error',
+    })
+    if (ok) setTimeout(() => window.location.reload(), 500)
+  } finally {
+    isClearing.value = false
+    confirmOpen.value = false
   }
-  try {
-    await deleteMusicDatabase()
-  } catch {
-    // 删除失败不阻塞页面重载，残留数据库会在下次访问时覆盖写入
-  }
-  toastStore.show({ message: t('components.settings.privacyCleared'), type: 'success' })
-  setTimeout(() => window.location.reload(), 500)
 }
 </script>
 

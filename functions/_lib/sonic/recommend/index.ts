@@ -10,3 +10,5 @@ export * from './seed-catalog';
 export * from './engine';
 export * from './smart-search';
 export * from './multi-entity';
+export * from './entity-store';
+export * from './event-state';

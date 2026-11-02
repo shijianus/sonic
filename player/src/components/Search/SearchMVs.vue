@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { cloudSearch } from '@/api'
+import MobileSearchError from '@/components/Search/MobileSearchError.vue'
 import { formatCount } from '@/utils/time'
 import { formatCoverUrl } from '@/utils/imageUrl'
 interface Props {
@@ -21,8 +22,32 @@ interface MVResult {
   duration: number
   playCount: number
 }
-const state = reactive<{ loading: boolean; results: MVResult[] }>({ loading: false, results: [] })
-const { results } = toRefs(state)
+type SearchErrorKind = '' | 'network' | 'rateLimited' | 'upstream'
+const state = reactive<{ loading: boolean; results: MVResult[]; errorKind: SearchErrorKind }>({
+  loading: false,
+  results: [],
+  errorKind: '',
+})
+const { results, loading, errorKind } = toRefs(state)
+
+const classifySearchError = (error: unknown): SearchErrorKind => {
+  const err = error as any
+  const status = Number(err?.response?.status ?? err?.status ?? 0)
+  if (status === 429) return 'rateLimited'
+  if (status > 0) return 'upstream'
+  if (err?.name === 'TypeError' || /failed to fetch|network|offline|timeout/i.test(String(err?.message || ''))) {
+    return 'network'
+  }
+  return 'upstream'
+}
+
+const checkSearchPayload = (payload: any) => {
+  if (payload?.error || Number(payload?.code) >= 400) {
+    const status = Number(payload?.status ?? payload?.code)
+    const rateLimited = /rate.limit/i.test(String(payload?.error?.code || ''))
+    throw Object.assign(new Error('Search provider failed'), { status: rateLimited ? 429 : status || 502 })
+  }
+}
 let requestController: AbortController | null = null
 let requestGeneration = 0
 
@@ -35,6 +60,7 @@ const fetchMVs = async () => {
   const controller = new AbortController()
   requestController = controller
   const term = props.keywords?.trim()
+  state.errorKind = ''
   if (!term) {
     state.results = []
     state.loading = false
@@ -49,7 +75,8 @@ const fetchMVs = async () => {
       offset: props.offset ?? 0,
     }, controller.signal)
     if (controller.signal.aborted || generation !== requestGeneration) return
-    const list: any[] = res?.result?.mvs || []
+    checkSearchPayload(res)
+    const list: any[] = Array.isArray(res?.result?.mvs) ? res.result.mvs : []
     state.results = list.map(it => ({
       id: Number(it?.id),
       title: it?.name || it?.title || '',
@@ -64,6 +91,7 @@ const fetchMVs = async () => {
     if (!controller.signal.aborted && generation === requestGeneration) {
       console.warn('[Search] MV request failed:', error)
       state.results = []
+      state.errorKind = classifySearchError(error)
       emit('loaded', 0)
       emit('total', 0)
     }
@@ -78,9 +106,15 @@ watch(
   },
   { immediate: true }
 )
+onUnmounted(() => {
+  requestGeneration++
+  requestController?.abort()
+})
 </script>
 <template>
-  <div v-if="results.length > 0" class="custom-scrollbar h-full overflow-y-auto">
+  <PageSkeleton v-if="loading" :sections="['grid']" :grid-count="12" />
+  <MobileSearchError v-else-if="errorKind" :kind="errorKind" class="mx-1" @retry="fetchMVs" />
+  <div v-else-if="results.length > 0" class="custom-scrollbar h-full overflow-y-auto">
     <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
       <router-link v-for="mv in results" :key="mv.id" :to="`/mv-player/${mv.id}`" class="group">
         <div class="relative aspect-video overflow-hidden rounded-2xl shadow-xl">
@@ -120,12 +154,12 @@ watch(
       </router-link>
     </div>
   </div>
-  <div v-else-if="!keywords" class="flex h-full items-center justify-center">
+  <div v-else class="flex h-full items-center justify-center">
     <div class="text-center">
       <div class="mb-4 inline-block rounded-full bg-white/5 p-6">
         <span class="icon-[mdi--movie-open-play] text-primary/20 h-12 w-12" />
       </div>
-      <p class="text-primary/50">{{ $t('search.enterKeyword') }}</p>
+      <p class="text-primary/50">{{ $t(keywords.trim() ? 'search.empty' : 'search.enterKeyword') }}</p>
     </div>
   </div>
 </template>

@@ -6,6 +6,7 @@
 // biome-ignore lint: disable
 export {}
 declare global {
+  const ACCESS_API_PATHS: typeof import('../stores/modules/access').ACCESS_API_PATHS
   const COMMENT_EMOJI_MAP: typeof import('../utils/commentEmoji').COMMENT_EMOJI_MAP
   const DEFAULT_COVER_DATA_URI: typeof import('../utils/imageUrl').DEFAULT_COVER_DATA_URI
   const DEFAULT_MV_POOL: typeof import('../stores/modules/radarAlbum').DEFAULT_MV_POOL
@@ -100,9 +101,11 @@ declare global {
   const mapWritableState: typeof import('pinia').mapWritableState
   const markRaw: typeof import('vue').markRaw
   const markStreamFailure: typeof import('../utils/gatewayHealth').markStreamFailure
+  const musicStreamUrl: typeof import('../utils/audioUtils').musicStreamUrl
   const nextTick: typeof import('vue').nextTick
   const normalizeDurationMs: typeof import('../utils/transformers').normalizeDurationMs
   const normalizeLyricWord: typeof import('../utils/lyricsWordSync').normalizeLyricWord
+  const normalizeSongSource: typeof import('../utils/audioUtils').normalizeSongSource
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount
   const onBeforeRouteLeave: typeof import('vue-router').onBeforeRouteLeave
@@ -131,6 +134,7 @@ declare global {
   const readonly: typeof import('vue').readonly
   const ref: typeof import('vue').ref
   const resolveComponent: typeof import('vue').resolveComponent
+  const resolvedSongSource: typeof import('../utils/audioUtils').resolvedSongSource
   const rgbToHex: typeof import('../utils/colorExtractor').rgbToHex
   const safeStorage: typeof import('../utils/safeStorage').default
   const saveLocalMVComment: typeof import('../utils/localCommentDB').saveLocalMVComment
@@ -139,7 +143,11 @@ declare global {
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
+  const songPlaybackSource: typeof import('../utils/audioUtils').songPlaybackSource
+  const songSourceCandidates: typeof import('../utils/audioUtils').songSourceCandidates
+  const songSourcePair: typeof import('../utils/audioUtils').songSourcePair
   const storeToRefs: typeof import('pinia').storeToRefs
+  const streamSourcePair: typeof import('../utils/audioUtils').streamSourcePair
   const syncWordElements: typeof import('../utils/lyricsWordSync').syncWordElements
   const testSongs: typeof import('../utils/testSongs').testSongs
   const toRaw: typeof import('vue').toRaw
@@ -169,6 +177,7 @@ declare global {
   const transformTopSongs: typeof import('../utils/transformers').transformTopSongs
   const triggerRef: typeof import('vue').triggerRef
   const unref: typeof import('vue').unref
+  const useAccessStore: typeof import('../stores/modules/access').useAccessStore
   const useAttrs: typeof import('vue').useAttrs
   const useAudioStore: typeof import('../stores/modules/audio').useAudioStore
   const useAuthStore: typeof import('../stores/modules/auth').useAuthStore
@@ -201,7 +210,7 @@ declare global {
   export type { Component, Slot, Slots, ComponentPublicInstance, ComputedRef, DirectiveBinding, ExtractDefaultPropTypes, ExtractPropTypes, ExtractPublicPropTypes, InjectionKey, PropType, Ref, ShallowRef, MaybeRef, MaybeRefOrGetter, VNode, WritableComputedRef } from 'vue'
   import('vue')
   // @ts-ignore
-  export type { AudioMetadata } from '../utils/audioUtils'
+  export type { SongSourcePair, AudioMetadata } from '../utils/audioUtils'
   import('../utils/audioUtils')
   // @ts-ignore
   export type { ResolvedBlobTier, ParsedAudioMeta } from '../utils/blobMetadataParser'
@@ -230,6 +239,9 @@ declare global {
   // @ts-ignore
   export type { QualityLevel, QualityChoiceMeta, ProbeQualityItem, SongProbeResult } from '../utils/qualityProbe'
   import('../utils/qualityProbe')
+  // @ts-ignore
+  export type { AccessMode, AccessStatusKind, AccessErrorKind, AccessStatusResponse, AccessState } from '../stores/modules/access'
+  import('../stores/modules/access')
   // @ts-ignore
   export type { UserInfo, AuthState } from '../stores/modules/auth'
   import('../stores/modules/auth')

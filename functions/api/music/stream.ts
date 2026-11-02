@@ -8,6 +8,8 @@ import {
   isBlockedSsrfHost,
   validateSafeUrl,
   safeFetch,
+  hasSensitiveMediaQuery,
+  isSafeFetchCapacityError,
 } from '../../_lib/sonic/security';
 import { getSonicConfig } from '../../_lib/sonic/config';
 import {
@@ -54,18 +56,18 @@ function isPlayableMediaType(contentType: string | null): boolean {
 // shared cache, must NEVER be exposed via cross-origin 302 Location headers, and upstream
 // `private`/`no-store` directives must never be upgraded.
 export const SENSITIVE_STREAM_QUERY =
-  /^(?:auth|authorization|token|access[_-]?token|refresh[_-]?token|key|api[_-]?key|apikey|sign|signature|sig|vkey|guid|wmid|expires?|expiry|nonce|session|cookie|uid|userid|user[_-]?id|wssecret|wstime|ekey|ckey|x-amz-signature|x-amz-credential|x-amz-security-token|ossaccesskeyid|q-signature)$/i;
+  /^(?:auth|authorization|token|access[_-]?token|refresh[_-]?token|key|api[_-]?key|apikey|sign|signature|sig|vkey|guid|wmid|expires?|expiry|nonce|session|cookie|uid|userid|user[_-]?id|wssecret|wstime|ekey|ckey|vuutv|dis_k|accesskey|code|x-amz-signature|x-amz-credential|x-amz-security-token|ossaccesskeyid|q-signature)$/i;
 
 export function hasSensitiveStreamQuery(target: URL): boolean {
-  return Array.from(target.searchParams.keys()).some((name) => SENSITIVE_STREAM_QUERY.test(name));
+  return hasSensitiveMediaQuery(target);
 }
 
-function streamCacheControl(target: URL, upstreamHeaders: Headers, status: number): string {
+function streamCacheControl(target: URL, upstreamHeaders: Headers, status: number, sensitive = false): string {
+  if (sensitive || hasSensitiveStreamQuery(target)) return 'private, no-store';
   if (status !== 200 && status !== 206) return 'no-store';
   const upstreamCacheControl = (upstreamHeaders.get('cache-control') || '').trim();
   const normalized = upstreamCacheControl.toLowerCase();
-  if (normalized.includes('no-store')) return 'no-store';
-  if (hasSensitiveStreamQuery(target)) return 'private, no-store';
+  if (normalized.includes('no-store')) return 'private, no-store';
   if (normalized.includes('private')) return upstreamCacheControl;
   return 'public, max-age=600';
 }
@@ -85,7 +87,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   const cfg = getSonicConfig(env);
-  const allowedDomains = getAllowedMediaDomains(env);
+  const allowedDomains = getAllowedMediaDomains(env, 'audio');
   const url = new URL(request.url);
   const targetParam = url.searchParams.get('target') || url.searchParams.get('url');
   const streamMode = (url.searchParams.get('mode') || (url.searchParams.get('redirect') === '1' ? 'redirect' : '')).toLowerCase();
@@ -129,7 +131,8 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     const durationStr = url.searchParams.get('duration');
     const durationSec = durationStr ? parseFloat(durationStr) : undefined;
     const allowTrial = url.searchParams.get('allowTrial') !== '0';
-    const nocache = url.searchParams.has('nocache');
+    // Playback retries opt in explicitly; unrelated query flags never disable caches.
+    const nocache = url.searchParams.get('nocache') === '1';
 
     if (!id && !title) {
       return errorResponse('缺少歌曲标识 (Parameter id or title is required)', 400);
@@ -167,6 +170,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           allowTrial,
           nocache,
           request,
+          signal: request.signal,
         },
         env,
       );
@@ -259,11 +263,16 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       degraded = resolved.degraded;
       degradedReason = resolved.degradedReason;
       circuitState = resolved.circuitState;
-      resolvedSource = resolved.resolvedSource || resolvedProvider || source;
-      resolvedTrackId = resolved.resolvedId || id;
-      resolvedTitle = resolved.resolvedTitle || title;
-      resolvedArtist = resolved.resolvedArtist || artist;
+      // A resolver/provider label is not a track namespace. Publish only an atomic
+      // verified pair; never combine a fallback provider with the original ID.
+      if (resolved.resolvedSource && resolved.resolvedId) {
+        resolvedSource = normalizeSourceId(resolved.resolvedSource);
+        resolvedTrackId = resolved.resolvedId;
+        resolvedTitle = resolved.resolvedTitle || title;
+        resolvedArtist = resolved.resolvedArtist || artist;
+      }
     } catch (err: any) {
+      request.signal.throwIfAborted();
       recordStreamMetric('err_5xx');
       return errorResponse(redactSensitiveString(err?.message || '解析音频流失败'), 502);
     }
@@ -271,36 +280,6 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
   if (!targetUrl) {
     return errorResponse('无法解析音频目标地址', 500);
-  }
-
-  // Optional Direct 302 Redirect Mode:
-  // ONLY allowed when caller passes `?mode=redirect`, CDN is HTTPS + CORS-safe, AND the target URL
-  // carries ZERO sensitive/signed query parameters (prevents leaking signed tokens via Location or cache).
-  if (
-    streamMode === 'redirect' &&
-    targetUrl.protocol === 'https:' &&
-    resolvedCorsSafe &&
-    !hasSensitiveStreamQuery(targetUrl)
-  ) {
-    const redirectHeaders = corsHeaders();
-    redirectHeaders.set('Location', targetUrl.toString());
-    redirectHeaders.set('Cache-Control', 'private, no-store');
-    redirectHeaders.set('Referrer-Policy', 'no-referrer');
-    redirectHeaders.set('X-Sonic-Provider', resolvedProvider);
-    redirectHeaders.set('X-Sonic-Via', resolvedVia);
-    redirectHeaders.set('X-Sonic-Stream-Type', resolvedStreamType);
-    if (resolvedTrial) redirectHeaders.set('X-Sonic-Stream-Trial', '1');
-    if (resolvedTrialDuration > 0) redirectHeaders.set('X-Sonic-Trial-Duration', String(resolvedTrialDuration));
-    if (degraded) redirectHeaders.set('X-Sonic-Degraded', '1');
-    if (resolvedSource) redirectHeaders.set('X-Sonic-Resolved-Source', resolvedSource);
-    if (resolvedTrackId) redirectHeaders.set('X-Sonic-Resolved-Id', resolvedTrackId);
-    if (resolvedTitle) redirectHeaders.set('X-Sonic-Resolved-Title', encodeURIComponent(resolvedTitle));
-    if (resolvedArtist) redirectHeaders.set('X-Sonic-Resolved-Artist', encodeURIComponent(resolvedArtist));
-    redirectHeaders.set(
-      'Access-Control-Expose-Headers',
-      'X-Sonic-Provider, X-Sonic-Via, X-Sonic-Stream-Trial, X-Sonic-Stream-Type, X-Sonic-Trial-Duration, X-Sonic-Degraded, X-Sonic-Resolved-Source, X-Sonic-Resolved-Id, X-Sonic-Resolved-Title, X-Sonic-Resolved-Artist',
-    );
-    return new Response(null, { status: 302, headers: redirectHeaders });
   }
 
   // Default: Same-Origin Byte-Range Stream Proxy (preserves CORS `Content-Range`, anti-hotlink `Referer`, and HTTPS)
@@ -337,9 +316,12 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         maxRedirects: 3,
         timeoutMs: 15000,
         maxBytes: 256 * 1024 * 1024,
+        includeMetadata: true,
       },
     );
 
+    const upstreamSensitive = Boolean(upstream.sensitive);
+    const finalTargetUrl = upstream.finalUrl || targetUrl;
     const status = upstream.status;
 
     // 1. Handle upstream HTTP error statuses explicitly BEFORE content-type checks,
@@ -504,7 +486,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     if (!headers.has('Content-Type')) {
       headers.set('Content-Type', 'audio/mpeg');
     }
-    headers.set('Cache-Control', streamCacheControl(targetUrl, upstream.headers, status));
+    headers.set('Cache-Control', streamCacheControl(finalTargetUrl, upstream.headers, status, upstreamSensitive));
     headers.set('Referrer-Policy', 'no-referrer');
     headers.set('X-Sonic-Provider', resolvedProvider);
     headers.set('X-Sonic-Via', resolvedVia);
@@ -525,6 +507,26 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       'Content-Range, Content-Length, Accept-Ranges, Content-Type, X-Sonic-Provider, X-Sonic-Via, X-Sonic-Stream-Trial, X-Sonic-Stream-Type, X-Sonic-Trial-Duration, X-Sonic-Degraded, X-Sonic-Circuit, X-Sonic-Resolved-Source, X-Sonic-Resolved-Id, X-Sonic-Resolved-Title, X-Sonic-Resolved-Artist',
     );
 
+    // Resolve and validate every redirect before emitting a Location. If any hop was
+    // signed, private, or the final host's CORS policy is unknown, reuse the fetched body.
+    if (
+      streamMode === 'redirect' &&
+      resolvedCorsSafe &&
+      finalTargetUrl.protocol === 'https:' &&
+      finalTargetUrl.origin === targetUrl.origin &&
+      !upstreamSensitive &&
+      !hasSensitiveStreamQuery(finalTargetUrl) &&
+      !/private|no-store/i.test(upstream.headers.get('cache-control') || '')
+    ) {
+      void upstream.body?.cancel().catch(() => {});
+      for (const name of ['Content-Length', 'Content-Range', 'Content-Type', 'ETag', 'Last-Modified', 'Accept-Ranges']) {
+        headers.delete(name);
+      }
+      headers.set('Location', finalTargetUrl.toString());
+      headers.set('Cache-Control', 'private, no-store');
+      return new Response(null, { status: 302, headers });
+    }
+
     recordStreamMetric(status === 206 ? 'proxied_206' : 'proxied_200');
     return new Response(upstream.body, {
       status,
@@ -532,6 +534,13 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       headers,
     });
   } catch (err: any) {
+    request.signal.throwIfAborted();
+    if (isSafeFetchCapacityError(err)) {
+      return jsonResponse(
+        { brand: 'Sonic', error: { code: 'UPSTREAM_BUSY', message: 'Upstream capacity is temporarily exhausted' } },
+        { status: 503, headers: corsHeaders({ 'Cache-Control': 'no-store', 'Retry-After': '1' }) },
+      );
+    }
     const rawMsg = String(err?.message || 'Proxy error');
     const isTimeout =
       err?.name === 'TimeoutError' ||
