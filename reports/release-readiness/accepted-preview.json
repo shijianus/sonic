@@ -1,0 +1,65 @@
+{
+  "ok": true,
+  "mode": "staging-live",
+  "base": "https://0d16874b.sonic-staging.pages.dev",
+  "branch": "rc-4b2de40f0f30",
+  "branchUrl": "https://rc-4b2de40f0f30.sonic-staging.pages.dev",
+  "deploymentId": "0d16874b-4b07-4ce9-83a8-e3938b9e4bfe",
+  "releaseId": "a75f5cb54a2f-4b2de40f0f30",
+  "sourceDigest": "4b2de40f0f30246aee9e4eeaa9d25a3a1bcca44dae6d6187660c2772eecb18f0",
+  "engineStorage": "sqlite",
+  "independentIdentityBindingPresent": true,
+  "authenticatedIdentityAssertionLiveVerified": true,
+  "oauthLoginVerified": false,
+  "authenticationLimitation": "An ephemeral signed staging subject verifies the real identity hop; the external OAuth provider login is not exercised",
+  "checks": [
+    {
+      "name": "existing staging project and preview bindings inspected without changes",
+      "ok": true
+    },
+    {
+      "name": "preserved 0600 staging credential file matches the running staging Engine",
+      "ok": true
+    },
+    {
+      "name": "Cloudflare confirms an isolated preview branch for this manifest and commit",
+      "ok": true
+    },
+    {
+      "name": "anonymous staging traffic is 401 with noindex",
+      "ok": true
+    },
+    {
+      "name": "existing staging access credential opens HTML with noindex",
+      "ok": true
+    },
+    {
+      "name": "staging invitation exchanges into a Secure HttpOnly cookie and strips the token URL",
+      "ok": true
+    },
+    {
+      "name": "preview headers, frontend manifest, compiled Edge identity and durable Engine identity match",
+      "ok": true
+    },
+    {
+      "name": "synthetic search returns real catalog results through the staging Engine",
+      "ok": true
+    },
+    {
+      "name": "Engine-backed audio HEAD, RIFF bytes, seek ranges 206 and invalid range 416",
+      "ok": true
+    },
+    {
+      "name": "consent, SQLite acknowledgements, two-subject isolation, retry deduplication and authoritative deletion",
+      "ok": true
+    },
+    {
+      "name": "temporary live-test subjects deleted and absence confirmed directly on Engine",
+      "ok": true
+    },
+    {
+      "name": "authenticated Edge and Engine subject parity, durable write/delete, and invalid signature rejection",
+      "ok": true
+    }
+  ]
+}
