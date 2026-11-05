@@ -10,7 +10,7 @@ interface CachedTicket {
   expiresAtMs: number
 }
 
-let cachedTicket: CachedTicket | null = null
+const ticketCache = new Map<string, CachedTicket>()
 
 export async function requestPlaybackTicket(
   id: string | number,
@@ -25,12 +25,9 @@ export async function requestPlaybackTicket(
   const now = Date.now()
 
   // Reuse cached ticket if within valid window (leave 15s margin)
-  if (
-    cachedTicket &&
-    cachedTicket.trackKey === trackKey &&
-    cachedTicket.expiresAtMs - now > 15_000
-  ) {
-    return cachedTicket.ticket
+  const cached = ticketCache.get(trackKey)
+  if (cached && cached.expiresAtMs - now > 15_000) {
+    return cached.ticket
   }
 
   try {
@@ -43,11 +40,11 @@ export async function requestPlaybackTicket(
 
     if (res && (res.ok || res.ticket) && res.ticket) {
       const ttlSec = Number(res.expiresIn || 120)
-      cachedTicket = {
+      ticketCache.set(trackKey, {
         ticket: res.ticket,
         trackKey,
         expiresAtMs: now + ttlSec * 1000,
-      }
+      })
       return res.ticket
     }
   } catch {
@@ -58,5 +55,5 @@ export async function requestPlaybackTicket(
 }
 
 export function clearPlaybackTicketCache(): void {
-  cachedTicket = null
+  ticketCache.clear()
 }

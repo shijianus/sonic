@@ -17,6 +17,9 @@ import { verifyAuth, readCookie } from '../../_lib/auth';
 import {
   checkStreamCorsAndFetchMetadata,
   evaluateStreamGuardQuota,
+  getTrackGrantCookieName,
+  normalizeTrackFingerprint,
+  verifyPlaybackGrantToken,
   verifyStreamTicket,
 } from '../../_lib/sonic/ticket';
 import { getSonicConfig } from '../../_lib/sonic/config';
@@ -102,6 +105,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
   // ── Stream Guard Phase 1: Access Control & Ticketing Gate ──
   const guardMode = String(env?.SONIC_STREAM_GUARD || 'off').trim().toLowerCase();
+  let isAnonymousGuarded = false;
+  let guardGrantCookie: string | undefined;
+
   if (guardMode === 'monitor' || guardMode === 'enforce') {
     // Constraint C1: Valid API Key caller completely bypasses Stream Guard checks and CORS restrictions
     const isEngineCaller = hasValidEngineSecret(request, env);
@@ -114,6 +120,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     }
 
     if (!hasApiKey) {
+      isAnonymousGuarded = true;
       // 1. Strict CORS & Fetch-Metadata verification (Constraint C4, C5)
       const corsCheck = checkStreamCorsAndFetchMetadata(request, env);
       if (!corsCheck.allowed) {
@@ -132,14 +139,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         console.warn(`[Stream Guard Monitor] CORS violation: ${corsCheck.reason}`);
       }
 
-      // 2. Extract ticket from Header, Cookie, or Query param
-      const ticket =
-        request.headers.get('x-sonic-ticket')?.trim() ||
-        readCookie(request, 'sonic_play_ticket')?.trim() ||
-        url.searchParams.get('t')?.trim() ||
-        url.searchParams.get('ticket')?.trim() ||
-        '';
-
+      // 2. Extract ticket and grant token from Header, Cookie, or Query param
       const rawTrackParam = url.searchParams.get('id') || url.searchParams.get('target') || '';
       const rawSourceParam = (url.searchParams.get('source') || 'netease').toLowerCase().trim();
       const rawBrParam = url.searchParams.get('br') || url.searchParams.get('quality') || '320';
@@ -148,26 +148,51 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       const durationSec = durationStr ? parseFloat(durationStr) : undefined;
       const clientIp = extractClientIp(request);
 
+      const tid = normalizeTrackFingerprint(rawTrackParam, rawSourceParam, rawBrParam);
+      const grantCookieName = getTrackGrantCookieName(tid);
+
       const anonCookie = readCookie(request, 'sonic_anon_session');
       const anonHeader = request.headers.get('x-sonic-anon-id')?.trim();
       const rawAnonSession = (anonCookie && anonCookie.includes('.') ? anonCookie.split('.')[0] : anonCookie) || anonHeader;
       const subject = rawAnonSession ? `anon:sess_${rawAnonSession.slice(0, 16)}` : `anon:${clientIp}`;
 
-      if (!ticket) {
-        if (guardMode === 'enforce') {
-          return jsonResponse(
-            {
-              brand: 'Sonic',
-              error: {
-                code: 'STREAM_TICKET_REQUIRED',
-                message: 'Playback ticket is required for anonymous stream access in enforce mode',
-              },
-            },
-            { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store' }) },
-          );
+      const grantToken =
+        request.headers.get('x-sonic-grant')?.trim() ||
+        readCookie(request, grantCookieName)?.trim() ||
+        readCookie(request, 'sonic_play_grant')?.trim() ||
+        url.searchParams.get('grant')?.trim() ||
+        '';
+
+      const ticket =
+        request.headers.get('x-sonic-ticket')?.trim() ||
+        readCookie(request, 'sonic_play_ticket')?.trim() ||
+        url.searchParams.get('t')?.trim() ||
+        url.searchParams.get('ticket')?.trim() ||
+        '';
+
+      let guardAuthorized = false;
+      let guardFailureCode: string | undefined;
+
+      // Check stateless grant token first (for subsequent Range / seek requests across any isolate)
+      if (grantToken) {
+        const grantCheck = await verifyPlaybackGrantToken(grantToken, {
+          id: rawTrackParam,
+          source: rawSourceParam,
+          br: rawBrParam,
+          purpose,
+          sub: subject,
+          ip: clientIp,
+          env,
+        });
+        if (grantCheck.valid) {
+          guardAuthorized = true;
+        } else {
+          guardFailureCode = grantCheck.error;
         }
-        console.warn(`[Stream Guard Monitor] Invalid or missing ticket: MISSING_TICKET`);
-      } else {
+      }
+
+      // If grantToken wasn't present or failed, check ticket
+      if (!guardAuthorized && ticket) {
         const ticketCheck = await verifyStreamTicket(ticket, {
           id: rawTrackParam,
           source: rawSourceParam,
@@ -176,23 +201,48 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           sub: subject,
           ip: clientIp,
           durationSec,
+          grantToken,
           env,
         });
+        if (ticketCheck.valid) {
+          guardAuthorized = true;
+          if (ticketCheck.grantCookieHeader) {
+            guardGrantCookie = ticketCheck.grantCookieHeader;
+          }
+        } else {
+          guardFailureCode = ticketCheck.error;
+        }
+      }
 
-        if (!ticketCheck.valid) {
+      if (!guardAuthorized) {
+        if (!ticket && !grantToken) {
           if (guardMode === 'enforce') {
             return jsonResponse(
               {
                 brand: 'Sonic',
                 error: {
-                  code: ticketCheck.error || 'INVALID_TICKET',
-                  message: `Invalid or expired stream playback ticket (${ticketCheck.error || 'UNAUTHORIZED'})`,
+                  code: 'STREAM_TICKET_REQUIRED',
+                  message: 'Playback ticket is required for anonymous stream access in enforce mode',
                 },
               },
               { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store' }) },
             );
           }
-          console.warn(`[Stream Guard Monitor] Invalid ticket for ${subject}: ${ticketCheck.error}`);
+          console.warn(`[Stream Guard Monitor] Invalid or missing ticket: MISSING_TICKET`);
+        } else {
+          if (guardMode === 'enforce') {
+            return jsonResponse(
+              {
+                brand: 'Sonic',
+                error: {
+                  code: guardFailureCode || 'INVALID_TICKET',
+                  message: `Invalid or expired stream playback ticket (${guardFailureCode || 'UNAUTHORIZED'})`,
+                },
+              },
+              { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store' }) },
+            );
+          }
+          console.warn(`[Stream Guard Monitor] Invalid ticket for ${subject}: ${guardFailureCode}`);
         }
       }
 
@@ -357,6 +407,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
             const outHeaders = new Headers(engineStream.response.headers);
             outHeaders.set('X-Sonic-Provider', 'local-synthetic');
             outHeaders.set('X-Sonic-Via', 'local-engine');
+            if (isAnonymousGuarded) {
+              outHeaders.set('Cache-Control', 'private, no-store');
+              if (guardGrantCookie) outHeaders.append('Set-Cookie', guardGrantCookie);
+            }
             if (engineStream.response.status === 206) recordStreamMetric('proxied_206');
             else if (engineStream.response.status === 200) recordStreamMetric('proxied_200');
             return new Response(engineStream.response.body, {
@@ -372,12 +426,15 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           request.headers.get('Range'),
           cfg.runtime === 'linux-engine' ? 'local-engine' : 'edge-degraded-synthetic',
         );
+        const h = new Headers(fallbackResp.headers);
         if (cfg.enableLocalEngine && !isFaultId) {
-          const h = new Headers(fallbackResp.headers);
           h.set('X-Sonic-Degraded', '1');
-          return new Response(fallbackResp.body, { status: fallbackResp.status, headers: h });
         }
-        return fallbackResp;
+        if (isAnonymousGuarded) {
+          h.set('Cache-Control', 'private, no-store');
+          if (guardGrantCookie) h.append('Set-Cookie', guardGrantCookie);
+        }
+        return new Response(fallbackResp.body, { status: fallbackResp.status, headers: h });
       }
 
       targetUrl = sanitizeTargetUrl(resolved.url, allowedDomains);
@@ -619,7 +676,12 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     if (!headers.has('Content-Type')) {
       headers.set('Content-Type', 'audio/mpeg');
     }
-    headers.set('Cache-Control', streamCacheControl(finalTargetUrl, upstream.headers, status, upstreamSensitive));
+    if (isAnonymousGuarded) {
+      headers.set('Cache-Control', 'private, no-store');
+      if (guardGrantCookie) headers.append('Set-Cookie', guardGrantCookie);
+    } else {
+      headers.set('Cache-Control', streamCacheControl(finalTargetUrl, upstream.headers, status, upstreamSensitive));
+    }
     headers.set('Referrer-Policy', 'no-referrer');
     headers.set('X-Sonic-Provider', resolvedProvider);
     headers.set('X-Sonic-Via', resolvedVia);

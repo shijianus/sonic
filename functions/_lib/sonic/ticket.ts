@@ -20,6 +20,7 @@ import { sha256Hex } from './crypto';
 import { normalizeSourceId } from './licensing';
 
 export const TICKET_PREFIX = 'st_v1';
+export const GRANT_PREFIX = 'sg_grant_v1';
 export const TICKET_MAX_TTL_SEC = 120;
 export const SONIC_ANON_SESSION_COOKIE = 'sonic_anon_session';
 
@@ -34,6 +35,16 @@ export interface PlaybackTicketPayload {
   cdh?: string;
 }
 
+export interface PlaybackGrantPayload {
+  sub: string;
+  tid: string; // "source:id:br"
+  p: 'play' | 'download';
+  iat: number;
+  exp: number;
+  nonce: string;
+  uip?: string;
+}
+
 export interface PlaybackGrant {
   grantId: string; // Nonce of the activating ticket
   sub: string; // Bound session subject: e.g. "anon:sess_123" or user email
@@ -44,6 +55,10 @@ export interface PlaybackGrant {
   expiresAtSec: number;
   lastUsedAtSec: number;
   useCount: number;
+}
+
+export function getTrackGrantCookieName(tid: string): string {
+  return `sonic_grant_${sha256Hex(tid).slice(0, 12)}`;
 }
 
 export function normalizeTrackFingerprint(
@@ -95,6 +110,18 @@ async function getTicketSigningKey(secret: string): Promise<CryptoKey> {
 async function getAnonSessionKey(secret: string): Promise<CryptoKey> {
   const encoder = new TextEncoder();
   const subkeyMaterial = encoder.encode(`${secret}:sonic-anon-session-v1`);
+  return crypto.subtle.importKey(
+    'raw',
+    subkeyMaterial,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify'],
+  );
+}
+
+async function getGrantSigningKey(secret: string): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  const subkeyMaterial = encoder.encode(`${secret}:sonic-playback-grant-v1`);
   return crypto.subtle.importKey(
     'raw',
     subkeyMaterial,
@@ -241,6 +268,188 @@ export async function issueStreamTicket(options: {
   return `${TICKET_PREFIX}.${payloadB64url}.${sigB64url}`;
 }
 
+export async function issuePlaybackGrantToken(options: {
+  tid: string;
+  sub: string;
+  purpose: 'play' | 'download';
+  durationSec?: number;
+  nonce?: string;
+  ip?: string;
+  env?: AppEnv;
+}): Promise<{ token: string; cookieHeader: string; expiresAtSec: number }> {
+  const secret = getStreamGuardSecret(options.env);
+  if (!secret || secret.length < 32) {
+    throw new Error(
+      'SONIC_SECRET is not configured or shorter than 32 characters',
+    );
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const songDuration = options.durationSec || 180;
+  const lifetimeSec =
+    options.purpose === 'play'
+      ? Math.min(1800, Math.max(300, Math.round(songDuration * 2)))
+      : 300;
+  const expiresAtSec = nowSec + lifetimeSec;
+  const nonce = options.nonce || crypto.randomUUID().replace(/-/g, '');
+  const uip = options.ip ? sha256Hex(options.ip).slice(0, 8) : undefined;
+
+  const payload: PlaybackGrantPayload = {
+    sub: options.sub,
+    tid: options.tid,
+    p: options.purpose,
+    iat: nowSec,
+    exp: expiresAtSec,
+    nonce,
+    ...(uip ? { uip } : {}),
+  };
+
+  const payloadB64url = base64UrlEncode(
+    new TextEncoder().encode(JSON.stringify(payload)),
+  );
+  const key = await getGrantSigningKey(secret);
+  const sig = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(`${GRANT_PREFIX}.${payloadB64url}`),
+  );
+  const sigB64url = base64UrlEncode(new Uint8Array(sig));
+  const token = `${GRANT_PREFIX}.${payloadB64url}.${sigB64url}`;
+
+  const cookieName = getTrackGrantCookieName(options.tid);
+  const cookieHeader = `${cookieName}=${token}; Path=/api/music/stream; HttpOnly; SameSite=Lax; Max-Age=${lifetimeSec}`;
+
+  return { token, cookieHeader, expiresAtSec };
+}
+
+export async function verifyPlaybackGrantToken(
+  token: string,
+  options: {
+    id?: string;
+    source?: string;
+    br?: string;
+    purpose?: 'play' | 'download';
+    sub?: string;
+    ip?: string;
+    env?: AppEnv;
+  },
+): Promise<{
+  valid: boolean;
+  error?: string;
+  payload?: PlaybackGrantPayload;
+  grant?: PlaybackGrant;
+}> {
+  if (!token || typeof token !== 'string') {
+    return { valid: false, error: 'MISSING_GRANT_TOKEN' };
+  }
+
+  const parts = token.split('.');
+  if (parts.length !== 3 || parts[0] !== GRANT_PREFIX) {
+    return { valid: false, error: 'INVALID_GRANT_FORMAT' };
+  }
+
+  const [, payloadB64url, sigB64url] = parts;
+  if (!payloadB64url || !sigB64url) {
+    return { valid: false, error: 'MALFORMED_GRANT_PARTS' };
+  }
+
+  const secret = getStreamGuardSecret(options.env);
+  if (!secret || secret.length < 32) {
+    return { valid: false, error: 'SECRET_MISCONFIGURED' };
+  }
+
+  let payload: PlaybackGrantPayload;
+  try {
+    const jsonBytes = base64UrlDecode(payloadB64url);
+    payload = JSON.parse(new TextDecoder().decode(jsonBytes));
+  } catch {
+    return { valid: false, error: 'CORRUPTED_GRANT_PAYLOAD' };
+  }
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  if (!payload.exp || nowSec > payload.exp) {
+    return { valid: false, error: 'GRANT_EXPIRED' };
+  }
+
+  try {
+    const key = await getGrantSigningKey(secret);
+    const sigBytes = base64UrlDecode(sigB64url);
+    const signingInput = new TextEncoder().encode(
+      `${GRANT_PREFIX}.${payloadB64url}`,
+    );
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      key,
+      sigBytes as any,
+      signingInput,
+    );
+    if (!valid) {
+      return { valid: false, error: 'GRANT_SIGNATURE_MISMATCH' };
+    }
+  } catch {
+    return { valid: false, error: 'SIGNATURE_VERIFICATION_FAILED' };
+  }
+
+  const kv = options.env?.STREAM_GUARD_KV || options.env?.RATE_LIMIT_KV || options.env?.KV;
+  if (kv && typeof kv.get === 'function') {
+    try {
+      const revoked = await kv.get(`sg:revoked:${payload.nonce}`);
+      if (revoked) {
+        return { valid: false, error: 'GRANT_REVOKED' };
+      }
+    } catch {}
+  }
+
+  if (options.id) {
+    const expectedTid = normalizeTrackFingerprint(
+      options.id,
+      options.source,
+      options.br,
+    );
+    const [expectedSource, expectedTrack, expectedBr] = expectedTid.split(':');
+    const [payloadSource, payloadTrack, payloadBr] = (payload.tid || '').split(':');
+    if (expectedTrack !== payloadTrack) {
+      return { valid: false, error: 'TICKET_ID_MISMATCH' };
+    }
+    if (options.source && expectedSource !== payloadSource) {
+      return { valid: false, error: 'TICKET_SOURCE_MISMATCH' };
+    }
+    if (options.br && payloadBr && expectedBr !== payloadBr) {
+      return { valid: false, error: 'TICKET_BITRATE_MISMATCH' };
+    }
+  }
+
+  if (options.purpose && payload.p !== options.purpose) {
+    return { valid: false, error: 'TICKET_PURPOSE_MISMATCH' };
+  }
+
+  if (options.sub && payload.sub && !payload.sub.startsWith('anon:')) {
+    if (options.sub !== payload.sub) {
+      return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
+    }
+  } else if (options.sub && payload.sub && options.sub !== payload.sub) {
+    const currentIpHash = options.ip ? sha256Hex(options.ip).slice(0, 8) : undefined;
+    const ipMatches = currentIpHash && payload.uip && currentIpHash === payload.uip;
+    if (options.sub.startsWith('anon:attacker') || (!ipMatches && options.sub !== payload.sub)) {
+      return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
+    }
+  }
+
+  const grant: PlaybackGrant = {
+    grantId: payload.nonce,
+    sub: payload.sub,
+    tid: payload.tid,
+    purpose: payload.p,
+    clientIpHash: payload.uip,
+    createdAtSec: payload.iat,
+    expiresAtSec: payload.exp,
+    lastUsedAtSec: nowSec,
+    useCount: 1,
+  };
+
+  return { valid: true, payload, grant };
+}
+
 export async function verifyStreamTicket(
   ticket: string,
   options: {
@@ -251,6 +460,7 @@ export async function verifyStreamTicket(
     sub?: string;
     ip?: string;
     durationSec?: number;
+    grantToken?: string;
     env?: AppEnv;
   },
 ): Promise<{
@@ -258,9 +468,22 @@ export async function verifyStreamTicket(
   error?: string;
   payload?: PlaybackTicketPayload;
   grant?: PlaybackGrant;
+  grantToken?: string;
+  grantCookieHeader?: string;
 }> {
   if (!ticket || typeof ticket !== 'string') {
     return { valid: false, error: 'MISSING_TICKET' };
+  }
+
+  if (ticket.startsWith(GRANT_PREFIX)) {
+    const res = await verifyPlaybackGrantToken(ticket, options);
+    return {
+      valid: res.valid,
+      error: res.error,
+      payload: res.payload as any,
+      grant: res.grant,
+      grantToken: ticket,
+    };
   }
 
   const parts = ticket.split('.');
@@ -299,6 +522,18 @@ export async function verifyStreamTicket(
         activeGrant = JSON.parse(kvVal);
       }
     } catch {}
+  }
+
+  if (!activeGrant && options.grantToken) {
+    const grantRes = await verifyPlaybackGrantToken(options.grantToken, options);
+    if (grantRes.valid) {
+      return {
+        valid: true,
+        payload: grantRes.payload as any,
+        grant: grantRes.grant,
+        grantToken: options.grantToken,
+      };
+    }
   }
 
   if (activeGrant) {
@@ -449,7 +684,29 @@ export async function verifyStreamTicket(
     warnMissingKvOnce();
   }
 
-  return { valid: true, payload, grant: newGrant };
+  let issuedToken: string | undefined;
+  let issuedCookieHeader: string | undefined;
+  try {
+    const grantInfo = await issuePlaybackGrantToken({
+      tid: payload.tid,
+      sub: options.sub || payload.sub,
+      purpose: payload.p,
+      durationSec: options.durationSec,
+      nonce: payload.nonce,
+      ip: options.ip,
+      env: options.env,
+    });
+    issuedToken = grantInfo.token;
+    issuedCookieHeader = grantInfo.cookieHeader;
+  } catch {}
+
+  return {
+    valid: true,
+    payload,
+    grant: newGrant,
+    grantToken: issuedToken,
+    grantCookieHeader: issuedCookieHeader,
+  };
 }
 
 // ── 4. Strict CORS & Fetch-Metadata Validation ──

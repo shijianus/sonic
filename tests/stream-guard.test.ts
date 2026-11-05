@@ -2,12 +2,16 @@ import { describe, it, expect, beforeEach } from "vitest";
 import {
   issueStreamTicket,
   verifyStreamTicket,
+  issuePlaybackGrantToken,
+  verifyPlaybackGrantToken,
+  getTrackGrantCookieName,
   getOrCreateAnonSession,
   checkStreamCorsAndFetchMetadata,
   evaluateStreamGuardQuota,
   normalizeTrackFingerprint,
   clearPlaybackGrantsForTest,
   TICKET_PREFIX,
+  GRANT_PREFIX,
   SONIC_ANON_SESSION_COOKIE,
 } from "../functions/_lib/sonic/ticket";
 import { onRequest as handleMusicTicket } from "../functions/api/music/ticket";
@@ -287,6 +291,150 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       });
       expect(attackerRes.valid).toBe(false);
       expect(attackerRes.error).toBe("TICKET_SESSION_MISMATCH");
+    });
+
+    it("Stateless Playback Authorization: Range requests on a fresh instance (memory wiped, no KV dependency) are still permitted via HMAC grant token", async () => {
+      // 1. Initial play request with ticket
+      const ticket = await issueStreamTicket({
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: "anon:sess_cold_start",
+        durationSec: 180,
+        env: BASE_ENV,
+      });
+
+      const firstReq = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+        {
+          headers: {
+            Cookie: "sonic_anon_session=cold_start.validSig",
+          },
+        },
+      );
+      const firstRes = await handleMusicStream({
+        request: firstReq,
+        env: { ...BASE_ENV, SONIC_STREAM_GUARD: "enforce", SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1" },
+      });
+      expect(firstRes.status).toBe(200);
+
+      // Extract the issued grant cookie from Set-Cookie
+      const setCookie = firstRes.headers.get("Set-Cookie");
+      expect(setCookie).toBeDefined();
+      expect(setCookie).toContain("sonic_grant_");
+      expect(setCookie).toContain("sg_grant_v1.");
+
+      const grantCookiePair = setCookie!.split(",").find(c => c.includes("sonic_grant_"))!.split(";")[0].trim();
+      const grantToken = grantCookiePair.split("=")[1];
+
+      // 2. Simulate multi-isolate cold start: completely wipe in-memory state and ensure no KV
+      clearPlaybackGrantsForTest();
+
+      // 3. Simulate 130s elapsed (original ticket is now expired: 130s > 120s)
+      // Subsequent Range request hits a 'fresh instance' with the grant cookie
+      const rangeReq = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+        {
+          headers: {
+            Range: "bytes=1024-2047",
+            Cookie: `sonic_anon_session=cold_start.validSig; ${grantCookiePair}`,
+          },
+        },
+      );
+
+      const freshEnv: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+        STREAM_GUARD_KV: undefined,
+        RATE_LIMIT_KV: undefined,
+        KV: undefined,
+      };
+
+      const rangeRes = await handleMusicStream({ request: rangeReq, env: freshEnv });
+      expect([200, 206]).toContain(rangeRes.status);
+
+      // Verify statelessly via verifyPlaybackGrantToken directly:
+      const directCheck = await verifyPlaybackGrantToken(grantToken, {
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: "anon:sess_cold_start",
+        env: freshEnv,
+      });
+      expect(directCheck.valid).toBe(true);
+      expect(directCheck.payload?.tid).toBe("synthetic:syn-440hz:320");
+    });
+
+    it("Preload conflict isolation: Play track A -> trigger track B preload -> seek track A, both tracks remain authorized without cookie collision", async () => {
+      const envEnforce: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+
+      // 1. Play Track A
+      const ticketA = await issueStreamTicket({
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: "anon:sess_user1",
+        durationSec: 180,
+        env: envEnforce,
+      });
+      const reqA1 = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticketA}`,
+        { headers: { Cookie: "sonic_anon_session=user1.sig" } },
+      );
+      const resA1 = await handleMusicStream({ request: reqA1, env: envEnforce });
+      expect(resA1.status).toBe(200);
+
+      const cookieA = resA1.headers.get("Set-Cookie")!.split(",").find(c => c.includes("sonic_grant_"))!.split(";")[0].trim();
+      const cookieNameA = cookieA.split("=")[0];
+
+      // 2. Preload Track B
+      const ticketB = await issueStreamTicket({
+        id: "syn-528hz",
+        source: "synthetic",
+        sub: "anon:sess_user1",
+        durationSec: 200,
+        env: envEnforce,
+      });
+      const reqB = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-528hz&source=synthetic&t=${ticketB}`,
+        { headers: { Cookie: `sonic_anon_session=user1.sig; ${cookieA}` } },
+      );
+      const resB = await handleMusicStream({ request: reqB, env: envEnforce });
+      expect(resB.status).toBe(200);
+
+      const cookieB = resB.headers.get("Set-Cookie")!.split(",").find(c => c.includes("sonic_grant_"))!.split(";")[0].trim();
+      const cookieNameB = cookieB.split("=")[0];
+
+      // Crucial assertion: Track A and Track B have distinct track-scoped cookie names!
+      expect(cookieNameA).not.toBe(cookieNameB);
+
+      // 3. Client seeks Track A (browser presents both cookies)
+      const seekReqA = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticketA}`,
+        {
+          headers: {
+            Range: "bytes=4096-8191",
+            Cookie: `sonic_anon_session=user1.sig; ${cookieA}; ${cookieB}`,
+          },
+        },
+      );
+      const seekResA = await handleMusicStream({ request: seekReqA, env: envEnforce });
+      expect([200, 206]).toContain(seekResA.status);
+
+      // 4. Client also seeks Track B (browser presents both cookies)
+      const seekReqB = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-528hz&source=synthetic&t=${ticketB}`,
+        {
+          headers: {
+            Range: "bytes=2048-4095",
+            Cookie: `sonic_anon_session=user1.sig; ${cookieA}; ${cookieB}`,
+          },
+        },
+      );
+      const seekResB = await handleMusicStream({ request: seekReqB, env: envEnforce });
+      expect([200, 206]).toContain(seekResB.status);
     });
   });
 
@@ -662,6 +810,120 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       expect(res.status).toBe(403);
       const data: any = await res.json();
       expect(data.error?.code).toBe("STREAM_TICKET_REQUIRED");
+    });
+
+    it("Cache Security: anonymous guarded streams return 'Cache-Control: private, no-store' in monitor and enforce modes", async () => {
+      // 1. Enforce mode with valid ticket
+      const envEnforce: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+      const ticket = await issueStreamTicket({
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: "anon:cache_test",
+        env: envEnforce,
+      });
+      const reqEnforce = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+      );
+      const resEnforce = await handleMusicStream({ request: reqEnforce, env: envEnforce });
+      expect(resEnforce.status).toBe(200);
+      expect(resEnforce.headers.get("Cache-Control")).toBe("private, no-store");
+
+      // 2. Monitor mode
+      const envMonitor: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "monitor",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+      const reqMonitor = new Request(
+        "https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic",
+      );
+      const resMonitor = await handleMusicStream({ request: reqMonitor, env: envMonitor });
+      expect(resMonitor.status).toBe(200);
+      expect(resMonitor.headers.get("Cache-Control")).toBe("private, no-store");
+
+      // 3. Off mode (default): returns standard cache control (not private, no-store)
+      const envOff: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "off",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+      const reqOff = new Request(
+        "https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic",
+      );
+      const resOff = await handleMusicStream({ request: reqOff, env: envOff });
+      expect(resOff.status).toBe(200);
+      expect(resOff.headers.get("Cache-Control")).not.toBe("private, no-store");
+
+      // 4. API Key caller in enforce mode retains original caching header (Constraint C1)
+      const session = await createSession(BASE_ENV, {
+        email: "cache-user@sonic.local",
+        name: "CacheUser",
+        avatar: "",
+      });
+      const reqAuth = new Request(
+        "https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic",
+        { headers: { "X-Sonic-Key": session.apiKey } },
+      );
+      const resAuth = await handleMusicStream({ request: reqAuth, env: envEnforce });
+      expect(resAuth.status).toBe(200);
+      expect(resAuth.headers.get("Cache-Control")).not.toBe("private, no-store");
+    });
+
+    it("Cache Security: unauthenticated crawler cannot get audio content via shared cache hits", async () => {
+      // Simulate RFC 9111 shared edge cache proxy
+      const sharedCache = new Map<string, { body: ArrayBuffer; status: number; headers: Headers }>();
+
+      const cacheProxyFetch = async (req: Request, env: AppEnv) => {
+        const cacheKey = req.url;
+        if (req.method === "GET" && sharedCache.has(cacheKey)) {
+          const cached = sharedCache.get(cacheKey)!;
+          return new Response(cached.body.slice(0), { status: cached.status, headers: new Headers(cached.headers) });
+        }
+        const res = await handleMusicStream({ request: req, env });
+        const cc = res.headers.get("Cache-Control") || "";
+        // Shared caches MUST NOT store responses with 'private' or 'no-store'
+        if (req.method === "GET" && res.status === 200 && !/private|no-store/i.test(cc)) {
+          const buf = await res.clone().arrayBuffer();
+          sharedCache.set(cacheKey, { body: buf, status: res.status, headers: new Headers(res.headers) });
+        }
+        return res;
+      };
+
+      const envEnforce: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+
+      // 1. Legitimate user requests stream with valid ticket
+      const ticket = await issueStreamTicket({
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: "anon:legit_user",
+        env: envEnforce,
+      });
+      const legitReq = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+      );
+      const legitRes = await cacheProxyFetch(legitReq, envEnforce);
+      expect(legitRes.status).toBe(200);
+
+      // Verify shared cache refused to store the private/no-store response
+      expect(sharedCache.has(legitReq.url)).toBe(false);
+
+      // 2. Crawler attempts to fetch without ticket (or scraping cached URLs)
+      const crawlerReq = new Request(
+        "https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic",
+      );
+      const crawlerRes = await cacheProxyFetch(crawlerReq, envEnforce);
+      // Crawler gets 0 bytes and 403 Forbidden!
+      expect(crawlerRes.status).toBe(403);
+      const err = (await crawlerRes.json()) as any;
+      expect(err.error?.code).toBe("STREAM_TICKET_REQUIRED");
     });
   });
 });

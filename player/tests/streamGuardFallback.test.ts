@@ -154,4 +154,46 @@ describe('Stream Guard Fallback & Resilience (Requirement 4)', () => {
     expect(resolvedUrl.searchParams.get('id')).toBe('1004')
     expect(resolvedUrl.searchParams.get('t')).toBe(mockTicket)
   })
+
+  it('Scenario 5: Preload next track carries independent ticket in URL and does not conflict with or overwrite current song', async () => {
+    const ticketA = 'st_v1.ticket_song_A.sigA'
+    const ticketB = 'st_v1.ticket_song_B.sigB'
+
+    httpPostMock.mockImplementation(async (_url: string, data: any) => {
+      if (data?.id === 'song-A') {
+        return { ok: true, ticket: ticketA, expiresIn: 120 }
+      }
+      if (data?.id === 'song-B') {
+        return { ok: true, ticket: ticketB, expiresIn: 120 }
+      }
+      return { ok: true, ticket: 'st_v1.default.sig', expiresIn: 120 }
+    })
+
+    const songA = song('song-A', { platform: 'netease', name: 'Song A' })
+    const songB = song('song-B', { platform: 'netease', name: 'Song B' })
+
+    const store = useAudioStore()
+    const audio = document.createElement('audio')
+    vi.spyOn(audio, 'play').mockResolvedValue(undefined)
+    vi.spyOn(audio, 'pause').mockImplementation(() => {})
+    vi.spyOn(audio, 'load').mockImplementation(() => {})
+    store.audio.audio = audio
+    store.setPlaylist([songA, songB], 0)
+
+    // 1. Play Song A
+    await store.playSong(songA, 0, true)
+    expect(audio.src).toContain('id=song-A')
+    expect(audio.src).toContain(`t=${ticketA}`)
+
+    // 2. Preload Song B (triggers preloadNextTrack)
+    await store.preloadNextTrack()
+    expect(songB.url).toBeDefined()
+    expect(songB.url).toContain('id=song-B')
+    expect(songB.url).toContain(`t=${ticketB}`)
+
+    // 3. Current playing audio must still point to Song A with ticket A
+    expect(audio.src).toContain('id=song-A')
+    expect(audio.src).toContain(`t=${ticketA}`)
+    expect(store.audio.currentSong?.id).toBe('song-A')
+  })
 })

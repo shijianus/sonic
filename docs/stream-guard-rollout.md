@@ -105,19 +105,39 @@
 
 ---
 
-## 5. 缓存架构与 Cookie 隔离规范（Cache & Cookie Architecture）
+## 5. 缓存架构、无状态授权与 Cookie 隔离规范（Cache & Cookie Architecture）
 
-1. **音频流接口绝对不含 `Set-Cookie`**：
-   * `/api/music/stream` 媒体代理接口**严禁下发任何 `Set-Cookie` 响应头**。
-   * 会话 Cookie（`sonic_anon_session`）仅在 `POST /api/music/ticket`（标有 `no-store, no-cache, must-revalidate` 的非缓存 JSON 接口）上下发。
-   * 这彻底避免了 RFC 9111 中共享 CDN（Cloudflare 边缘缓存节点、中继代理）在缓存公共音频切片时错误缓存并广播用户私人 Cookie 的风险。
-2. **`?t=` 对缓存命中率的影响与多途径支持**：
-   * **URL 参数的局限性**：若将票据放于 URL（`?t=...`），由于票据包含随机 `nonce` 与动态时间戳，不同用户的请求 URL 各不相同，会导致公共边缘 CDN 缓存无法跨用户命中。
-   * **多途径透明传递**：服务端已实现同时支持：
-     - 请求头：`X-Sonic-Ticket: <ticket>`（供 fetch / XHR 使用）
-     - 会话 Cookie：`sonic_play_ticket=<ticket>`（供 `<audio>` 播放器自动携带）
-     - Query 参数：`?t=<ticket>`（兼容性回退）
-   * 采用 Cookie 或请求头传递时，音频 URL 保持干净统一（`/api/music/stream?id=...&source=...&br=...`），既能实现强鉴权防盗，又能享受 100% 的边缘公共缓存与浏览器强缓存优势。
+### 5.1 匿名流缓存安全与边缘命中率影响（如实说明）
+* **Cache-Control 安全收紧**：
+  * 在 `monitor` 与 `enforce` 模式下，针对**匿名且需要票据**的音频流响应，服务端统一返回：
+    ```http
+    Cache-Control: private, no-store
+    ```
+  * **技术必要性**：若允许共享缓存（如 Cloudflare Edge CDN）缓存匿名音频响应，则未经票据鉴权的未授权爬虫只需请求相同 URL 即可从边缘缓存节点直接读取音频文件，彻底绕过 Stream Guard 守卫逻辑。
+  * **对边缘缓存命中率的客观影响**：
+    * **匿名播放流量**：边缘公共缓存命中率降低至 0%（每个 Range 切片均经由 Worker 执行无状态票据/授权验签并向源站代理），Worker 调用量与上游代理回源量呈 1:1 线性对应。
+    * **有效 API Key 调用者**：严格维持原有 `streamCacheControl` 规则（如 `public, max-age=600`），100% 保留原有边缘高速缓存与免回源收益（满足 C1 约束）。
+
+### 5.2 无状态播放授权令牌（Stateless Playback Grant）
+* **多 Isolate 与冷启动自愈**：
+  * 首次验票通过后，服务端签发 HMAC 签名的无状态授权令牌：
+    ```
+    sg_grant_v1.<payload_base64url>.<sig_base64url>
+    ```
+  * Payload 包含 `sub`（会话标识）、`tid`（曲目指纹 `source:id:br`）、`p`（play/download）、`iat`、`exp`（有效期设定为 `min(曲长×2, 30分钟)`）、`nonce` 与 `uip`（客户端 IP 哈希）。
+  * 后续 Range 请求由任意 Worker Isolate 纯密码学验签放行，**不依赖服务端进程内存，也不依赖 KV 存储**。
+  * `STREAM_GUARD_KV` 仅作为可选的“黑名单吊销/防重放”增强，未绑定或读写降级时绝不影响正常播放。
+
+### 5.3 预加载冲突隔离与曲目作用域 Cookie
+* **曲目指纹 Cookie 命名隔离**：
+  * 授权 Cookie 严格采用曲目指纹短哈希隔离命名：
+    ```
+    sonic_grant_${sha256Hex(tid).slice(0, 12)}=sg_grant_v1...
+    ```
+  * **预加载互不干扰**：当播放曲目 A 并后台触发 `preloadNextTrack()` 预加载曲目 B 时，曲目 B 换取的授权 Cookie 为 `sonic_grant_B`，与曲目 A 的 `sonic_grant_A` 在浏览器中共存，彻底杜绝全局 Cookie 覆盖导致曲目 A 无法 Seek/Range 的问题。
+* **多通道透明兼容**：
+  * 前端 `<audio>` 原生播放优先在 `src` URL 中附带 `?t=<ticket>`。
+  * 服务端支持从 Cookie（`sonic_grant_*`）、请求头（`X-Sonic-Grant` / `X-Sonic-Ticket`）及 Query 参数（`?grant=` / `?t=`）多通道识别授权。
 
 ---
 

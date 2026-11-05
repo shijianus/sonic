@@ -4,7 +4,7 @@ export interface AppEnv {
   EPOMAIL_CLIENT_SECRET?: string;
   EPOMAIL_REDIRECT_URI?: string;
   EPOMAIL_HTTP_TIMEOUT_MS?: string;
-  EPOMAIL_TOKEN_CONTENT_TYPE?: "json" | "form" | string;
+  EPOMAIL_TOKEN_CONTENT_TYPE?: 'json' | 'form' | string;
   SONIC_ENABLE_OAUTH?: string;
   MUSIC_API_BASE?: string;
   SOLARA_SECRET?: string;
@@ -20,12 +20,10 @@ export interface AppEnv {
   SONIC_KEY_REVOCATION_FAIL_CLOSED?: string;
   KV?: any;
   RATE_LIMIT_KV?: any;
-  RATE_LIMITER?: {
-    limit(options: { key: string }): Promise<{ success: boolean }>;
-  };
+  RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
   DB?: any;
   // Linux VPS Local Engine & Inter-Service Auth
-  SONIC_RUNTIME?: "cf-pages" | "linux-engine" | string;
+  SONIC_RUNTIME?: 'cf-pages' | 'linux-engine' | string;
   SONIC_LOCAL_ENGINE_URL?: string;
   SONIC_ENGINE_SECRET?: string;
   SONIC_ENGINE_IDENTITY_SECRET?: string;
@@ -40,11 +38,7 @@ export interface AppEnv {
   SONIC_CACHE_MAX_BYTES?: string;
   SONIC_NCM_REQUIRED?: string;
   SONIC_REQUIRE_RELEASE_METADATA?: string;
-  SONIC_DRAIN_STATE?: {
-    draining: boolean;
-    deadlineAt?: number;
-    activeRequests: number;
-  };
+  SONIC_DRAIN_STATE?: { draining: boolean; deadlineAt?: number; activeRequests: number };
   SONIC_CB_FAILURE_THRESHOLD?: string;
   SONIC_CB_COOLDOWN_MS?: string;
   SONIC_NCM_API_URL?: string;
@@ -81,19 +75,19 @@ export interface AppEnv {
   SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT?: string;
   SONIC_RATE_LIMIT_FAIL_CLOSED?: string;
   // Content Licensing Policy & Controlled Beta Isolation
-  SONIC_CONTENT_POLICY?: "default" | "strict-allowlist" | string;
+  SONIC_CONTENT_POLICY?: 'default' | 'strict-allowlist' | string;
   SONIC_ALLOWED_SOURCES?: string;
   SONIC_ENABLE_SYNTHETIC_TEST_SOURCE?: string;
   SONIC_AUTHORIZED_TEST_DOMAINS?: string;
   // Release Metadata, Staging Gate & Observability / Alerting
-  SONIC_ENV?: "production" | "staging" | "development" | "test" | string;
+  SONIC_ENV?: 'production' | 'staging' | 'development' | 'test' | string;
   SONIC_RELEASE_COMMIT?: string;
   SONIC_RELEASE_ID?: string;
   SONIC_SOURCE_DIGEST?: string;
   SONIC_RELEASE_DIRTY?: string;
   SONIC_BUILD_TIME?: string;
   SONIC_STAGING_ACCESS_TOKEN?: string;
-  SONIC_ACCESS_MODE?: "open" | "legacy-staging" | "invite" | string;
+  SONIC_ACCESS_MODE?: 'open' | 'legacy-staging' | 'invite' | string;
   SONIC_ACCESS_SECRET?: string;
   SONIC_ACCESS_SESSION_MAX_AGE_SEC?: string;
   SONIC_INVITE_CODES?: string;
@@ -110,12 +104,12 @@ export interface AppEnv {
   SONIC_ALERT_ALLOW_LOCALHOST?: string;
   SONIC_MIN_FREE_DISK_MB?: string;
   // Stream Guard (Anti-Scraping / Anti-Theft Protection)
-  SONIC_STREAM_GUARD?: "off" | "monitor" | "enforce" | string;
-  SONIC_CORS_STRICT?: "0" | "1" | string;
+  SONIC_STREAM_GUARD?: 'off' | 'monitor' | 'enforce' | string;
+  SONIC_CORS_STRICT?: '0' | '1' | string;
   SONIC_ALLOWED_ORIGINS?: string;
-  SONIC_DOWNLOAD_GUARD?: "0" | "1" | string;
+  SONIC_DOWNLOAD_GUARD?: '0' | '1' | string;
   SONIC_ANON_DOWNLOAD_LIMIT_DAILY?: string;
-  SONIC_TURNSTILE_ENABLED?: "0" | "1" | string;
+  SONIC_TURNSTILE_ENABLED?: '0' | '1' | string;
   SONIC_TURNSTILE_SITE_KEY?: string;
   SONIC_TURNSTILE_SECRET_KEY?: string;
   STREAM_GUARD_KV?: any;
@@ -146,6 +140,7 @@ export interface AppEnv {
   [key: string]: any;
 }
 
+
 export interface SongItem {
   id: string;
   name: string;
@@ -158,25 +153,25 @@ export interface SongItem {
   coverUrl?: string;
   duration?: number;
   sources?: any[];
-  streamType?: "full" | "trial" | "unavailable";
+  streamType?: 'full' | 'trial' | 'unavailable';
 }
 
-export type LyricSyncType = "word" | "line";
+export type LyricSyncType = 'word' | 'line';
 
 export interface LyricWord {
   text: string;
-  start: number; // 毫秒
-  startSec: number; // 秒
-  end: number; // 毫秒
-  endSec: number; // 秒
-  duration: number; // 毫秒
+  start: number;     // 毫秒
+  startSec: number;  // 秒
+  end: number;       // 毫秒
+  endSec: number;    // 秒
+  duration: number;  // 毫秒
   durationSec?: number; // 秒
 }
 
 export interface LyricLine {
-  time: number; // 毫秒
-  timeSec: number; // 秒
-  duration?: number; // 毫秒
+  time: number;       // 毫秒
+  timeSec: number;    // 秒
+  duration?: number;  // 毫秒
   durationSec?: number; // 秒
   text: string;
   words?: LyricWord[];
@@ -187,14 +182,14 @@ export interface HighPrecisionLyricPayload {
   id: string;
   source: string;
   syncType: LyricSyncType;
-  offset: number; // 毫秒
+  offset: number;     // 毫秒
   title?: string;
   artist?: string;
   lines: LyricLine[];
   lineCount: number;
   rawLyric?: string;
-  elrc?: string; // Enhanced LRC (LRC A2 / Lyricify / AMLL)
-  ttml?: string; // Apple Music Timed Text XML (TTML)
+  elrc?: string;      // Enhanced LRC (LRC A2 / Lyricify / AMLL)
+  ttml?: string;      // Apple Music Timed Text XML (TTML)
   isPureMusic?: boolean;
 }
 
