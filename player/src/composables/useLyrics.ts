@@ -7,6 +7,7 @@ import {
   buildProcessedWords,
   isMetadataLine,
 } from '@/utils/lyricsWordSync'
+import { sonicBlogBridge } from '@/utils/sonicBlogBridge'
 
 export type { LyricWord }
 
@@ -485,6 +486,29 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
         // A transient miss is not a permanent cached lyric result.
         lastCacheKey.value = null
       }
+
+      // 字母/歌词链路：向博客随身听全量同步逐字与行级高精歌词
+      try {
+        const broadcastLines = state.lyricsOriginal.map(line => ({
+          time: line.time,
+          timeSec: line.time,
+          text: line.text,
+          durationSec: (line as any).durationSec || (line.words && line.words.length > 0 ? (line.words[line.words.length - 1].endSec - line.time) : undefined),
+          words: line.words ? line.words.map(w => ({
+            text: w.text,
+            start: w.startSec,
+            startSec: w.startSec,
+            end: w.endSec,
+            endSec: w.endSec,
+            duration: w.durationSec,
+            durationSec: w.durationSec,
+          })) : undefined,
+        }))
+        sonicBlogBridge.broadcastLyrics({
+          syncType: 'word',
+          lines: broadcastLines,
+        })
+      } catch {}
     }
 
     inFlightKey = cacheKey

@@ -467,6 +467,9 @@ export default {
     closePlayer: '关闭播放器',
     closePlayerTitle: '关闭播放器（Esc）',
     fullPlayerAria: '全屏音乐播放器与歌词',
+    pocketLink: '随身听联动',
+    pocketLinked: '已联动博客随身听',
+    pocketSyncSuccess: '已同步至博客随身听，音频与歌词链路已就绪',
   },
   auth: {
     login: '登录',

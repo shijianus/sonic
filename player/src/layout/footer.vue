@@ -17,12 +17,23 @@ import { formatCoverUrl } from '@/utils/imageUrl'
 import { gsap } from 'gsap'
 import { useDownloadStore } from '@/stores/modules/download'
 import { useToastStore } from '@/stores/modules/toast'
+import { sonicBlogBridge } from '@/utils/sonicBlogBridge'
 
 const { t } = useI18n()
 const audioStore = useAudioStore()
 const downloadStore = useDownloadStore()
 const toastStore = useToastStore()
 const hasQueue = computed(() => playlist.value.length > 0)
+const isPocketLinked = ref(false)
+
+const togglePocketLink = () => {
+  sonicBlogBridge.broadcastFullSync()
+  isPocketLinked.value = true
+  toastStore.show({
+    message: t('player.pocketSyncSuccess'),
+    type: 'success',
+  })
+}
 
 // 使用音频播放器组合式API
 const {
@@ -897,6 +908,22 @@ const emit = defineEmits(['show'])
           :aria-label="t('common.download')"
           @click.stop="downloadCurrentSong"
         />
+
+        <!-- 博客音乐随身听联动按钮 (音频与字母/歌词全链路互联) -->
+        <button
+          type="button"
+          class="group flex h-11 w-11 items-center justify-center rounded-full text-primary/70 hover:text-sky-400 transition-colors relative cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80"
+          :class="{ 'text-sky-400': isPocketLinked }"
+          :title="isPocketLinked ? t('player.pocketLinked') : t('player.pocketLink')"
+          :aria-label="isPocketLinked ? t('player.pocketLinked') : t('player.pocketLink')"
+          @click="togglePocketLink"
+        >
+          <span class="icon-[mdi--link-variant] h-5 w-5 transition-transform group-hover:scale-110"></span>
+          <span
+            v-if="isPocketLinked"
+            class="absolute top-2 right-2 w-2 h-2 rounded-full bg-sky-400 shadow-[0_0_8px_#38bdf8] animate-pulse"
+          ></span>
+        </button>
 
         <div class="footer-volume">
           <VolumeControl />

@@ -146,6 +146,7 @@ declare global {
   const songPlaybackSource: typeof import('../utils/audioUtils').songPlaybackSource
   const songSourceCandidates: typeof import('../utils/audioUtils').songSourceCandidates
   const songSourcePair: typeof import('../utils/audioUtils').songSourcePair
+  const sonicBlogBridge: typeof import('../utils/sonicBlogBridge').sonicBlogBridge
   const storeToRefs: typeof import('pinia').storeToRefs
   const streamSourcePair: typeof import('../utils/audioUtils').streamSourcePair
   const syncWordElements: typeof import('../utils/lyricsWordSync').syncWordElements
@@ -242,6 +243,9 @@ declare global {
   // @ts-ignore
   export type { AccessMode, AccessStatusKind, AccessErrorKind, AccessStatusResponse, AccessState } from '../stores/modules/access'
   import('../stores/modules/access')
+  // @ts-ignore
+  export type { SonicPocketTrack, SonicPocketPlayback, SonicPocketLyricWord, SonicPocketLyricLine, SonicPocketLyrics, SonicPocketMessage, PocketCommandMessage } from '../utils/sonicBlogBridge'
+  import('../utils/sonicBlogBridge')
   // @ts-ignore
   export type { UserInfo, AuthState } from '../stores/modules/auth'
   import('../stores/modules/auth')

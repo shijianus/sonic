@@ -11,6 +11,7 @@ import i18n from '@/languages'
 import { downloadedMusicDB, localMusicDB } from '@/utils/indexedDB'
 import { musicStreamUrl, songSourceCandidates, songPlaybackSource, songSourcePair, streamSourcePair } from '@/utils/audioUtils'
 import { inspectGatewayHeaders, markStreamFailure, gatewayHealth } from '@/utils/gatewayHealth'
+import { sonicBlogBridge } from '@/utils/sonicBlogBridge'
 import piniaPersistConfig from '../persist'
 
 /** 全局 Audio 单例（整个应用只创建一个 HTMLAudioElement） */
@@ -228,6 +229,20 @@ export const useAudioStore = defineStore('audio', {
       if (!this.audio.audio) {
         this.audio.audio = getAudioSingleton()
         this.setupAudioEvents()
+        sonicBlogBridge.init()
+        sonicBlogBridge.onCommand((cmd) => {
+          if (cmd.action === 'SEEK' && typeof cmd.currentTime === 'number') {
+            this.setCurrentTime(cmd.currentTime)
+          } else if (cmd.action === 'PLAY') {
+            if (this.audio.audio?.paused) {
+              this.resume()
+            }
+          } else if (cmd.action === 'PAUSE') {
+            if (!this.audio.audio?.paused) {
+              this.pause()
+            }
+          }
+        })
         // 如果有歌曲的情况下
         if (this.audio.playlist.length > 0) {
           const index =
@@ -362,6 +377,13 @@ export const useAudioStore = defineStore('audio', {
           this.audio.isPlaying = false
           this.audio.isPaused = true
           clearStartupWatchdog()
+          sonicBlogBridge.broadcastPlayback({
+            isPlaying: false,
+            currentTime: audio.currentTime || 0,
+            duration: audio.duration || 0,
+            volume: audio.volume,
+            playbackRate: audio.playbackRate,
+          })
         }
       })
 
@@ -399,6 +421,14 @@ export const useAudioStore = defineStore('audio', {
         this.audio.isPlaying = true
         this.audio.isPaused = false
 
+        sonicBlogBridge.broadcastPlayback({
+          isPlaying: true,
+          currentTime: audio.currentTime || 0,
+          duration: audio.duration || 0,
+          volume: audio.volume,
+          playbackRate: audio.playbackRate,
+        })
+
         const s = this.audio.currentSong
         if (s && !s.isLocal && playStartedSongId !== s.id) {
           playStartedSongId = s.id
@@ -430,6 +460,7 @@ export const useAudioStore = defineStore('audio', {
         const cur = audio.currentTime || 0
         this.audio.currentTime = cur
         const dur = audio.duration || 0
+        sonicBlogBridge.broadcastTimeUpdate(cur, dur, !audio.paused)
         // 达到 50% 播放进度（或播放满 45 秒）上报一次有效播放进度信号
         const s = this.audio.currentSong
         if (
@@ -719,6 +750,29 @@ export const useAudioStore = defineStore('audio', {
 
         // 添加到播放历史
         this.addToHistory(this.audio.currentSong)
+
+        // 联动博客随身听：全链路广播当前曲目元数据与音频流
+        if (this.audio.currentSong && this.audio.audio) {
+          sonicBlogBridge.broadcastTrack(
+            {
+              id: this.audio.currentSong.id,
+              name: this.audio.currentSong.name,
+              artist: this.audio.currentSong.artists || (this.audio.currentSong as any).artist || '',
+              album: (this.audio.currentSong as any).album || (this.audio.currentSong.al as any)?.name || '',
+              coverUrl: this.audio.currentSong.picUrl || (this.audio.currentSong as any).cover || (this.audio.currentSong.al as any)?.picUrl || '',
+              audioUrl: this.audio.currentSong.url || this.audio.audio.src,
+              duration: this.audio.duration || (this.audio.currentSong.duration ? this.audio.currentSong.duration / 1000 : 0),
+              source: 'sonic',
+            },
+            {
+              isPlaying: true,
+              currentTime: this.audio.currentTime || 0,
+              duration: this.audio.duration || 0,
+              volume: this.audio.audio.volume,
+              playbackRate: this.audio.audio.playbackRate,
+            }
+          )
+        }
       } catch (error: any) {
         // 过期请求（用户已切歌/暂停/停止）的失败不得覆盖新播放状态或弹出错误
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
@@ -1458,6 +1512,7 @@ export const useAudioStore = defineStore('audio', {
         } catch {}
       }
       this.audio.currentTime = validTime
+      sonicBlogBridge.broadcastSeek(validTime)
     },
 
     // 设置播放进度（百分比）

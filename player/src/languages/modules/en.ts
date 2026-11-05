@@ -477,6 +477,9 @@ export default {
     closePlayer: 'Close player',
     closePlayerTitle: 'Close player (Esc)',
     fullPlayerAria: 'Full-screen music player and lyrics',
+    pocketLink: 'Pocket Link',
+    pocketLinked: 'Pocket Linked',
+    pocketSyncSuccess: 'Synced to Music Pocket. Audio and lyrics are ready.',
   },
   auth: {
     login: 'Login',

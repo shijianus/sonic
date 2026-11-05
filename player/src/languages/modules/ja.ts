@@ -482,6 +482,9 @@ export default {
     closePlayer: 'プレイヤーを閉じる',
     closePlayerTitle: 'プレイヤーを閉じる（Esc）',
     fullPlayerAria: '全画面ミュージックプレイヤーと歌詞',
+    pocketLink: '随身聴連携',
+    pocketLinked: 'ブログ随身聴と連携中',
+    pocketSyncSuccess: 'ブログ音楽ポケットへ同期完了、音声と歌詞が連携されました',
   },
   auth: {
     login: 'ログイン',
