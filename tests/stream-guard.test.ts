@@ -10,12 +10,16 @@ import {
   evaluateStreamGuardQuota,
   normalizeTrackFingerprint,
   clearPlaybackGrantsForTest,
+  buildGrantCookieHeaders,
+  parseIncomingGrantCookies,
+  MAX_RETAINED_GRANT_COOKIES,
   TICKET_PREFIX,
   GRANT_PREFIX,
   SONIC_ANON_SESSION_COOKIE,
 } from "../functions/_lib/sonic/ticket";
 import { onRequest as handleMusicTicket } from "../functions/api/music/ticket";
 import { onRequest as handleMusicStream } from "../functions/api/music/stream";
+import { getObservabilitySnapshot } from "../functions/_lib/sonic/observability";
 import { createSession } from "../functions/_lib/auth";
 import type { AppEnv } from "../functions/_lib/types";
 
@@ -435,6 +439,206 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       );
       const seekResB = await handleMusicStream({ request: seekReqB, env: envEnforce });
       expect([200, 206]).toContain(seekResB.status);
+    });
+
+    it("Cookie accumulation control: playing 50 consecutive songs evicts older grant cookies, keeping cookie header <= 4KB and max 8 grant cookies; recent tracks remain playable with Range/seek", async () => {
+      const envEnforce: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+
+      // Simulated browser cookie jar: Map<cookieName, cookieValue>
+      const cookieJar = new Map<string, string>();
+      cookieJar.set("sonic_anon_session", "user_50_songs.sig");
+
+      const helperApplySetCookies = (setCookieHeaders: string[]) => {
+        for (const cookieStr of setCookieHeaders) {
+          const parts = cookieStr.trim().split(";");
+          const nameVal = parts[0].trim();
+          const eqIdx = nameVal.indexOf("=");
+          if (eqIdx === -1) continue;
+          const name = nameVal.slice(0, eqIdx).trim();
+          const val = nameVal.slice(eqIdx + 1).trim();
+          const isExpired = parts.some(p => p.trim().toLowerCase().startsWith("max-age=0"));
+          if (isExpired) {
+            cookieJar.delete(name);
+          } else if (val) {
+            cookieJar.set(name, val);
+          }
+        }
+      };
+
+      const getCookieHeader = () => {
+        return Array.from(cookieJar.entries())
+          .map(([k, v]) => `${k}=${v}`)
+          .join("; ");
+      };
+
+      // Play 50 tracks sequentially
+      for (let i = 1; i <= 50; i++) {
+        const trackId = `track-${i}`;
+        const currentCookieHeader = getCookieHeader();
+        const setCookieHeaders = buildGrantCookieHeaders(currentCookieHeader, {
+          tid: `netease:${trackId}:320`,
+          token: await issuePlaybackGrantToken({
+            tid: `netease:${trackId}:320`,
+            sub: "anon:sess_user_50_songs",
+            purpose: "play",
+            durationSec: 180,
+            nonce: `nonce-${i}`,
+            env: envEnforce,
+          }).then(r => r.token),
+          expiresAtSec: Math.floor(Date.now() / 1000) + 360,
+        });
+
+        // Apply all Set-Cookie headers to our client cookie jar
+        helperApplySetCookies(setCookieHeaders);
+      }
+
+      // Check cookie jar properties after 50 tracks:
+      const grantCookies = Array.from(cookieJar.keys()).filter(k => k.startsWith("sonic_grant_"));
+      // 1. Exactly MAX_RETAINED_GRANT_COOKIES (8) retained
+      expect(grantCookies.length).toBe(MAX_RETAINED_GRANT_COOKIES);
+      expect(grantCookies.length).toBe(8);
+
+      // 2. Total Cookie header size is strictly <= 4096 bytes (4KB)
+      const finalCookieHeader = getCookieHeader();
+      expect(finalCookieHeader.length).toBeLessThan(3000); // Actually ~1.9KB
+      expect(finalCookieHeader.length).toBeLessThan(4096);
+
+      // 3. Oldest tracks (e.g. track 1) have been evicted
+      const track1CookieName = getTrackGrantCookieName("netease:track-1:320");
+      expect(cookieJar.has(track1CookieName)).toBe(false);
+
+      // 4. Most recent tracks (e.g. track 50 and track 49) are retained and authorized for Range/seek
+      const track50CookieName = getTrackGrantCookieName("netease:track-50:320");
+      expect(cookieJar.has(track50CookieName)).toBe(true);
+      const track50Token = cookieJar.get(track50CookieName)!;
+
+      const directVerify = await verifyPlaybackGrantToken(track50Token, {
+        id: "track-50",
+        source: "netease",
+        sub: "anon:sess_user_50_songs",
+        env: envEnforce,
+      });
+      expect(directVerify.valid).toBe(true);
+      expect(directVerify.payload?.tid).toBe("netease:track-50:320");
+    });
+
+    it("Softened IP binding: same session with IP drift (Wi-Fi to cellular) allows Range/seek requests without blocking", async () => {
+      const envEnforce: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+
+      const wifiIp = "192.0.2.10";
+      const cellularIp = "198.51.100.88";
+      const userSession = "anon:sess_mobile_commuter";
+
+      // 1. Issue ticket on Wi-Fi
+      const ticket = await issueStreamTicket({
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: userSession,
+        ip: wifiIp,
+        durationSec: 180,
+        env: envEnforce,
+      });
+
+      // 2. Initial verification on Wi-Fi -> issues grant token
+      const activateRes = await verifyStreamTicket(ticket, {
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: userSession,
+        ip: wifiIp,
+        durationSec: 180,
+        env: envEnforce,
+      });
+      expect(activateRes.valid).toBe(true);
+      expect(activateRes.grantToken).toBeDefined();
+      const grantToken = activateRes.grantToken!;
+
+      // 3. Client IP drifts to cellular (IP changes from 192.0.2.10 to 198.51.100.88), session stays the same
+      const seekOnCellular = await verifyPlaybackGrantToken(grantToken, {
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: userSession,
+        ip: cellularIp, // Drifted!
+        env: envEnforce,
+      });
+
+      // Softened IP binding: Range/seek must still be permitted!
+      expect(seekOnCellular.valid).toBe(true);
+      expect(seekOnCellular.ipDrift).toBe(true);
+
+      // 4. Verification via verifyStreamTicket also permits IP drift for the same session
+      const ticketOnCellular = await verifyStreamTicket(ticket, {
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: userSession,
+        ip: cellularIp,
+        env: envEnforce,
+      });
+      expect(ticketOnCellular.valid).toBe(true);
+      expect(ticketOnCellular.ipDrift).toBe(true);
+    });
+
+    it("Anti-theft: cross-session ticket theft with different session + different IP is strictly rejected with 403 / TICKET_SESSION_MISMATCH", async () => {
+      const envEnforce: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+
+      const victimIp = "192.0.2.10";
+      const attackerIp = "203.0.113.99";
+      const victimSession = "anon:sess_victim";
+      const attackerSession = "anon:sess_attacker";
+
+      const ticket = await issueStreamTicket({
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: victimSession,
+        ip: victimIp,
+        durationSec: 180,
+        env: envEnforce,
+      });
+
+      // Victim activates and gets grant token
+      const victimRes = await verifyStreamTicket(ticket, {
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: victimSession,
+        ip: victimIp,
+        durationSec: 180,
+        env: envEnforce,
+      });
+      expect(victimRes.valid).toBe(true);
+      const grantToken = victimRes.grantToken!;
+
+      // Attacker on different session AND different IP attempts to use the ticket:
+      const stolenTicketRes = await verifyStreamTicket(ticket, {
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: attackerSession,
+        ip: attackerIp,
+        env: envEnforce,
+      });
+      expect(stolenTicketRes.valid).toBe(false);
+      expect(stolenTicketRes.error).toBe("TICKET_SESSION_MISMATCH");
+
+      // Attacker attempts to use the grant token:
+      const stolenGrantRes = await verifyPlaybackGrantToken(grantToken, {
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: attackerSession,
+        ip: attackerIp,
+        env: envEnforce,
+      });
+      expect(stolenGrantRes.valid).toBe(false);
+      expect(stolenGrantRes.error).toBe("TICKET_SESSION_MISMATCH");
     });
   });
 
@@ -924,6 +1128,78 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       expect(crawlerRes.status).toBe(403);
       const err = (await crawlerRes.json()) as any;
       expect(err.error?.code).toBe("STREAM_TICKET_REQUIRED");
+    });
+  });
+
+  describe("8. Structured Observability Metrics (Monitor Mode 7-day observation)", () => {
+    it("Structured Metrics: captures missing_ticket, rejection reason distribution, grant hits, cookie_too_large, and anon_request totals", async () => {
+      const envMonitor: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "monitor",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+
+      const initialSnapshot = getObservabilitySnapshot(envMonitor);
+      const initialMetrics = initialSnapshot.streamGuard;
+      expect(initialMetrics).toBeDefined();
+      expect(initialMetrics.rejectionsByReason).toBeDefined();
+
+      const baseAnonRequests = initialMetrics.totalAnonymousRequests;
+      const baseMissing = initialMetrics.missingTickets;
+      const baseGrantHits = initialMetrics.grantHits;
+      const baseCookieTooLarge = initialMetrics.cookieHeaderTooLarge;
+      const baseMismatches = initialMetrics.rejectionsByReason.mismatch;
+
+      // 1. Anonymous request without ticket -> increments totalAnonymousRequests and missingTickets
+      const noTicketReq = new Request(
+        "https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic",
+      );
+      const noTicketRes = await handleMusicStream({ request: noTicketReq, env: envMonitor });
+      expect(noTicketRes.status).toBe(200); // monitor mode doesn't block
+
+      let snap = getObservabilitySnapshot(envMonitor).streamGuard;
+      expect(snap.totalAnonymousRequests).toBe(baseAnonRequests + 1);
+      expect(snap.missingTickets).toBe(baseMissing + 1);
+
+      // 2. Request with huge cookie header (>3KB) -> increments cookieHeaderTooLarge
+      const largeCookie = "x=" + "a".repeat(3200);
+      const largeCookieReq = new Request(
+        "https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic",
+        { headers: { Cookie: largeCookie } },
+      );
+      await handleMusicStream({ request: largeCookieReq, env: envMonitor });
+      snap = getObservabilitySnapshot(envMonitor).streamGuard;
+      expect(snap.cookieHeaderTooLarge).toBe(baseCookieTooLarge + 1);
+
+      // 3. Request with malformed/tampered ticket -> increments rejectionsByReason.mismatch
+      const badTicketReq = new Request(
+        "https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=st_v1.malformed.sig",
+      );
+      await handleMusicStream({ request: badTicketReq, env: envMonitor });
+      snap = getObservabilitySnapshot(envMonitor).streamGuard;
+      expect(snap.rejectionsByReason.mismatch).toBe(baseMismatches + 1);
+
+      // 4. Request with valid grant token -> increments grantHits
+      const validGrantToken = await issuePlaybackGrantToken({
+        tid: "synthetic:syn-440hz:320",
+        sub: "anon:sess_metric_user",
+        purpose: "play",
+        durationSec: 180,
+        nonce: "metric_nonce_1",
+        env: envMonitor,
+      }).then(r => r.token);
+
+      const grantReq = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&grant=${validGrantToken}`,
+        {
+          headers: {
+            Cookie: "sonic_anon_session=metric_user.sig",
+          },
+        },
+      );
+      await handleMusicStream({ request: grantReq, env: envMonitor });
+      snap = getObservabilitySnapshot(envMonitor).streamGuard;
+      expect(snap.grantHits).toBe(baseGrantHits + 1);
     });
   });
 });

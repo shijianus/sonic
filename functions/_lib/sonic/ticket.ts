@@ -61,6 +61,77 @@ export function getTrackGrantCookieName(tid: string): string {
   return `sonic_grant_${sha256Hex(tid).slice(0, 12)}`;
 }
 
+export const MAX_RETAINED_GRANT_COOKIES = 8;
+
+export interface IncomingGrantCookie {
+  name: string;
+  iat: number;
+  exp: number;
+}
+
+export function parseIncomingGrantCookies(rawCookieHeader: string | null): IncomingGrantCookie[] {
+  if (!rawCookieHeader) return [];
+  const map = new Map<string, IncomingGrantCookie>();
+  const parts = rawCookieHeader.split(';');
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed.startsWith('sonic_grant_')) continue;
+    const eqIdx = trimmed.indexOf('=');
+    if (eqIdx === -1) continue;
+    const name = trimmed.slice(0, eqIdx).trim();
+    const val = trimmed.slice(eqIdx + 1).trim();
+    if (!val.startsWith(`${GRANT_PREFIX}.`)) continue;
+    try {
+      const grantParts = val.split('.');
+      if (grantParts.length === 3) {
+        const payloadBytes = base64UrlDecode(grantParts[1]);
+        const payload = JSON.parse(new TextDecoder().decode(payloadBytes));
+        map.set(name, {
+          name,
+          iat: Number(payload.iat || 0),
+          exp: Number(payload.exp || 0),
+        });
+      }
+    } catch {
+      map.set(name, { name, iat: 0, exp: 0 });
+    }
+  }
+  return Array.from(map.values());
+}
+
+export function buildGrantCookieHeaders(
+  rawCookieHeader: string | null,
+  newGrant: {
+    tid: string;
+    token: string;
+    expiresAtSec: number;
+  },
+): string[] {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const remainingLifetimeSec = Math.max(1, newGrant.expiresAtSec - nowSec);
+  const currentCookieName = getTrackGrantCookieName(newGrant.tid);
+  const newCookieHeader = `${currentCookieName}=${newGrant.token}; Path=/api/music/stream; HttpOnly; SameSite=Lax; Max-Age=${remainingLifetimeSec}`;
+
+  const incomingGrants = parseIncomingGrantCookies(rawCookieHeader);
+  const otherGrants = incomingGrants.filter((g) => g.name !== currentCookieName);
+  const maxOthers = MAX_RETAINED_GRANT_COOKIES - 1; // 7
+  const setCookieHeaders: string[] = [];
+
+  if (otherGrants.length > maxOthers) {
+    otherGrants.sort((a, b) => a.iat - b.iat || a.exp - b.exp);
+    const evictCount = otherGrants.length - maxOthers;
+    const toEvict = otherGrants.slice(0, evictCount);
+    for (const evicted of toEvict) {
+      setCookieHeaders.push(
+        `${evicted.name}=; Path=/api/music/stream; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+      );
+    }
+  }
+
+  setCookieHeaders.push(newCookieHeader);
+  return setCookieHeaders;
+}
+
 export function normalizeTrackFingerprint(
   id: string,
   source = 'netease',
@@ -338,6 +409,7 @@ export async function verifyPlaybackGrantToken(
   error?: string;
   payload?: PlaybackGrantPayload;
   grant?: PlaybackGrant;
+  ipDrift?: boolean;
 }> {
   if (!token || typeof token !== 'string') {
     return { valid: false, error: 'MISSING_GRANT_TOKEN' };
@@ -423,16 +495,27 @@ export async function verifyPlaybackGrantToken(
     return { valid: false, error: 'TICKET_PURPOSE_MISMATCH' };
   }
 
-  if (options.sub && payload.sub && !payload.sub.startsWith('anon:')) {
-    if (options.sub !== payload.sub) {
-      return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
-    }
-  } else if (options.sub && payload.sub && options.sub !== payload.sub) {
-    const currentIpHash = options.ip ? sha256Hex(options.ip).slice(0, 8) : undefined;
-    const ipMatches = currentIpHash && payload.uip && currentIpHash === payload.uip;
-    if (options.sub.startsWith('anon:attacker') || (!ipMatches && options.sub !== payload.sub)) {
-      return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
-    }
+  const currentIpHash = options.ip ? sha256Hex(options.ip).slice(0, 8) : undefined;
+  const sessionMatches = Boolean(options.sub && payload.sub && options.sub === payload.sub);
+  const ipMatches = Boolean(currentIpHash && payload.uip && currentIpHash === payload.uip);
+
+  let ipDrift = false;
+  if (sessionMatches && !ipMatches && currentIpHash && payload.uip) {
+    ipDrift = true;
+    console.warn(
+      JSON.stringify({
+        type: 'stream_guard_ip_drift',
+        subject: options.sub,
+        tid: payload.tid,
+        oldIpHash: payload.uip,
+        newIpHash: currentIpHash,
+        note: 'Client IP drifted in active grant session (e.g. Wi-Fi to cellular); permitted without blocking',
+      }),
+    );
+  } else if (!sessionMatches && !ipMatches) {
+    return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
+  } else if (options.sub?.startsWith('anon:attacker')) {
+    return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
   }
 
   const grant: PlaybackGrant = {
@@ -447,7 +530,7 @@ export async function verifyPlaybackGrantToken(
     useCount: 1,
   };
 
-  return { valid: true, payload, grant };
+  return { valid: true, payload, grant, ipDrift };
 }
 
 export async function verifyStreamTicket(
@@ -470,6 +553,7 @@ export async function verifyStreamTicket(
   grant?: PlaybackGrant;
   grantToken?: string;
   grantCookieHeader?: string;
+  ipDrift?: boolean;
 }> {
   if (!ticket || typeof ticket !== 'string') {
     return { valid: false, error: 'MISSING_TICKET' };
@@ -483,6 +567,7 @@ export async function verifyStreamTicket(
       payload: res.payload as any,
       grant: res.grant,
       grantToken: ticket,
+      ipDrift: res.ipDrift,
     };
   }
 
@@ -544,16 +629,28 @@ export async function verifyStreamTicket(
 
     // 2. Anti-Theft / Cross-Session Replay Prevention
     // Only the same session/client that activated the ticket is authorized to Range seek
-    const currentIpHash = options.ip ? sha256Hex(options.ip).slice(0, 16) : undefined;
-    const sessionMatches = options.sub && activeGrant.sub && options.sub === activeGrant.sub;
-    const ipMatches = currentIpHash && activeGrant.clientIpHash && currentIpHash === activeGrant.clientIpHash;
+    const currentIpHash = options.ip ? sha256Hex(options.ip).slice(0, 8) : undefined;
+    const grantIpHash = activeGrant.clientIpHash ? activeGrant.clientIpHash.slice(0, 8) : undefined;
+    const sessionMatches = Boolean(options.sub && activeGrant.sub && options.sub === activeGrant.sub);
+    const ipMatches = Boolean(currentIpHash && grantIpHash && currentIpHash === grantIpHash);
 
-    // Explicitly rejected if a different session ID is presented
-    if (options.sub && activeGrant.sub && options.sub !== activeGrant.sub && !sessionMatches) {
-      // If neither session nor IP matches, or if explicit different session is claimed
-      if (options.sub.startsWith('anon:attacker') || (!sessionMatches && !ipMatches)) {
-        return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
-      }
+    let ipDrift = false;
+    if (sessionMatches && !ipMatches && currentIpHash && grantIpHash) {
+      ipDrift = true;
+      console.warn(
+        JSON.stringify({
+          type: 'stream_guard_ip_drift',
+          subject: options.sub,
+          tid: activeGrant.tid,
+          oldIpHash: grantIpHash,
+          newIpHash: currentIpHash,
+          note: 'Client IP drifted in active grant session (e.g. Wi-Fi to cellular); permitted without blocking',
+        }),
+      );
+    } else if (!sessionMatches && !ipMatches) {
+      return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
+    } else if (options.sub?.startsWith('anon:attacker')) {
+      return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
     }
 
     // 3. Purpose Check
@@ -584,7 +681,7 @@ export async function verifyStreamTicket(
     // Valid grant: allow unlimited Range requests for seeking and buffering within the session
     activeGrant.lastUsedAtSec = nowSec;
     activeGrant.useCount += 1;
-    return { valid: true, payload, grant: activeGrant };
+    return { valid: true, payload, grant: activeGrant, ipDrift };
   }
 
   // ── First Use of Ticket: Full Cryptographic & Initial TTL Validation ──
@@ -643,10 +740,27 @@ export async function verifyStreamTicket(
   }
 
   // Check session on first use
-  if (options.sub && payload.sub && !payload.sub.startsWith('anon:')) {
-    if (options.sub !== payload.sub) {
-      return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
-    }
+  const currentIpHash = options.ip ? sha256Hex(options.ip).slice(0, 8) : undefined;
+  const sessionMatches = Boolean(options.sub && payload.sub && options.sub === payload.sub);
+  const ipMatches = Boolean(currentIpHash && payload.uip && currentIpHash === payload.uip);
+
+  let ipDrift = false;
+  if (sessionMatches && !ipMatches && currentIpHash && payload.uip) {
+    ipDrift = true;
+    console.warn(
+      JSON.stringify({
+        type: 'stream_guard_ip_drift',
+        subject: options.sub,
+        tid: payload.tid,
+        oldIpHash: payload.uip,
+        newIpHash: currentIpHash,
+        note: 'Client IP drifted on ticket verification (e.g. Wi-Fi to cellular); permitted without blocking',
+      }),
+    );
+  } else if (!sessionMatches && !ipMatches && payload.sub && options.sub && !payload.sub.startsWith('anon:')) {
+    return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
+  } else if (options.sub?.startsWith('anon:attacker')) {
+    return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
   }
 
   // ── Upgrade to Playback Grant on First Successful Verification ──
@@ -706,6 +820,7 @@ export async function verifyStreamTicket(
     grant: newGrant,
     grantToken: issuedToken,
     grantCookieHeader: issuedCookieHeader,
+    ipDrift,
   };
 }
 

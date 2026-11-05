@@ -15,6 +15,7 @@ import {
 } from '../../_lib/sonic/security';
 import { verifyAuth, readCookie } from '../../_lib/auth';
 import {
+  buildGrantCookieHeaders,
   checkStreamCorsAndFetchMetadata,
   evaluateStreamGuardQuota,
   getTrackGrantCookieName,
@@ -30,6 +31,7 @@ import {
 } from '../../_lib/sonic/licensing';
 import {
   recordLicensingBlockMetric,
+  recordStreamGuardMetric,
   recordStreamMetric,
   redactSensitiveString,
 } from '../../_lib/sonic/observability';
@@ -106,7 +108,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   // ── Stream Guard Phase 1: Access Control & Ticketing Gate ──
   const guardMode = String(env?.SONIC_STREAM_GUARD || 'off').trim().toLowerCase();
   let isAnonymousGuarded = false;
-  let guardGrantCookie: string | undefined;
+  let guardSetCookieHeaders: string[] = [];
 
   if (guardMode === 'monitor' || guardMode === 'enforce') {
     // Constraint C1: Valid API Key caller completely bypasses Stream Guard checks and CORS restrictions
@@ -121,6 +123,19 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
     if (!hasApiKey) {
       isAnonymousGuarded = true;
+      recordStreamGuardMetric({ kind: 'anon_request' });
+
+      const rawCookieHeader = request.headers.get('Cookie');
+      if ((rawCookieHeader || '').length > 3072) {
+        recordStreamGuardMetric({ kind: 'cookie_too_large' });
+        console.warn(
+          JSON.stringify({
+            type: 'stream_guard_cookie_too_large',
+            size: (rawCookieHeader || '').length,
+          }),
+        );
+      }
+
       // 1. Strict CORS & Fetch-Metadata verification (Constraint C4, C5)
       const corsCheck = checkStreamCorsAndFetchMetadata(request, env);
       if (!corsCheck.allowed) {
@@ -186,6 +201,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         });
         if (grantCheck.valid) {
           guardAuthorized = true;
+          recordStreamGuardMetric({ kind: 'grant_hit' });
+          if (grantCheck.ipDrift) {
+            recordStreamGuardMetric({ kind: 'ip_drift', reason: 'ip_drift' });
+          }
         } else {
           guardFailureCode = grantCheck.error;
         }
@@ -206,16 +225,45 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         });
         if (ticketCheck.valid) {
           guardAuthorized = true;
-          if (ticketCheck.grantCookieHeader) {
-            guardGrantCookie = ticketCheck.grantCookieHeader;
+          if (ticketCheck.ipDrift) {
+            recordStreamGuardMetric({ kind: 'ip_drift', reason: 'ip_drift' });
+          }
+          if (ticketCheck.grantToken) {
+            const expiresAtSec =
+              ticketCheck.grant?.expiresAtSec ||
+              Math.floor(Date.now() / 1000) + 1800;
+            guardSetCookieHeaders = buildGrantCookieHeaders(rawCookieHeader, {
+              tid,
+              token: ticketCheck.grantToken,
+              expiresAtSec,
+            });
           }
         } else {
           guardFailureCode = ticketCheck.error;
         }
       }
 
+      const mapRejectionReason = (
+        code?: string,
+      ): 'expired' | 'mismatch' | 'session_mismatch' | 'other' => {
+        if (!code) return 'other';
+        if (code.includes('EXPIRED')) return 'expired';
+        if (code.includes('SESSION_MISMATCH')) return 'session_mismatch';
+        if (
+          code.includes('MISMATCH') ||
+          code.includes('INVALID') ||
+          code.includes('SIGNATURE') ||
+          code.includes('CORRUPTED') ||
+          code.includes('MALFORMED')
+        ) {
+          return 'mismatch';
+        }
+        return 'other';
+      };
+
       if (!guardAuthorized) {
         if (!ticket && !grantToken) {
+          recordStreamGuardMetric({ kind: 'missing_ticket' });
           if (guardMode === 'enforce') {
             return jsonResponse(
               {
@@ -228,8 +276,19 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
               { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store' }) },
             );
           }
-          console.warn(`[Stream Guard Monitor] Invalid or missing ticket: MISSING_TICKET`);
+          console.warn(
+            JSON.stringify({
+              type: 'stream_guard_monitor',
+              subject,
+              event: 'missing_ticket',
+              ip: clientIp,
+            }),
+          );
         } else {
+          recordStreamGuardMetric({
+            kind: 'rejection',
+            reason: mapRejectionReason(guardFailureCode),
+          });
           if (guardMode === 'enforce') {
             return jsonResponse(
               {
@@ -242,7 +301,16 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
               { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store' }) },
             );
           }
-          console.warn(`[Stream Guard Monitor] Invalid ticket for ${subject}: ${guardFailureCode}`);
+          console.warn(
+            JSON.stringify({
+              type: 'stream_guard_monitor',
+              subject,
+              event: 'rejection',
+              reason: guardFailureCode,
+              mappedReason: mapRejectionReason(guardFailureCode),
+              ip: clientIp,
+            }),
+          );
         }
       }
 
@@ -409,7 +477,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
             outHeaders.set('X-Sonic-Via', 'local-engine');
             if (isAnonymousGuarded) {
               outHeaders.set('Cache-Control', 'private, no-store');
-              if (guardGrantCookie) outHeaders.append('Set-Cookie', guardGrantCookie);
+              for (const sc of guardSetCookieHeaders) {
+                outHeaders.append('Set-Cookie', sc);
+              }
             }
             if (engineStream.response.status === 206) recordStreamMetric('proxied_206');
             else if (engineStream.response.status === 200) recordStreamMetric('proxied_200');
@@ -432,7 +502,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         }
         if (isAnonymousGuarded) {
           h.set('Cache-Control', 'private, no-store');
-          if (guardGrantCookie) h.append('Set-Cookie', guardGrantCookie);
+          for (const sc of guardSetCookieHeaders) {
+            h.append('Set-Cookie', sc);
+          }
         }
         return new Response(fallbackResp.body, { status: fallbackResp.status, headers: h });
       }
@@ -678,7 +750,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     }
     if (isAnonymousGuarded) {
       headers.set('Cache-Control', 'private, no-store');
-      if (guardGrantCookie) headers.append('Set-Cookie', guardGrantCookie);
+      for (const sc of guardSetCookieHeaders) {
+        headers.append('Set-Cookie', sc);
+      }
     } else {
       headers.set('Cache-Control', streamCacheControl(finalTargetUrl, upstream.headers, status, upstreamSensitive));
     }

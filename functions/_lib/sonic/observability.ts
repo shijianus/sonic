@@ -171,6 +171,20 @@ function summarizeSamples(ring: RollingSamples, sinceMs?: number, now = Date.now
   };
 }
 
+export interface StreamGuardMetricsState {
+  totalAnonymousRequests: number;
+  missingTickets: number;
+  grantHits: number;
+  cookieHeaderTooLarge: number;
+  rejectionsByReason: {
+    expired: number;
+    mismatch: number;
+    sessionMismatch: number;
+    ipDrift: number;
+    other: number;
+  };
+}
+
 interface ObservabilityState {
   bootAtMs: number;
   bootAtIso: string;
@@ -198,6 +212,7 @@ interface ObservabilityState {
       degraded: number;
     };
   };
+  streamGuard: StreamGuardMetricsState;
   oauth: {
     loginStarted: number;
     callbackSuccess: number;
@@ -273,6 +288,19 @@ function createInitialState(): ObservabilityState {
         '5xx': 0,
         timeout: 0,
         degraded: 0,
+      },
+    },
+    streamGuard: {
+      totalAnonymousRequests: 0,
+      missingTickets: 0,
+      grantHits: 0,
+      cookieHeaderTooLarge: 0,
+      rejectionsByReason: {
+        expired: 0,
+        mismatch: 0,
+        sessionMismatch: 0,
+        ipDrift: 0,
+        other: 0,
       },
     },
     oauth: {
@@ -595,6 +623,40 @@ export function recordSqliteMetric(kind: 'read_error' | 'write_error' | 'memory_
   else if (kind === 'memory_fallback') state.sqlite.memoryFallbacks += 1;
 }
 
+export function recordStreamGuardMetric(event: {
+  kind: 'anon_request' | 'missing_ticket' | 'grant_hit' | 'cookie_too_large' | 'rejection' | 'ip_drift';
+  reason?: 'expired' | 'mismatch' | 'session_mismatch' | 'ip_drift' | string;
+}): void {
+  if (event.kind === 'anon_request') {
+    state.streamGuard.totalAnonymousRequests += 1;
+  } else if (event.kind === 'missing_ticket') {
+    state.streamGuard.missingTickets += 1;
+  } else if (event.kind === 'grant_hit') {
+    state.streamGuard.grantHits += 1;
+  } else if (event.kind === 'cookie_too_large') {
+    state.streamGuard.cookieHeaderTooLarge += 1;
+  } else if (event.kind === 'ip_drift') {
+    state.streamGuard.rejectionsByReason.ipDrift += 1;
+  } else if (event.kind === 'rejection') {
+    const r = event.reason || 'other';
+    if (r === 'expired') state.streamGuard.rejectionsByReason.expired += 1;
+    else if (r === 'mismatch') state.streamGuard.rejectionsByReason.mismatch += 1;
+    else if (r === 'session_mismatch') state.streamGuard.rejectionsByReason.sessionMismatch += 1;
+    else if (r === 'ip_drift') state.streamGuard.rejectionsByReason.ipDrift += 1;
+    else state.streamGuard.rejectionsByReason.other += 1;
+  }
+}
+
+export function getStreamGuardMetricsSnapshot(): StreamGuardMetricsState {
+  return {
+    totalAnonymousRequests: state.streamGuard.totalAnonymousRequests,
+    missingTickets: state.streamGuard.missingTickets,
+    grantHits: state.streamGuard.grantHits,
+    cookieHeaderTooLarge: state.streamGuard.cookieHeaderTooLarge,
+    rejectionsByReason: { ...state.streamGuard.rejectionsByReason },
+  };
+}
+
 export function getObservabilitySnapshot(env?: AppEnv) {
   const now = Date.now();
   const total = state.requests.total;
@@ -628,6 +690,7 @@ export function getObservabilitySnapshot(env?: AppEnv) {
       body: { engine: { ...state.stream.body.engine }, http: { ...state.stream.body.http } },
       errors: { ...state.stream.errors },
     },
+    streamGuard: getStreamGuardMetricsSnapshot(),
     oauth: {
       loginStarted: state.oauth.loginStarted,
       callbackSuccess: state.oauth.callbackSuccess,
