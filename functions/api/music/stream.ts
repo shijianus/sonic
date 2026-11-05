@@ -10,7 +10,15 @@ import {
   safeFetch,
   hasSensitiveMediaQuery,
   isSafeFetchCapacityError,
+  extractClientIp,
+  hasValidEngineSecret,
 } from '../../_lib/sonic/security';
+import { verifyAuth, readCookie } from '../../_lib/auth';
+import {
+  checkStreamCorsAndFetchMetadata,
+  evaluateStreamGuardQuota,
+  verifyStreamTicket,
+} from '../../_lib/sonic/ticket';
 import { getSonicConfig } from '../../_lib/sonic/config';
 import {
   getAllowedMediaDomains,
@@ -90,7 +98,132 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   const allowedDomains = getAllowedMediaDomains(env, 'audio');
   const url = new URL(request.url);
   const targetParam = url.searchParams.get('target') || url.searchParams.get('url');
-  const streamMode = (url.searchParams.get('mode') || (url.searchParams.get('redirect') === '1' ? 'redirect' : '')).toLowerCase();
+  let streamMode = (url.searchParams.get('mode') || (url.searchParams.get('redirect') === '1' ? 'redirect' : '')).toLowerCase();
+
+  // ── Stream Guard Phase 1: Access Control & Ticketing Gate ──
+  const guardMode = String(env?.SONIC_STREAM_GUARD || 'off').trim().toLowerCase();
+  if (guardMode === 'monitor' || guardMode === 'enforce') {
+    // Constraint C1: Valid API Key caller completely bypasses Stream Guard checks and CORS restrictions
+    const isEngineCaller = hasValidEngineSecret(request, env);
+    let hasApiKey = isEngineCaller;
+    if (!hasApiKey) {
+      const auth = await verifyAuth(request, env);
+      if (auth.authenticated && auth.source === 'header') {
+        hasApiKey = true;
+      }
+    }
+
+    if (!hasApiKey) {
+      // 1. Strict CORS & Fetch-Metadata verification (Constraint C4, C5)
+      const corsCheck = checkStreamCorsAndFetchMetadata(request, env);
+      if (!corsCheck.allowed) {
+        if (guardMode === 'enforce') {
+          return jsonResponse(
+            {
+              brand: 'Sonic',
+              error: {
+                code: 'CORS_FORBIDDEN',
+                message: `Cross-origin stream request forbidden by security policy (${corsCheck.reason})`,
+              },
+            },
+            { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store' }) },
+          );
+        }
+        console.warn(`[Stream Guard Monitor] CORS violation: ${corsCheck.reason}`);
+      }
+
+      // 2. Extract ticket from Header, Cookie, or Query param
+      const ticket =
+        request.headers.get('x-sonic-ticket')?.trim() ||
+        readCookie(request, 'sonic_play_ticket')?.trim() ||
+        url.searchParams.get('t')?.trim() ||
+        url.searchParams.get('ticket')?.trim() ||
+        '';
+
+      const rawTrackParam = url.searchParams.get('id') || url.searchParams.get('target') || '';
+      const rawSourceParam = (url.searchParams.get('source') || 'netease').toLowerCase().trim();
+      const rawBrParam = url.searchParams.get('br') || url.searchParams.get('quality') || '320';
+      const purpose = (url.searchParams.get('purpose') === 'download' ? 'download' : 'play') as 'play' | 'download';
+      const durationStr = url.searchParams.get('duration');
+      const durationSec = durationStr ? parseFloat(durationStr) : undefined;
+      const clientIp = extractClientIp(request);
+
+      const anonCookie = readCookie(request, 'sonic_anon_session');
+      const anonHeader = request.headers.get('x-sonic-anon-id')?.trim();
+      const rawAnonSession = (anonCookie && anonCookie.includes('.') ? anonCookie.split('.')[0] : anonCookie) || anonHeader;
+      const subject = rawAnonSession ? `anon:sess_${rawAnonSession.slice(0, 16)}` : `anon:${clientIp}`;
+
+      if (!ticket) {
+        if (guardMode === 'enforce') {
+          return jsonResponse(
+            {
+              brand: 'Sonic',
+              error: {
+                code: 'STREAM_TICKET_REQUIRED',
+                message: 'Playback ticket is required for anonymous stream access in enforce mode',
+              },
+            },
+            { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store' }) },
+          );
+        }
+        console.warn(`[Stream Guard Monitor] Invalid or missing ticket: MISSING_TICKET`);
+      } else {
+        const ticketCheck = await verifyStreamTicket(ticket, {
+          id: rawTrackParam,
+          source: rawSourceParam,
+          br: rawBrParam,
+          purpose,
+          sub: subject,
+          ip: clientIp,
+          durationSec,
+          env,
+        });
+
+        if (!ticketCheck.valid) {
+          if (guardMode === 'enforce') {
+            return jsonResponse(
+              {
+                brand: 'Sonic',
+                error: {
+                  code: ticketCheck.error || 'INVALID_TICKET',
+                  message: `Invalid or expired stream playback ticket (${ticketCheck.error || 'UNAUTHORIZED'})`,
+                },
+              },
+              { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store' }) },
+            );
+          }
+          console.warn(`[Stream Guard Monitor] Invalid ticket for ${subject}: ${ticketCheck.error}`);
+        }
+      }
+
+      // 3. Sliding-window Quota check
+      const quotaCheck = await evaluateStreamGuardQuota(subject, rawTrackParam, purpose, env);
+      if (!quotaCheck.allowed) {
+        if (guardMode === 'enforce') {
+          const h = corsHeaders({
+            'Cache-Control': 'no-store',
+            'Retry-After': String(quotaCheck.retryAfter || 60),
+          });
+          return jsonResponse(
+            {
+              brand: 'Sonic',
+              error: {
+                code: 'STREAM_QUOTA_EXCEEDED',
+                message: 'Stream request quota exceeded, please retry later',
+              },
+            },
+            { status: 429, headers: h },
+          );
+        }
+        console.warn(`[Stream Guard Monitor] Quota exceeded for ${subject}: ${quotaCheck.reason}`);
+      }
+
+      // 4. In enforce mode, disable redirect mode to prevent upstream URL exposure
+      if (guardMode === 'enforce' && streamMode === 'redirect') {
+        streamMode = '';
+      }
+    }
+  }
   let targetUrl: URL | null = null;
   let resolvedProvider = 'proxy-target';
   let resolvedVia = 'direct-param';

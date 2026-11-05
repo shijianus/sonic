@@ -12,6 +12,7 @@ import { downloadedMusicDB, localMusicDB } from '@/utils/indexedDB'
 import { musicStreamUrl, songSourceCandidates, songPlaybackSource, songSourcePair, streamSourcePair } from '@/utils/audioUtils'
 import { inspectGatewayHeaders, markStreamFailure, gatewayHealth } from '@/utils/gatewayHealth'
 import { sonicBlogBridge } from '@/utils/sonicBlogBridge'
+import { requestPlaybackTicket } from '@/utils/streamGuard'
 import piniaPersistConfig from '../persist'
 
 /** 全局 Audio 单例（整个应用只创建一个 HTMLAudioElement） */
@@ -934,12 +935,24 @@ export const useAudioStore = defineStore('audio', {
           if (song.duration) params.set('duration', String(Math.round(song.duration > 1000 ? song.duration / 1000 : song.duration)))
           params.set('quality', settingsStore.audioQuality)
           if (fresh) params.set('nocache', '1')
-          const gatewayUrl = `/api/music/stream?${params.toString()}`
+          const gatewayUrl = () => `/api/music/stream?${params.toString()}`
           // A retry must not reuse a stale URL from url, streamUrl, qualities or song/url/v1.
-          if (fresh) return gatewayUrl
+          if (fresh) {
+            try {
+              const ticket = await requestPlaybackTicket(chosen.platformId, chosen.platform, settingsStore.audioQuality)
+              if (ticket) params.set('t', ticket)
+            } catch {}
+            return gatewayUrl()
+          }
           const ownUrl = song.qualities?.find((q: { level: string; streamUrl?: string }) => q.level === settingsStore.audioQuality)?.streamUrl || song.streamUrl || song.url || ''
           if (ownUrl && !musicStreamUrl(ownUrl)) return ownUrl
-          if (ownUrl) return gatewayUrl
+          if (ownUrl) {
+            try {
+              const ticket = await requestPlaybackTicket(chosen.platformId, chosen.platform, settingsStore.audioQuality)
+              if (ticket) params.set('t', ticket)
+            } catch {}
+            return gatewayUrl()
+          }
           // Only the legacy NetEase endpoint understands bare numeric IDs. All other
           // providers use the source-aware gateway directly.
           if (chosen.platform === 'netease') {
@@ -954,7 +967,11 @@ export const useAudioStore = defineStore('audio', {
               if (url && !musicStreamUrl(url)) return url
             } catch {}
           }
-          return gatewayUrl
+          try {
+            const ticket = await requestPlaybackTicket(chosen.platformId, chosen.platform, settingsStore.audioQuality)
+            if (ticket) params.set('t', ticket)
+          } catch {}
+          return gatewayUrl()
         })()
         flight = { promise, generation, version }
         pendingUrlRequests.set(requestKey, flight)
@@ -1420,6 +1437,10 @@ export const useAudioStore = defineStore('audio', {
           id: pair.platformId, source: pair.platform, br,
           title: song.name || '', artist: song.artist || '',
         })
+        try {
+          const ticket = await requestPlaybackTicket(pair.platformId, pair.platform, br)
+          if (ticket) params.set('t', ticket)
+        } catch {}
         newUrl = `/api/music/stream?${params.toString()}`
       }
 

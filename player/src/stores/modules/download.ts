@@ -3,6 +3,7 @@ import { downloadedMusicDB, type DownloadedSong } from '@/utils/indexedDB'
 import type { Song } from '../interface'
 import { useAudioStore } from './audio'
 import { useToastStore } from './toast'
+import { requestPlaybackTicket } from '@/utils/streamGuard'
 import i18n from '@/languages'
 
 export interface QualityChoice {
@@ -228,17 +229,24 @@ export const useDownloadStore = defineStore('download', {
 
         // 优先使用歌曲自带对应音质的 streamUrl
         let streamUrl = ''
+        const fallbackSource = song.sources?.[0]?.platform || song.platform || song.source || 'netease'
         const found = song.qualities?.find((q) => q.level === qualityChoice.level)
         if (found && found.streamUrl) {
           streamUrl = found.streamUrl
         } else {
           // 第一方聚合曲目回退到自身来源，避免命中网关策略禁用的商业源
           const ownStreamUrl = song.streamUrl || song.url || ''
-          const fallbackSource = song.sources?.[0]?.platform || 'netease'
           streamUrl =
             ownStreamUrl ||
             `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=${encodeURIComponent(fallbackSource)}&br=${br}&title=${encodeURIComponent(song.name || '')}&artist=${encodeURIComponent(song.artist || '')}`
         }
+
+        try {
+          const downloadTicket = await requestPlaybackTicket(song.id, fallbackSource, br, 'download')
+          if (downloadTicket && streamUrl.includes('/api/music/stream')) {
+            streamUrl += (streamUrl.includes('?') ? '&' : '?') + `t=${encodeURIComponent(downloadTicket)}&purpose=download`
+          }
+        } catch {}
 
         // 1. 获取音频二进制 Blob（带进度，可取消）
         const blob = await this._fetchBlobWithProgress(

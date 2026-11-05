@@ -23,6 +23,7 @@ declare global {
   const calibrateWordsInterludeIsolation: typeof import('../utils/lyricsWordSync').calibrateWordsInterludeIsolation
   const cancelSongProbe: typeof import('../utils/qualityProbe').cancelSongProbe
   const classifyPlaybackError: typeof import('../stores/modules/audio').classifyPlaybackError
+  const clearPlaybackTicketCache: typeof import('../utils/streamGuard').clearPlaybackTicketCache
   const computed: typeof import('vue').computed
   const createApp: typeof import('vue').createApp
   const createAudioVisualizer: typeof import('../utils/audioUtils').createAudioVisualizer
@@ -133,6 +134,7 @@ declare global {
   const reactive: typeof import('vue').reactive
   const readonly: typeof import('vue').readonly
   const ref: typeof import('vue').ref
+  const requestPlaybackTicket: typeof import('../utils/streamGuard').requestPlaybackTicket
   const resolveComponent: typeof import('vue').resolveComponent
   const resolvedSongSource: typeof import('../utils/audioUtils').resolvedSongSource
   const rgbToHex: typeof import('../utils/colorExtractor').rgbToHex

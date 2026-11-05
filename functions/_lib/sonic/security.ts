@@ -308,6 +308,7 @@ interface WindowCounter {
 const rateBuckets = new Map<string, WindowCounter>();
 const MAX_RATE_BUCKETS = 4096;
 const RATE_LIMIT_OVERFLOW_KEY = '__sonic_rate_limit_overflow__';
+let warnedMissingRateLimiter = false;
 
 export interface RateLimitDecision {
   allowed: boolean;
@@ -362,6 +363,12 @@ export async function evaluateGatewayRateLimit(
     Math.max(1, parseInt(String(env?.SONIC_RATE_LIMIT_ANON_RPM || '240'), 10) || 240),
   );
   let subject = `anon:${ip}`;
+  const anonCookie = readCookie(request, 'sonic_anon_session');
+  const anonHeader = request.headers.get('x-sonic-anon-id')?.trim();
+  const rawAnonSession = (anonCookie && anonCookie.includes('.') ? anonCookie.split('.')[0] : anonCookie) || anonHeader;
+  if (rawAnonSession && /^[a-zA-Z0-9_-]{16,64}$/.test(rawAnonSession)) {
+    subject = `anon:sess_${sha256Hex(rawAnonSession).slice(0, 16)}`;
+  }
 
   if (isEngineCaller) {
     tier = 'engine';
@@ -401,6 +408,15 @@ export async function evaluateGatewayRateLimit(
 
   // Preferred: Cloudflare native Rate Limiting binding (atomic and shared across isolates).
   const nativeLimiter = (env as any)?.RATE_LIMITER;
+  if (!nativeLimiter && !isSingleNodeEngine && !warnedMissingRateLimiter) {
+    warnedMissingRateLimiter = true;
+    console.warn(
+      JSON.stringify({
+        type: 'rate_limit_binding_missing',
+        note: 'Rate Limiter: Cloudflare native RATE_LIMITER binding is absent. Rate limiting will operate in memory/KV sliding window fallback mode (multi-isolate atomicity is not guaranteed).',
+      }),
+    );
+  }
   if (nativeLimiter && typeof nativeLimiter.limit === 'function') {
     try {
       const outcome = await nativeLimiter.limit({ key: bucketKey });
