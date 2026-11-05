@@ -206,6 +206,10 @@ export default {
     newSongs: '新歌速递',
     official: '官方榜单',
     trending: '站内趋势榜',
+    categoryLabel: '榜单分类:',
+    trendingLabel: '站内趋势:',
+    newSongLabel: '新歌分类:',
+    officialLabel: '官方榜单:',
   },
   components: {
     infiniteScroll: {

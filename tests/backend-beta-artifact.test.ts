@@ -63,7 +63,10 @@ describe('Release artifact identity and Edge gate', () => {
     const response = await onRequest({
       request: new Request('https://sonic.example/api'),
       env: {
-        SONIC_ENV: 'production',
+        SONIC_ENV: 'staging',
+        SONIC_REQUIRE_RELEASE_METADATA: '1',
+        SONIC_ACCESS_MODE: 'open',
+        SONIC_CONTENT_POLICY: 'strict-allowlist',
         SONIC_RELEASE_COMMIT: 'a'.repeat(40),
         SONIC_RELEASE_ID: releaseId,
         SONIC_RELEASE_DIRTY: '1',
@@ -74,5 +77,25 @@ describe('Release artifact identity and Edge gate', () => {
     });
     expect(response.status).toBe(200);
     expect(response.headers.get('x-sonic-release')).toBe(releaseId);
+  });
+
+  it('marks invite-gated responses noindex without a staging token', async () => {
+    const response = await onRequest({
+      request: new Request('https://sonic.example/'),
+      env: {
+        SONIC_ENV: 'staging',
+        SONIC_REQUIRE_RELEASE_METADATA: '1',
+        SONIC_ACCESS_MODE: 'invite',
+        SONIC_CONTENT_POLICY: 'strict-allowlist',
+        SONIC_RELEASE_COMMIT: 'a'.repeat(40),
+        SONIC_RELEASE_ID: 'a75f5cb54a2f-123456abcdef',
+        SONIC_RELEASE_DIRTY: '1',
+        SONIC_SOURCE_DIGEST: 'b'.repeat(64),
+        SONIC_BUILD_TIME: '2026-11-02T00:00:00.000Z',
+      },
+      next: async () => new Response('ok'),
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get('x-robots-tag')).toContain('noindex');
   });
 });

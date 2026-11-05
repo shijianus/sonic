@@ -68,7 +68,7 @@ export async function onRequest({
         method: 'GET',
         timeoutMs: config.engineTimeoutMs,
       });
-      if (engineRes.ok && engineRes.data?.brand === 'Sonic') {
+      if (engineRes.ok && engineRes.data?.brand === 'Sonic' && engineRes.data?.meta?.storageKind === 'sqlite') {
         return jsonResponse(engineRes.data, {
           status: 200,
           headers: buildGatewayHeaders(privateHeaders, false, 'CLOSED'),
@@ -80,6 +80,11 @@ export async function onRequest({
     }
 
     const store = getRecommendStore(env);
+    if (store.kind !== 'sqlite') {
+      return sonicError('RADAR_STORAGE_UNAVAILABLE', 'Cloud radar storage requires persistent SQLite', 503, {
+        provider: 'sonic-radar', degraded: true, retryable: true,
+      });
+    }
     const profile = store.getUserRadarProfile?.(accountSubject) || null;
     let parsedData = null;
     if (profile?.payloadJson) {
@@ -96,6 +101,7 @@ export async function onRequest({
         meta: {
           latencyMs: Date.now() - start,
           subjectKey: accountSubject,
+          storageKind: store.kind,
         },
       },
       {
@@ -169,19 +175,37 @@ export async function onRequest({
       body: payloadJson,
       timeoutMs: config.engineTimeoutMs,
     });
-    if (!engineRes.ok || engineRes.data?.brand !== 'Sonic') {
-      return sonicError('RADAR_STORAGE_UNAVAILABLE', 'Cloud radar storage unavailable; retry later', 503, {
-        provider: 'sonic-radar', degraded: true, retryable: true,
+    const engineData = engineRes.data;
+    if (engineRes.ok && engineData?.brand === 'Sonic' && engineData?.meta?.storageKind === 'sqlite') {
+      return jsonResponse({ ...engineData, meta: { ...engineData.meta, persistenceConfirmed: true } }, {
+        status: 200,
+        headers: buildGatewayHeaders(privateHeaders, false, 'CLOSED'),
       });
     }
-    return jsonResponse(engineRes.data, {
-      status: 200,
-      headers: buildGatewayHeaders(privateHeaders, false, 'CLOSED'),
+    if (engineRes.status && engineRes.status >= 400 && engineRes.status < 500 && engineData?.error?.code) {
+      return jsonResponse(engineData, {
+        status: engineRes.status,
+        headers: buildGatewayHeaders(privateHeaders, false, 'CLOSED'),
+      });
+    }
+    return sonicError('RADAR_STORAGE_UNAVAILABLE', 'Cloud radar storage unavailable; retry later', 503, {
+      provider: 'sonic-radar', degraded: true, retryable: true,
     });
   }
 
   const store = getRecommendStore(env);
-  store.saveUserRadarProfile?.(accountSubject, payloadJson);
+  if (store.kind !== 'sqlite' || typeof store.saveUserRadarProfile !== 'function') {
+    return sonicError('RADAR_STORAGE_UNAVAILABLE', 'Cloud radar storage requires persistent SQLite', 503, {
+      provider: 'sonic-radar', degraded: true, retryable: true,
+    });
+  }
+  try {
+    store.saveUserRadarProfile(accountSubject, payloadJson);
+  } catch {
+    return sonicError('RADAR_STORAGE_UNAVAILABLE', 'Cloud radar storage write failed; retry later', 503, {
+      provider: 'sonic-radar', degraded: true, retryable: true,
+    });
+  }
 
   return jsonResponse(
     {
@@ -189,6 +213,10 @@ export async function onRequest({
       ok: true,
       syncedAt: sanitized.updatedAt,
       trackCount: sanitized.tracks.length,
+      meta: {
+        storageKind: store.kind,
+        persistenceConfirmed: true,
+      },
     },
     {
       status: 200,

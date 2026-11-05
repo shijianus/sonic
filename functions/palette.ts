@@ -16,6 +16,8 @@ import type { AppEnv } from "./_lib/types";
 const MAX_DIMENSION = 96;
 const TARGET_SAMPLE_COUNT = 2400;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_PIXELS = 16_000_000;
+const MAX_IMAGE_SIDE = 12_000;
 
 type SupportedFormat = "jpeg" | "jpg" | "pjpeg";
 
@@ -36,6 +38,13 @@ class ImageTooLargeError extends Error {
   constructor(maxBytes: number) {
     super(`Image exceeds ${maxBytes} bytes limit`);
     this.name = "ImageTooLargeError";
+  }
+}
+
+class ImagePixelBudgetError extends Error {
+  constructor() {
+    super("Image exceeds the pixel budget");
+    this.name = "ImagePixelBudgetError";
   }
 }
 
@@ -308,6 +317,37 @@ function resizeImage(image: DecodedImage): DecodedImage {
   };
 }
 
+function readJpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+  let offset = 2;
+  while (offset + 9 < bytes.length) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1;
+      continue;
+    }
+    let marker = bytes[offset + 1];
+    while (marker === 0xff && offset + 2 < bytes.length) {
+      offset += 1;
+      marker = bytes[offset + 1];
+    }
+    if (marker === 0xd8 || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
+      offset += 2;
+      continue;
+    }
+    if (marker === 0xd9 || marker === 0xda) break;
+    const length = (bytes[offset + 2] << 8) | bytes[offset + 3];
+    if (length < 2) return null;
+    const isSof = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+    if (isSof) {
+      const height = (bytes[offset + 5] << 8) | bytes[offset + 6];
+      const width = (bytes[offset + 7] << 8) | bytes[offset + 8];
+      return width > 0 && height > 0 ? { width, height } : null;
+    }
+    offset += 2 + length;
+  }
+  return null;
+}
+
 function decodeImage(arrayBuffer: ArrayBuffer, contentType: string): DecodedImage {
   const subtype = contentType.split("/")[1]?.split(";")[0]?.toLowerCase() ?? "";
   const supported: SupportedFormat[] = ["jpeg", "jpg", "pjpeg"];
@@ -316,6 +356,19 @@ function decodeImage(arrayBuffer: ArrayBuffer, contentType: string): DecodedImag
   }
 
   const bytes = new Uint8Array(arrayBuffer);
+  const dimensions = readJpegDimensions(bytes);
+  // A JPEG whose SOF dimensions cannot be parsed is not safe to decode: the
+  // decoder would allocate RGBA for an unknown size. Fail closed instead.
+  if (!dimensions) {
+    throw new ImagePixelBudgetError();
+  }
+  if (
+    dimensions.width > MAX_IMAGE_SIDE ||
+    dimensions.height > MAX_IMAGE_SIDE ||
+    dimensions.width * dimensions.height > MAX_IMAGE_PIXELS
+  ) {
+    throw new ImagePixelBudgetError();
+  }
   const decoded = decodeJpeg(bytes, {
     useTArray: true,
     formatAsRGBA: true,
@@ -595,6 +648,12 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
 
     return response;
   } catch (error) {
+    if (error instanceof ImagePixelBudgetError) {
+      return new Response(JSON.stringify({ error: "Image exceeds the 16MP analysis limit" }), {
+        status: 413,
+        headers: createJsonHeaders(413),
+      });
+    }
     if (error instanceof UnsupportedImageFormatError) {
       return new Response(JSON.stringify({ error: error.message }), {
         status: 415,

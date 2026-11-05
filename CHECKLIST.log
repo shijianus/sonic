@@ -1,0 +1,104 @@
+# Sonic 交付后真实环境验收与管理补齐清单
+# 文件：CHECKLIST.log
+# 生成：2026-11-05
+# 说明：本文件记录“本地无法替代、必须在真实环境执行”的验收项，以及明确延后到 Epomail 统一管理后台的功能。
+# 状态图例：[x] 已完成（本地自动化）  [ ] 待真实环境执行  [~] 部分完成/有限制
+
+======================================================================
+0. 负责人指令与范围（2026-11-05）
+======================================================================
+[x] 项目负责人直接授权 Sonic 使用以下内容来源，不再以 PENDING_CONFIRMATION 阻断功能：
+    netease / qq / kugou / kuwo / amll / lrclib
+[ ] 正式版权/平台授权文件、授权范围、有效期、联系人由项目方归档（Sonic 代码不伪造法律文件）。
+[x] GDStudio / Lyriva / Unblock 仍为 PROHIBITED（代码硬关闭，任何环境变量不能开启）。
+[ ] 远端重构：本地修复提交后，在远端仓库/CI 重新执行完整门禁并完成重构评审。
+[ ] 管理后台：当前 Sonic 侧只保留最小运维能力，完整管理员后台统一交由 Epomail 开发。
+
+======================================================================
+1. 真实环境音乐播放 / 歌词 / 展示同步验收（必须在 staging/生产执行）
+======================================================================
+[ ] 真实 NetEase 音频：/api/music/stream 返回 200/206，Range/Seek 正常，进度条与音频实际时间一致。
+[ ] 真实 QQ/Kugou/Kuwo 回退：至少一个备用源可解析并播放；失败时返回机器可读错误，不静默卡死。
+[ ] 播放器展示同步：底部播放器/全屏播放器的标题、歌手、封面、专辑与当前音频一致。
+[ ] 歌词同步：歌词来源与当前 trackId 强绑定；切歌后歌词立即切换，不残留上一首。
+[ ] 逐字歌词：若来源返回逐字时间轴，高亮随 currentTime 推进；无逐字时回退到行级 LRC。
+[ ] 移动端：390x844、360x800 下播放、暂停、下一首、歌词页、封面展开均正常，无横向溢出。
+[ ] 弱网/超时：上游挂起时有明确超时与重试，不出现无限 loading。
+[ ] 真实封面：封面代理只允许白名单域名，SVG/HTML 不落同源；图片失败有回退。
+[ ] 记录：日期、环境、音源、歌曲 ID、结果、截图/日志链接。
+
+======================================================================
+2. Cloudflare Pages / Engine 部署与管理验收
+======================================================================
+[ ] Pages 项目已绑定自定义域名与 HTTPS；`/release.json`、`X-Sonic-Release` 与构建 manifest 一致。
+[ ] Pages 环境变量已设置：SONIC_ENV=production、SONIC_ACCESS_MODE=open|invite、
+    SONIC_CONTENT_POLICY=strict-allowlist、SONIC_ALLOWED_SOURCES=netease,qq,kugou,kuwo,amll,lrclib。
+[ ] Pages 已绑定原生 RATE_LIMITER，并设置 SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT=1；
+    未绑定时 API 必须 fail-closed（503），不得退化为无管理的 isolate 内存限流。
+[ ] Engine 通过 Tunnel 暴露，SONIC_ENGINE_SECRET / SONIC_ENGINE_IDENTITY_SECRET / SONIC_SECRET 均 >=32 字符且互不复用。
+[ ] Engine 数据卷可持久化：recommend/account/access SQLite 重启后数据仍可读。
+[ ] 部署后执行 npm run verify:deployed <url>，release/contentPolicy/access/health 全部 ok。
+[ ] 回滚：按 docs/RUNBOOK-ROLLBACK.md 演练一次，确认上一版本可恢复。
+[ ] 日志与告警：5xx、P95、SQLite 降级、授权阻断、限流降级可观测并投递到真实接收端。
+[ ] 滥用控制：匿名/API Key/Engine 分档限流生效；邀请码不能无限兑换（Engine SQLite 单次使用）。
+[ ] 管理入口：当前仅 env + health + revoke CLI；完整后台见第 4 节（待 Epomail）。
+
+======================================================================
+3. 邀请制公测 / 访问控制真实链路
+======================================================================
+[ ] 邀请表单：错误码 → 正确码 → 设置 HttpOnly Cookie → 刷新仍授权 → 退出清除。
+[ ] 无效/过期/撤销邀请码均 401/403，响应不回显原始码。
+[ ] 邀请码 >=16 字符；Engine SQLite 下同一码只能兑换一次。
+[ ] 撤销：npm run revoke:invite -- <access.sqlite> <code> 后立即不可兑换；轮换 SONIC_ACCESS_SECRET 使旧会话失效。
+[ ] Pages-only 限制已知：无 SQLite 时签名会话可重复兑换且不可服务端撤销；只用于短 TTL 受控内测。
+[ ] OAuth：真实 EpoMail 登录、PKCE、回调、退出、API Key 生命周期通过。
+[ ] 未登录/未兑换时，业务 API、/proxy、/palette 被拒绝；邀请与 OAuth 生命周期接口可达。
+
+======================================================================
+4. Epomail 统一管理后台（当前 Sonic 侧不实现，待统一开发补齐）
+======================================================================
+[ ] 管理员身份与 RBAC：管理员登录、角色、权限、审计；不得复用 Engine Secret 作为人类后台密码。
+[ ] 音源管理：按 source 开关、allowlist 编辑、生效状态展示；变更需审计与二次确认。
+[ ] 邀请管理：批量生成、导出、单次/次数限制、过期、撤销、使用记录。
+[ ] 用户与配额：账号查询、封禁/解封、匿名 ID 治理、每用户/每 IP 配额、套餐/计费（如需要）。
+[ ] 滥用治理：异常流量、刷流、批量抓取、盗链检测；自动限速/封禁与人工复核。
+[ ] 运营看板：请求量、5xx、P50/P95、缓存命中、上游失败、授权阻断、限流降级、告警历史。
+[ ] 内容合规：来源授权状态、下架/屏蔽、版权投诉处理流程与留痕。
+[ ] 发布管理：releaseId/sourceDigest、部署审批、灰度、回滚、健康五元组。
+[ ] 数据治理：账号数据导出/删除、日志保留期、隐私请求（与 EpoMail 身份体系统一）。
+[ ] 安全：CSRF、CORS、管理端限流、会话撤销、操作审计、最小权限。
+[ ] 说明：以上为后续 Epomail 统一开发项；Sonic 当前仅保证“可观测、可限流、可撤销、可回滚”，不提供完整人类管理后台。
+
+======================================================================
+5. 远端重构 / CI 验收（本地交付后执行）
+======================================================================
+[ ] 提交当前工作树；确认 git status clean。
+[ ] clean tree 执行 npm ci、pnpm --dir player install --frozen-lockfile。
+[ ] npm run typecheck && npm run lint && npm test。
+[ ] pnpm --dir player test；E2E_CHANNEL=chrome pnpm --dir player e2e（含官方榜与 CSP）。
+[ ] npm run build && npm run build:engine；确认 dist/release.json dirty=false。
+[ ] npm run verify:pages-deploy；CI Docker job（production profile）通过。
+[ ] 真实 Pages→Tunnel→Engine staging 全链路。
+[ ] 远端重构评审：目录/模块拆分、镜像构建、E2E mock 与真实网关隔离。
+[ ] 安全加固：Sonic↔Blog bridge 的 window.postMessage 目前向 opener/parent/frames 使用 "*" 并接受任意 origin 命令；远端重构时必须改为 origin allowlist（建议 VITE_SONIC_BRIDGE_ORIGINS），避免跨站控制播放/泄露音频 URL。
+
+======================================================================
+6. 当前本地已验证（供真实环境对照）
+======================================================================
+[x] npm test 626/626（jiti 200 + Vitest 163 + beta 263）通过。
+[x] Player 单测 127/127。
+[x] 浏览器 E2E 87/87（mock 网关 + 合成 WAV；含桌面/移动官方榜、CSP、播放/歌词/展示同步）。
+[x] 同步截图：reports/release-readiness/evidence/2026-11-05-audit/desktop-chromium-playback-lyrics-sync.png
+[x] typecheck / lint / build / build:engine / verify:pages-deploy / observability / load 通过。
+[x] 生产内容策略：直接授权后 readiness 通过；PROHIBITED 源仍关闭。
+[x] 生产 profile 启动探针：strict-allowlist + 六个已授权源，health ok=true，effectiveSources 完整。
+[x] 部署后验证脚本自测 2/2；撤销 CLI 实测 revoked:true。
+[x] 官方榜桌面无重叠、无截断、Tab 高度稳定；移动端纵向换行 + 可见滚动条。
+[ ] 以上均不代表真实商业音源、真实 OAuth、真实 CDN、真实容量或真实管理后台通过。
+
+======================================================================
+7. 签字
+======================================================================
+项目负责人（授权/发布）：____________________  日期：__________
+运维/真实环境验收：____________________      日期：__________
+Epomail 管理后台负责人：____________________  日期：__________

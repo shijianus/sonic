@@ -25,7 +25,8 @@ import {
 } from '../functions/_lib/sonic/observability';
 import { handleOptions } from '../functions/_lib/http';
 import { checkEngineIdentityAccess } from '../functions/_lib/sonic/engine-identity';
-import { requireAccess } from '../functions/_lib/sonic/access';
+import { getAccessMode, requireAccess } from '../functions/_lib/sonic/access';
+import { getContentPolicyReadiness } from '../functions/_lib/sonic/licensing';
 import { toWebRequest, abortWebRequest } from './request-adapter';
 
 // Route handlers shared directly from `functions/`
@@ -89,6 +90,23 @@ const MIME_TYPES: Record<string, string> = {
   '.txt': 'text/plain; charset=utf-8',
   '.webmanifest': 'application/manifest+json',
 };
+
+const STATIC_CONTENT_SECURITY_POLICY = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+  "font-src 'self' data: https://fonts.gstatic.com",
+  "img-src 'self' data: blob: https:",
+  "media-src 'self' blob: https:",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+  "frame-src 'none'",
+  "worker-src 'self' blob:",
+  "manifest-src 'self'",
+].join('; ');
 
 let serverRecommendStore: RecommendStore | null = null;
 let serverRecommendDbKey = '';
@@ -378,7 +396,7 @@ async function serveStaticAsset(staticRoot: string, pathname: string, isHead: bo
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'no-referrer',
       'X-Frame-Options': 'DENY',
-      'Content-Security-Policy': "frame-ancestors 'none'",
+      'Content-Security-Policy': STATIC_CONTENT_SECURITY_POLICY,
       'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), payment=(), usb=()',
     };
     if (isHead) {
@@ -481,6 +499,7 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
       if (
         release.environment === 'staging' ||
         release.environment === 'preview' ||
+        getAccessMode(env) === 'invite' ||
         Boolean(env.SONIC_STAGING_ACCESS_TOKEN && String(env.SONIC_STAGING_ACCESS_TOKEN).trim())
       ) {
         res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
@@ -517,6 +536,19 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
       }
 
       const pathname = normalizeEnginePathname(new URL(webReq.url).pathname);
+      const contentPolicyReadiness = getContentPolicyReadiness(env);
+      if (pathname !== '/api/sonic/engine/health' && !contentPolicyReadiness.ok) {
+        await sendWebResponse(res, new Response(JSON.stringify({
+          brand: 'Sonic', error: {
+            code: 'CONTENT_POLICY_MISCONFIGURED',
+            message: 'Production requires SONIC_CONTENT_POLICY=strict-allowlist and a reviewed SONIC_ALLOWED_SOURCES list',
+            reason: contentPolicyReadiness.reason,
+            invalidSources: contentPolicyReadiness.invalidSources,
+            effectiveSources: contentPolicyReadiness.effectiveSources,
+          },
+        }), { status: 503, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Retry-After': '30', Connection: 'close' } }), webReq.method === 'HEAD');
+        return;
+      }
       const releaseReadiness = getReleaseReadiness(env);
       if (pathname !== '/api/sonic/engine/health' && (drainState.draining || !releaseReadiness.ok)) {
         await sendWebResponse(res, new Response(JSON.stringify({
@@ -601,6 +633,10 @@ if (isMain) {
   // silently using an in-memory store would report healthy and lose data on restart.
   try {
     if (!getReleaseReadiness(process.env as AppEnv).ok) throw new Error('Release metadata is missing or invalid');
+    const contentPolicy = getContentPolicyReadiness(process.env as AppEnv);
+    if (!contentPolicy.ok) {
+      throw new Error(`Content policy is not deployment-ready: ${contentPolicy.reason || 'misconfigured'}`);
+    }
     withRecommendStartupLock(process.env.SONIC_RECOMMEND_DB_PATH, () => getOrInitServerRecommendStore());
   } catch (err: any) {
     console.error(`[Sonic Local Engine] Fatal: ${err?.message || err}`);

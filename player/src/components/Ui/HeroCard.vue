@@ -133,7 +133,7 @@ const handleClick = async (event: MouseEvent) => {
       padding: 24px;
       opacity: 0;
     ">
-      <img src="${cleanCover}" referrerpolicy="no-referrer" onerror="this.onerror=null;this.style.display='none';" style="
+      <img src="${cleanCover}" referrerpolicy="no-referrer" style="
         width: 200px;
         height: 200px;
         border-radius: 16px;
@@ -151,6 +151,12 @@ const handleClick = async (event: MouseEvent) => {
       <p class="hero-clone-subtitle" style="margin-top: 8px; font-size: 14px; color: rgba(255,255,255,0.7);"></p>
     </div>
   `
+  // CSP blocks inline onerror attributes; attach the same fallback in script.
+  clone.querySelectorAll('img').forEach((img) => {
+    img.addEventListener('error', () => {
+      img.style.display = 'none'
+    }, { once: true })
+  })
   const cloneTitle = clone.querySelector('.hero-clone-title')
   if (cloneTitle) cloneTitle.textContent = props.title
   const cloneSubtitle = clone.querySelector('.hero-clone-subtitle') as HTMLElement | null

@@ -4,6 +4,7 @@
 import { base64UrlDecode, base64UrlEncode, readCookie, shouldUseSecureCookie } from '../auth';
 import { jsonResponse } from '../http';
 import { hasValidEngineSecret } from './security';
+import { isProductionDeployment } from './environment';
 import { sha256Hex } from './crypto';
 import type { AppEnv } from '../types';
 
@@ -15,12 +16,16 @@ export const DEFAULT_ACCESS_SESSION_MAX_AGE_SEC = 7 * 24 * 60 * 60;
 export const MAX_ACCESS_SESSION_MAX_AGE_SEC = 30 * 24 * 60 * 60;
 const MIN_ACCESS_SESSION_MAX_AGE_SEC = 60;
 const MAX_INVITE_CODE_LENGTH = 256;
+// Invite codes are the only credential in Pages-only invite mode. Short codes
+// are brute-forceable even behind the rate limiter, so reject them up front.
+const MIN_INVITE_CODE_LENGTH = 16;
 const MAX_ACCESS_SESSION_TOKEN_LENGTH = 512;
 const ACCESS_TOKEN_DOMAIN = 'sonic-access-session-v1.';
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
 export type AccessMode = 'open' | 'legacy-staging' | 'invite';
+const VALID_ACCESS_MODES = new Set<AccessMode>(['open', 'legacy-staging', 'invite']);
 
 export interface AccessSessionRecord {
   sessionHash: string;
@@ -63,6 +68,16 @@ export function getAccessMode(env?: AppEnv): AccessMode {
   return 'open';
 }
 
+export function isAccessModeExplicit(env?: AppEnv): boolean {
+  const raw = String(env?.SONIC_ACCESS_MODE || '').trim().toLowerCase();
+  return VALID_ACCESS_MODES.has(raw as AccessMode);
+}
+
+export function isAccessModeDeclaredInvalid(env?: AppEnv): boolean {
+  const raw = String(env?.SONIC_ACCESS_MODE || '').trim().toLowerCase();
+  return Boolean(raw) && !VALID_ACCESS_MODES.has(raw as AccessMode);
+}
+
 export function getAccessSessionMaxAgeSec(env?: AppEnv): number {
   const raw = Number.parseInt(String(env?.SONIC_ACCESS_SESSION_MAX_AGE_SEC || ''), 10);
   if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_ACCESS_SESSION_MAX_AGE_SEC;
@@ -70,43 +85,20 @@ export function getAccessSessionMaxAgeSec(env?: AppEnv): number {
 }
 
 export function getAccessRepository(env?: AppEnv): AccessRepository | null {
-  const candidate = (env as any)?.SONIC_ACCESS_STORE || (env as any)?.SONIC_INVITE_KV;
+  const candidate = (env as any)?.SONIC_ACCESS_STORE;
   if (!candidate || typeof candidate !== 'object') return null;
   if (typeof candidate.redeemInvite === 'function' && typeof candidate.createSession === 'function' && typeof candidate.getSession === 'function') return candidate as AccessRepository;
-  if (typeof candidate.get === 'function' && typeof candidate.put === 'function') return createKvAccessRepository(candidate);
   return null;
-}
-
-function createKvAccessRepository(kv: any): AccessRepository {
-  const read = async (key: string) => {
-    const raw = await kv.get(key);
-    return raw ? JSON.parse(raw) : null;
-  };
-  const write = async (key: string, value: unknown, expiresAt?: number) => {
-    const options = expiresAt ? { expirationTtl: Math.max(60, Math.ceil((expiresAt - Date.now()) / 1000)) } : undefined;
-    await kv.put(key, JSON.stringify(value), options);
-  };
-  return {
-    async redeemInvite(codeHash, nowMs) {
-      const row = await read(codeHash);
-      if (!row || row.revokedAt || (row.expiresAt && row.expiresAt <= nowMs) || Number(row.usedCount || 0) >= Number(row.maxUses || 1)) return null;
-      // KV cannot provide atomic compare-and-swap; require a native atomic binding for
-      // production invite mode instead of silently overselling a code under concurrency.
-      if (typeof kv.atomic !== 'function') throw new Error('Invite KV lacks atomic redemption support');
-      const next = { ...row, usedCount: Number(row.usedCount || 0) + 1 };
-      await write(codeHash, next, row.expiresAt);
-      return { inviteId: String(row.inviteId || codeHash), ...(row.expiresAt ? { expiresAt: Number(row.expiresAt) } : {}) };
-    },
-    createSession: (record) => write(record.sessionHash, record, record.expiresAt),
-    getSession: (sessionHash, nowMs) => read(sessionHash).then((record) => record && record.expiresAt > nowMs ? record : null),
-    revokeSession: (sessionHash, nowMs) => write(sessionHash, { ...(read(sessionHash) as any), revokedAt: nowMs }),
-  };
 }
 
 
 function normalizeInviteCode(code: unknown): string {
   const value = asTrimmedString(code, MAX_INVITE_CODE_LENGTH);
-  if (!value || value.length > MAX_INVITE_CODE_LENGTH || /[\u0000-\u0020\u007f]/.test(value)) return '';
+  if (
+    value.length < MIN_INVITE_CODE_LENGTH ||
+    value.length > MAX_INVITE_CODE_LENGTH ||
+    /[\u0000-\u0020\u007f]/.test(value)
+  ) return '';
   return value;
 }
 
@@ -189,7 +181,8 @@ export async function redeemAccessInvite(
 ): Promise<AccessRedeemResult> {
   const codeHash = hashInviteCode(code);
   const repository = getAccessRepository(env);
-  if (!codeHash && !repository) return { ok: false, code: 'store_unavailable' };
+  // A malformed/too-short code is just invalid; never disclose whether the
+  // server has a durable access store.
   if (!codeHash) return { ok: false, code: 'invalid' };
 
   // Pages without a durable store use the independent signed-session path.
@@ -248,9 +241,13 @@ export async function createAccessSession(
   maxAgeSec = getAccessSessionMaxAgeSec(env),
 ): Promise<{ token: string; record: AccessSessionRecord } | null> {
   const repository = getAccessRepository(env);
+  const boundedMaxAgeSec = Math.min(
+    MAX_ACCESS_SESSION_MAX_AGE_SEC,
+    Math.max(MIN_ACCESS_SESSION_MAX_AGE_SEC, Math.floor(maxAgeSec)),
+  );
   const recordBase = {
     createdAt: nowMs,
-    expiresAt: nowMs + Math.min(MAX_ACCESS_SESSION_MAX_AGE_SEC, Math.max(MIN_ACCESS_SESSION_MAX_AGE_SEC, maxAgeSec * 1000)),
+    expiresAt: nowMs + boundedMaxAgeSec * 1000,
   };
   if (!repository) {
     try {
@@ -316,16 +313,27 @@ export async function revokeAccessSession(request: Request, env: AppEnv, nowMs =
   }
 }
 
-export function accessStatusResponse(request: Request, env: AppEnv): Response | null {
+export async function requireAccess(request: Request, env: AppEnv): Promise<Response | null> {
+  if (hasValidEngineSecret(request, env)) return null;
+  // An explicitly configured but unknown mode is a typo, not an invitation to
+  // fall back to public access. Reject it in every environment.
+  if (isAccessModeDeclaredInvalid(env)) {
+    return jsonResponse(
+      { brand: 'Sonic', error: { code: 'ACCESS_MODE_INVALID', message: 'SONIC_ACCESS_MODE must be one of open, invite or legacy-staging' } },
+      { status: 503, headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow, noarchive', 'Retry-After': '30' } },
+    );
+  }
+  // A production edge deployment must state its access policy explicitly. A
+  // missing variable previously fell back to public/open access, which would
+  // silently remove the invite gate from a restricted beta.
+  if (isProductionDeployment(env) && !isAccessModeExplicit(env)) {
+    return jsonResponse(
+      { brand: 'Sonic', error: { code: 'ACCESS_MODE_MISCONFIGURED', message: 'SONIC_ACCESS_MODE must be explicitly configured in production' } },
+      { status: 503, headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow, noarchive', 'Retry-After': '30' } },
+    );
+  }
   const mode = getAccessMode(env);
   if (mode === 'open') return null;
-  if (mode === 'legacy-staging') return null;
-  return null;
-}
-
-export async function requireAccess(request: Request, env: AppEnv): Promise<Response | null> {
-  const mode = getAccessMode(env);
-  if (mode === 'open' || hasValidEngineSecret(request, env)) return null;
   const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
   const publicPath =
     path === '/api/access/session' ||
@@ -337,7 +345,7 @@ export async function requireAccess(request: Request, env: AppEnv): Promise<Resp
     path === '/api/auth/callback' ||
     path === '/api/auth/logout' ||
     path === '/api/auth/user' ||
-    (!path.startsWith('/api/') && path !== '/proxy' && path !== '/palette');
+    (path !== '/api' && !path.startsWith('/api/') && path !== '/proxy' && path !== '/palette');
   if (publicPath) return null;
   if (mode === 'legacy-staging') return jsonResponse({ brand: 'Sonic', error: { code: 'STAGING_ACCESS_REQUIRED', message: 'Staging access is required' } }, { status: 401, headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow, noarchive' } });
   const status = await verifyAccessSession(request, env);

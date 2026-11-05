@@ -42,9 +42,9 @@ function touchMemoryLru(key: string, entry: MemoryCacheEntry, maxBytes = DEFAULT
 }
 
 export function buildSonicCacheKey(namespace: string, identifier: string): string {
-  // Encode the whole identifier so user-controlled ':' / '=' characters cannot collide
-  // with the field separators used by callers.
-  const cleanId = encodeURIComponent(identifier.trim().replace(/\s+/g, '_'));
+  // Encode the whole identifier so user-controlled ':', '=', whitespace and other
+  // separators cannot collide with field separators or with each other.
+  const cleanId = encodeURIComponent(identifier.trim());
   return `sonic:${namespace}:${cleanId}`;
 }
 

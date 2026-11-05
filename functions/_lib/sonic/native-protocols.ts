@@ -5,7 +5,7 @@
 import type { AppEnv, SongItem } from '../types';
 import type { SonicAttempt, SonicSearchTrack } from './types';
 import { getSonicConfig } from './config';
-import { isSourceEnabledByPolicy } from './licensing';
+import { getAllowedMediaDomains, isSourceEnabledByPolicy } from './licensing';
 import { buildNeteaseEapiParams, buildNeteaseLinuxApiParams } from './crypto';
 import { normalizeArtistString, normalizeText, normalizeCjkText, calcLevenshteinSimilarity } from './utils';
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
@@ -748,6 +748,7 @@ export async function probeStreamPhysicalQuality(
   expectedDurationSec?: number,
   nominalBitrateKbps = 320,
   signal?: AbortSignal,
+  env?: AppEnv,
 ): Promise<{ streamType: 'full' | 'trial' | 'unavailable'; totalBytes: number; ratio: number }> {
   try {
     const headers: Record<string, string> = {
@@ -755,7 +756,20 @@ export async function probeStreamPhysicalQuality(
       'User-Agent': DESKTOP_UA,
     };
     if (referer) headers.Referer = referer;
-    const res = await nativeFetch(url, { headers }, timeoutMs, signal);
+    // A probe reads only headers and cancels the body immediately, so it must
+    // not be rejected when a CDN ignores `Range` and advertises the full file
+    // size in Content-Length (maxBytes would abort before we can inspect it).
+    const res = await safeFetch(
+      url,
+      { headers, signal },
+      {
+        allowHttp: false,
+        allowedDomains: getAllowedMediaDomains(env, 'audio'),
+        maxRedirects: 2,
+        timeoutMs,
+        maxBytes: 0,
+      },
+    );
     const cr = res.headers.get('content-range') || '';
     const cl = res.headers.get('content-length') || '';
     res.body?.cancel?.().catch(() => {});
@@ -862,6 +876,33 @@ export async function resolvePlayableStream(
   }
 }
 
+export interface StreamCacheIdentityInput {
+  source: string;
+  id: string;
+  quality?: string;
+  title?: string;
+  artist?: string;
+  allowTrial?: boolean;
+  durationSec?: number;
+}
+
+/**
+ * JSON tuple encoding keeps user-controlled separators (`:`, `=`) inside their
+ * own field instead of letting them alias another field boundary.
+ */
+export function buildStreamCacheIdentifier(input: StreamCacheIdentityInput): string {
+  return JSON.stringify([
+    'stream-url-v2',
+    String(input.source || '').toLowerCase(),
+    String(input.id || ''),
+    String(input.quality || '320').toLowerCase(),
+    normalizeText(input.title || ''),
+    normalizeText(input.artist || ''),
+    input.allowTrial === false ? 0 : 1,
+    Number(input.durationSec) || 0,
+  ]);
+}
+
 async function resolvePlayableStreamWithinBudget(
   opts: ResolveStreamOptions,
   env?: AppEnv,
@@ -885,7 +926,15 @@ async function resolvePlayableStreamWithinBudget(
   const quality = String(opts.quality || '320').toLowerCase();
   const nominalBr = quality === '128' ? 128 : quality === 'flac' ? 800 : 320;
   const allowTrial = opts.allowTrial !== false;
-  const cacheId = `${cleanSource}:${cleanId}:${quality}:${normalizeText(opts.title || '')}:${normalizeText(opts.artist || '')}`;
+  const cacheId = buildStreamCacheIdentifier({
+    source: cleanSource,
+    id: cleanId,
+    quality,
+    title: opts.title,
+    artist: opts.artist,
+    allowTrial,
+    durationSec: opts.durationSec,
+  });
 
   // 1. Fresh cache check (8 minutes — well within signed CDN token TTL)
   if (!opts.nocache) {
@@ -1082,7 +1131,7 @@ async function resolvePlayableStreamWithinBudget(
       } else if (cleanSource === 'qq' && cfg.enableQq) {
         const qq = await resolveQQSingleStream(cleanId, env, signal);
         if (qq?.url) {
-          const probe = await probeStreamPhysicalQuality(qq.url, 'https://y.qq.com/', 2000, opts.durationSec, nominalBr, signal);
+          const probe = await probeStreamPhysicalQuality(qq.url, 'https://y.qq.com/', 2000, opts.durationSec, nominalBr, signal, env);
           const isFull = probe.streamType === 'full';
           attempts.push({ provider: pLabel, via: qq.via, ok: true, ms: Date.now() - pStart });
           const out: ResolvedStreamInfo = {
@@ -1116,7 +1165,7 @@ async function resolvePlayableStreamWithinBudget(
       } else if (cleanSource === 'kugou' && cfg.enableKugou) {
         const kg = await resolveKugouSingleStream(cleanId, env, signal);
         if (kg?.url) {
-          const probe = await probeStreamPhysicalQuality(kg.url, 'https://m.kugou.com/', 2000, opts.durationSec, nominalBr, signal);
+          const probe = await probeStreamPhysicalQuality(kg.url, 'https://m.kugou.com/', 2000, opts.durationSec, nominalBr, signal, env);
           const sizeEval = typeof kg.size === 'number' ? evaluateStreamTypeByRelativeBytes(kg.size, opts.durationSec, nominalBr) : null;
           const isFull = probe.streamType === 'full' || sizeEval?.streamType === 'full';
           attempts.push({ provider: pLabel, via: kg.via, ok: true, ms: Date.now() - pStart });
@@ -1297,7 +1346,7 @@ async function resolvePlayableStreamWithinBudget(
         if (match) {
           const neStream = await resolveNeteaseSingleStream(match.platformId, quality, env, signal);
           if (neStream?.url && !neStream.isTrial) {
-            const probe = await probeStreamPhysicalQuality(neStream.url, undefined, 2000, match.duration || opts.durationSec, nominalBr, signal);
+            const probe = await probeStreamPhysicalQuality(neStream.url, undefined, 2000, match.duration || opts.durationSec, nominalBr, signal, env);
             if (probe.streamType === 'full') {
               attempts.push({ provider: label, via: `${neStream.via}:free-match`, ok: true, ms: Date.now() - sStart });
               const out: ResolvedStreamInfo = {
@@ -1353,7 +1402,7 @@ async function resolvePlayableStreamWithinBudget(
           if (freeItem?.hash) {
             const kgStream = await resolveKugouSingleStream(freeItem.hash, env, signal);
             if (kgStream?.url) {
-              const probe = await probeStreamPhysicalQuality(kgStream.url, 'https://m.kugou.com/', 2000, freeItem.duration || opts.durationSec, nominalBr, signal);
+              const probe = await probeStreamPhysicalQuality(kgStream.url, 'https://m.kugou.com/', 2000, freeItem.duration || opts.durationSec, nominalBr, signal, env);
               if (probe.streamType === 'full') {
                 attempts.push({ provider: label, via: `${kgStream.via}:free-match`, ok: true, ms: Date.now() - sStart });
                 const out: ResolvedStreamInfo = {
@@ -1403,7 +1452,7 @@ async function resolvePlayableStreamWithinBudget(
           ) {
             const kwStream = await resolveKuwoSingleStream(kt.platformId, env, signal);
             if (kwStream?.url) {
-              const probe = await probeStreamPhysicalQuality(kwStream.url, 'https://www.kuwo.cn/', 2000, kt.duration || opts.durationSec, nominalBr, signal);
+              const probe = await probeStreamPhysicalQuality(kwStream.url, 'https://www.kuwo.cn/', 2000, kt.duration || opts.durationSec, nominalBr, signal, env);
               if (probe.streamType === 'full') {
                 attempts.push({ provider: label, via: `${kwStream.via}:free-match`, ok: true, ms: Date.now() - sStart });
                 const out: ResolvedStreamInfo = {

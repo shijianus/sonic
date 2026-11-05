@@ -102,6 +102,18 @@ const httpStatus = (error: unknown): number | undefined => {
   return typeof value === 'number' ? value : undefined
 }
 
+const errorPayload = (error: unknown): AccessStatusResponse | undefined => {
+  const candidate = error as { response?: { data?: unknown } } | null
+  const data = candidate?.response?.data
+  return data && typeof data === 'object' ? (data as AccessStatusResponse) : undefined
+}
+
+const errorCodeOf = (error: unknown): string => {
+  const value = errorPayload(error)?.error
+  if (typeof value === 'string') return value
+  return value && typeof value === 'object' && typeof value.code === 'string' ? value.code : ''
+}
+
 const isNetworkError = (error: unknown): boolean => {
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return true
   const candidate = error as { code?: unknown; message?: unknown; name?: unknown } | null
@@ -152,6 +164,20 @@ export const useAccessStore = defineStore('access', {
         this.lastCheckedAt = Date.now()
         return this.canAccess
       } catch (error) {
+        // An invite-gated deployment rejects the status probe with HTTP 401 and
+        // `mode: invite`. That is the normal "not yet admitted" state, not a
+        // service failure: keep the invite form reachable. Legacy staging uses a
+        // different 401 and has no invite endpoint, so surface it as an error.
+        if (httpStatus(error) === 401 && errorCodeOf(error) !== 'STAGING_ACCESS_REQUIRED') {
+          const result = statusOf(errorPayload(error) || {})
+          this.mode = result.mode === 'open' ? 'invite' : result.mode
+          this.granted = false
+          this.status = 'required'
+          this.errorKind = null
+          this.errorMessage = ''
+          this.lastCheckedAt = Date.now()
+          return false
+        }
         this.errorKind = errorKindOf(error)
         this.errorMessage = error instanceof Error ? error.message : ''
         this.status = 'error'
@@ -179,9 +205,18 @@ export const useAccessStore = defineStore('access', {
         this.lastCheckedAt = Date.now()
         return this.granted
       } catch (error) {
+        const status = httpStatus(error)
         this.errorKind = errorKindOf(error, true)
         this.errorMessage = error instanceof Error ? error.message : ''
-        this.status = this.mode === 'invite' ? 'required' : 'error'
+        // Invalid/expired/rate-limited codes keep the user on the invite form so
+        // they can retry. Transport or storage failures are a real error state.
+        if (status === 400 || status === 401 || status === 403 || status === 404 || status === 429) {
+          this.mode = 'invite'
+          this.granted = false
+          this.status = 'required'
+        } else {
+          this.status = 'error'
+        }
         return false
       } finally {
         this.isRedeeming = false

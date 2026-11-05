@@ -98,7 +98,9 @@ export async function onRequest({
     });
   }
 
-  const cacheIdentifier = `q=${query.toLowerCase()}:p=${page}:c=${count}`;
+  const personalize = url.searchParams.get('personalize') !== '0';
+  const skipLiveUpstream = url.searchParams.get('localOnly') === '1';
+  const cacheIdentifier = `q=${query.toLowerCase()}:p=${page}:c=${count}:l=${skipLiveUpstream ? 1 : 0}:z=${personalize ? 1 : 0}`;
   if (allowSharedCache && !nocache) {
     const hit = await getSonicCachedJson<any>('search-smart-v1', cacheIdentifier, env);
     if (hit?.value) {
@@ -157,8 +159,6 @@ export async function onRequest({
   }
 
   try {
-    const personalize = url.searchParams.get('personalize') !== '0';
-    const skipLiveUpstream = url.searchParams.get('localOnly') === '1';
     const result = await executeSmartSearch(
       query,
       { page, count, personalize, skipLiveUpstream, request },

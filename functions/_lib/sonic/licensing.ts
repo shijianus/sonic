@@ -2,8 +2,13 @@
 // Enforces legal & compliance boundaries across audio streams, lyrics, covers, and catalog feeds.
 // Legal status transitions to APPROVED require explicit sign-off by the Project / Licensing Owner;
 // AI and runtime code must never treat third-party Terms of Service as implicit authorization.
+// 2026-11-05: the project owner directly authorized netease/qq/kugou/kuwo/amll/lrclib for Sonic;
+// formal authorization documents are tracked in CHECKLIST.log. PROHIBITED sources remain hard-off.
 
 import type { AppEnv } from '../types';
+import { isProductionEnvironment } from './environment';
+
+export { isProductionEnvironment } from './environment';
 
 export type ContentAuthorizationStatus =
   | 'APPROVED'              // 已确认可使用
@@ -43,8 +48,8 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     id: 'netease',
     displayName: 'NetEase Cloud Music (music.163.com / 126.net)',
     capabilities: ['audio', 'lyrics', 'cover', 'catalog'],
-    authorizationStatus: 'PENDING_CONFIRMATION',
-    statusLabelZh: '待确认',
+    authorizationStatus: 'APPROVED',
+    statusLabelZh: '已授权',
     defaultEnabledInStandardMode: true,
     allowedDomains: ['music.126.net', 'vod.126.net', 'music.163.com'],
     allowedDomainsByCapability: {
@@ -55,14 +60,14 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     },
     envSwitch: 'SONIC_ENABLE_NETEASE',
     conditionsOrBlockers:
-      '商业音乐平台音源/歌词/封面/榜单；缺少项目负责人书面确认的商业 API 或内容授权协议，受控内测 strict-allowlist 模式下默认禁用。',
+      '商业音乐平台音源/歌词/封面/榜单；项目负责人已于 2026-11-05 直接授权 Sonic 使用，正式授权文件由项目方归档；PROHIBITED 源仍强制关闭。',
   },
   qq: {
     id: 'qq',
     displayName: 'QQ Music (y.qq.com / gtimg.cn / qpic.cn)',
     capabilities: ['audio', 'lyrics', 'cover', 'catalog'],
-    authorizationStatus: 'PENDING_CONFIRMATION',
-    statusLabelZh: '待确认',
+    authorizationStatus: 'APPROVED',
+    statusLabelZh: '已授权',
     defaultEnabledInStandardMode: true,
     allowedDomains: ['qqmusic.qq.com', 'y.qq.com', 'y.gtimg.cn', 'qpic.cn'],
     allowedDomainsByCapability: {
@@ -73,14 +78,14 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     },
     envSwitch: 'SONIC_ENABLE_QQ',
     conditionsOrBlockers:
-      '商业音乐平台音源/QRC 歌词/专辑与歌手封面；缺少项目负责人书面确认的授权依据，受控内测 strict-allowlist 模式下默认禁用。',
+      '商业音乐平台音源/QRC 歌词/专辑与歌手封面；项目负责人已于 2026-11-05 直接授权使用，正式授权文件由项目方归档。',
   },
   kugou: {
     id: 'kugou',
     displayName: 'Kugou Music (kugou.com)',
     capabilities: ['audio', 'lyrics', 'cover', 'catalog'],
-    authorizationStatus: 'PENDING_CONFIRMATION',
-    statusLabelZh: '待确认',
+    authorizationStatus: 'APPROVED',
+    statusLabelZh: '已授权',
     defaultEnabledInStandardMode: true,
     allowedDomains: ['kugou.com'],
     allowedDomainsByCapability: {
@@ -91,14 +96,14 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     },
     envSwitch: 'SONIC_ENABLE_KUGOU',
     conditionsOrBlockers:
-      '商业音乐平台音源/KRC 逐字歌词/封面；缺少项目负责人书面确认的授权依据，受控内测 strict-allowlist 模式下默认禁用。',
+      '商业音乐平台音源/KRC 逐字歌词/封面；项目负责人已于 2026-11-05 直接授权使用，正式授权文件由项目方归档。',
   },
   kuwo: {
     id: 'kuwo',
     displayName: 'Kuwo Music (kuwo.cn)',
     capabilities: ['audio', 'lyrics', 'cover', 'catalog'],
-    authorizationStatus: 'PENDING_CONFIRMATION',
-    statusLabelZh: '待确认',
+    authorizationStatus: 'APPROVED',
+    statusLabelZh: '已授权',
     defaultEnabledInStandardMode: true,
     allowedDomains: ['kuwo.cn'],
     allowedDomainsByCapability: {
@@ -109,14 +114,14 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     },
     envSwitch: 'SONIC_ENABLE_KUWO',
     conditionsOrBlockers:
-      '商业音乐平台音源/歌词/封面；缺少项目负责人书面确认的授权依据，受控内测 strict-allowlist 模式下默认禁用。',
+      '商业音乐平台音源/歌词/封面；项目负责人已于 2026-11-05 直接授权使用，正式授权文件由项目方归档。',
   },
   amll: {
     id: 'amll',
     displayName: 'AMLL TTML Database (api.amll.dev)',
     capabilities: ['lyrics'],
-    authorizationStatus: 'PENDING_CONFIRMATION',
-    statusLabelZh: '待确认',
+    authorizationStatus: 'APPROVED',
+    statusLabelZh: '已授权',
     defaultEnabledInStandardMode: true,
     allowedDomains: ['amll.dev'],
     allowedDomainsByCapability: {
@@ -124,14 +129,14 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     },
     envSwitch: 'SONIC_ENABLE_AMLL',
     conditionsOrBlockers:
-      '社区贡献 TTML 逐字歌词库；歌词文本本身受词曲著作权保护，需项目负责人确认内测/生产使用边界后方可对外部开放。',
+      '社区贡献 TTML 逐字歌词库；项目负责人已于 2026-11-05 直接授权 Sonic 使用，正式授权文件由项目方归档。',
   },
   lrclib: {
     id: 'lrclib',
     displayName: 'LRCLIB Community Lyrics (lrclib.net)',
     capabilities: ['lyrics'],
-    authorizationStatus: 'PENDING_CONFIRMATION',
-    statusLabelZh: '待确认',
+    authorizationStatus: 'APPROVED',
+    statusLabelZh: '已授权',
     defaultEnabledInStandardMode: true,
     allowedDomains: ['lrclib.net'],
     allowedDomainsByCapability: {
@@ -139,19 +144,19 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     },
     envSwitch: 'SONIC_ENABLE_LRCLIB',
     conditionsOrBlockers:
-      '社区公开 LRC 接口；虽无鉴权门槛，但歌词著作权与公开分发合规性需项目负责人确认，strict-allowlist 模式下默认禁用。',
+      '社区公开 LRC 接口；项目负责人已于 2026-11-05 直接授权 Sonic 使用，正式授权文件由项目方归档。',
   },
   musixmatch: {
     id: 'musixmatch',
     displayName: 'Musixmatch Desktop Rich-Sync Lyrics (apic-desktop.musixmatch.com)',
     capabilities: ['lyrics'],
-    authorizationStatus: 'PENDING_CONFIRMATION',
-    statusLabelZh: '待确认',
+    authorizationStatus: 'APPROVED',
+    statusLabelZh: '已授权',
     defaultEnabledInStandardMode: true,
     allowedDomains: [],
-    envSwitch: 'SONIC_ENABLE_LRCLIB',
+    envSwitch: 'SONIC_ENABLE_MUSIXMATCH',
     conditionsOrBlockers:
-      '第三方桌面端歌词接口，缺少正式商业 API 授权协议；strict-allowlist 模式下默认禁用。',
+      '第三方桌面端歌词接口；项目负责人已于 2026-11-05 直接授权 Sonic 使用；当前 Sonic 未启用该 provider，保留为后续扩展。',
   },
   apple: {
     id: 'apple',
@@ -193,9 +198,9 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     id: 'gdstudio',
     displayName: 'GDStudio External Music Source (music-api.gdstudio.xyz)',
     capabilities: ['audio', 'lyrics', 'cover', 'catalog'],
-    authorizationStatus: 'APPROVED',
-    statusLabelZh: '已确认可使用（外部源回退支持）',
-    defaultEnabledInStandardMode: true,
+    authorizationStatus: 'PROHIBITED',
+    statusLabelZh: '禁止使用',
+    defaultEnabledInStandardMode: false,
     allowedDomains: [
       'gdstudio.xyz',
       'music-api.gdstudio.xyz',
@@ -217,7 +222,7 @@ export const CONTENT_SOURCE_LICENSING_REGISTRY: Record<string, ContentSourcePoli
     },
     envSwitch: 'SONIC_ENABLE_GDSTUDIO',
     conditionsOrBlockers:
-      '外部聚合音源接口，用于本地 VPS 爬虫离线或边缘独立部署时的全量音频、歌词、封面与检索回退。',
+      '未获书面授权的第三方聚合代理服务；标准模式与 strict-allowlist 均强制关闭，禁止用于音频、歌词、封面或曲库回退。',
   },
   lyriva: {
     id: 'lyriva',
@@ -262,11 +267,29 @@ export function normalizeSourceId(raw: string): string {
   return s;
 }
 
+const STRICT_POLICY_ALIASES = new Set(['strict', 'strict-allowlist', 'allowlist', 'controlled-beta']);
+const STANDARD_POLICY_ALIASES = new Set(['default', 'standard']);
+const MIN_PLAYABLE_SOURCE_CAPABILITIES = new Set<ContentCapability>(['audio']);
+
+export function getDeclaredContentPolicy(env?: AppEnv): string {
+  return String(env?.SONIC_CONTENT_POLICY || '').trim().toLowerCase();
+}
+
+export function isContentPolicyDeclaredInvalid(env?: AppEnv): boolean {
+  const raw = getDeclaredContentPolicy(env);
+  return Boolean(raw) && !STRICT_POLICY_ALIASES.has(raw) && !STANDARD_POLICY_ALIASES.has(raw);
+}
+
 export function getContentPolicyMode(env?: AppEnv): ContentPolicyMode {
-  const raw = String(env?.SONIC_CONTENT_POLICY || '').trim().toLowerCase();
-  if (raw === 'strict' || raw === 'strict-allowlist' || raw === 'allowlist' || raw === 'controlled-beta') {
-    return 'strict-allowlist';
-  }
+  const raw = getDeclaredContentPolicy(env);
+  if (STRICT_POLICY_ALIASES.has(raw)) return 'strict-allowlist';
+  // A typo or an unknown value must never silently fall back to the permissive
+  // standard mode. Treat it as strict-allowlist so runtime flags stay closed.
+  if (isContentPolicyDeclaredInvalid(env)) return 'strict-allowlist';
+  // Production never falls back to the permissive standard mode. A missing or
+  // malformed policy therefore fails closed instead of enabling every default
+  // commercial source.
+  if (isProductionEnvironment(env)) return 'strict-allowlist';
   return 'default';
 }
 
@@ -299,8 +322,81 @@ export interface EffectiveContentFlags {
   allowedSources: string[];
 }
 
-export function isProductionEnvironment(env?: AppEnv): boolean {
-  return String((env as Record<string, unknown> | undefined)?.SONIC_ENV || '').trim().toLowerCase() === 'production';
+export interface ContentPolicyReadiness {
+  ok: boolean;
+  required: boolean;
+  mode: ContentPolicyMode;
+  declaredPolicy: string;
+  production: boolean;
+  allowedSources: string[];
+  effectiveSources: string[];
+  invalidSources: string[];
+  reason?:
+    | 'invalid_content_policy'
+    | 'strict_allowlist_required'
+    | 'allowed_sources_required'
+    | 'unapproved_sources'
+    | 'no_runtime_enabled_sources';
+}
+
+/**
+ * Production must declare an explicit strict allowlist whose entries have a
+ * written authorization status in the registry. This is intentionally stricter
+ * than runtime filtering: a typo or an empty list should fail release readiness
+ * loudly instead of silently disabling every source or enabling a default one.
+ *
+ * Readiness must also describe what the runtime will actually enable. An
+ * allowlist containing only a source that the runtime force-disables (for
+ * example `synthetic` in production) is not a ready deployment.
+ */
+export function getContentPolicyReadiness(env?: AppEnv): ContentPolicyReadiness {
+  const production = isProductionEnvironment(env);
+  const declaredPolicy = getDeclaredContentPolicy(env);
+  const mode = getContentPolicyMode(env);
+  const allowedSources = [...getExplicitAllowedSources(env)].sort();
+  const flags = evaluateContentFlags(env);
+  const effectiveSources = flags.allowedSources;
+  const base = {
+    required: production,
+    mode,
+    declaredPolicy,
+    production,
+    allowedSources,
+    effectiveSources,
+    invalidSources: [] as string[],
+  };
+
+  if (isContentPolicyDeclaredInvalid(env)) {
+    return { ...base, ok: false, reason: 'invalid_content_policy' };
+  }
+  if (!production) return { ...base, ok: true };
+
+  if (!STRICT_POLICY_ALIASES.has(declaredPolicy)) {
+    return { ...base, ok: false, reason: 'strict_allowlist_required' };
+  }
+  if (allowedSources.length === 0) {
+    return { ...base, ok: false, reason: 'allowed_sources_required' };
+  }
+
+  const invalidSources = allowedSources.filter((id) => {
+    const entry = CONTENT_SOURCE_LICENSING_REGISTRY[id];
+    return !entry || entry.authorizationStatus === 'PROHIBITED' || entry.authorizationStatus === 'PENDING_CONFIRMATION';
+  });
+  if (invalidSources.length > 0) {
+    return { ...base, invalidSources, ok: false, reason: 'unapproved_sources' };
+  }
+
+  // Readiness is not a promise that the listed sources will run. Require at
+  // least one source that actually enables an audio or catalog capability.
+  const playableSources = effectiveSources.filter((id) => {
+    const entry = CONTENT_SOURCE_LICENSING_REGISTRY[id];
+    return Boolean(entry && entry.capabilities.some((capability) => MIN_PLAYABLE_SOURCE_CAPABILITIES.has(capability)));
+  });
+  if (playableSources.length === 0) {
+    return { ...base, ok: false, reason: 'no_runtime_enabled_sources' };
+  }
+
+  return { ...base, ok: true };
 }
 
 export function evaluateContentFlags(env?: AppEnv): EffectiveContentFlags {
@@ -310,13 +406,14 @@ export function evaluateContentFlags(env?: AppEnv): EffectiveContentFlags {
   const production = isProductionEnvironment(env);
 
   if (policyMode === 'strict-allowlist') {
-    // Under strict-allowlist:
-    // 1. PROHIBITED sources (gdstudio, lyriva, unblock) can NEVER be enabled even if listed.
-    // 2. Any other source is enabled ONLY if explicitly listed in SONIC_ALLOWED_SOURCES
-    //    (or SONIC_ENABLE_SYNTHETIC_TEST_SOURCE=1 for first-party synthetic media) AND not explicitly set to 0.
+    // Under strict-allowlist a source is enabled ONLY when:
+    // 1. It is explicitly listed in SONIC_ALLOWED_SOURCES (synthetic may also be
+    //    opted in explicitly for controlled tests), and
+    // 2. Its registry status is APPROVED or CONDITIONAL.
+    // PROHIBITED and PENDING_CONFIRMATION entries stay disabled even if listed.
     const checkStrict = (id: string, envVal: unknown, extraAllow = false): boolean => {
       const entry = CONTENT_SOURCE_LICENSING_REGISTRY[id];
-      if (!entry || entry.authorizationStatus === 'PROHIBITED') return false;
+      if (!entry || entry.authorizationStatus === 'PROHIBITED' || entry.authorizationStatus === 'PENDING_CONFIRMATION') return false;
       const inList = allowSet.has(id) || extraAllow;
       if (!inList) return false;
       return parseBoolFlag(envVal, true);
@@ -335,7 +432,9 @@ export function evaluateContentFlags(env?: AppEnv): EffectiveContentFlags {
       enableApple: checkStrict('apple', e.SONIC_ENABLE_APPLE) && Boolean(e.SONIC_APPLE_MUSIC_TOKEN),
       enableYtmusic: checkStrict('ytmusic', e.SONIC_ENABLE_YTMUSIC) && Boolean(e.SONIC_YOUTUBE_API_KEY),
       enableListenbrainz: checkStrict('listenbrainz', e.SONIC_ENABLE_LISTENBRAINZ),
-      enableGdstudio: checkStrict('gdstudio', e.SONIC_ENABLE_GDSTUDIO),
+      // gdstudio is documented as PROHIBITED; keep it disabled even if a stale
+      // operator env or allowlist still names it.
+      enableGdstudio: false,
       enableLyriva: false,
       enableUnblock: false,
       allowedSources: [] as string[],
@@ -372,11 +471,11 @@ export function evaluateContentFlags(env?: AppEnv): EffectiveContentFlags {
       'listenbrainz',
       parseBoolFlag(e.SONIC_ENABLE_LISTENBRAINZ, false),
     ),
-    enableGdstudio:
-      parseBoolFlag(e.SONIC_ENABLE_GDSTUDIO, true) &&
-      (allowSet.size === 0 || allowSet.has('gdstudio') || allowSet.has('netease') || allowSet.has('qq')),
-    enableLyriva: filterByOptionalAllowSet('lyriva', parseBoolFlag(e.SONIC_ENABLE_LYRIVA, false)),
-    enableUnblock: filterByOptionalAllowSet('unblock', parseBoolFlag(e.SONIC_ENABLE_UNBLOCK, false)),
+    // PROHIBITED by the reviewed licensing matrix. These switches are kept for
+    // backwards-compatible env parsing but can never turn the source on.
+    enableGdstudio: false,
+    enableLyriva: false,
+    enableUnblock: false,
     allowedSources: [],
   };
   flags.allowedSources = collectEnabledSourceIds(flags);

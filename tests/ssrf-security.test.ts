@@ -7,6 +7,7 @@ import {
   SONIC_ALLOWED_MUSIC_DOMAINS,
   validateSafeUrl,
 } from '../functions/_lib/sonic/security';
+import { probeStreamPhysicalQuality } from '../functions/_lib/sonic/native-protocols';
 
 const ALLOWED = ['music.com'];
 
@@ -191,5 +192,40 @@ describe('SSRF: provider allowlist boundaries', () => {
     expect(check('https://mail.qq.com/').valid).toBe(false);
     expect(check('https://mail.163.com/').valid).toBe(false);
     expect(check('https://evil.qq.com.example.org/').valid).toBe(false);
+  });
+});
+
+describe('SSRF: physical stream probes use the shared safeFetch policy', () => {
+  it('rejects a metadata-service URL without issuing an outbound request', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await probeStreamPhysicalQuality(
+      'https://169.254.169.254/latest/meta-data',
+      'https://y.qq.com/',
+      100,
+      200,
+      320,
+    );
+    expect(result).toEqual({ streamType: 'unavailable', totalBytes: 0, ratio: 0 });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects a provider redirect to a private address instead of following it', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: 'https://127.0.0.1/internal.mp3' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const result = await probeStreamPhysicalQuality(
+      'https://ws.stream.qqmusic.qq.com/a.mp3',
+      'https://y.qq.com/',
+      100,
+      200,
+      320,
+    );
+    expect(result).toEqual({ streamType: 'unavailable', totalBytes: 0, ratio: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

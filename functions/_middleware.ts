@@ -10,7 +10,8 @@ import {
   redactSensitiveString,
 } from './_lib/sonic/observability';
 import { checkStagingAccessGate } from './_lib/sonic/security';
-import { requireAccess } from './_lib/sonic/access';
+import { getAccessMode, requireAccess } from './_lib/sonic/access';
+import { getContentPolicyReadiness } from './_lib/sonic/licensing';
 import type { AppEnv } from './_lib/types';
 
 export async function onRequest(context: {
@@ -26,6 +27,7 @@ export async function onRequest(context: {
   const isStaging =
     release.environment === 'staging' ||
     release.environment === 'preview' ||
+    getAccessMode(env) === 'invite' ||
     Boolean(env?.SONIC_STAGING_ACCESS_TOKEN && String(env.SONIC_STAGING_ACCESS_TOKEN).trim());
 
   const finalizeResponse = (resp: Response): Response => {
@@ -64,8 +66,28 @@ export async function onRequest(context: {
     return finalizeResponse(accessDenied);
   }
 
+  const contentPolicy = getContentPolicyReadiness(env);
   const releaseReadiness = getReleaseReadiness(env);
-  if (!releaseReadiness.ok) {
+  // Health must remain reachable so an operator can see why a deployment is
+  // failing closed. The handler reports contentPolicy/release details itself.
+  const isHealthEndpoint = pathname === '/api/sonic/engine/health';
+  if (!isHealthEndpoint && !contentPolicy.ok) {
+    return finalizeResponse(jsonResponse(
+      {
+        brand: 'Sonic',
+        error: {
+          code: 'CONTENT_POLICY_MISCONFIGURED',
+          message: 'Production requires SONIC_CONTENT_POLICY=strict-allowlist and a reviewed SONIC_ALLOWED_SOURCES list',
+          reason: contentPolicy.reason,
+          invalidSources: contentPolicy.invalidSources,
+          effectiveSources: contentPolicy.effectiveSources,
+        },
+      },
+      { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '30' } },
+    ));
+  }
+
+  if (!isHealthEndpoint && !releaseReadiness.ok) {
     return finalizeResponse(jsonResponse(
       { brand: 'Sonic', error: { code: 'RELEASE_NOT_READY', message: 'Release metadata is not configured' } },
       { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '30' } },

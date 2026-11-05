@@ -1185,10 +1185,28 @@ async function decodeKugouKrc(base64Content: string): Promise<string> {
   }
   const ds = new DecompressionStream('deflate');
   const writer = ds.writable.getWriter();
-  writer.write(bodyBuf);
-  writer.close();
-  const res = new Response(ds.readable);
-  return await res.text();
+  const reader = ds.readable.getReader();
+  const decoder = new TextDecoder();
+  const maxBytes = 2 * 1024 * 1024;
+  let total = 0;
+  let text = '';
+  const writePromise = writer.write(bodyBuf).then(() => writer.close());
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error('KRC lyric exceeds the decompressed size limit');
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    await writePromise;
+    return text;
+  } finally {
+    try { await writer.abort(); } catch {}
+    try { await reader.cancel(); } catch {}
+    try { await writePromise; } catch {}
+  }
 }
 
 async function crawlKugouBySearch(
@@ -1703,16 +1721,20 @@ async function getUniversalLyricsWithinBudget(env: AppEnv, options: LyricFetchOp
   let finalId = id;
   let finalTitle = title;
   let finalArtist = artist;
+  // Only pair an ID with the provider that issued it. A numeric Kuwo/Kugou ID
+  // must never be sent to NetEase as if it were a NetEase song ID.
+  const isNeteaseSource = source === 'netease' || source === 'ncm' || source === 'sonic';
+  const isQqSource = source === 'tencent' || source === 'qq';
 
   // 1. 直连 ID 优先提取
   if (id && id !== 'undefined' && id !== 'null') {
-    if (cfg.enableNetease && (source === 'netease' || (/^\d+$/.test(id) && source !== 'tencent' && source !== 'qq'))) {
+    if (cfg.enableNetease && isNeteaseSource) {
       const directNetease = await fetchDirectNetEaseLyrics(id, signal);
       if (directNetease && isValidLyric(directNetease)) {
         rawLyric = directNetease;
         finalSource = 'netease';
       }
-    } else if (cfg.enableQq && (source === 'tencent' || source === 'qq')) {
+    } else if (cfg.enableQq && isQqSource) {
       const directQQ = await fetchDirectQQLyrics(id, signal);
       if (directQQ && isValidLyric(directQQ)) {
         rawLyric = directQQ;
@@ -1746,7 +1768,7 @@ async function getUniversalLyricsWithinBudget(env: AppEnv, options: LyricFetchOp
   }
 
   // 若缺失歌曲标题但提供了网易云 ID，自动解析曲名与歌手以便进行全网高精逐字匹配
-  if (cfg.enableNetease && !finalTitle && id && id !== 'undefined' && id !== 'null' && (source === 'netease' || /^\d+$/.test(id))) {
+  if (cfg.enableNetease && !finalTitle && id && id !== 'undefined' && id !== 'null' && isNeteaseSource) {
     try {
       const dRes = await timedFetch(`https://music.163.com/api/song/detail/?id=${encodeURIComponent(id)}&ids=[${encodeURIComponent(id)}]`, { signal,
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },

@@ -13,6 +13,7 @@ dist-server/
 rollback-backups/
 rollback-*.json
 *.log
+!CHECKLIST.log
 /tmp/
 tmp/
 *.token

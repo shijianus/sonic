@@ -10,7 +10,9 @@ function parseSeedCodes(raw = ''): string[] {
   return raw
     .split(',')
     .map(value => value.trim())
-    .filter(value => value.length >= 8 && value.length <= 256 && !/[\u0000-\u0020\u007f]/.test(value));
+    // Keep in sync with functions/_lib/sonic/access.ts: invite codes are the
+    // only credential for a restricted beta and must not be brute-forceable.
+    .filter(value => value.length >= 16 && value.length <= 256 && !/[\u0000-\u0020\u007f]/.test(value));
 }
 
 export class SqliteAccessStore implements AccessRepository {
@@ -142,6 +144,13 @@ export class SqliteAccessStore implements AccessRepository {
 
   revokeSession(sessionHash: string, nowMs: number): void {
     this.db.prepare('UPDATE access_sessions SET revoked_at=? WHERE session_hash=? AND revoked_at IS NULL').run(nowMs, sessionHash);
+  }
+
+  revokeInvite(inviteKey: string, nowMs: number): boolean {
+    const result = this.db.prepare(
+      'UPDATE access_invites SET revoked_at=? WHERE invite_key=? AND revoked_at IS NULL',
+    ).run(nowMs, inviteKey);
+    return Number(result.changes) > 0;
   }
 
   close(): void { this.db.close(); }

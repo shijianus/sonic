@@ -64,9 +64,10 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
     const inputs = collectReleaseInputs(root);
     const paths = inputs.files.map((file: { path: string }) => file.path);
     expect(paths).toEqual(expect.arrayContaining([
-      'Dockerfile.ncm', '.dockerignore', 'player/scripts/fixture.ts', 'player/tsconfig.json',
+      'Dockerfile.ncm', '.dockerignore', 'CHECKLIST.log', 'player/scripts/fixture.ts', 'player/tsconfig.json',
       'player/src/auto-import/imports.d.ts', 'player/src/auto-import/components.d.ts',
       'player/eslint.config.mjs', 'scripts/theme-lint-baseline.json', '.github/workflows/ci.yml',
+      'scripts/deploy-pages.mjs', 'scripts/pages-release-lib.mjs', 'scripts/verify-pages-deploy-tree.mjs', 'scripts/verify-deployed-release.mjs', 'scripts/revoke-invite.mjs',
       'tests/fixture.ts', 'player/tests/fixture.ts', 'player/e2e/fixture.ts', 'js/playlist-view.js',
       'docs/RUNBOOK-ROLLBACK.md', 'docs/OPERATIONS.md', 'docs/release/RELEASE-CHECKLIST.md',
     ]));

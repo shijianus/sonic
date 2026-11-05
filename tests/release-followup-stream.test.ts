@@ -7,7 +7,7 @@ vi.mock('../functions/_lib/sonic/local-engine', async (original) => ({
   callLocalEngineJson: engineMock,
 }));
 
-import { resolvePlayableStream, type ResolvedStreamInfo } from '../functions/_lib/sonic/native-protocols';
+import { buildStreamCacheIdentifier, resolvePlayableStream, type ResolvedStreamInfo } from '../functions/_lib/sonic/native-protocols';
 import { clearSonicMemoryCacheForTest, getSonicCachedJson, putSonicCachedJson } from '../functions/_lib/sonic/cache';
 import { onRequest as stream } from '../functions/api/music/stream';
 import { resetRateLimitsForTest } from '../functions/_lib/sonic/security';
@@ -26,7 +26,7 @@ const info = (name: string, extra: Partial<ResolvedStreamInfo> = {}): ResolvedSt
 const engineSuccess = (value: ResolvedStreamInfo) => ({ ok: true, data: { ok: true, data: value }, latencyMs: 1, status: 200, circuitState: 'CLOSED' });
 const engineFailure = () => ({ ok: false, data: { ok: false }, error: 'unavailable', latencyMs: 1, status: 503, circuitState: 'OPEN', skippedByCircuit: true });
 const opts = { id: '1001', source: 'netease', quality: '320', title: 'Track', artist: 'Artist' };
-const cacheId = 'netease:1001:320:track:artist';
+const cacheId = buildStreamCacheIdentifier(opts);
 const request = (query = '', init: RequestInit = {}) => new Request(`https://sonic.test/api/music/stream?id=1001&source=netease&title=Track&artist=Artist${query}`, init);
 const deferred = <T>() => {
   let resolve!: (value: T) => void;

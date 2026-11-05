@@ -375,9 +375,13 @@ describe('P0-C: Content Licensing Matrix, Strict Allowlist Isolation & First-Par
 
   it('classifies all sources in CONTENT_SOURCE_LICENSING_REGISTRY and disables unapproved sources in strict-allowlist mode', () => {
     expect(CONTENT_SOURCE_LICENSING_REGISTRY.synthetic.authorizationStatus).toBe('APPROVED');
-    expect(CONTENT_SOURCE_LICENSING_REGISTRY.netease.authorizationStatus).toBe('PENDING_CONFIRMATION');
-    expect(CONTENT_SOURCE_LICENSING_REGISTRY.qq.authorizationStatus).toBe('PENDING_CONFIRMATION');
-    expect(CONTENT_SOURCE_LICENSING_REGISTRY.gdstudio.authorizationStatus).toBe('APPROVED');
+    expect(CONTENT_SOURCE_LICENSING_REGISTRY.netease.authorizationStatus).toBe('APPROVED');
+    expect(CONTENT_SOURCE_LICENSING_REGISTRY.qq.authorizationStatus).toBe('APPROVED');
+    expect(CONTENT_SOURCE_LICENSING_REGISTRY.kugou.authorizationStatus).toBe('APPROVED');
+    expect(CONTENT_SOURCE_LICENSING_REGISTRY.kuwo.authorizationStatus).toBe('APPROVED');
+    expect(CONTENT_SOURCE_LICENSING_REGISTRY.amll.authorizationStatus).toBe('APPROVED');
+    expect(CONTENT_SOURCE_LICENSING_REGISTRY.lrclib.authorizationStatus).toBe('APPROVED');
+    expect(CONTENT_SOURCE_LICENSING_REGISTRY.gdstudio.authorizationStatus).toBe('PROHIBITED');
     expect(CONTENT_SOURCE_LICENSING_REGISTRY.unblock.authorizationStatus).toBe('PROHIBITED');
     expect(CONTENT_SOURCE_LICENSING_REGISTRY.apple.authorizationStatus).toBe('CONDITIONAL');
 

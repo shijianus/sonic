@@ -30,9 +30,7 @@ const state = reactive({
 
 const { activeTab, trendingWindow, activeType } = toRefs(state)
 
-const displayedOfficialLists = computed(() => {
-  return state.officialLists.slice(0, 20)
-})
+const displayedOfficialLists = computed(() => state.officialLists)
 
 const mainTabs = computed(() => [
   { key: 'trending' as const, labelKey: 'charts.trending', icon: 'icon-[mdi--chart-line-variant]' },
@@ -97,10 +95,13 @@ const loadNewSongs = async () => {
   }
 }
 
+let listRequestGeneration = 0
+
 const selectList = async (item: any, force = false) => {
   if (!item?.id) return
   if (!force && state.selectedList?.id === item.id && state.listSongs.length > 0) return
 
+  const generation = ++listRequestGeneration
   state.selectedList = item
   state.listLoading = true
   try {
@@ -109,6 +110,7 @@ const selectList = async (item: any, force = false) => {
       playlistTrackAll({ id: numericId, limit: 100 }),
       playlistDetail({ id: Number(numericId) }),
     ])
+    if (generation !== listRequestGeneration) return
 
     let songs: SongData[] = []
     if (tracksRes.status === 'fulfilled' && tracksRes.value) {
@@ -120,10 +122,11 @@ const selectList = async (item: any, force = false) => {
 
     state.listSongs = songs
   } catch (err) {
+    if (generation !== listRequestGeneration) return
     console.error('[Charts] selectList failed:', err)
     state.listSongs = []
   } finally {
-    state.listLoading = false
+    if (generation === listRequestGeneration) state.listLoading = false
   }
 }
 
@@ -254,11 +257,12 @@ onMounted(() => {
       </div>
 
       <!-- 第二栏（下栏）：分类维度筛选（严格保持与歌手页完全一致的结构规范） -->
-      <div class="pt-2.5 h-[96px] flex flex-col justify-between">
+      <!-- 高度按官方榜两行按钮预留；所有 Tab 使用同一高度，切换时不跳动。 -->
+      <div class="pt-2.5 h-[154px] flex flex-col justify-between">
         <!-- 维度行 1：主分类切换（趋势榜 / 新歌速递 / 官方榜单） -->
         <div class="flex items-center gap-2 flex-wrap">
-          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[70px]">
-            榜单分类:
+          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[92px]">
+            {{ t('charts.categoryLabel') }}
           </span>
           <div class="flex items-center gap-1 flex-wrap">
             <button
@@ -279,12 +283,12 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- 维度行 2：子选项区域（高度固定 58px，以官方榜单两行为准，结构与视觉彻底同步） -->
-        <div class="h-[58px] flex flex-col justify-center">
+        <!-- 维度行 2：子选项区域（高度固定 116px，官方榜多行滚动也不会越界遮挡分类按钮） -->
+        <div class="h-[116px] flex flex-col justify-center">
           <!-- 模式 A：趋势榜时间范围选项 -->
           <div v-if="activeTab === 'trending'" class="flex items-center gap-2 flex-wrap">
-            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[70px]">
-              站内趋势:
+            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[92px]">
+              {{ t('charts.trendingLabel') }}
             </span>
             <div class="flex items-center gap-1 flex-wrap">
               <button
@@ -307,8 +311,8 @@ onMounted(() => {
 
           <!-- 模式 B：新歌榜地区选项 -->
           <div v-else-if="activeTab === 'newSong'" class="flex items-center gap-2 flex-wrap">
-            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[70px]">
-              新歌分类:
+            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[92px]">
+              {{ t('charts.newSongLabel') }}
             </span>
             <div class="flex items-center gap-1 flex-wrap">
               <button
@@ -331,10 +335,10 @@ onMounted(() => {
 
           <!-- 模式 C：官方榜单（结构完全同步，2 行紧凑排布，文字完整展示绝无省略截断） -->
           <div v-else class="flex items-start gap-2 flex-wrap">
-            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[70px] mt-1">
-              官方榜单:
+            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[92px] mt-1">
+              {{ t('charts.officialLabel') }}
             </span>
-            <div class="flex items-center gap-1 flex-wrap flex-1 min-w-0 max-h-[58px] overflow-hidden content-start">
+            <div class="official-filter-scroll flex items-center gap-1 flex-wrap flex-1 min-w-0 max-h-[116px] overflow-y-auto content-start pr-1" tabindex="0">
               <button
                 v-for="item in displayedOfficialLists"
                 :key="item.id"
@@ -369,6 +373,28 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* Keep every official chart reachable without silently clipping the filter row. */
+.official-filter-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(56, 189, 248, 0.55) transparent;
+  scrollbar-gutter: stable;
+  -ms-overflow-style: auto;
+}
+.official-filter-scroll::-webkit-scrollbar {
+  display: block;
+  width: 6px;
+}
+.official-filter-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.official-filter-scroll::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.5);
+  border-radius: 999px;
+}
+.official-filter-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.75);
+}
+
 /* ── 深度强化歌曲列表的垂直滚动条滑块（清晰可见、精致毛玻璃触感、支持拖拽） ── */
 .charts-content-container :deep(.song-list-scroll) {
   scrollbar-width: thin !important;

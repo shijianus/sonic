@@ -68,7 +68,7 @@ describe('public beta: equivalent engine paths have one authentication boundary'
 
 describe('public beta: actual capability allowlists', () => {
   it.each([undefined, 'audio', 'cover', 'lyrics', 'catalog'] as const)('does not allow vendor apex services for capability %s', (capability) => {
-    for (const env of [{}, { SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'gdstudio' }]) {
+    for (const env of [{}, { SONIC_CONTENT_POLICY: 'default', SONIC_ALLOWED_SOURCES: 'netease' }]) {
       const allowedDomains = getAllowedMediaDomains(env, capability);
       expect(allowedDomains.length).toBeGreaterThan(0);
       for (const host of ['qq.com', 'mail.qq.com', '163.com', 'mail.163.com', '126.net', 'mail.126.net', 'evil.qq.com.example.org']) {

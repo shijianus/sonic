@@ -10,6 +10,7 @@ import {
 import type { AppEnv } from '../types';
 import { extractAuthCredentials, readCookie, shouldUseSecureCookie, verifyAuth } from '../auth';
 import { isEnvEnabled } from './config';
+import { isCloudflarePages, isProductionEnvironment } from './environment';
 import { jsonResponse } from '../http';
 import { sha256Bytes, sha256Hex } from './crypto';
 import {
@@ -319,6 +320,13 @@ export interface RateLimitDecision {
   degraded?: boolean;
 }
 
+function requireDistributedRateLimit(env?: AppEnv): boolean {
+  // Production Pages deployments must bind the native atomic limiter. Without
+  // it, per-isolate memory limits are trivially bypassed by replica fan-out.
+  const productionEdge = isCloudflarePages(env) && isProductionEnvironment(env) && env?.SONIC_RUNTIME !== 'linux-engine';
+  return isEnvEnabled(env?.SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT, productionEdge);
+}
+
 export function getRateLimitConfigStatus(env?: AppEnv): {
   configuredBackend: 'native' | 'kv' | 'memory';
   distributedAtomic: boolean;
@@ -332,7 +340,7 @@ export function getRateLimitConfigStatus(env?: AppEnv): {
   const configuredBackend = hasNative ? 'native' : hasKv ? 'kv' : 'memory';
   const isSingleNodeEngine = env?.SONIC_RUNTIME === 'linux-engine';
   const distributedAtomic = hasNative || isSingleNodeEngine;
-  const requireDistributed = isEnvEnabled(env?.SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT, false);
+  const requireDistributed = requireDistributedRateLimit(env);
   const failClosedOnDegrade = isEnvEnabled(env?.SONIC_RATE_LIMIT_FAIL_CLOSED, true);
   return {
     configuredBackend,
@@ -434,7 +442,7 @@ export async function evaluateGatewayRateLimit(
   // Strict production guard: never silently degrade on multi-isolate edge when native limiter is required
   if (
     !isSingleNodeEngine &&
-    isEnvEnabled(env?.SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT, false) &&
+    requireDistributedRateLimit(env) &&
     isEnvEnabled(env?.SONIC_RATE_LIMIT_FAIL_CLOSED, true)
   ) {
     recordRateLimitMetric({
@@ -603,7 +611,7 @@ export async function evaluateAuthRateLimit(
 
   if (
     !isSingleNodeEngine &&
-    isEnvEnabled(env?.SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT, false) &&
+    requireDistributedRateLimit(env) &&
     isEnvEnabled(env?.SONIC_RATE_LIMIT_FAIL_CLOSED, true)
   ) {
     recordRateLimitMetric({

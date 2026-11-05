@@ -341,7 +341,7 @@ export async function callLocalEngineJson<T = any>(
       if ((readiness.required || accountRoute) && !assertion) throw new EngineIdentityError();
     }
     const response = await fetchWithRuntimeBudget(`${cfg.localEngineUrl}${pathWithQuery.startsWith('/') ? '' : '/'}${pathWithQuery}`, {
-      method, headers, body: method !== 'GET' ? options?.body : undefined,
+      method, headers, body: method !== 'GET' ? options?.body : undefined, redirect: 'error',
     }, { timeoutMs, signals });
     if (response.status >= 500 || INSTANT_TRIP_HTTP_STATUSES.has(response.status)) {
       const error = `Engine HTTP ${response.status}`;
@@ -431,7 +431,7 @@ export async function callLocalEngineStream(
   let bodyStarted = false;
   try {
     const response = await fetchWithRuntimeBudget(`${cfg.localEngineUrl}${pathWithQuery.startsWith('/') ? '' : '/'}${pathWithQuery}`, {
-      method: options?.method || 'GET', headers,
+      method: options?.method || 'GET', headers, redirect: 'error',
     }, {
       signals,
       timeoutMs: positiveMs(env?.SONIC_STREAM_TOTAL_TIMEOUT_MS, 30 * 60_000),

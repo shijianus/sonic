@@ -67,12 +67,21 @@ async function runTests() {
   console.log('\n2. Testing Condition 1b (External Source Fallback & Honest Provenance)');
   {
     const cfg = getSonicConfig({});
-    assert(cfg.enableGdstudio === true, 'SONIC_ENABLE_GDSTUDIO defaults to true (external fallback)');
+    assert(cfg.enableGdstudio === false, 'SONIC_ENABLE_GDSTUDIO is force-disabled (PROHIBITED source)');
     assert(cfg.enableLyriva === false, 'SONIC_ENABLE_LYRIVA defaults to false');
     assert(cfg.enableUnblock === false, 'SONIC_ENABLE_UNBLOCK defaults to false');
 
+    const cfgForced = getSonicConfig({
+      SONIC_ENABLE_GDSTUDIO: '1',
+      SONIC_ENABLE_LYRIVA: '1',
+      SONIC_ENABLE_UNBLOCK: '1',
+    });
+    assert(cfgForced.enableGdstudio === false, 'SONIC_ENABLE_GDSTUDIO=1 cannot enable a PROHIBITED source');
+    assert(cfgForced.enableLyriva === false, 'SONIC_ENABLE_LYRIVA=1 cannot enable a PROHIBITED source');
+    assert(cfgForced.enableUnblock === false, 'SONIC_ENABLE_UNBLOCK=1 cannot enable a PROHIBITED source');
+
     const cfgDisabled = getSonicConfig({ SONIC_ENABLE_GDSTUDIO: '0' });
-    assert(cfgDisabled.enableGdstudio === false, 'SONIC_ENABLE_GDSTUDIO=0 disables gdstudio');
+    assert(cfgDisabled.enableGdstudio === false, 'SONIC_ENABLE_GDSTUDIO=0 keeps gdstudio disabled');
 
     const gdRes = await handleSingleProviderSearchRequest(
       'gdstudio',

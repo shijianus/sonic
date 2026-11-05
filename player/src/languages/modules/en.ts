@@ -210,6 +210,10 @@ export default {
     newSongs: 'New Songs',
     official: 'Official Charts',
     trending: 'Trending',
+    categoryLabel: 'Category:',
+    trendingLabel: 'Trending:',
+    newSongLabel: 'New songs:',
+    officialLabel: 'Official charts:',
   },
   components: {
     infiniteScroll: {
