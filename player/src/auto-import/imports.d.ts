@@ -241,11 +241,11 @@ declare global {
   export type { QualityLevel, QualityChoiceMeta, ProbeQualityItem, SongProbeResult } from '../utils/qualityProbe'
   import('../utils/qualityProbe')
   // @ts-ignore
-  export type { AccessMode, AccessStatusKind, AccessErrorKind, AccessStatusResponse, AccessState } from '../stores/modules/access'
-  import('../stores/modules/access')
-  // @ts-ignore
   export type { SonicPocketTrack, SonicPocketPlayback, SonicPocketLyricWord, SonicPocketLyricLine, SonicPocketLyrics, SonicPocketMessage, PocketCommandMessage } from '../utils/sonicBlogBridge'
   import('../utils/sonicBlogBridge')
+  // @ts-ignore
+  export type { AccessMode, AccessStatusKind, AccessErrorKind, AccessStatusResponse, AccessState } from '../stores/modules/access'
+  import('../stores/modules/access')
   // @ts-ignore
   export type { UserInfo, AuthState } from '../stores/modules/auth'
   import('../stores/modules/auth')
