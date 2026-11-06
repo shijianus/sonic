@@ -15,6 +15,7 @@ import {
   base64UrlEncode,
   readCookie,
   shouldUseSecureCookie,
+  verifyAuth,
 } from '../auth';
 import { sha256Hex } from './crypto';
 import { normalizeSourceId } from './licensing';
@@ -99,6 +100,20 @@ export function parseIncomingGrantCookies(rawCookieHeader: string | null): Incom
   return Array.from(map.values());
 }
 
+export function checkCookieSecure(requestOrUrlOrSecure?: Request | URL | boolean): boolean {
+  if (typeof requestOrUrlOrSecure === 'boolean') return requestOrUrlOrSecure;
+  if (!requestOrUrlOrSecure) return true;
+  try {
+    if (requestOrUrlOrSecure instanceof Request) {
+      return shouldUseSecureCookie(new URL(requestOrUrlOrSecure.url));
+    }
+    if (requestOrUrlOrSecure instanceof URL) {
+      return shouldUseSecureCookie(requestOrUrlOrSecure);
+    }
+  } catch {}
+  return true;
+}
+
 export function buildGrantCookieHeaders(
   rawCookieHeader: string | null,
   newGrant: {
@@ -106,11 +121,14 @@ export function buildGrantCookieHeaders(
     token: string;
     expiresAtSec: number;
   },
+  requestOrSecure?: Request | URL | boolean,
 ): string[] {
+  const isSecure = checkCookieSecure(requestOrSecure);
+  const secureAttr = isSecure ? '; Secure' : '';
   const nowSec = Math.floor(Date.now() / 1000);
   const remainingLifetimeSec = Math.max(1, newGrant.expiresAtSec - nowSec);
   const currentCookieName = getTrackGrantCookieName(newGrant.tid);
-  const newCookieHeader = `${currentCookieName}=${newGrant.token}; Path=/api/music/stream; HttpOnly; SameSite=Lax; Max-Age=${remainingLifetimeSec}`;
+  const newCookieHeader = `${currentCookieName}=${newGrant.token}; Path=/api/music/stream; HttpOnly; SameSite=Lax; Max-Age=${remainingLifetimeSec}${secureAttr}`;
 
   const incomingGrants = parseIncomingGrantCookies(rawCookieHeader);
   const otherGrants = incomingGrants.filter((g) => g.name !== currentCookieName);
@@ -123,7 +141,7 @@ export function buildGrantCookieHeaders(
     const toEvict = otherGrants.slice(0, evictCount);
     for (const evicted of toEvict) {
       setCookieHeaders.push(
-        `${evicted.name}=; Path=/api/music/stream; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+        `${evicted.name}=; Path=/api/music/stream; HttpOnly; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT${secureAttr}`,
       );
     }
   }
@@ -267,6 +285,58 @@ export async function getOrCreateAnonSession(
   return { sessionId: newSessionId, isNew: true, cookieHeader };
 }
 
+export function extractClientIpForTicket(request: Request, env?: AppEnv): string {
+  const secret = env?.SONIC_ENGINE_SECRET;
+  if (secret && secret.length >= 32 && request.headers.get('X-Sonic-Engine-Secret') === secret) {
+    const forwarded = request.headers.get('X-Sonic-Client-IP')?.trim();
+    if (forwarded) return forwarded.replace(/^\[|\]$/g, '');
+  }
+  const cfIp = request.headers.get('CF-Connecting-IP')?.trim();
+  if (cfIp) return cfIp.replace(/^\[|\]$/g, '');
+  return 'unknown';
+}
+
+export async function resolveGuardSubject(
+  request: Request,
+  env?: AppEnv,
+): Promise<string> {
+  // 1. Authenticated user (API Key / user session cookie) -> user:<email>
+  try {
+    const auth = await verifyAuth(request, env || {});
+    if (auth.authenticated && auth.user?.email) {
+      return `user:${auth.user.email.toLowerCase().trim()}`;
+    }
+  } catch {}
+
+  // 2. Verified sonic_anon_session cookie (HMAC signed) -> anon:<完整会话ID>
+  // Strictly ignores unverified X-Sonic-Anon-Id header
+  const secret = getStreamGuardSecret(env);
+  const rawCookie = readCookie(request, SONIC_ANON_SESSION_COOKIE);
+  if (secret.length >= 32 && rawCookie && rawCookie.includes('.')) {
+    const [rawId, rawSig] = rawCookie.split('.');
+    if (rawId && rawSig && /^[a-zA-Z0-9_-]{16,64}$/.test(rawId)) {
+      try {
+        const key = await getAnonSessionKey(secret);
+        const sigBytes = base64UrlDecode(rawSig);
+        const valid = await crypto.subtle.verify(
+          'HMAC',
+          key,
+          sigBytes as any,
+          new TextEncoder().encode(rawId),
+        );
+        if (valid) {
+          return `anon:${rawId}`;
+        }
+      } catch {}
+    }
+  }
+
+  // 3. Unauthenticated / No valid session -> anon:ip:<ip哈希>
+  const clientIp = extractClientIpForTicket(request, env);
+  const ipHash = sha256Hex(clientIp).slice(0, 16);
+  return `anon:ip:${ipHash}`;
+}
+
 // ── 2. Playback Grant Store (Active Playback Authorization) ──
 
 const memoryPlaybackGrants = new Map<string, PlaybackGrant>();
@@ -346,6 +416,9 @@ export async function issuePlaybackGrantToken(options: {
   durationSec?: number;
   nonce?: string;
   ip?: string;
+  request?: Request;
+  url?: URL;
+  isSecure?: boolean;
   env?: AppEnv;
 }): Promise<{ token: string; cookieHeader: string; expiresAtSec: number }> {
   const secret = getStreamGuardSecret(options.env);
@@ -387,8 +460,10 @@ export async function issuePlaybackGrantToken(options: {
   const sigB64url = base64UrlEncode(new Uint8Array(sig));
   const token = `${GRANT_PREFIX}.${payloadB64url}.${sigB64url}`;
 
+  const isSecure = checkCookieSecure(options.request || options.url || options.isSecure);
+  const secureAttr = isSecure ? '; Secure' : '';
   const cookieName = getTrackGrantCookieName(options.tid);
-  const cookieHeader = `${cookieName}=${token}; Path=/api/music/stream; HttpOnly; SameSite=Lax; Max-Age=${lifetimeSec}`;
+  const cookieHeader = `${cookieName}=${token}; Path=/api/music/stream; HttpOnly; SameSite=Lax; Max-Age=${lifetimeSec}${secureAttr}`;
 
   return { token, cookieHeader, expiresAtSec };
 }
@@ -512,9 +587,7 @@ export async function verifyPlaybackGrantToken(
         note: 'Client IP drifted in active grant session (e.g. Wi-Fi to cellular); permitted without blocking',
       }),
     );
-  } else if (!sessionMatches && !ipMatches) {
-    return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
-  } else if (options.sub?.startsWith('anon:attacker')) {
+  } else if ((options.sub || options.ip) && !sessionMatches && !ipMatches) {
     return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
   }
 
@@ -647,9 +720,7 @@ export async function verifyStreamTicket(
           note: 'Client IP drifted in active grant session (e.g. Wi-Fi to cellular); permitted without blocking',
         }),
       );
-    } else if (!sessionMatches && !ipMatches) {
-      return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
-    } else if (options.sub?.startsWith('anon:attacker')) {
+    } else if ((options.sub || options.ip) && !sessionMatches && !ipMatches) {
       return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
     }
 
@@ -757,9 +828,7 @@ export async function verifyStreamTicket(
         note: 'Client IP drifted on ticket verification (e.g. Wi-Fi to cellular); permitted without blocking',
       }),
     );
-  } else if (!sessionMatches && !ipMatches && payload.sub && options.sub && !payload.sub.startsWith('anon:')) {
-    return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
-  } else if (options.sub?.startsWith('anon:attacker')) {
+  } else if ((options.sub || options.ip) && !sessionMatches && !ipMatches) {
     return { valid: false, error: 'TICKET_SESSION_MISMATCH' };
   }
 
@@ -851,30 +920,53 @@ export function checkStreamCorsAndFetchMetadata(
     .map((o) => o.trim().toLowerCase())
     .filter(Boolean);
 
+  let isAllowedOrigin = false;
+  let matchedOrigin = '';
+
   if (origin) {
     const normOrigin = origin.trim().toLowerCase();
     try {
       const reqOrigin = new URL(request.url).origin.toLowerCase();
       if (normOrigin === reqOrigin) {
-        return { allowed: true, allowOriginHeader: origin };
+        isAllowedOrigin = true;
+        matchedOrigin = origin;
       }
     } catch {}
 
-    const isAllowed = allowedList.some((allowed) => {
-      try {
-        const u = new URL(allowed);
-        return u.origin.toLowerCase() === normOrigin;
-      } catch {
-        return allowed === normOrigin;
-      }
-    });
+    if (!isAllowedOrigin) {
+      isAllowedOrigin = allowedList.some((allowed) => {
+        try {
+          const u = new URL(allowed);
+          if (u.origin.toLowerCase() === normOrigin) {
+            matchedOrigin = origin;
+            return true;
+          }
+          return false;
+        } catch {
+          if (allowed === normOrigin) {
+            matchedOrigin = origin;
+            return true;
+          }
+          return false;
+        }
+      });
+    }
 
-    if (!isAllowed) {
+    if (!isAllowedOrigin) {
       return {
         allowed: false,
         reason: 'ORIGIN_FORBIDDEN',
       };
     }
+  }
+
+  // Sec-Fetch-Site 判断：cross-site 且 Origin 不在白名单时拒绝
+  const fetchSite = request.headers.get('Sec-Fetch-Site')?.toLowerCase().trim();
+  if (fetchSite === 'cross-site' && !isAllowedOrigin) {
+    return {
+      allowed: false,
+      reason: 'CROSS_SITE_FETCH_FORBIDDEN',
+    };
   }
 
   // Sec-Fetch-Dest & Sec-Fetch-Site (where supported by browser)
@@ -891,7 +983,8 @@ export function checkStreamCorsAndFetchMetadata(
     };
   }
 
-  return { allowed: true, allowOriginHeader: origin || '*' };
+  const allowOriginHeader = matchedOrigin || allowedList[0] || origin || '*';
+  return { allowed: true, allowOriginHeader };
 }
 
 // ── 5. Sliding-Window Quota & Anomaly Tracking ──

@@ -12,13 +12,13 @@ import { downloadedMusicDB, localMusicDB } from '@/utils/indexedDB'
 import { musicStreamUrl, songSourceCandidates, songPlaybackSource, songSourcePair, streamSourcePair } from '@/utils/audioUtils'
 import { inspectGatewayHeaders, markStreamFailure, gatewayHealth } from '@/utils/gatewayHealth'
 import { sonicBlogBridge } from '@/utils/sonicBlogBridge'
-import { requestPlaybackTicket } from '@/utils/streamGuard'
+import { requestPlaybackTicket, isTicketExpired, isTicketOrGrantError } from '@/utils/streamGuard'
 import piniaPersistConfig from '../persist'
 
 /** 全局 Audio 单例（整个应用只创建一个 HTMLAudioElement） */
 let globalAudio: HTMLAudioElement | null = null
-/** 标记事件是否已绑定，防止重复监听 */
-let eventsBound = false
+/** 标记事件已绑定的音频元素，防止重复监听 */
+let boundAudioElement: HTMLAudioElement | null = null
 /** 标记当前播放歌曲是否已触发过下一首预加载，避免重复发起 */
 let hasPreloadedNext = false
 /** 推荐行为追踪：记录当前歌曲是否已上报过起播与 50% 有效播放进度 */
@@ -229,7 +229,6 @@ export const useAudioStore = defineStore('audio', {
     initAudio() {
       if (!this.audio.audio) {
         this.audio.audio = getAudioSingleton()
-        this.setupAudioEvents()
         sonicBlogBridge.init()
         sonicBlogBridge.onCommand((cmd) => {
           if (cmd.action === 'SEEK' && typeof cmd.currentTime === 'number') {
@@ -263,6 +262,7 @@ export const useAudioStore = defineStore('audio', {
           }
         }
       }
+      this.setupAudioEvents()
     },
 
     /** blob: URL 仅在创建它的页面会话内有效；未重建过的视为失效 */
@@ -353,7 +353,8 @@ export const useAudioStore = defineStore('audio', {
     // 设置音频事件监听
     setupAudioEvents() {
       if (!this.audio.audio) return
-      if (eventsBound) return
+      if (boundAudioElement === this.audio.audio) return
+      boundAudioElement = this.audio.audio
 
       const audio = this.audio.audio
 
@@ -514,6 +515,76 @@ export const useAudioStore = defineStore('audio', {
         const failedSongId = this.audio.currentSong?.id ?? null
         const failedGeneration = playbackGeneration
         const currentSong = this.audio.currentSong
+        const savedTime = audio.currentTime || this.audio.currentTime || 0
+
+        // 区分两类播放错误：
+        // a) 票据/授权问题（过期、缺失）：只刷新票据，保持同一音源，使用相同曲目重新加载，并恢复到出错时的 currentTime，不得消耗“切换音源”的重试次数，也不得从 0 秒重新开始。
+        // b) 真正的音源失败（404/版权/上游错误）：沿用现有的 failover 逻辑。
+        let isTicketOrAuthIssue = false
+        if (failedSrc && failedSrc.includes('/api/music/stream')) {
+          if (isTicketExpired(failedSrc)) {
+            isTicketOrAuthIssue = true
+          } else {
+            let diagnosticResponse: Response | undefined
+            try {
+              const diagRes = await fetch(failedSrc, {
+                method: 'GET',
+                headers: { Range: 'bytes=0-0' },
+                signal: AbortSignal.timeout(3000),
+              })
+              diagnosticResponse = diagRes
+              if (diagRes.status === 403) {
+                try {
+                  const errJson: any = await diagRes.json()
+                  if (isTicketOrGrantError(diagRes.status, errJson)) {
+                    isTicketOrAuthIssue = true
+                  }
+                } catch {
+                  isTicketOrAuthIssue = true
+                }
+              }
+            } catch {
+            } finally {
+              void diagnosticResponse?.body?.cancel().catch(() => {})
+            }
+          }
+        }
+
+        if (isTicketOrAuthIssue && currentSong && !currentSong.isLocal) {
+          console.warn(
+            `[Stream Guard] Playback ticket/grant expired or invalid for song ${failedSongId}. Refreshing ticket and resuming at ${savedTime}s without changing source...`
+          )
+          try {
+            this.audio.isLoading = true
+            // 保持同一音源 (tryNextSource = false)，强制拉取最新票据 (forceFresh = true)
+            await this._fetchAndApplyUrl(currentSong, true, false)
+            if (failedGeneration !== playbackGeneration || this.audio.currentSong?.id !== failedSongId || !currentSong.url) return
+
+            if (savedTime > 0) {
+              const restoreProgress = () => {
+                try {
+                  if (audio.duration && audio.duration > 0) {
+                    audio.currentTime = Math.min(savedTime, audio.duration)
+                  } else {
+                    audio.currentTime = savedTime
+                  }
+                } catch {}
+              }
+              audio.addEventListener('loadedmetadata', restoreProgress, { once: true })
+            }
+            this._loadAudioSrc(currentSong.url, true)
+            await audio.play()
+            if (failedGeneration !== playbackGeneration || this.audio.currentSong?.id !== failedSongId) return
+            clearStartupWatchdog()
+            this.audio.error = null
+            this._dismissPlaybackErrorToast()
+            return
+          } catch (refreshErr) {
+            console.warn('[Stream Guard] Refresh ticket and resume failed, falling back to source failover:', refreshErr)
+          } finally {
+            this.audio.isLoading = false
+          }
+        }
 
         // 核心容灾：优先静默换源（Failover）轮询候选音轨或跨平台平替源，轮换穷尽前绝不轻易向用户报错！
         const songKey = currentSong ? songPlaybackKey(currentSong) : ''
@@ -586,7 +657,6 @@ export const useAudioStore = defineStore('audio', {
           diagnosticNetworkFailure ? new Error('network fetch failed') : audio.error || e
         )
       })
-      eventsBound = true
     },
 
     /** 播放歌曲（自动获取缺失的播放地址） */
@@ -675,6 +745,10 @@ export const useAudioStore = defineStore('audio', {
         if (shouldFallbackReload) {
           try {
             this.audio.isLoading = true
+            // 若凭据已过期或缺失，先拉取最新票据再载入播放，确保续播不卡死
+            if (this.audio.currentSong && !this.audio.currentSong.isLocal && (isTicketExpired(this.audio.currentSong.url) || !this.audio.currentSong.url)) {
+              await this._fetchAndApplyUrl(this.audio.currentSong, true, false)
+            }
             if (resumeTime > 0) {
               const restoreProgress = () => {
                 try {
@@ -725,7 +799,9 @@ export const useAudioStore = defineStore('audio', {
         const wrongPair = gateway && !gateway.searchParams.has('target') && !gateway.searchParams.has('url') &&
           (!requestedPair || !sourcePair || requestedPair.platform !== sourcePair.platform || requestedPair.platformId !== sourcePair.platformId)
         // Repair a mapper's legacy default-source URL before loading a foreign provider ID.
-        if ((!currentSong.url || wrongPair) && !currentSong.isLocal) {
+        // Also refresh if URL is missing or has an expired ticket (e.g. restored from persisted playlist).
+        const hasStaleTicket = isTicketExpired(currentSong.url)
+        if ((!currentSong.url || wrongPair || hasStaleTicket) && !currentSong.isLocal) {
           await this._fetchAndApplyUrl(currentSong)
         }
 
@@ -935,23 +1011,28 @@ export const useAudioStore = defineStore('audio', {
           if (song.duration) params.set('duration', String(Math.round(song.duration > 1000 ? song.duration / 1000 : song.duration)))
           params.set('quality', settingsStore.audioQuality)
           if (fresh) params.set('nocache', '1')
-          const gatewayUrl = () => `/api/music/stream?${params.toString()}`
           // A retry must not reuse a stale URL from url, streamUrl, qualities or song/url/v1.
-          if (fresh) {
+          const resolveFinalGatewayUrl = async () => {
             try {
-              const ticket = await requestPlaybackTicket(chosen.platformId, chosen.platform, settingsStore.audioQuality)
+              const ticket = await requestPlaybackTicket(
+                chosen.platformId,
+                chosen.platform,
+                settingsStore.audioQuality,
+                'play',
+                fresh
+              )
               if (ticket) params.set('t', ticket)
             } catch {}
-            return gatewayUrl()
+            return `/api/music/stream?${params.toString()}`
+          }
+
+          if (fresh) {
+            return await resolveFinalGatewayUrl()
           }
           const ownUrl = song.qualities?.find((q: { level: string; streamUrl?: string }) => q.level === settingsStore.audioQuality)?.streamUrl || song.streamUrl || song.url || ''
           if (ownUrl && !musicStreamUrl(ownUrl)) return ownUrl
           if (ownUrl) {
-            try {
-              const ticket = await requestPlaybackTicket(chosen.platformId, chosen.platform, settingsStore.audioQuality)
-              if (ticket) params.set('t', ticket)
-            } catch {}
-            return gatewayUrl()
+            return await resolveFinalGatewayUrl()
           }
           // Only the legacy NetEase endpoint understands bare numeric IDs. All other
           // providers use the source-aware gateway directly.
@@ -967,11 +1048,7 @@ export const useAudioStore = defineStore('audio', {
               if (url && !musicStreamUrl(url)) return url
             } catch {}
           }
-          try {
-            const ticket = await requestPlaybackTicket(chosen.platformId, chosen.platform, settingsStore.audioQuality)
-            if (ticket) params.set('t', ticket)
-          } catch {}
-          return gatewayUrl()
+          return await resolveFinalGatewayUrl()
         })()
         flight = { promise, generation, version }
         pendingUrlRequests.set(requestKey, flight)

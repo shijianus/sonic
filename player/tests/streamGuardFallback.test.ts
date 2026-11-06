@@ -23,7 +23,13 @@ vi.mock('@/utils/gatewayHealth', () => ({
 }))
 
 import { useAudioStore } from '@/stores/modules/audio'
-import { requestPlaybackTicket, clearPlaybackTicketCache } from '@/utils/streamGuard'
+import {
+  requestPlaybackTicket,
+  clearPlaybackTicketCache,
+  stripTicketFromUrl,
+  isTicketExpired,
+  isTicketOrGrantError,
+} from '@/utils/streamGuard'
 
 const song = (id: string | number, extra: Partial<Song> = {}): Song => ({
   id,
@@ -195,5 +201,172 @@ describe('Stream Guard Fallback & Resilience (Requirement 4)', () => {
     expect(audio.src).toContain('id=song-A')
     expect(audio.src).toContain(`t=${ticketA}`)
     expect(store.audio.currentSong?.id).toBe('song-A')
+  })
+
+  it('Requirement 7: fetchAndApplyUrl strictly attaches ticket before evaluating final URL', async () => {
+    const rawTicket = 'st_v1.payload_exact.sig_exact'
+    httpPostMock.mockResolvedValue({
+      ok: true,
+      ticket: rawTicket,
+      expiresIn: 120,
+    })
+
+    const testSong = song('track-req-7', { platform: 'netease', name: 'Exact Ticket Test' })
+    const { store, audio } = ready(testSong)
+
+    await store.playSong(testSong, 0, true)
+
+    const finalUrl = new URL(audio.src)
+    expect(finalUrl.pathname).toBe('/api/music/stream')
+    expect(finalUrl.searchParams.get('id')).toBe('track-req-7')
+    expect(finalUrl.searchParams.get('source')).toBe('netease')
+    expect(finalUrl.searchParams.get('t')).toBe(rawTicket)
+    expect(finalUrl.searchParams.has('t')).toBe(true)
+  })
+
+  it('Requirement 8: Ticket/grant expiration during playback refreshes ticket, retains same source platform without consuming retry attempts, and preserves currentTime', async () => {
+    let ticketCounter = 1
+    httpPostMock.mockImplementation(async () => ({
+      ok: true,
+      ticket: `st_v1.ticket_version_${ticketCounter++}.sig`,
+      expiresIn: 120,
+    }))
+
+    const candidateSources = [
+      { platform: 'netease', platformId: '10001' },
+      { platform: 'qq', platformId: '001qq' },
+    ]
+    const testSong = song('10001', {
+      platform: 'netease',
+      name: 'Resilient Track',
+      sources: candidateSources,
+    })
+    const { store, audio } = ready(testSong)
+
+    // 1. Initial play
+    await store.playSong(testSong, 0, true)
+    expect(audio.src).toContain('t=st_v1.ticket_version_1.sig')
+    expect(audio.src).toContain('source=netease')
+
+    // 2. Playback reaches 42 seconds
+    audio.currentTime = 42
+    store.audio.currentTime = 42
+
+    // 3. Ticket expires or diagnostic check returns 403 STREAM_TICKET_REQUIRED
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            brand: 'Sonic',
+            error: {
+              code: 'TICKET_EXPIRED',
+              message: 'Ticket expired',
+            },
+          }),
+          { status: 403, headers: { 'Content-Type': 'application/json' } }
+        )
+      )
+    )
+
+    // Simulate audio error event (e.g. Range request rejected by server)
+    const errorEvent = new Event('error')
+    audio.dispatchEvent(errorEvent)
+
+    // Allow async error handler to complete
+    await new Promise((r) => setTimeout(r, 50))
+
+    // Assert:
+    // a) Sound source platform is STILL netease (NO failover to qq)
+    expect(audio.src).toContain('source=netease')
+    expect(audio.src).toContain('id=10001')
+
+    // b) New ticket was requested and applied
+    expect(audio.src).toContain('t=st_v1.ticket_version_2.sig')
+
+    // c) Retains same sound source, and progress is restored
+    expect(store.audio.currentTime).toBe(42)
+  })
+
+  it('Requirement 8b: True sound source failure (404/copyright) triggers multi-source failover and consumes retry attempt', async () => {
+    httpPostMock.mockResolvedValue({
+      ok: true,
+      ticket: 'st_v1.valid.sig',
+      expiresIn: 120,
+    })
+
+    const candidateSources = [
+      { platform: 'netease', platformId: '20001' },
+      { platform: 'qq', platformId: '002qq' },
+    ]
+    const testSong = song('20001', {
+      platform: 'netease',
+      name: 'Failover Track',
+      sources: candidateSources,
+    })
+    const { store, audio } = ready(testSong)
+
+    await store.playSong(testSong, 0, true)
+    expect(audio.src).toContain('source=netease')
+
+    // Upstream 404 permanent missing audio
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 404 }))
+    )
+
+    // Trigger error
+    audio.dispatchEvent(new Event('error'))
+    await new Promise((r) => setTimeout(r, 50))
+
+    // Assert: failover switched candidate source to QQ
+    expect(audio.src).toContain('source=qq')
+    expect(audio.src).toContain('id=002qq')
+  })
+
+  it('Requirement 9 & 10: Persisted playlist strips t=, and resuming after pause beyond TTL refreshes ticket and preserves progress', async () => {
+    // 1. Test stripTicketFromUrl
+    const urlWithTicket = '/api/music/stream?id=100&source=netease&t=st_v1.secret.sig&quality=320'
+    const stripped = stripTicketFromUrl(urlWithTicket)
+    expect(stripped).not.toContain('t=')
+    expect(stripped).toContain('id=100')
+    expect(stripped).toContain('source=netease')
+
+    // 2. Test isTicketExpired with expired timestamp (nowSec > exp)
+    const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 100 }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '')
+    const expiredUrl = `/api/music/stream?id=100&source=netease&t=st_v1.${expiredPayload}.sig`
+    expect(isTicketExpired(expiredUrl)).toBe(true)
+
+    // Valid ticket (exp 1000s in the future)
+    const validPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 1000 }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '')
+    const validUrl = `/api/music/stream?id=100&source=netease&t=st_v1.${validPayload}.sig`
+    expect(isTicketExpired(validUrl)).toBe(false)
+
+    // Unticketed gateway stream is considered expired/requiring ticket
+    expect(isTicketExpired('/api/music/stream?id=100&source=netease')).toBe(true)
+
+    // 3. Resuming playback when song has an expired ticket fetches fresh ticket
+    let ticketCounter = 1
+    httpPostMock.mockImplementation(async () => ({
+      ok: true,
+      ticket: `st_v1.fresh_ticket_${ticketCounter++}.sig`,
+      expiresIn: 120,
+    }))
+
+    const testSong = song('30001', {
+      platform: 'netease',
+      url: expiredUrl,
+    })
+    const { store, audio } = ready(testSong)
+
+    // Calling playSong on song with expired ticket -> automatically fetches fresh ticket!
+    await store.playSong(testSong, 0, true)
+    expect(audio.src).toContain('t=st_v1.fresh_ticket_1.sig')
   })
 })

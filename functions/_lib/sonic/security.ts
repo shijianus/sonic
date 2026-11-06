@@ -12,6 +12,7 @@ import { extractAuthCredentials, readCookie, shouldUseSecureCookie, verifyAuth }
 import { isEnvEnabled } from './config';
 import { jsonResponse } from '../http';
 import { sha256Bytes, sha256Hex } from './crypto';
+import { resolveGuardSubject } from './ticket';
 import {
   recordRateLimitMetric,
   redactSensitiveString,
@@ -363,12 +364,6 @@ export async function evaluateGatewayRateLimit(
     Math.max(1, parseInt(String(env?.SONIC_RATE_LIMIT_ANON_RPM || '240'), 10) || 240),
   );
   let subject = `anon:${ip}`;
-  const anonCookie = readCookie(request, 'sonic_anon_session');
-  const anonHeader = request.headers.get('x-sonic-anon-id')?.trim();
-  const rawAnonSession = (anonCookie && anonCookie.includes('.') ? anonCookie.split('.')[0] : anonCookie) || anonHeader;
-  if (rawAnonSession && /^[a-zA-Z0-9_-]{16,64}$/.test(rawAnonSession)) {
-    subject = `anon:sess_${sha256Hex(rawAnonSession).slice(0, 16)}`;
-  }
 
   if (isEngineCaller) {
     tier = 'engine';
@@ -401,6 +396,22 @@ export async function evaluateGatewayRateLimit(
         backend: 'auth-gate',
         degraded: false,
       };
+    } else {
+      tier = 'anonymous';
+      const guardMode = String(env?.SONIC_STREAM_GUARD || 'off').trim().toLowerCase();
+      if (guardMode === 'off') {
+        // Must be identical to eddcf54 baseline
+        subject = `anon:${ip}`;
+      } else {
+        // Under monitor / enforce: only HMAC-verified session can be used as subject,
+        // stacked with IP to ensure session rotation cannot bypass IP limit
+        const guardSubject = await resolveGuardSubject(request, env);
+        if (guardSubject.startsWith('anon:') && !guardSubject.startsWith('anon:ip:')) {
+          subject = `anon:${ip}:${guardSubject}`;
+        } else {
+          subject = `anon:${ip}`;
+        }
+      }
     }
   }
 
@@ -419,6 +430,27 @@ export async function evaluateGatewayRateLimit(
   }
   if (nativeLimiter && typeof nativeLimiter.limit === 'function') {
     try {
+      if (subject !== `anon:${ip}` && subject.startsWith('anon:')) {
+        const ipOutcome = await nativeLimiter.limit({ key: `${scope}:anon:${ip}` });
+        if (ipOutcome && !ipOutcome.success) {
+          recordRateLimitMetric({
+            allowed: false,
+            backend: 'native',
+            degraded: false,
+            scope,
+            env,
+          });
+          return {
+            allowed: false,
+            tier,
+            limit,
+            remaining: 0,
+            resetSec: 60,
+            backend: 'native',
+            degraded: false,
+          };
+        }
+      }
       const outcome = await nativeLimiter.limit({ key: bucketKey });
       if (!outcome || typeof outcome.success !== 'boolean') {
         throw new Error('RATE_LIMITER returned an invalid result');
@@ -500,6 +532,26 @@ export async function evaluateGatewayRateLimit(
         '[Sonic RateLimit] KV rate limiter fallback to in-memory:',
         redactSensitiveString(kvErr?.message || kvErr),
       );
+    }
+  }
+
+  if (subject !== `anon:${ip}` && subject.startsWith('anon:')) {
+    const ipResult = bumpInMemoryWindow(`${scope}:anon:${ip}`, limit, now, windowMs);
+    if (!ipResult.allowed) {
+      const degraded = !isSingleNodeEngine;
+      recordRateLimitMetric({
+        allowed: false,
+        backend: 'memory',
+        degraded,
+        scope,
+        env,
+      });
+      return {
+        ...ipResult,
+        tier,
+        backend: 'memory',
+        degraded,
+      };
     }
   }
 

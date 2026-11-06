@@ -12,11 +12,13 @@ import {
   clearPlaybackGrantsForTest,
   buildGrantCookieHeaders,
   parseIncomingGrantCookies,
+  resolveGuardSubject,
   MAX_RETAINED_GRANT_COOKIES,
   TICKET_PREFIX,
   GRANT_PREFIX,
   SONIC_ANON_SESSION_COOKIE,
 } from "../functions/_lib/sonic/ticket";
+import { evaluateGatewayRateLimit, resetRateLimitsForTest } from "../functions/_lib/sonic/security";
 import { onRequest as handleMusicTicket } from "../functions/api/music/ticket";
 import { onRequest as handleMusicStream } from "../functions/api/music/stream";
 import { getObservabilitySnapshot } from "../functions/_lib/sonic/observability";
@@ -30,6 +32,25 @@ const BASE_ENV: AppEnv = {
   SONIC_RATE_LIMIT_ANON_RPM: "1000",
   SONIC_RATE_LIMIT_AUTH_RPM: "2000",
 };
+
+async function createValidAnonSession(env: AppEnv, ip?: string) {
+  const req = new Request("https://sonic.epocanvas.tech", {
+    headers: ip ? { "CF-Connecting-IP": ip } : {},
+  });
+  const session = await getOrCreateAnonSession(req, env);
+  const cookiePair = session.cookieHeader ? session.cookieHeader.split(";")[0].trim() : "";
+  const cookieValue = cookiePair.split("=")[1] || "";
+  return {
+    sessionId: session.sessionId,
+    sub: `anon:${session.sessionId}`,
+    cookieValue,
+    cookieHeader: cookiePair,
+    headers: {
+      Cookie: cookiePair,
+      ...(ip ? { "CF-Connecting-IP": ip } : {}),
+    },
+  };
+}
 
 describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
   beforeEach(() => {
@@ -298,11 +319,12 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
     });
 
     it("Stateless Playback Authorization: Range requests on a fresh instance (memory wiped, no KV dependency) are still permitted via HMAC grant token", async () => {
+      const anon = await createValidAnonSession(BASE_ENV);
       // 1. Initial play request with ticket
       const ticket = await issueStreamTicket({
         id: "syn-440hz",
         source: "synthetic",
-        sub: "anon:sess_cold_start",
+        sub: anon.sub,
         durationSec: 180,
         env: BASE_ENV,
       });
@@ -311,7 +333,7 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
         `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
         {
           headers: {
-            Cookie: "sonic_anon_session=cold_start.validSig",
+            Cookie: anon.cookieHeader,
           },
         },
       );
@@ -340,7 +362,7 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
         {
           headers: {
             Range: "bytes=1024-2047",
-            Cookie: `sonic_anon_session=cold_start.validSig; ${grantCookiePair}`,
+            Cookie: `${anon.cookieHeader}; ${grantCookiePair}`,
           },
         },
       );
@@ -361,7 +383,7 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       const directCheck = await verifyPlaybackGrantToken(grantToken, {
         id: "syn-440hz",
         source: "synthetic",
-        sub: "anon:sess_cold_start",
+        sub: anon.sub,
         env: freshEnv,
       });
       expect(directCheck.valid).toBe(true);
@@ -374,18 +396,19 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
         SONIC_STREAM_GUARD: "enforce",
         SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
       };
+      const anon = await createValidAnonSession(envEnforce);
 
       // 1. Play Track A
       const ticketA = await issueStreamTicket({
         id: "syn-440hz",
         source: "synthetic",
-        sub: "anon:sess_user1",
+        sub: anon.sub,
         durationSec: 180,
         env: envEnforce,
       });
       const reqA1 = new Request(
         `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticketA}`,
-        { headers: { Cookie: "sonic_anon_session=user1.sig" } },
+        { headers: { Cookie: anon.cookieHeader } },
       );
       const resA1 = await handleMusicStream({ request: reqA1, env: envEnforce });
       expect(resA1.status).toBe(200);
@@ -397,13 +420,13 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       const ticketB = await issueStreamTicket({
         id: "syn-528hz",
         source: "synthetic",
-        sub: "anon:sess_user1",
+        sub: anon.sub,
         durationSec: 200,
         env: envEnforce,
       });
       const reqB = new Request(
         `https://sonic.epocanvas.tech/api/music/stream?id=syn-528hz&source=synthetic&t=${ticketB}`,
-        { headers: { Cookie: `sonic_anon_session=user1.sig; ${cookieA}` } },
+        { headers: { Cookie: `${anon.cookieHeader}; ${cookieA}` } },
       );
       const resB = await handleMusicStream({ request: reqB, env: envEnforce });
       expect(resB.status).toBe(200);
@@ -420,7 +443,7 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
         {
           headers: {
             Range: "bytes=4096-8191",
-            Cookie: `sonic_anon_session=user1.sig; ${cookieA}; ${cookieB}`,
+            Cookie: `${anon.cookieHeader}; ${cookieA}; ${cookieB}`,
           },
         },
       );
@@ -433,7 +456,7 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
         {
           headers: {
             Range: "bytes=2048-4095",
-            Cookie: `sonic_anon_session=user1.sig; ${cookieA}; ${cookieB}`,
+            Cookie: `${anon.cookieHeader}; ${cookieA}; ${cookieB}`,
           },
         },
       );
@@ -899,15 +922,17 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
         SONIC_STREAM_GUARD: "enforce",
         SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
       };
+      const anon = await createValidAnonSession(envEnforce);
       const ticket = await issueStreamTicket({
         id: "syn-440hz",
         source: "synthetic",
-        sub: "anon:web_client",
+        sub: anon.sub,
         env: envEnforce,
       });
 
       const req = new Request(
         `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+        { headers: anon.headers },
       );
       const res = await handleMusicStream({ request: req, env: envEnforce });
       expect(res.status).toBe(200);
@@ -973,16 +998,18 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
         SONIC_STREAM_GUARD: "enforce",
         SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
       };
+      const anon = await createValidAnonSession(envEnforce);
       const ticket = await issueStreamTicket({
         id: "syn-440hz",
         source: "synthetic",
-        sub: "anon:redirect_test",
+        sub: anon.sub,
         env: envEnforce,
       });
 
       // Anonymous caller requests mode=redirect
       const req = new Request(
         `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&mode=redirect&t=${ticket}`,
+        { headers: anon.headers },
       );
       const res = await handleMusicStream({ request: req, env: envEnforce });
       // In enforce mode, redirect mode is disabled and forced to proxy: status must be 200 (audio bytes), NOT 302!
@@ -1023,14 +1050,16 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
         SONIC_STREAM_GUARD: "enforce",
         SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
       };
+      const anon = await createValidAnonSession(envEnforce);
       const ticket = await issueStreamTicket({
         id: "syn-440hz",
         source: "synthetic",
-        sub: "anon:cache_test",
+        sub: anon.sub,
         env: envEnforce,
       });
       const reqEnforce = new Request(
         `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+        { headers: anon.headers },
       );
       const resEnforce = await handleMusicStream({ request: reqEnforce, env: envEnforce });
       expect(resEnforce.status).toBe(200);
@@ -1102,16 +1131,18 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
         SONIC_STREAM_GUARD: "enforce",
         SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
       };
+      const anon = await createValidAnonSession(envEnforce);
 
       // 1. Legitimate user requests stream with valid ticket
       const ticket = await issueStreamTicket({
         id: "syn-440hz",
         source: "synthetic",
-        sub: "anon:legit_user",
+        sub: anon.sub,
         env: envEnforce,
       });
       const legitReq = new Request(
         `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+        { headers: anon.headers },
       );
       const legitRes = await cacheProxyFetch(legitReq, envEnforce);
       expect(legitRes.status).toBe(200);
@@ -1180,9 +1211,10 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       expect(snap.rejectionsByReason.mismatch).toBe(baseMismatches + 1);
 
       // 4. Request with valid grant token -> increments grantHits
+      const anonMetric = await createValidAnonSession(envMonitor);
       const validGrantToken = await issuePlaybackGrantToken({
         tid: "synthetic:syn-440hz:320",
-        sub: "anon:sess_metric_user",
+        sub: anonMetric.sub,
         purpose: "play",
         durationSec: 180,
         nonce: "metric_nonce_1",
@@ -1193,13 +1225,260 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
         `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&grant=${validGrantToken}`,
         {
           headers: {
-            Cookie: "sonic_anon_session=metric_user.sig",
+            Cookie: anonMetric.cookieHeader,
           },
         },
       );
       await handleMusicStream({ request: grantReq, env: envMonitor });
       snap = getObservabilitySnapshot(envMonitor).streamGuard;
       expect(snap.grantHits).toBe(baseGrantHits + 1);
+    });
+  });
+
+  describe("9. Phase 1 Hardening & Subject Unification Verification", () => {
+    beforeEach(() => {
+      resetRateLimitsForTest();
+      clearPlaybackGrantsForTest();
+    });
+
+    it("A2: Rate limiting fallback: rotating X-Sonic-Anon-Id header cannot bypass IP limit; off mode subject is byte-exact eddcf54 baseline", async () => {
+      const envOff: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "off",
+        SONIC_RATE_LIMIT_ANON_RPM: "5",
+      };
+
+      const ipOff = "192.0.2.77";
+      const reqOff = new Request("https://sonic.epocanvas.tech/api/music/search?keywords=test", {
+        headers: {
+          "CF-Connecting-IP": ipOff,
+          "X-Sonic-Anon-Id": "fake-rotating-id-1",
+        },
+      });
+
+      // In off mode, rate limit subject is byte-exact eddcf54 baseline: anon:${ip}
+      const evalOff = await evaluateGatewayRateLimit(reqOff, envOff, "search");
+      expect(evalOff.allowed).toBe(true);
+      expect(evalOff.tier).toBe("anonymous");
+
+      // In enforce mode, rotating X-Sonic-Anon-Id header cannot bypass IP-level rate limits
+      const envEnforceRateLimit: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_RATE_LIMIT_ANON_RPM: "3",
+      };
+
+      const ipEnforce = "192.0.2.78";
+      for (let i = 1; i <= 3; i++) {
+        const req = new Request("https://sonic.epocanvas.tech/api/music/search?keywords=test", {
+          headers: {
+            "CF-Connecting-IP": ipEnforce,
+            "X-Sonic-Anon-Id": `attacker-rotation-${i}`,
+          },
+        });
+        const res = await evaluateGatewayRateLimit(req, envEnforceRateLimit, "search");
+        expect(res.allowed).toBe(true);
+      }
+
+      // 4th request from same IP with yet another rotating X-Sonic-Anon-Id MUST be rate-limited!
+      const req4 = new Request("https://sonic.epocanvas.tech/api/music/search?keywords=test", {
+        headers: {
+          "CF-Connecting-IP": ipEnforce,
+          "X-Sonic-Anon-Id": "attacker-rotation-4",
+        },
+      });
+      const res4 = await evaluateGatewayRateLimit(req4, envEnforceRateLimit, "search");
+      expect(res4.allowed).toBe(false);
+    });
+
+    it("B6: Unified subject resolution across ticket, stream, quota, and rate-limiting", async () => {
+      // 1. Authenticated user with session cookie returns user:<email>
+      const authSession = await createSession(BASE_ENV, {
+        email: "alice@sonic.local",
+        name: "Alice",
+        avatar: "",
+      });
+      const authReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+        headers: {
+          Cookie: `sonic_session=${authSession.apiKey}`,
+        },
+      });
+      const authSubject = await resolveGuardSubject(authReq, BASE_ENV);
+      expect(authSubject).toBe("user:alice@sonic.local");
+
+      // 2. Anonymous user with verified sonic_anon_session cookie returns anon:<sessionId>
+      const anon = await createValidAnonSession(BASE_ENV);
+      const anonReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+        headers: anon.headers,
+      });
+      const anonSubject = await resolveGuardSubject(anonReq, BASE_ENV);
+      expect(anonSubject).toBe(anon.sub);
+
+      // 3. Fallback without valid session returns anon:ip:<ipHash>
+      const noSessionReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+        headers: { "CF-Connecting-IP": "198.51.100.99" },
+      });
+      const fallbackSubject = await resolveGuardSubject(noSessionReq, BASE_ENV);
+      expect(fallbackSubject.startsWith("anon:ip:")).toBe(true);
+
+      // 4. IP drift during first play (Wi-Fi to cellular) with same session permits playback
+      const envEnforce: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+      const ticketReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...anon.headers,
+          "CF-Connecting-IP": "198.51.100.10",
+        },
+        body: JSON.stringify({ id: "syn-440hz", source: "synthetic", br: "320" }),
+      });
+      const ticketRes = await handleMusicTicket({ request: ticketReq, env: envEnforce });
+      expect(ticketRes.status).toBe(200);
+      const ticketData = (await ticketRes.json()) as any;
+      expect(ticketData.ticket).toBeDefined();
+
+      // Client plays from cellular IP 203.0.113.88 with same session cookie
+      const streamReqDrift = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticketData.ticket}`,
+        {
+          headers: {
+            ...anon.headers,
+            "CF-Connecting-IP": "203.0.113.88",
+          },
+        },
+      );
+      const streamResDrift = await handleMusicStream({ request: streamReqDrift, env: envEnforce });
+      expect(streamResDrift.status).toBe(200);
+
+      // 5. Cross-session + cross-IP ticket theft is rejected
+      const attackerAnon = await createValidAnonSession(envEnforce, "192.0.2.99");
+      const streamReqTheft = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticketData.ticket}`,
+        {
+          headers: {
+            ...attackerAnon.headers,
+            "CF-Connecting-IP": "192.0.2.99",
+          },
+        },
+      );
+      const streamResTheft = await handleMusicStream({ request: streamReqTheft, env: envEnforce });
+      expect(streamResTheft.status).toBe(403);
+      const theftData = (await streamResTheft.json()) as any;
+      expect(theftData.error?.code).toBe("TICKET_SESSION_MISMATCH");
+    });
+
+    it("D12: Cookie Secure attribute on HTTPS and Strict CORS reflection", async () => {
+      // 1. Cookie headers on HTTPS request include '; Secure'
+      const secureAnon = await getOrCreateAnonSession(new Request("https://sonic.epocanvas.tech/api/music/ticket"), BASE_ENV);
+      expect(secureAnon.cookieHeader).toContain("; Secure");
+
+      const grantHeaders = buildGrantCookieHeaders(
+        null,
+        {
+          tid: "synthetic:syn-440hz:320",
+          token: "dummy_token",
+          expiresAtSec: Math.floor(Date.now() / 1000) + 1800,
+        },
+        new Request("https://sonic.epocanvas.tech/api/music/stream"),
+      );
+      expect(grantHeaders.length).toBeGreaterThan(0);
+      expect(grantHeaders[0]).toContain("; Secure");
+
+      // 2. Strict CORS mode (SONIC_CORS_STRICT=1)
+      const envStrict: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_CORS_STRICT: "1",
+        SONIC_ALLOWED_ORIGINS: "https://sonic.epocanvas.tech,https://trusted-partner.com",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+
+      // 2a. Ticket endpoint checks Origin allowlist: unauthorized origin rejected with 403
+      const unauthOriginReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "https://malicious-thief.com",
+        },
+        body: JSON.stringify({ id: "syn-440hz", source: "synthetic" }),
+      });
+      const unauthOriginRes = await handleMusicTicket({ request: unauthOriginReq, env: envStrict });
+      expect(unauthOriginRes.status).toBe(403);
+      const unauthData = (await unauthOriginRes.json()) as any;
+      expect(unauthData.error?.code).toBe("CORS_FORBIDDEN");
+
+      // 2b. Ticket endpoint reflects matched origin, not '*'
+      const authOriginReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Origin: "https://trusted-partner.com",
+        },
+        body: JSON.stringify({ id: "syn-440hz", source: "synthetic" }),
+      });
+      const authOriginRes = await handleMusicTicket({ request: authOriginReq, env: envStrict });
+      expect(authOriginRes.status).toBe(200);
+      expect(authOriginRes.headers.get("Access-Control-Allow-Origin")).toBe("https://trusted-partner.com");
+      expect(authOriginRes.headers.get("Vary")).toContain("Origin");
+
+      // 2c. Stream endpoint reflects matched origin for anonymous requests
+      const anonStrict = await createValidAnonSession(envStrict);
+      const ticketStrict = await issueStreamTicket({
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: anonStrict.sub,
+        env: envStrict,
+      });
+      const streamCorsReq = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticketStrict}`,
+        {
+          headers: {
+            ...anonStrict.headers,
+            Origin: "https://trusted-partner.com",
+          },
+        },
+      );
+      const streamCorsRes = await handleMusicStream({ request: streamCorsReq, env: envStrict });
+      expect(streamCorsRes.status).toBe(200);
+      expect(streamCorsRes.headers.get("Access-Control-Allow-Origin")).toBe("https://trusted-partner.com");
+      expect(streamCorsRes.headers.get("Vary")).toContain("Origin");
+
+      // 2d. API Key stream request keeps Access-Control-Allow-Origin: * (Constraint C1)
+      const apiKeySession = await createSession(BASE_ENV, {
+        email: "partner@api.local",
+        name: "API Partner",
+        avatar: "",
+      });
+      const apiKeyCorsReq = new Request(
+        "https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic",
+        {
+          headers: {
+            "X-Sonic-Key": apiKeySession.apiKey,
+            Origin: "https://some-external-app.com",
+          },
+        },
+      );
+      const apiKeyCorsRes = await handleMusicStream({ request: apiKeyCorsReq, env: envStrict });
+      expect(apiKeyCorsRes.status).toBe(200);
+      expect(apiKeyCorsRes.headers.get("Access-Control-Allow-Origin")).toBe("*");
+
+      // 2e. Sec-Fetch-Site: cross-site with unlisted origin is rejected
+      const crossSiteReq = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticketStrict}`,
+        {
+          headers: {
+            ...anonStrict.headers,
+            "Sec-Fetch-Site": "cross-site",
+            Origin: "https://unauthorized-cross-site.com",
+          },
+        },
+      );
+      const crossSiteRes = await handleMusicStream({ request: crossSiteReq, env: envStrict });
+      expect(crossSiteRes.status).toBe(403);
     });
   });
 });

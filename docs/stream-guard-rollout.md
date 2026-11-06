@@ -146,6 +146,33 @@
   * 前端 `<audio>` 原生播放优先在 `src` URL 中附带 `?t=<ticket>`。
   * 服务端支持从 Cookie（`sonic_grant_*`）、请求头（`X-Sonic-Grant` / `X-Sonic-Ticket`）及 Query 参数（`?grant=` / `?t=`）多通道识别授权。
 
+### 5.4 统一主体解析（`resolveGuardSubject`）与限流安全回退
+* **单一主体收口规则**：
+  * 全站（票据签发 `ticket.ts`、音频流代理 `stream.ts`、防刷配额 `evaluateStreamGuardQuota`、网关限流 `evaluateGatewayRateLimit`）严格统一通过单一函数 `resolveGuardSubject(request, env)` 计算主体：
+    1. **已登录用户**（经由 `verifyAuth` 验签通过的 API Key 或 `sonic_session` Cookie 用户）：统一为 `user:<email>`；
+    2. **匿名访客**：严格仅信任经由 HMAC-SHA256 验签通过的 `sonic_anon_session` Cookie，主体格式为 `anon:<完整会话ID>`，严禁信任或直接使用未验签的 `X-Sonic-Anon-Id` 请求头；
+    3. **无有效会话**：回退为客户端 IP 摘要 `anon:ip:<ipHash>`。
+* **默认行为安全回退（最高优先级）**：
+  * 当 `SONIC_STREAM_GUARD=off` 时，网关匿名限流主体严格回退为阶段 1 之前（`eddcf54`）的客户端 IP 格式（`anon:${ip}`），杜绝任何行为漂移。
+  * 当 `monitor` 或 `enforce` 时，仅验签合法的会话才可作为主体；同时底层限流引擎叠加客户端 IP 基础桶双重校验，杜绝攻击者通过快速轮换客户端会话 ID 绕过 IP 限额。
+
+### 5.5 前端票据自愈与音源失效解耦机制
+* **`fetchAndApplyUrl` 严格求值顺序**：
+  * 客户端在计算 `finalGatewayUrl` 前必须先调用 `requestPlaybackTicket`，并在 `params.set('t', ticket)` 写入后才生成最终的 `finalGatewayUrl`，严禁将未附带票据的基础 URL 赋给 `audio.src`。
+* **精准区分两类播放错误（故障域解耦）**：
+  * **类型 A：票据/授权过期或失效（403 票据错误 / 本地 TTL 超时）**：
+    * 客户端原地静默请求最新票据（`forceFresh = true`，`tryNextSource = false`）；
+    * 使用相同平台、相同曲目重新载入并精准恢复到出错时的 `currentTime`；
+    * **严格不消耗备选源重试次数，绝对不触发向备选平台（如 QQ 音乐）的错误降级**。
+  * **类型 B：音源真正失效（404、版权下线、上游 5xx 故障）**：
+    * 触发 YesPlayMusic 风格的多候选源轮换（Failover），轮询备选音轨或跨平台平替源。
+* **播放列表持久化脱敏与自动补票**：
+  * 在将播放列表、当前播放曲目存入 localStorage 前，必须经由 `stripTicketFromUrl` 清除 URL 中的 `?t=`、`?ticket=` 与 `?grant=` 临时凭据。
+  * 页面刷新或会话恢复时，若播放列表中的 URL 缺少票据或票据已过期，起播时自动触发 `_fetchAndApplyUrl` 申请新鲜票据，实现无感自愈起播。
+* **Cookie 安全属性与严格跨域收紧**：
+  * `sonic_grant_*` 与 `sonic_anon_session` Cookie 在 HTTPS 环境下根据请求 URL 及 `x-forwarded-proto` 自动注入 `; Secure` 属性。
+  * `SONIC_CORS_STRICT=1` 开启时，`/api/music/ticket` 严格校验 Origin 白名单；`stream` 与 `ticket` 仅返回具体匹配的 Origin 而非 `*`（API Key 请求保持 `*` 以遵守 C1）；非法跨域的 `Sec-Fetch-Site: cross-site` 直接阻断。
+
 ---
 
 ## 6. 秒级应急与回滚步骤

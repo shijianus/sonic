@@ -20,8 +20,10 @@ import {
   evaluateStreamGuardQuota,
   getTrackGrantCookieName,
   normalizeTrackFingerprint,
+  resolveGuardSubject,
   verifyPlaybackGrantToken,
   verifyStreamTicket,
+  type CorsCheckResult,
 } from '../../_lib/sonic/ticket';
 import { getSonicConfig } from '../../_lib/sonic/config';
 import {
@@ -109,6 +111,8 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   const guardMode = String(env?.SONIC_STREAM_GUARD || 'off').trim().toLowerCase();
   let isAnonymousGuarded = false;
   let guardSetCookieHeaders: string[] = [];
+  let corsCheck: CorsCheckResult | undefined;
+  const isStrictCors = String(env?.SONIC_CORS_STRICT || '0').trim() === '1';
 
   if (guardMode === 'monitor' || guardMode === 'enforce') {
     // Constraint C1: Valid API Key caller completely bypasses Stream Guard checks and CORS restrictions
@@ -137,7 +141,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       }
 
       // 1. Strict CORS & Fetch-Metadata verification (Constraint C4, C5)
-      const corsCheck = checkStreamCorsAndFetchMetadata(request, env);
+      corsCheck = checkStreamCorsAndFetchMetadata(request, env);
       if (!corsCheck.allowed) {
         if (guardMode === 'enforce') {
           return jsonResponse(
@@ -148,7 +152,15 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
                 message: `Cross-origin stream request forbidden by security policy (${corsCheck.reason})`,
               },
             },
-            { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store' }) },
+            {
+              status: 403,
+              headers: corsHeaders({
+                'Cache-Control': 'no-store',
+                ...(isStrictCors && corsCheck.allowOriginHeader
+                  ? { 'Access-Control-Allow-Origin': corsCheck.allowOriginHeader, Vary: 'Origin' }
+                  : {}),
+              }),
+            },
           );
         }
         console.warn(`[Stream Guard Monitor] CORS violation: ${corsCheck.reason}`);
@@ -166,10 +178,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       const tid = normalizeTrackFingerprint(rawTrackParam, rawSourceParam, rawBrParam);
       const grantCookieName = getTrackGrantCookieName(tid);
 
-      const anonCookie = readCookie(request, 'sonic_anon_session');
-      const anonHeader = request.headers.get('x-sonic-anon-id')?.trim();
-      const rawAnonSession = (anonCookie && anonCookie.includes('.') ? anonCookie.split('.')[0] : anonCookie) || anonHeader;
-      const subject = rawAnonSession ? `anon:sess_${rawAnonSession.slice(0, 16)}` : `anon:${clientIp}`;
+      const subject = await resolveGuardSubject(request, env);
 
       const grantToken =
         request.headers.get('x-sonic-grant')?.trim() ||
@@ -232,11 +241,15 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
             const expiresAtSec =
               ticketCheck.grant?.expiresAtSec ||
               Math.floor(Date.now() / 1000) + 1800;
-            guardSetCookieHeaders = buildGrantCookieHeaders(rawCookieHeader, {
-              tid,
-              token: ticketCheck.grantToken,
-              expiresAtSec,
-            });
+            guardSetCookieHeaders = buildGrantCookieHeaders(
+              rawCookieHeader,
+              {
+                tid,
+                token: ticketCheck.grantToken,
+                expiresAtSec,
+              },
+              request,
+            );
           }
         } else {
           guardFailureCode = ticketCheck.error;
@@ -480,6 +493,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
               for (const sc of guardSetCookieHeaders) {
                 outHeaders.append('Set-Cookie', sc);
               }
+              if (isStrictCors && corsCheck?.allowOriginHeader) {
+                outHeaders.set('Access-Control-Allow-Origin', corsCheck.allowOriginHeader);
+                outHeaders.append('Vary', 'Origin');
+              }
             }
             if (engineStream.response.status === 206) recordStreamMetric('proxied_206');
             else if (engineStream.response.status === 200) recordStreamMetric('proxied_200');
@@ -504,6 +521,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           h.set('Cache-Control', 'private, no-store');
           for (const sc of guardSetCookieHeaders) {
             h.append('Set-Cookie', sc);
+          }
+          if (isStrictCors && corsCheck?.allowOriginHeader) {
+            h.set('Access-Control-Allow-Origin', corsCheck.allowOriginHeader);
+            h.append('Vary', 'Origin');
           }
         }
         return new Response(fallbackResp.body, { status: fallbackResp.status, headers: h });
@@ -752,6 +773,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       headers.set('Cache-Control', 'private, no-store');
       for (const sc of guardSetCookieHeaders) {
         headers.append('Set-Cookie', sc);
+      }
+      if (isStrictCors && corsCheck?.allowOriginHeader) {
+        headers.set('Access-Control-Allow-Origin', corsCheck.allowOriginHeader);
+        headers.append('Vary', 'Origin');
       }
     } else {
       headers.set('Cache-Control', streamCacheControl(finalTargetUrl, upstream.headers, status, upstreamSensitive));
