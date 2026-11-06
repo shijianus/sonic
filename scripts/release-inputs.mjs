@@ -14,7 +14,7 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
   'package.json', 'package-lock.json', 'tsconfig.json',
   'Dockerfile', 'Dockerfile.ncm', 'docker-compose.yml', '.dockerignore',
   '.gitattributes', '.gitignore', '.env.example', 'AGENTS.md',
-  'README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'favicon.png', 'favicon.svg',
+  'README.md', 'CHECKLIST.log', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'favicon.png', 'favicon.svg',
   'player/package.json', 'player/pnpm-lock.yaml', 'player/pnpm-workspace.yaml',
   'player/.npmrc', 'player/.env.example', 'player/.gitignore', 'player/index.html',
   'player/vite.config.ts', 'player/tsconfig.json', 'player/vitest.config.ts',
@@ -24,10 +24,11 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
   // These generated declarations are also inputs to typecheck BEFORE a build.
   'player/src/auto-import/imports.d.ts', 'player/src/auto-import/components.d.ts',
   'player/src/vite-env.d.ts', 'player/build/plugins.ts', 'player/build/getEnv.ts',
-  'player/build/proxy.ts', 'player/public/_headers', 'player/public/_redirects',
+  'player/build/proxy.ts', 'player/public/_headers', 'player/public/_redirects', 'player/public/bootstrap.js',
   'js/index.js', 'js/playlist-view.js', '.github/workflows/ci.yml',
   'scripts/release-inputs.mjs', 'scripts/write-release-manifest.mjs',
   'scripts/package-release.mjs', 'scripts/prepare-pages-preview.mjs',
+  'scripts/pages-release-lib.mjs', 'scripts/verify-pages-deploy-tree.mjs', 'scripts/verify-deployed-release.mjs',
   'scripts/copy-dist.mjs', 'scripts/deploy-pages.mjs', 'scripts/lint-theme.mjs',
   'scripts/theme-lint-baseline.json', 'scripts/generate-sbom.mjs',
   'scripts/test-sonic-gateway.mjs', 'scripts/test-auth-compatibility.mjs',
@@ -35,7 +36,7 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
   'scripts/verify-observability-and-alerts.mjs',
   'scripts/evaluate-recommendation.mjs', 'scripts/evaluate-multi-entity.mjs',
   'scripts/selftest-multi-entity-http.mjs', 'scripts/verify-mixed-load.mjs',
-  'scripts/backup-recommend-db.mjs', 'scripts/restore-recommend-db.mjs',
+  'scripts/backup-recommend-db.mjs', 'scripts/restore-recommend-db.mjs', 'scripts/revoke-invite.mjs',
   'scripts/build-staging-release.sh', 'scripts/deploy-staging-engine.py',
   'scripts/verify-staging-candidate.py', 'scripts/verify-staging-live.mjs',
   'scripts/verify-built-release.mjs', 'scripts/rollback-production.sh',
@@ -66,6 +67,9 @@ function safeName(name) {
 // whether it should be shipped. Examples are only allowed at two exact paths.
 export function excludedReleasePath(name) {
   if (GENERATED_FILES.has(name)) return true;
+  // The reviewed delivery checklist is intentionally shipped even though the
+  // generic exclusion rules drop *.log files (which normally contain secrets).
+  if (name === 'CHECKLIST.log') return false;
   const parts = name.split('/');
   return parts.some(part => {
     const lower = part.toLowerCase();

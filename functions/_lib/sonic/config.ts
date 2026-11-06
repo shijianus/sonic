@@ -122,7 +122,7 @@ export function getSonicConfig(env?: AppEnv): SonicConfig {
     upstreamMeting: normalizeServiceUrl(e.SONIC_UPSTREAM_METING),
     enableOAuth: isEnvEnabled(e.SONIC_ENABLE_OAUTH, true),
     enableLocalEngine: Boolean(localEngineUrl && runtime !== 'linux-engine' && isEnvEnabled(e.SONIC_ENABLE_LOCAL_ENGINE, true)),
-    enableSynthetic: contentFlags.enableSynthetic && String(e.SONIC_ENV || '').trim().toLowerCase() !== 'production',
+    enableSynthetic: contentFlags.enableSynthetic,
     // Per compliance & architecture requirements: VIP unblock & third-party free aggregation APIs are OFF by default
     enableUnblock: contentFlags.enableUnblock,
     enableFreeCrossMatch: isEnvEnabled(

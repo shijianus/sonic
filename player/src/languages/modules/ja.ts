@@ -210,6 +210,10 @@ export default {
     newSongs: '新曲',
     official: '公式ランキング',
     trending: 'トレンドランキング',
+    categoryLabel: 'ランキング分類:',
+    trendingLabel: 'トレンド:',
+    newSongLabel: '新曲:',
+    officialLabel: '公式ランキング:',
   },
   components: {
     infiniteScroll: {

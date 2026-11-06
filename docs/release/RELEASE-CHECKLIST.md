@@ -100,6 +100,17 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 ## D. 部署前检查（仅在 C 项满足后执行）
 
 - [ ] 固定发布 SHA，并在部署产物/健康端点暴露 `SONIC_RELEASE_COMMIT`。
+- [ ] 生产部署必须显式设置 `SONIC_ENV=production`；预览部署显式设置 `SONIC_ENV=preview` 或 `SONIC_ENV=staging`。
+- [ ] 生产部署必须显式设置 `SONIC_ACCESS_MODE=open` 或 `SONIC_ACCESS_MODE=invite`；缺失或非法值会被 Edge 以 503 拒绝。
+- [ ] 生产部署必须设置 `SONIC_CONTENT_POLICY=strict-allowlist`，且 `SONIC_ALLOWED_SOURCES` 非空并仅包含 APPROVED/CONDITIONAL 源；缺失、`default`、空名单、PROHIBITED 或未登记源都会使 Edge/Engine 返回 503 `CONTENT_POLICY_MISCONFIGURED`。
+- [ ] 已记录 2026-11-05 负责人直接授权 `netease/qq/kugou/kuwo/amll/lrclib`；正式授权文件由项目方归档，见 `CHECKLIST.log`。`gdstudio/lyriva/unblock` 仍为 PROHIBITED，禁止开启。
+- [ ] 生产 readiness 还必须至少解析出一个运行时启用的音频源（`effectiveSources` 中至少一个具备 `audio` 能力）；仅有 `synthetic`（生产强制关闭）、Apple 或 catalog/lyrics-only 源会返回 503 `no_runtime_enabled_sources`。
+- [ ] 邀请码每个至少 16 字符；需要单次使用或服务端撤销时必须配置 `SONIC_ACCESS_DB_PATH`（Engine），Pages-only 签名会话只适合短 TTL 的受控内测。
+- [ ] 撤销邀请码使用 `npm run revoke:invite -- <access.sqlite> <code>`，并在撤销后确认 `revoked:true`；轮换 `SONIC_ACCESS_SECRET` 可让全部已签发会话失效。
+- [ ] Pages 环境不得设置 `SONIC_RUNTIME=linux-engine`；该变量只属于 VPS Engine。
+- [ ] 多 isolate Pages 生产必须绑定 `RATE_LIMITER`；生产默认要求分布式限流，缺失时 API 与 health 会 fail-closed（503），不得依赖 isolate 内存限流。
+- [ ] 交付后真实环境验收按根目录 `CHECKLIST.log` 执行；完整管理员后台、配额/封禁/审计等滥用治理由 Epomail 统一开发并签字。
+- [ ] 生产部署必须设置 `SONIC_DEPLOY_VERIFY_URL`（线上域名）并保留 `SONIC_ENGINE_SECRET`，部署后脚本会核对 `/release.json`、`X-Sonic-Release` 与 health 的 release/contentPolicy/access 五元组；无法验证时不得上线。
 - [ ] 生产/内测环境配置 `SONIC_SECRET`、`SONIC_ENGINE_SECRET`（≥32 字符，随机）。
 - [ ] 确认 `SONIC_ENABLE_UNBLOCK=0`、`SONIC_ENABLE_GDSTUDIO=0`、`SONIC_ENABLE_LYRIVA=0`。
 - [ ] 仅启用已授权音源；未授权源不可达。

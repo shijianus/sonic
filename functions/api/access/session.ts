@@ -1,5 +1,6 @@
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import { getAccessMode, verifyAccessSession } from '../../_lib/sonic/access';
+import { buildRateLimitErrorResponse, evaluateGatewayRateLimit } from '../../_lib/sonic/security';
 import type { AppEnv } from '../../_lib/types';
 
 const NO_STORE_HEADERS = {
@@ -12,6 +13,13 @@ const NO_STORE_HEADERS = {
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
   if (request.method !== 'GET' && request.method !== 'HEAD') return errorResponse('Method not allowed', 405);
+
+  const rateLimit = await evaluateGatewayRateLimit(request, env, 'access-session');
+  if (!rateLimit.allowed) {
+    const denied = buildRateLimitErrorResponse(rateLimit);
+    for (const [key, value] of Object.entries(NO_STORE_HEADERS)) denied.headers.set(key, value);
+    return denied;
+  }
 
   const mode = getAccessMode(env);
   if (mode === 'open') return jsonResponse({ brand: 'Sonic', ok: true, access: true, mode }, { headers: NO_STORE_HEADERS });

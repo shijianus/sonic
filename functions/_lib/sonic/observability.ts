@@ -4,6 +4,7 @@
 
 import type { AppEnv } from '../types';
 import { isEnvEnabled } from './config';
+import { isProductionEnvironment } from './environment';
 import { COMPILED_RELEASE } from './compiled-release';
 
 export type RouteMetricGroup =
@@ -398,7 +399,16 @@ export function getReleaseMetadata(env?: AppEnv): ReleaseMetadata {
   const procEnv = typeof process !== 'undefined' && process.env ? process.env : {};
   const compiled = COMPILED_RELEASE as ReleaseMetadata & { baseCommit: string } | null;
   const rawCommit = String(compiled ? compiled.baseCommit : e.SONIC_RELEASE_COMMIT || e.CF_PAGES_COMMIT_SHA || procEnv.SONIC_RELEASE_COMMIT || procEnv.CF_PAGES_COMMIT_SHA || 'unknown').trim();
-  const rawEnv = String(e.SONIC_ENV || (e.CF_PAGES_BRANCH === 'main' ? 'production' : e.CF_PAGES_BRANCH ? 'staging' : '') || procEnv.SONIC_ENV || procEnv.NODE_ENV || 'development').trim();
+  // Keep the reported environment aligned with the same fail-closed policy used
+  // by access and content licensing. A Pages preview without an explicit
+  // environment is treated as production, not staging.
+  const explicitEnv = String(e.SONIC_ENV || procEnv.SONIC_ENV || '').trim().toLowerCase();
+  const production = isProductionEnvironment(env);
+  const rawEnv = explicitEnv
+    ? (production ? 'production' : explicitEnv)
+    : production
+      ? 'production'
+      : String(e.CF_PAGES_BRANCH ? 'staging' : (procEnv.NODE_ENV || 'development')).trim().toLowerCase();
   const buildTime = String(compiled ? compiled.buildTime || '' : e.SONIC_BUILD_TIME || procEnv.SONIC_BUILD_TIME || '').trim();
   const releaseId = String(compiled ? compiled.releaseId || '' : e.SONIC_RELEASE_ID || procEnv.SONIC_RELEASE_ID || '').trim();
   const sourceDigest = String(compiled ? compiled.sourceDigest || '' : e.SONIC_SOURCE_DIGEST || procEnv.SONIC_SOURCE_DIGEST || '').trim();
@@ -611,9 +621,16 @@ export function recordRateLimitMetric(opts: {
   }
 }
 
+const KNOWN_LICENSING_SOURCES = new Set([
+  'synthetic', 'netease', 'ncm', 'qq', 'tencent', 'kugou', 'kuwo',
+  'amll', 'lrclib', 'apple', 'ytmusic', 'listenbrainz', 'gdstudio', 'lyriva', 'unblock',
+  'sonic', 'palette', 'palette-url', 'legacy-proxy', 'forward-url', 'direct-cover-url', 'unknown',
+]);
+
 export function recordLicensingBlockMetric(source: string): void {
   state.licensing.blockedByPolicy += 1;
-  const safe = (source || 'unknown').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32) || 'unknown';
+  const normalized = (source || '').toLowerCase().replace(/[^a-z0-9_-]/g, '').slice(0, 32);
+  const safe = KNOWN_LICENSING_SOURCES.has(normalized) ? normalized : 'unknown';
   state.licensing.blockedBySource[safe] = (state.licensing.blockedBySource[safe] || 0) + 1;
 }
 

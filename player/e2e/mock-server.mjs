@@ -252,7 +252,7 @@ async function handleApi(req, res, url) {
     return sendJson(res, {
       brand: 'Sonic',
       data: {
-        syncedLyrics: [0, 3, 6, 9, 12, 15].map((startMs, i) => ({
+        syncedLyrics: [0, 3000, 6000, 9000, 12000, 15000].map((startMs, i) => ({
           startMs,
           text: `${title} line ${i + 1}`,
         })),

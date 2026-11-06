@@ -108,5 +108,9 @@ describe('Third-party metadata is never parsed as HTML', () => {
     expect(deployedHeaders).toMatch(/X-Content-Type-Options:\s*nosniff/i);
     expect(deployedHeaders).toMatch(/X-Frame-Options:\s*DENY/i);
     expect(deployedHeaders).toMatch(/frame-ancestors 'none'/);
+    expect(deployedHeaders).toMatch(/script-src 'self'(?:;|$)/m);
+    expect(deployedHeaders).not.toMatch(/script-src[^;]*'unsafe-inline'/);
+    expect(deployedHeaders).toMatch(/object-src 'none'/);
+    expect(deployedHeaders).toMatch(/base-uri 'self'/);
   });
 });

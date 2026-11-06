@@ -34,6 +34,7 @@ SONIC_INVITE_CODES               # 仅在受控密钥管理中提供；不得写
   - `SONIC_ACCOUNT_DB_PATH=/app/data/sonic-account.sqlite`
   - `SONIC_ACCESS_DB_PATH=/app/data/sonic-access.sqlite`
 - Pages invite 模式没有 SQLite 时必须设置 `SONIC_ACCESS_SECRET` 和服务端邀请码来源；无安全持久/签名配置时应 fail closed。
+- 邀请码每个至少 16 字符。Pages-only 签名会话可被重复兑换且无法服务端撤销，只适合短 TTL 的受控内测；需要单次使用或撤销时必须使用 Engine SQLite（`SONIC_ACCESS_DB_PATH`），并用 `npm run revoke:invite -- <db> <code>` 撤销。
 - `SONIC_CONTENT_POLICY=strict-allowlist` 时只列入已书面批准的来源。
 - 邀请制环境设置 `SONIC_ACCESS_MODE=invite`，不要同时依赖旧的共享 `SONIC_STAGING_ACCESS_TOKEN`。
 - 继续设置 `X-Robots-Tag: noindex, nofollow, noarchive`、外部访问门禁和独立测试域名。

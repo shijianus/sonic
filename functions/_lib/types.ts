@@ -91,7 +91,6 @@ export interface AppEnv {
   SONIC_ACCESS_SECRET?: string;
   SONIC_ACCESS_SESSION_MAX_AGE_SEC?: string;
   SONIC_INVITE_CODES?: string;
-  SONIC_INVITE_KV?: any;
   SONIC_ALERT_WEBHOOK_URL?: string;
   SONIC_ALERT_COOLDOWN_SEC?: string;
   SONIC_ALERT_5XX_THRESHOLD?: string;

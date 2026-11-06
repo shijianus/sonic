@@ -7,7 +7,14 @@ import { handleOptions, jsonResponse } from '../../../_lib/http';
 import { checkEngineAccess, getRateLimitConfigStatus } from '../../../_lib/sonic/security';
 import { getSonicConfig, isEnvEnabled } from '../../../_lib/sonic/config';
 import { fetchWithRuntimeBudget } from '../../../_lib/sonic/local-engine';
-import { getLicensingAuditSummary } from '../../../_lib/sonic/licensing';
+import { getLicensingAuditSummary, getContentPolicyReadiness } from '../../../_lib/sonic/licensing';
+import {
+  getAccessMode,
+  getAccessRepository,
+  hashInviteCode,
+  isAccessModeDeclaredInvalid,
+  isAccessModeExplicit,
+} from '../../../_lib/sonic/access';
 import { getLocalEngineCircuitSnapshot } from '../../../_lib/sonic/local-engine';
 import { getEngineIdentityReadiness, requireValidEngineIdentity, EngineIdentityError } from '../../../_lib/sonic/engine-identity';
 import {
@@ -89,6 +96,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   const sidecarRequired = isEnvEnabled(env.SONIC_NCM_REQUIRED, false);
   const sidecarReady = !sidecarRequired || ncmSidecarHealthy === true;
   const releaseReadiness = getReleaseReadiness(env);
+  const contentPolicyReadiness = getContentPolicyReadiness(env);
   const identityReadiness = getEngineIdentityReadiness(env);
   let identityVerified = false;
   try {
@@ -99,13 +107,46 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   }
   const rateLimit = getRateLimitConfigStatus(env);
   const rateLimitReady = !rateLimit.requireDistributed || rateLimit.productionCompliant;
+  const accessMode = getAccessMode(env);
+  const accessRepository = getAccessRepository(env);
+  const accessStoreUsable = Boolean(accessRepository) && typeof accessRepository?.redeemInviteAndCreateSession === 'function';
+  const accessSecretConfigured = String(env.SONIC_ACCESS_SECRET || '').trim().length >= 32;
+  const configuredInviteCodes = String(env.SONIC_INVITE_CODES || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  const validConfiguredInviteCodes = configuredInviteCodes.filter(code => hashInviteCode(code) !== null).length;
+  const invalidConfiguredInviteCodes = configuredInviteCodes.length - validConfiguredInviteCodes;
+  const signedAccessReady = accessSecretConfigured && validConfiguredInviteCodes > 0;
+  const accessReady =
+    !isAccessModeDeclaredInvalid(env) &&
+    invalidConfiguredInviteCodes === 0 &&
+    (accessMode !== 'invite' ||
+      (accessRepository ? accessStoreUsable : signedAccessReady));
+  const accessReadiness = {
+    mode: accessMode,
+    explicit: isAccessModeExplicit(env),
+    invalid: isAccessModeDeclaredInvalid(env),
+    required: accessMode === 'invite',
+    storeConfigured: Boolean(accessRepository),
+    storeUsable: accessStoreUsable,
+    singleUse: Boolean(accessRepository),
+    revocable: Boolean(accessRepository?.revokeSession),
+    secretConfigured: accessSecretConfigured,
+    configuredInviteCodes: configuredInviteCodes.length,
+    validConfiguredInviteCodes,
+    invalidConfiguredInviteCodes,
+    ok: accessReady,
+  };
   const draining = Boolean(env.SONIC_DRAIN_STATE?.draining);
-  const ok = storageHealthy && sidecarReady && releaseReadiness.ok && identityReadiness.ok && rateLimitReady && !draining;
+  const ok = storageHealthy && sidecarReady && releaseReadiness.ok && contentPolicyReadiness.ok && accessReady && identityReadiness.ok && rateLimitReady && !draining;
   const degraded = Boolean(cfg.ncmApiUrl && !sidecarRequired && ncmSidecarHealthy === false);
   const reasons = [
     ...(!storageHealthy ? [storageError || 'storage_unhealthy'] : []),
     ...(!sidecarReady ? ['required_sidecar_unavailable'] : []),
     ...(!releaseReadiness.ok ? [releaseReadiness.error!] : []),
+    ...(!contentPolicyReadiness.ok ? [`content_policy_${contentPolicyReadiness.reason || 'misconfigured'}`] : []),
+    ...(!accessReady ? ['access_misconfigured'] : []),
     ...(!identityReadiness.ok ? ['engine_identity_unavailable'] : []),
     ...(!rateLimitReady ? ['distributed_rate_limiter_unavailable'] : []),
     ...(draining ? ['engine_draining'] : []),
@@ -137,6 +178,8 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       readiness: {
         ok, degraded, reasons, draining, deadlineAt: env.SONIC_DRAIN_STATE?.deadlineAt,
         release: releaseReadiness, identity: { ...identityReadiness, requestVerified: identityVerified },
+        contentPolicy: contentPolicyReadiness,
+        access: accessReadiness,
       },
       runtime: cfg.runtime,
       release,

@@ -376,9 +376,10 @@ docker compose logs -f sonic-engine
 
 ### 来源策略的当前差异
 
-- 标准模式空配置会启用 NetEase、QQ、Kugou、Kuwo、AMLL、LRCLIB，**GDStudio 也默认启用**；模板与 Compose 则显式设置 GDStudio 为 `0`。
-- 音频解析的 `allowExternal` 条件在部分原生/Engine 失败路径允许聚合回退，即使 `SONIC_ENABLE_GDSTUDIO=0`。修复并验证之前，不能把该开关当成禁止所有 GDStudio 出站请求的保证。
-- `strict-allowlist` 依赖明确名单与开关，并强制禁用 Lyriva/Unblock；但登记为待确认的来源也可被名单启用。GDStudio 在当前代码被标记为 `APPROVED`，与历史授权矩阵不一致，必须由负责人核实依据。
+- 标准模式空配置会启用 NetEase、QQ、Kugou、Kuwo、AMLL、LRCLIB；GDStudio、Lyriva、Unblock 已在代码中强制关闭，任何环境变量都不能开启。
+- 项目负责人已于 2026-11-05 直接授权 NetEase、QQ、Kugou、Kuwo、AMLL、LRCLIB；正式授权文件由项目方归档，详见 `CHECKLIST.log`。
+- `strict-allowlist` 依赖明确名单与开关；列出的来源必须同时在 registry 中为 `APPROVED`/`CONDITIONAL`，否则 readiness 返回 `unapproved_sources`。
+- 生产 readiness 还要求至少一个 `audio` 源实际启用；仅 Apple/catalog/lyrics 或生产禁用的 synthetic 不会被判定为可播放。
 - Apple/YouTube Music 歌词适配器目前是保留骨架，不能通过配置凭据就视为已完成来源。
 
 不要将模板中的 `203.0.113.10` 当成真实出口 IP。账号 Cookie 只应配置在服务端，并遵守所属账号权限与上游条款。

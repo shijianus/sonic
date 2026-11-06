@@ -124,8 +124,41 @@ export async function handleUpstreamEndpoint(
   }
 }
 
+async function readBoundedResponseText(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(`Upstream JSON exceeds ${maxBytes} bytes`);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
 async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: Request, env?: AppEnv): Promise<Response> {
   const cfg = getSonicConfig(env);
+  const maxJsonBytes = Math.min(
+    16 * 1024 * 1024,
+    Math.max(512 * 1024, Number(env?.SONIC_UPSTREAM_MAX_JSON_BYTES) || 8 * 1024 * 1024),
+  );
   // JSON is materialized inside the shared flight. Each caller gets a fresh body;
   // no Response.clone tee can keep a slow subscriber's entire payload buffered.
   const timedFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
@@ -138,7 +171,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
     const key = JSON.stringify([String(input), init.method || 'GET', pairs(init.headers), init.body || '']);
     const result = await withSonicJsonSingleFlight(key, async (signal) => {
       const response = await fetchWithRuntimeBudget(input, { ...init, signal: undefined }, { timeoutMs: cfg.timeoutMs, signals: [signal] });
-      return { body: await response.text(), status: response.status, statusText: response.statusText, headers: pairs(response.headers) };
+      return { body: await readBoundedResponseText(response, maxJsonBytes), status: response.status, statusText: response.statusText, headers: pairs(response.headers) };
     }, request.signal);
     return new Response([204, 205, 304].includes(result.status) ? null : result.body, { status: result.status, statusText: result.statusText, headers: result.headers });
   };

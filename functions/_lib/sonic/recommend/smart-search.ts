@@ -71,13 +71,9 @@ export function executeSmartSuggest(
         add({ text: q, type: 'query', subLabel: '最近搜索', score: 95 });
       }
     }
-    // Public suggestions must not expose raw user queries. Query aggregates are only
-    // suitable for private/opt-in identities; public users receive catalog-curated items.
-    if (identity?.mode !== 'public') {
-      for (const topQ of store.getTopSearchQueries('', 4)) {
-        add({ text: topQ.query, type: 'query', subLabel: '热门搜索', score: 85 });
-      }
-    }
+    // Public suggestions must not expose raw user queries. Aggregates can still
+    // contain personal search terms, so only the caller's own recent queries and
+    // catalog-curated presets are returned.
     for (const preset of ['周杰伦', '华语 R&B', '陈奕迅', '粤语金曲', 'Taylor Swift']) {
       add({ text: preset, type: 'query', subLabel: '精选热搜', score: 75 });
     }
@@ -119,17 +115,6 @@ export function executeSmartSuggest(
       subLabel: t.album || t.genres[0]?.toUpperCase() || '单曲',
       score: 100 + t.externalPopularity * 0.1,
     });
-  }
-
-  if (identity?.mode !== 'public') {
-    for (const qItem of store.getTopSearchQueries(trimmed, 5)) {
-      pushUnique({
-        text: qItem.query,
-        type: 'query',
-        subLabel: '历史热搜',
-        score: 80 + Math.min(15, qItem.count),
-      });
-    }
   }
 
   for (const g of exp.inferredGenres) {
