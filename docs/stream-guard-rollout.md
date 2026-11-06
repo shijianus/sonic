@@ -152,8 +152,9 @@
     1. **已登录用户**（经由 `verifyAuth` 验签通过的 API Key 或 `sonic_session` Cookie 用户）：统一为 `user:<email>`；
     2. **匿名访客**：严格仅信任经由 HMAC-SHA256 验签通过的 `sonic_anon_session` Cookie，主体格式为 `anon:<完整会话ID>`，严禁信任或直接使用未验签的 `X-Sonic-Anon-Id` 请求头；
     3. **无有效会话**：回退为客户端 IP 摘要 `anon:ip:<ipHash>`。
-* **默认行为安全回退（最高优先级）**：
-  * 当 `SONIC_STREAM_GUARD=off` 时，网关匿名限流主体严格回退为阶段 1 之前（`eddcf54`）的客户端 IP 格式（`anon:${ip}`），杜绝任何行为漂移。
+* **默认行为安全回退与出口 NAT 限流说明**：
+  * 当 `SONIC_STREAM_GUARD=off` 时，网关匿名限流主体严格统一按客户端真实 IP（`anon:${ip}`），杜绝任何利用会话绕过限流的漏洞。
+  * **共享出口 IP 风险与 429 观测**：由于统一按 IP 分桶（与历史基线对带会话请求的分桶行为不同），处于同一企业局域网、高校校园网或公共 Wi-Fi 等大容量 NAT 出口下的多个独立匿名用户，将共同消耗单 IP 的 `SONIC_RATE_LIMIT_ANON_RPM` 限额。因此，在将系统切换至 `monitor` 灰度观察期时，运维团队必须重点监控匿名接口的 HTTP 429 报错比例是否异常抬升，必要时合理调整 `SONIC_RATE_LIMIT_ANON_RPM` 阈值。
   * 当 `monitor` 或 `enforce` 时，仅验签合法的会话才可作为主体；同时底层限流引擎叠加客户端 IP 基础桶双重校验，杜绝攻击者通过快速轮换客户端会话 ID 绕过 IP 限额。
 
 ### 5.5 前端票据自愈与音源失效解耦机制
@@ -188,6 +189,18 @@
      * 遵循约束 C1，带有效 API Key 的音频流请求 100% 旁路票据与 Stream Guard 防护；
   3. **方式 C：纯控制信令互联（推荐默认）**：
      * 博客随身听仅作为遥控控制器（通过 `SEEK`、`PLAY`、`PAUSE`、`TOGGLE_PLAY` 命令控制 Sonic 标签页播放器），音频由 Sonic 本站标签页解码播放，博客端无需单独发起跨域媒体请求。
+
+### 5.7 Cloudflare Turnstile 验证码启用要求与前置配置规范
+* **功能定位**：
+  * 面向高风控/大促/爬虫激增时期的弹性人机校验手段，防御自动化脚本高频刷取票据或批量爬取音源。
+* **启用前提与环境变量**：
+  1. **服务端开关**：设置 `SONIC_TURNSTILE_ENABLED=1`；
+  2. **服务端 Secret**：配置 Cloudflare Dashboard 颁发的 `SONIC_TURNSTILE_SECRET_KEY`；
+  3. **前端 SiteKey**：客户端集成时需配置 `SONIC_TURNSTILE_SITE_KEY`。
+* **校验规则与豁免范围**：
+  * **匿名强制**：在 `SONIC_TURNSTILE_ENABLED=1` 开启下，所有未通过 `verifyAuth` 鉴权的匿名访客调用 `POST /api/music/ticket` 时，必须在请求 Body 中携带有效的 `cfTurnstileToken`；若缺失或经 Cloudflare 校验无效，一律返回 HTTP 403 `CAPTCHA_FAILED`。
+  * **登录/API Key 自动豁免**：凡已通过 `verifyAuth`（合法 API Key 或已登录 Session）的请求，自动豁免人机验证，绝不弹出验证码，保障核心调用方与注册用户的流畅体验。
+  * **未启用时零影响**：当 `SONIC_TURNSTILE_ENABLED=0`（或缺省未配置）时，`/api/music/ticket` 完全不强制要求验证码，维持常规快速取票。
 
 ---
 

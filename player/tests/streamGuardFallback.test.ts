@@ -461,4 +461,59 @@ describe('Stream Guard Fallback & Resilience (Requirement 4)', () => {
       window.removeEventListener('sonic:audio-sync', handler)
     }
   })
+
+  it('Requirement 14: Zero overhead in off mode (guard: off is cached for 10 min, zero extra ticket requests on subsequent songs)', async () => {
+    const { requestPlaybackTicket, clearPlaybackTicketCache, getCachedGuardMode } = await import('@/utils/streamGuard')
+    clearPlaybackTicketCache()
+
+    let networkTicketCalls = 0
+    httpPostMock.mockImplementation(async () => {
+      networkTicketCalls++
+      return {
+        ok: true,
+        brand: 'Sonic',
+        ticket: null,
+        guard: 'off',
+        expiresIn: 0,
+      }
+    })
+
+    // 1. First ticket request calls endpoint and learns guard is 'off'
+    const ticket1 = await requestPlaybackTicket('song_1', 'netease')
+    expect(ticket1).toBeNull()
+    expect(networkTicketCalls).toBe(1)
+    expect(getCachedGuardMode()).toBe('off')
+
+    // 2. Subsequent requests for different songs return null with 0 network calls
+    const ticket2 = await requestPlaybackTicket('song_2', 'netease')
+    expect(ticket2).toBeNull()
+    expect(networkTicketCalls).toBe(1) // Still 1!
+
+    const ticket3 = await requestPlaybackTicket('song_3', 'qq')
+    expect(ticket3).toBeNull()
+    expect(networkTicketCalls).toBe(1) // Still 1!
+
+    // 3. End-to-end playback test: playing 5 consecutive songs triggers exactly 1 initial check, and 0 additional checks
+    const songA = song('1001', { platform: 'netease', name: 'Song A' })
+    const songB = song('1002', { platform: 'netease', name: 'Song B' })
+    const songC = song('1003', { platform: 'netease', name: 'Song C' })
+    const songD = song('1004', { platform: 'netease', name: 'Song D' })
+    const songE = song('1005', { platform: 'netease', name: 'Song E' })
+
+    const { store } = ready(songA)
+    store.audio.playlist = [songA, songB, songC, songD, songE]
+
+    const callsBefore = networkTicketCalls
+    await store.playSong(songA, 0, true)
+    await store.playSong(songB, 1, true)
+    await store.playSong(songC, 2, true)
+    await store.playSong(songD, 3, true)
+    await store.playSong(songE, 4, true)
+
+    // Assert: Across all 5 songs, zero additional ticket requests were generated!
+    expect(networkTicketCalls - callsBefore).toBe(0)
+    expect(songA.url).not.toMatch(/[?&]t=/)
+    expect(songE.url).not.toMatch(/[?&]t=/)
+    expect(songE.url).toContain('/api/music/stream')
+  })
 })

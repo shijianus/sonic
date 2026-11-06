@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   issueStreamTicket,
   verifyStreamTicket,
@@ -831,13 +831,18 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
   });
 
   describe("6. Ticket Endpoint: POST /api/music/ticket", () => {
+    const envTicket: AppEnv = {
+      ...BASE_ENV,
+      SONIC_STREAM_GUARD: "enforce",
+    };
+
     it("issues ticket with valid JSON payload", async () => {
       const req = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id: "186016", source: "netease", br: "320" }),
       });
-      const res = await handleMusicTicket({ request: req, env: BASE_ENV });
+      const res = await handleMusicTicket({ request: req, env: envTicket });
       expect(res.status).toBe(200);
 
       const data = (await res.json()) as any;
@@ -853,7 +858,7 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       );
       const getRes = await handleMusicTicket({
         request: getReq,
-        env: BASE_ENV,
+        env: envTicket,
       });
       expect(getRes.status).toBe(405);
 
@@ -867,7 +872,7 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       );
       const noIdRes = await handleMusicTicket({
         request: noIdReq,
-        env: BASE_ENV,
+        env: envTicket,
       });
       expect(noIdRes.status).toBe(400);
     });
@@ -1611,6 +1616,132 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       expect(allowedRes.status).toBe(206);
       expect(allowedRes.headers.get("Access-Control-Allow-Origin")).toBe("https://allowed-blog.example.com");
       expect(allowedRes.headers.get("Vary")).toContain("Origin");
+    });
+
+    it("12. Cloudflare Turnstile enforcement (SONIC_TURNSTILE_ENABLED=1)", async () => {
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async (input: any) => {
+        const urlStr = typeof input === "string" ? input : input?.url || "";
+        if (urlStr.includes("challenges.cloudflare.com")) {
+          return new Response(JSON.stringify({ success: false, "error-codes": ["invalid-input-response"] }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+        return origFetch(input);
+      }) as any;
+
+      try {
+        const envTurnstile: AppEnv = {
+          ...BASE_ENV,
+          SONIC_STREAM_GUARD: "enforce",
+          SONIC_TURNSTILE_ENABLED: "1",
+          SONIC_TURNSTILE_SECRET_KEY: "0x4AAAAAAABBBBBBCCCCCC",
+        };
+
+        // a) Anonymous request lacking cfTurnstileToken is rejected with 403 CAPTCHA_FAILED
+        const noTokenReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: "syn-440hz", source: "synthetic" }),
+        });
+        const noTokenRes = await handleMusicTicket({ request: noTokenReq, env: envTurnstile });
+        expect(noTokenRes.status).toBe(403);
+        const noTokenBody: any = await noTokenRes.json();
+        expect(noTokenBody.error?.code).toBe("CAPTCHA_FAILED");
+
+        // b) Anonymous request with invalid cfTurnstileToken is rejected with 403 CAPTCHA_FAILED
+        const badTokenReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: "syn-440hz", source: "synthetic", cfTurnstileToken: "bad_token" }),
+        });
+        const badTokenRes = await handleMusicTicket({ request: badTokenReq, env: envTurnstile });
+        expect(badTokenRes.status).toBe(403);
+        const badTokenBody: any = await badTokenRes.json();
+        expect(badTokenBody.error?.code).toBe("CAPTCHA_FAILED");
+
+        // c) Authenticated user is exempt from Turnstile check
+        const authUserSession = await createSession(envTurnstile, {
+          email: "verified@sonic.internal",
+          name: "Verified User",
+          avatar: "",
+        });
+        const authReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-Sonic-Key": authUserSession.apiKey,
+          },
+          body: JSON.stringify({ id: "syn-440hz", source: "synthetic" }),
+        });
+        const authRes = await handleMusicTicket({ request: authReq, env: envTurnstile });
+        expect(authRes.status).toBe(200);
+        const authBody: any = await authRes.json();
+        expect(authBody.ok).toBe(true);
+
+        // d) Turnstile disabled (default) does not require cfTurnstileToken
+        const envNoTurnstile: AppEnv = {
+          ...BASE_ENV,
+          SONIC_STREAM_GUARD: "enforce",
+          SONIC_TURNSTILE_ENABLED: "0",
+        };
+        const normalReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: "syn-440hz", source: "synthetic" }),
+        });
+        const normalRes = await handleMusicTicket({ request: normalReq, env: envNoTurnstile });
+        expect(normalRes.status).toBe(200);
+      } finally {
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    it("13. Zero overhead in off mode (SONIC_STREAM_GUARD=off returns ticket: null, guard: 'off')", async () => {
+      const envOff: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "off",
+      };
+
+      const req = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "syn-440hz", source: "synthetic" }),
+      });
+      const res = await handleMusicTicket({ request: req, env: envOff });
+      expect(res.status).toBe(200);
+      const body: any = await res.json();
+      expect(body).toEqual({
+        ok: true,
+        brand: "Sonic",
+        ticket: null,
+        guard: "off",
+        expiresIn: 0,
+      });
+      expect(res.headers.get("Set-Cookie")).toBeNull();
+    });
+
+    it("14. Error sanitization: ticket issuance failures return generic error code and message without leaking err.message", async () => {
+      const envBadSecret: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_SECRET: "too_short", // Causes issueStreamTicket to throw
+      };
+
+      const req = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: "syn-440hz", source: "synthetic" }),
+      });
+      const res = await handleMusicTicket({ request: req, env: envBadSecret });
+      expect(res.status).toBe(500);
+      const body: any = await res.json();
+      expect(body.error?.code).toBe("TICKET_ISSUANCE_FAILED");
+      expect(body.error?.message).toBe("Failed to issue stream ticket");
+      // Never leaks internal error details
+      expect(body.error?.message).not.toContain("SONIC_SECRET");
+      expect(body.error?.message).not.toContain("too_short");
     });
   });
 });

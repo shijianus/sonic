@@ -10,7 +10,28 @@ interface CachedTicket {
   expiresAtMs: number
 }
 
+interface GuardModeCache {
+  guard: 'off' | 'monitor' | 'enforce'
+  expiresAtMs: number
+}
+
 const ticketCache = new Map<string, CachedTicket>()
+let cachedGuardState: GuardModeCache | null = null
+export const GUARD_OFF_CACHE_TTL_MS = 10 * 60 * 1000 // 10 minutes
+
+export function getCachedGuardMode(): 'off' | 'monitor' | 'enforce' | null {
+  if (cachedGuardState && Date.now() < cachedGuardState.expiresAtMs) {
+    return cachedGuardState.guard
+  }
+  return null
+}
+
+export function setCachedGuardMode(guard: 'off' | 'monitor' | 'enforce', ttlMs = GUARD_OFF_CACHE_TTL_MS): void {
+  cachedGuardState = {
+    guard,
+    expiresAtMs: Date.now() + ttlMs,
+  }
+}
 
 export async function requestPlaybackTicket(
   id: string | number,
@@ -22,10 +43,16 @@ export async function requestPlaybackTicket(
   const cleanId = String(id || '').trim()
   if (!cleanId) return null
 
-  const trackKey = `${purpose}:${source}:${cleanId}:${br}`
   const now = Date.now()
 
-  // Reuse cached ticket if within valid window (leave 15s margin), unless forceFresh requested
+  // 1. If guard is cached as 'off' (and not expired), skip ticket request immediately
+  if (!forceFresh && cachedGuardState && cachedGuardState.guard === 'off' && now < cachedGuardState.expiresAtMs) {
+    return null
+  }
+
+  const trackKey = `${purpose}:${source}:${cleanId}:${br}`
+
+  // 2. Reuse cached ticket if within valid window (leave 15s margin), unless forceFresh requested
   if (!forceFresh) {
     const cached = ticketCache.get(trackKey)
     if (cached && cached.expiresAtMs - now > 15_000) {
@@ -40,6 +67,16 @@ export async function requestPlaybackTicket(
       br,
       purpose,
     })
+
+    // If server reports guard: 'off', cache this state for 10 minutes and return null (zero overhead)
+    if (res && res.guard === 'off') {
+      setCachedGuardMode('off')
+      return null
+    }
+
+    if (res && (res.guard === 'monitor' || res.guard === 'enforce')) {
+      setCachedGuardMode(res.guard)
+    }
 
     if (res && (res.ok || res.ticket) && res.ticket) {
       const ttlSec = Number(res.expiresIn || 120)
@@ -59,6 +96,7 @@ export async function requestPlaybackTicket(
 
 export function clearPlaybackTicketCache(): void {
   ticketCache.clear()
+  cachedGuardState = null
 }
 
 /**
@@ -86,6 +124,8 @@ export function stripTicketFromUrl(url?: string | null): string {
  */
 export function isTicketExpired(url?: string | null): boolean {
   if (!url || typeof url !== 'string' || !url.includes('/api/music/stream')) return false
+  // If server is in 'off' mode, unticketed streams are valid and never considered expired
+  if (getCachedGuardMode() === 'off') return false
   try {
     const dummyBase = 'http://localhost'
     const parsed = new URL(url, dummyBase)

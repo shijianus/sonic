@@ -17,6 +17,7 @@ import {
   extractClientIp,
   hasValidEngineSecret,
 } from '../../_lib/sonic/security';
+import { redactSensitiveString } from '../../_lib/sonic/observability';
 import {
   getOrCreateAnonSession,
   issueStreamTicket,
@@ -82,6 +83,25 @@ export async function onRequest({
     return errorResponse('Method not allowed', 405);
   }
 
+  const guardMode = String(env?.SONIC_STREAM_GUARD || 'off').trim().toLowerCase();
+  if (guardMode === 'off') {
+    return jsonResponse(
+      {
+        ok: true,
+        brand: 'Sonic',
+        ticket: null,
+        guard: 'off',
+        expiresIn: 0,
+      },
+      {
+        status: 200,
+        headers: buildTicketResponseHeaders({
+          'Cache-Control': 'no-store, no-cache, must-revalidate',
+        }),
+      },
+    );
+  }
+
   const engineDenied = checkEngineAccess(request, env);
   if (engineDenied) return engineDenied;
 
@@ -109,23 +129,57 @@ export async function onRequest({
   const auth = await verifyAuth(request, env);
   let cookieHeader: string | undefined;
 
-  if (!auth.authenticated && body.cfTurnstileToken) {
-    const turnstileCheck = await verifyTurnstileToken(
-      body.cfTurnstileToken,
-      clientIp,
-      env,
-    );
-    if (!turnstileCheck.success) {
-      return jsonResponse(
-        {
-          brand: 'Sonic',
-          error: {
-            code: 'CAPTCHA_FAILED',
-            message: 'Human verification failed or expired',
+  const isTurnstileEnabled = String(env?.SONIC_TURNSTILE_ENABLED || '0').trim() === '1';
+  if (!auth.authenticated) {
+    if (isTurnstileEnabled) {
+      const turnstileToken = String(body.cfTurnstileToken || '').trim();
+      if (!turnstileToken) {
+        return jsonResponse(
+          {
+            brand: 'Sonic',
+            error: {
+              code: 'CAPTCHA_FAILED',
+              message: 'Human verification token is required',
+            },
           },
-        },
-        { status: 403, headers: buildTicketResponseHeaders({ 'Cache-Control': 'no-store' }) },
+          { status: 403, headers: buildTicketResponseHeaders({ 'Cache-Control': 'no-store' }) },
+        );
+      }
+      const turnstileCheck = await verifyTurnstileToken(
+        turnstileToken,
+        clientIp,
+        env,
       );
+      if (!turnstileCheck.success) {
+        return jsonResponse(
+          {
+            brand: 'Sonic',
+            error: {
+              code: 'CAPTCHA_FAILED',
+              message: 'Human verification failed or expired',
+            },
+          },
+          { status: 403, headers: buildTicketResponseHeaders({ 'Cache-Control': 'no-store' }) },
+        );
+      }
+    } else if (body.cfTurnstileToken) {
+      const turnstileCheck = await verifyTurnstileToken(
+        String(body.cfTurnstileToken).trim(),
+        clientIp,
+        env,
+      );
+      if (!turnstileCheck.success) {
+        return jsonResponse(
+          {
+            brand: 'Sonic',
+            error: {
+              code: 'CAPTCHA_FAILED',
+              message: 'Human verification failed or expired',
+            },
+          },
+          { status: 403, headers: buildTicketResponseHeaders({ 'Cache-Control': 'no-store' }) },
+        );
+      }
     }
   }
 
@@ -166,6 +220,7 @@ export async function onRequest({
         ok: true,
         brand: 'Sonic',
         ticket,
+        guard: guardMode,
         expiresIn: TICKET_MAX_TTL_SEC,
         purpose,
         fingerprint: `${source}:${id}:${br}`,
@@ -176,12 +231,18 @@ export async function onRequest({
       },
     );
   } catch (err: any) {
+    console.error(
+      JSON.stringify({
+        type: 'stream_guard_ticket_issuance_failed',
+        error: redactSensitiveString(err?.message || String(err)),
+      }),
+    );
     return jsonResponse(
       {
         brand: 'Sonic',
         error: {
           code: 'TICKET_ISSUANCE_FAILED',
-          message: err?.message || 'Failed to issue stream ticket',
+          message: 'Failed to issue stream ticket',
         },
       },
       { status: 500, headers: buildTicketResponseHeaders({ 'Cache-Control': 'no-store' }) },
