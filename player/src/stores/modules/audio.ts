@@ -12,7 +12,7 @@ import { downloadedMusicDB, localMusicDB } from '@/utils/indexedDB'
 import { musicStreamUrl, songSourceCandidates, songPlaybackSource, songSourcePair, streamSourcePair } from '@/utils/audioUtils'
 import { inspectGatewayHeaders, markStreamFailure, gatewayHealth } from '@/utils/gatewayHealth'
 import { sonicBlogBridge } from '@/utils/sonicBlogBridge'
-import { requestPlaybackTicket, isTicketExpired, isTicketOrGrantError } from '@/utils/streamGuard'
+import { requestPlaybackTicket, isTicketExpired, isTicketOrGrantError, stripTicketFromUrl } from '@/utils/streamGuard'
 import piniaPersistConfig from '../persist'
 
 /** 全局 Audio 单例（整个应用只创建一个 HTMLAudioElement） */
@@ -556,8 +556,8 @@ export const useAudioStore = defineStore('audio', {
           )
           try {
             this.audio.isLoading = true
-            // 保持同一音源 (tryNextSource = false)，强制拉取最新票据 (forceFresh = true)
-            await this._fetchAndApplyUrl(currentSong, true, false)
+            // 保持同一音源 (tryNextSource = false)，强制拉取最新票据 (forceFresh = true)，不加 nocache=1
+            await this._fetchAndApplyUrl(currentSong, true, false, false)
             if (failedGeneration !== playbackGeneration || this.audio.currentSong?.id !== failedSongId || !currentSong.url) return
 
             if (savedTime > 0) {
@@ -747,7 +747,7 @@ export const useAudioStore = defineStore('audio', {
             this.audio.isLoading = true
             // 若凭据已过期或缺失，先拉取最新票据再载入播放，确保续播不卡死
             if (this.audio.currentSong && !this.audio.currentSong.isLocal && (isTicketExpired(this.audio.currentSong.url) || !this.audio.currentSong.url)) {
-              await this._fetchAndApplyUrl(this.audio.currentSong, true, false)
+              await this._fetchAndApplyUrl(this.audio.currentSong, true, false, false)
             }
             if (resumeTime > 0) {
               const restoreProgress = () => {
@@ -837,7 +837,7 @@ export const useAudioStore = defineStore('audio', {
               artist: this.audio.currentSong.artists || (this.audio.currentSong as any).artist || '',
               album: (this.audio.currentSong as any).album || (this.audio.currentSong.al as any)?.name || '',
               coverUrl: this.audio.currentSong.picUrl || (this.audio.currentSong as any).cover || (this.audio.currentSong.al as any)?.picUrl || '',
-              audioUrl: this.audio.currentSong.url || this.audio.audio.src,
+              audioUrl: stripTicketFromUrl(this.audio.currentSong.url || this.audio.audio.src),
               duration: this.audio.duration || (this.audio.currentSong.duration ? this.audio.currentSong.duration / 1000 : 0),
               source: 'sonic',
             },
@@ -882,7 +882,7 @@ export const useAudioStore = defineStore('audio', {
      * 刷新当前歌曲的播放地址并重试播放
      * 用于链接过期、流断开或音源 403/404 场景的多源自动 failover 与恢复
      */
-    async refreshAndReplay(tryNextSource = false): Promise<void> {
+    async refreshAndReplay(tryNextSource = false, bypassCache = true): Promise<void> {
       if (!this.audio.currentSong || !this.audio.audio) return
       if (this.audio.currentSong.isLocal) return
 
@@ -891,7 +891,7 @@ export const useAudioStore = defineStore('audio', {
       this.audio.isLoading = true
       this.audio.isPaused = false
       try {
-        await this._fetchAndApplyUrl(this.audio.currentSong, true, tryNextSource)
+        await this._fetchAndApplyUrl(this.audio.currentSong, true, tryNextSource, tryNextSource || bypassCache)
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId || !this.audio.currentSong.url) return
         this._loadAudioSrc(this.audio.currentSong.url, true)
         await this.audio.audio.play()
@@ -963,9 +963,10 @@ export const useAudioStore = defineStore('audio', {
         }
       }
       const nextSong = this.audio.playlist[nextIndex]
-      if (nextSong && !nextSong.url && !nextSong.isLocal) {
+      const needsFresh = isTicketExpired(nextSong?.url)
+      if (nextSong && (!nextSong.url || needsFresh) && !nextSong.isLocal) {
         try {
-          await this._fetchAndApplyUrl(nextSong)
+          await this._fetchAndApplyUrl(nextSong, needsFresh)
         } catch {}
       }
     },
@@ -975,8 +976,14 @@ export const useAudioStore = defineStore('audio', {
      * 抽取自 playSong 和 refreshAndReplay 的公共逻辑，支持传入目标歌曲进行预解析
      * @param forceFresh 是否强制跳过内存 Promise 缓存重新请求
      * @param tryNextSource 是否在发生错误时轮询切换下一个候选音源平台
+     * @param bypassCache 是否显式附加 nocache=1 绕过边缘与上游缓存（仅在切源或显式重试时开启，换票不开启）
      */
-    async _fetchAndApplyUrl(targetSong?: Song, forceFresh = false, tryNextSource = false): Promise<void> {
+    async _fetchAndApplyUrl(
+      targetSong?: Song,
+      forceFresh = false,
+      tryNextSource = false,
+      bypassCache = false
+    ): Promise<void> {
       const song = targetSong || this.audio.currentSong
       if (!song) return
       const generation = playbackGeneration
@@ -993,8 +1000,16 @@ export const useAudioStore = defineStore('audio', {
           chosen = candidates[(current + 1) % candidates.length]
         }
       }
-      const fresh = forceFresh || tryNextSource
-      const requestKey = JSON.stringify([songKey, chosen?.platform, chosen?.platformId, settingsStore.audioQuality, fresh])
+      const shouldBypassCache = tryNextSource || bypassCache
+      const fresh = forceFresh || shouldBypassCache
+      const requestKey = JSON.stringify([
+        songKey,
+        chosen?.platform,
+        chosen?.platformId,
+        settingsStore.audioQuality,
+        fresh,
+        shouldBypassCache,
+      ])
       let flight = pendingUrlRequests.get(requestKey)
       if (fresh || flight?.generation !== generation) flight = undefined
       if (!flight) {
@@ -1010,7 +1025,7 @@ export const useAudioStore = defineStore('audio', {
           if (artist) params.set('artist', artist)
           if (song.duration) params.set('duration', String(Math.round(song.duration > 1000 ? song.duration / 1000 : song.duration)))
           params.set('quality', settingsStore.audioQuality)
-          if (fresh) params.set('nocache', '1')
+          if (shouldBypassCache) params.set('nocache', '1')
           // A retry must not reuse a stale URL from url, streamUrl, qualities or song/url/v1.
           const resolveFinalGatewayUrl = async () => {
             try {
@@ -1019,7 +1034,7 @@ export const useAudioStore = defineStore('audio', {
                 chosen.platform,
                 settingsStore.audioQuality,
                 'play',
-                fresh
+                forceFresh
               )
               if (ticket) params.set('t', ticket)
             } catch {}

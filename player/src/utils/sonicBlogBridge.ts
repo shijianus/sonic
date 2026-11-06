@@ -4,6 +4,8 @@
  * 保障音频链路（播放流、播放/暂停、精准毫秒跳转、时间同步）与字母/歌词链路（逐字时间戳、行级对齐、歌词文本）100% 同步
  */
 
+import { stripTicketFromUrl } from '@/utils/streamGuard'
+
 export interface SonicPocketTrack {
   id: string | number
   name: string
@@ -221,13 +223,14 @@ class SonicBlogBridgeManager {
    */
   public normalizeAudioUrl(url: string): string {
     if (!url) return ''
-    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:') || url.startsWith('data:')) {
-      return url
+    const cleanUrl = stripTicketFromUrl(url)
+    if (cleanUrl.startsWith('http://') || cleanUrl.startsWith('https://') || cleanUrl.startsWith('blob:') || cleanUrl.startsWith('data:')) {
+      return cleanUrl
     }
-    if (typeof window !== 'undefined' && url.startsWith('/')) {
-      return `${window.location.origin}${url}`
+    if (typeof window !== 'undefined' && cleanUrl.startsWith('/')) {
+      return `${window.location.origin}${cleanUrl}`
     }
-    return url
+    return cleanUrl
   }
 
   /**

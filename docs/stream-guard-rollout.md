@@ -173,6 +173,22 @@
   * `sonic_grant_*` 与 `sonic_anon_session` Cookie 在 HTTPS 环境下根据请求 URL 及 `x-forwarded-proto` 自动注入 `; Secure` 属性。
   * `SONIC_CORS_STRICT=1` 开启时，`/api/music/ticket` 严格校验 Origin 白名单；`stream` 与 `ticket` 仅返回具体匹配的 Origin 而非 `*`（API Key 请求保持 `*` 以遵守 C1）；非法跨域的 `Sec-Fetch-Site: cross-site` 直接阻断。
 
+### 5.6 博客随身听互联（sonicBlogBridge）与访问配置规范
+* **`audioUrl` 使用机制与跨域解耦**：
+  * Sonic 通过 `sonicBlogBridge.broadcastTrack` 向外广播当前播放曲目（通过 `window.opener.postMessage`、`window.parent.postMessage`、`BroadcastChannel` 及 `localStorage` 同步）。
+  * 广播给 `shijianus-blog`（随身听 mini-player）的 `audioUrl` 在广播前**必须经过 `stripTicketFromUrl` 脱敏，剔除所有 `t=`、`ticket=` 与 `grant=` 临时票据参数**。
+  * 避免短效票据随跨域消息广播泄漏，或因票据失效导致博客侧音频播放死锁。
+* **博客端（shijianus-blog）访问方式配置说明**：
+  当 Sonic 部署环境开启 `SONIC_STREAM_GUARD=enforce` 或 `SONIC_CORS_STRICT=1` 时，若博客端需要直接跨域播放/加载 Sonic 音频流，博客管理员或站点部署需按以下方式之一配置：
+  1. **方式 A：白名单 Origin + 票据签发（推荐 Web 嵌入）**：
+     * 将博客域名（如 `https://shijian.us`、`https://blog.shijian.us`）加入服务端的 `SONIC_ALLOWED_ORIGINS` 环境变量；
+     * 博客随身听直接在跨域中请求 `POST /api/music/ticket` 获取播放票据，或通过 postMessage 由 Sonic 宿主窗口转发已授权的临时播放句柄；
+  2. **方式 B：服务端 API Key 直通（推荐后端或特权集成）**：
+     * 为博客集成配置专属 API Key（`X-Sonic-Key` 或通过安全代理转发）；
+     * 遵循约束 C1，带有效 API Key 的音频流请求 100% 旁路票据与 Stream Guard 防护；
+  3. **方式 C：纯控制信令互联（推荐默认）**：
+     * 博客随身听仅作为遥控控制器（通过 `SEEK`、`PLAY`、`PAUSE`、`TOGGLE_PLAY` 命令控制 Sonic 标签页播放器），音频由 Sonic 本站标签页解码播放，博客端无需单独发起跨域媒体请求。
+
 ---
 
 ## 6. 秒级应急与回滚步骤

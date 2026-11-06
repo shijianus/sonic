@@ -1480,5 +1480,137 @@ describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
       const crossSiteRes = await handleMusicStream({ request: crossSiteReq, env: envStrict });
       expect(crossSiteRes.status).toBe(403);
     });
+
+    it("10. Unified Client IP extraction (extractClientIp)", async () => {
+      const envWithSecret: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_ENGINE_SECRET: "test_engine_secret_at_least_32_characters_long",
+      };
+
+      // 1. Untrusted caller forging X-Sonic-Client-IP
+      const forgedReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "203.0.113.10",
+          "X-Sonic-Client-IP": "198.51.100.99", // attacker forged IP
+        },
+        body: JSON.stringify({ id: "syn-440hz", source: "synthetic" }),
+      });
+      const ticketRes = await handleMusicTicket({ request: forgedReq, env: envWithSecret });
+      expect(ticketRes.status).toBe(200);
+      const ticketBody: any = await ticketRes.json();
+      expect(ticketBody.ok).toBe(true);
+
+      // Verify the ticket was bound to 203.0.113.10 (not 198.51.100.99)
+      const ticketParts = ticketBody.ticket.split(".");
+      const payloadBytes = Buffer.from(ticketParts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64");
+      const payload = JSON.parse(payloadBytes.toString("utf8"));
+      const expectedIpHash = (await crypto.subtle.digest("SHA-256", new TextEncoder().encode("203.0.113.10")));
+      const expectedIpHashHex = Array.from(new Uint8Array(expectedIpHash)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
+      expect(payload.uip).toBe(expectedIpHashHex);
+
+      // 2. Trusted engine hop with valid X-Sonic-Engine-Key trusts X-Sonic-Client-IP
+      const trustedEngineReq = new Request("https://sonic.epocanvas.tech/api/music/ticket", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "CF-Connecting-IP": "10.0.0.1",
+          "X-Sonic-Engine-Key": "test_engine_secret_at_least_32_characters_long",
+          "X-Sonic-Client-IP": "198.51.100.99",
+        },
+        body: JSON.stringify({ id: "syn-440hz", source: "synthetic" }),
+      });
+      const trustedRes = await handleMusicTicket({ request: trustedEngineReq, env: envWithSecret });
+      expect(trustedRes.status).toBe(200);
+      const trustedBody: any = await trustedRes.json();
+      const trustedParts = trustedBody.ticket.split(".");
+      const trustedPayloadBytes = Buffer.from(trustedParts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64");
+      const trustedPayload = JSON.parse(trustedPayloadBytes.toString("utf8"));
+      const engineIpHash = (await crypto.subtle.digest("SHA-256", new TextEncoder().encode("198.51.100.99")));
+      const engineIpHashHex = Array.from(new Uint8Array(engineIpHash)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 8);
+      expect(trustedPayload.uip).toBe(engineIpHashHex);
+    });
+
+    it("11. Strict CORS compliance (SONIC_CORS_STRICT=1)", async () => {
+      const envStrict: AppEnv = {
+        ...BASE_ENV,
+        SONIC_STREAM_GUARD: "enforce",
+        SONIC_CORS_STRICT: "1",
+        SONIC_ALLOWED_ORIGINS: "https://allowed-blog.example.com",
+        SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: "1",
+      };
+
+      const anonSession = await createValidAnonSession(envStrict);
+      const ticket = await issueStreamTicket({
+        id: "syn-440hz",
+        source: "synthetic",
+        sub: anonSession.sub,
+        env: envStrict,
+      });
+
+      // a) Same-origin request without Origin header and Sec-Fetch-Site: same-origin is permitted
+      const sameOriginReq = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+        {
+          headers: {
+            ...anonSession.headers,
+            "Sec-Fetch-Site": "same-origin",
+            Range: "bytes=0-1023",
+          },
+        },
+      );
+      const sameOriginRes = await handleMusicStream({ request: sameOriginReq, env: envStrict });
+      expect(sameOriginRes.status).toBe(206);
+      // In strict CORS, same-origin request does NOT have wildcard Access-Control-Allow-Origin: *
+      expect(sameOriginRes.headers.get("Access-Control-Allow-Origin")).toBeNull();
+
+      // b) Cross-site request without Origin header (Sec-Fetch-Site: cross-site) is rejected
+      const hotlinkReq = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+        {
+          headers: {
+            ...anonSession.headers,
+            "Sec-Fetch-Site": "cross-site",
+          },
+        },
+      );
+      const hotlinkRes = await handleMusicStream({ request: hotlinkReq, env: envStrict });
+      expect(hotlinkRes.status).toBe(403);
+      const hotlinkBody: any = await hotlinkRes.json();
+      expect(hotlinkBody.error.code).toBe("CORS_FORBIDDEN");
+
+      // c) Unlisted Origin is rejected
+      const evilReq = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+        {
+          headers: {
+            ...anonSession.headers,
+            Origin: "https://evil-unlisted-site.com",
+          },
+        },
+      );
+      const evilRes = await handleMusicStream({ request: evilReq, env: envStrict });
+      expect(evilRes.status).toBe(403);
+      const evilBody: any = await evilRes.json();
+      expect(evilBody.error.code).toBe("CORS_FORBIDDEN");
+
+      // d) Whitelisted Origin reflects Origin and sets Vary: Origin
+      const allowedReq = new Request(
+        `https://sonic.epocanvas.tech/api/music/stream?id=syn-440hz&source=synthetic&t=${ticket}`,
+        {
+          headers: {
+            ...anonSession.headers,
+            Origin: "https://allowed-blog.example.com",
+            Range: "bytes=0-1023",
+          },
+        },
+      );
+      const allowedRes = await handleMusicStream({ request: allowedReq, env: envStrict });
+      expect(allowedRes.status).toBe(206);
+      expect(allowedRes.headers.get("Access-Control-Allow-Origin")).toBe("https://allowed-blog.example.com");
+      expect(allowedRes.headers.get("Vary")).toContain("Origin");
+    });
   });
 });

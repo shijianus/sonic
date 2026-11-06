@@ -51,15 +51,13 @@ export async function onRequest({
     customCorsHeaders['Vary'] = 'Origin';
   }
 
-  if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      status: 204,
-      headers: corsHeaders(customCorsHeaders),
-    });
-  }
-  if (request.method !== 'POST') {
-    return errorResponse('Method not allowed', 405);
-  }
+  const buildTicketResponseHeaders = (extra: Record<string, string> = {}): Headers => {
+    const h = corsHeaders({ ...customCorsHeaders, ...extra });
+    if (isStrictCors && !hasApiKey && !corsCheck.allowOriginHeader) {
+      h.delete('Access-Control-Allow-Origin');
+    }
+    return h;
+  };
 
   if (!corsCheck.allowed && !hasApiKey) {
     return jsonResponse(
@@ -70,8 +68,18 @@ export async function onRequest({
           message: `Cross-origin ticket request forbidden by security policy (${corsCheck.reason})`,
         },
       },
-      { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store', ...customCorsHeaders }) },
+      { status: 403, headers: buildTicketResponseHeaders({ 'Cache-Control': 'no-store' }) },
     );
+  }
+
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: buildTicketResponseHeaders(),
+    });
+  }
+  if (request.method !== 'POST') {
+    return errorResponse('Method not allowed', 405);
   }
 
   const engineDenied = checkEngineAccess(request, env);
@@ -95,7 +103,7 @@ export async function onRequest({
   const source = String(body.source || body.platform || 'netease').trim().toLowerCase();
   const br = String(body.br || body.quality || '320').trim();
   const purpose = (body.purpose === 'download' ? 'download' : 'play') as 'play' | 'download';
-  const clientIp = extractClientIp(request);
+  const clientIp = extractClientIp(request, env);
 
   // 1. Identify requester subject: Authenticated API User vs Anonymous Visitor
   const auth = await verifyAuth(request, env);
@@ -116,7 +124,7 @@ export async function onRequest({
             message: 'Human verification failed or expired',
           },
         },
-        { status: 403, headers: corsHeaders({ 'Cache-Control': 'no-store', ...customCorsHeaders }) },
+        { status: 403, headers: buildTicketResponseHeaders({ 'Cache-Control': 'no-store' }) },
       );
     }
   }
@@ -148,7 +156,6 @@ export async function onRequest({
     const responseHeaders: Record<string, string> = {
       'Cache-Control': 'no-store, no-cache, must-revalidate',
       'X-Sonic-Ticket-Ttl': String(TICKET_MAX_TTL_SEC),
-      ...customCorsHeaders,
     };
     if (cookieHeader) {
       responseHeaders['Set-Cookie'] = cookieHeader;
@@ -165,7 +172,7 @@ export async function onRequest({
       },
       {
         status: 200,
-        headers: corsHeaders(responseHeaders),
+        headers: buildTicketResponseHeaders(responseHeaders),
       },
     );
   } catch (err: any) {
@@ -177,7 +184,7 @@ export async function onRequest({
           message: err?.message || 'Failed to issue stream ticket',
         },
       },
-      { status: 500, headers: corsHeaders({ 'Cache-Control': 'no-store', ...customCorsHeaders }) },
+      { status: 500, headers: buildTicketResponseHeaders({ 'Cache-Control': 'no-store' }) },
     );
   }
 }

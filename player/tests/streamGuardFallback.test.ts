@@ -369,4 +369,96 @@ describe('Stream Guard Fallback & Resilience (Requirement 4)', () => {
     await store.playSong(testSong, 0, true)
     expect(audio.src).toContain('t=st_v1.fresh_ticket_1.sig')
   })
+
+  it('Requirement 11: Decouple ticket refresh and cache bypassing (forceFresh does not add nocache=1)', async () => {
+    httpPostMock.mockResolvedValue({
+      ok: true,
+      ticket: 'st_v1.fresh_ticket.sig',
+      expiresIn: 120,
+    })
+
+    const testSong = song('40001', {
+      platform: 'netease',
+      name: 'Cache Decouple Track',
+    })
+    const { store } = ready(testSong)
+
+    // a) Normal ticket refresh (forceFresh=true, tryNextSource=false, bypassCache=false)
+    await store._fetchAndApplyUrl(testSong, true, false, false)
+    expect(testSong.url).toContain('t=st_v1.fresh_ticket.sig')
+    expect(testSong.url).not.toContain('nocache=1')
+
+    // b) Source failover or explicit retry sets nocache=1
+    await store._fetchAndApplyUrl(testSong, true, true)
+    expect(testSong.url).toContain('nocache=1')
+  })
+
+  it('Requirement 12: preloadNextTrack triggers on missing URL or expired ticket, but skips valid tickets', async () => {
+    let ticketCounter = 1
+    httpPostMock.mockImplementation(async () => ({
+      ok: true,
+      ticket: `st_v1.preload_${ticketCounter++}.sig`,
+      expiresIn: 120,
+    }))
+
+    const validPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 1000 }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '')
+    const validUrl = `/api/music/stream?id=50002&source=netease&t=st_v1.${validPayload}.sig`
+
+    const expiredPayload = btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) - 100 }))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '')
+    const expiredUrl = `/api/music/stream?id=50002&source=netease&t=st_v1.${expiredPayload}.sig`
+
+    const song1 = song('50001', { platform: 'netease', url: 'blob:song1' })
+    const song2 = song('50002', { platform: 'netease', url: '' }) // missing URL
+
+    const { store } = ready(song1)
+    store.audio.playlist = [song1, song2]
+    store.audio.currentIndex = 0
+
+    // 1. Missing URL -> preload triggers
+    await store.preloadNextTrack()
+    expect(song2.url).toContain('t=st_v1.preload_1.sig')
+
+    // 2. Already has valid ticket -> preload skips
+    song2.url = validUrl
+    await store.preloadNextTrack()
+    expect(song2.url).toBe(validUrl) // Not replaced
+
+    // 3. Expired ticket -> preload re-triggers
+    song2.url = expiredUrl
+    await store.preloadNextTrack()
+    expect(song2.url).toContain('t=st_v1.preload_2.sig')
+  })
+
+  it('Requirement 13: sonicBlogBridge.broadcastTrack strips ticket parameter from broadcast audioUrl', async () => {
+    const { sonicBlogBridge } = await import('@/utils/sonicBlogBridge')
+    let capturedEventDetail: any = null
+    const handler = (e: any) => {
+      capturedEventDetail = e.detail
+    }
+    window.addEventListener('sonic:audio-sync', handler)
+
+    try {
+      sonicBlogBridge.broadcastTrack({
+        id: '999',
+        name: 'Bridge Song',
+        artist: 'Sonic Artist',
+        audioUrl: 'https://sonic.internal/api/music/stream?id=999&source=netease&t=st_v1.leaked_ticket.sig&quality=320',
+        duration: 200,
+        source: 'sonic',
+      })
+
+      expect(sonicBlogBridge.lastTrack?.audioUrl).not.toContain('t=st_v1.leaked_ticket.sig')
+      expect(sonicBlogBridge.lastTrack?.audioUrl).toContain('id=999')
+      expect(capturedEventDetail?.track?.audioUrl).not.toContain('t=st_v1.leaked_ticket.sig')
+      expect(capturedEventDetail?.track?.audioUrl).toContain('id=999')
+    } finally {
+      window.removeEventListener('sonic:audio-sync', handler)
+    }
+  })
 })

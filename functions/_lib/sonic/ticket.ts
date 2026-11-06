@@ -19,6 +19,7 @@ import {
 } from '../auth';
 import { sha256Hex } from './crypto';
 import { normalizeSourceId } from './licensing';
+import { extractClientIp } from './security';
 
 export const TICKET_PREFIX = 'st_v1';
 export const GRANT_PREFIX = 'sg_grant_v1';
@@ -285,17 +286,6 @@ export async function getOrCreateAnonSession(
   return { sessionId: newSessionId, isNew: true, cookieHeader };
 }
 
-export function extractClientIpForTicket(request: Request, env?: AppEnv): string {
-  const secret = env?.SONIC_ENGINE_SECRET;
-  if (secret && secret.length >= 32 && request.headers.get('X-Sonic-Engine-Secret') === secret) {
-    const forwarded = request.headers.get('X-Sonic-Client-IP')?.trim();
-    if (forwarded) return forwarded.replace(/^\[|\]$/g, '');
-  }
-  const cfIp = request.headers.get('CF-Connecting-IP')?.trim();
-  if (cfIp) return cfIp.replace(/^\[|\]$/g, '');
-  return 'unknown';
-}
-
 export async function resolveGuardSubject(
   request: Request,
   env?: AppEnv,
@@ -332,7 +322,7 @@ export async function resolveGuardSubject(
   }
 
   // 3. Unauthenticated / No valid session -> anon:ip:<ip哈希>
-  const clientIp = extractClientIpForTicket(request, env);
+  const clientIp = extractClientIp(request, env);
   const ipHash = sha256Hex(clientIp).slice(0, 16);
   return `anon:ip:${ipHash}`;
 }
@@ -983,7 +973,7 @@ export function checkStreamCorsAndFetchMetadata(
     };
   }
 
-  const allowOriginHeader = matchedOrigin || allowedList[0] || origin || '*';
+  const allowOriginHeader = matchedOrigin || undefined;
   return { allowed: true, allowOriginHeader };
 }
 

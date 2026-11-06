@@ -173,7 +173,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       const purpose = (url.searchParams.get('purpose') === 'download' ? 'download' : 'play') as 'play' | 'download';
       const durationStr = url.searchParams.get('duration');
       const durationSec = durationStr ? parseFloat(durationStr) : undefined;
-      const clientIp = extractClientIp(request);
+      const clientIp = extractClientIp(request, env);
 
       const tid = normalizeTrackFingerprint(rawTrackParam, rawSourceParam, rawBrParam);
       const grantCookieName = getTrackGrantCookieName(tid);
@@ -493,9 +493,13 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
               for (const sc of guardSetCookieHeaders) {
                 outHeaders.append('Set-Cookie', sc);
               }
-              if (isStrictCors && corsCheck?.allowOriginHeader) {
-                outHeaders.set('Access-Control-Allow-Origin', corsCheck.allowOriginHeader);
-                outHeaders.append('Vary', 'Origin');
+              if (isStrictCors) {
+                if (corsCheck?.allowOriginHeader) {
+                  outHeaders.set('Access-Control-Allow-Origin', corsCheck.allowOriginHeader);
+                  outHeaders.append('Vary', 'Origin');
+                } else {
+                  outHeaders.delete('Access-Control-Allow-Origin');
+                }
               }
             }
             if (engineStream.response.status === 206) recordStreamMetric('proxied_206');
@@ -522,9 +526,13 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
           for (const sc of guardSetCookieHeaders) {
             h.append('Set-Cookie', sc);
           }
-          if (isStrictCors && corsCheck?.allowOriginHeader) {
-            h.set('Access-Control-Allow-Origin', corsCheck.allowOriginHeader);
-            h.append('Vary', 'Origin');
+          if (isStrictCors) {
+            if (corsCheck?.allowOriginHeader) {
+              h.set('Access-Control-Allow-Origin', corsCheck.allowOriginHeader);
+              h.append('Vary', 'Origin');
+            } else {
+              h.delete('Access-Control-Allow-Origin');
+            }
           }
         }
         return new Response(fallbackResp.body, { status: fallbackResp.status, headers: h });
@@ -774,9 +782,13 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       for (const sc of guardSetCookieHeaders) {
         headers.append('Set-Cookie', sc);
       }
-      if (isStrictCors && corsCheck?.allowOriginHeader) {
-        headers.set('Access-Control-Allow-Origin', corsCheck.allowOriginHeader);
-        headers.append('Vary', 'Origin');
+      if (isStrictCors) {
+        if (corsCheck?.allowOriginHeader) {
+          headers.set('Access-Control-Allow-Origin', corsCheck.allowOriginHeader);
+          headers.append('Vary', 'Origin');
+        } else {
+          headers.delete('Access-Control-Allow-Origin');
+        }
       }
     } else {
       headers.set('Cache-Control', streamCacheControl(finalTargetUrl, upstream.headers, status, upstreamSensitive));
