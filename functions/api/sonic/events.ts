@@ -9,6 +9,8 @@ import { jsonResponse, handleOptions } from '../../_lib/http';
 import { getSonicConfig } from '../../_lib/sonic/config';
 import { callLocalEngineJson } from '../../_lib/sonic/local-engine';
 import { buildGatewayHeaders, guardGatewayRequest, readBoundedRequestBody, sonicError } from '../../_lib/sonic/route-helpers';
+import { getPublicClientIp } from '../../_lib/sonic/security';
+import { sha256Hex } from '../../_lib/sonic/crypto';
 import {
   buildUserPreferenceProfile,
   clearUserRecommendationData,
@@ -21,6 +23,37 @@ import {
 } from '../../_lib/sonic/recommend';
 
 const MAX_BODY_BYTES = 64 * 1024;
+// Events are the only anonymous write surface that feeds global popularity.
+// Bound both the network identity (IP) and the claimed subject so a single
+// client cannot amplify the store by replaying large batches.
+const EVENT_QUOTA_WINDOW_MS = 60_000;
+const EVENT_QUOTA_PER_IP = 4_000;
+const EVENT_QUOTA_PER_SUBJECT = 600;
+const MAX_EVENT_QUOTA_BUCKETS = 4096;
+const eventQuotaBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function bumpEventQuota(key: string, limit: number, count: number, now = Date.now()): boolean {
+  let bucket = eventQuotaBuckets.get(key);
+  if (!bucket || now >= bucket.resetAt) {
+    if (eventQuotaBuckets.size >= MAX_EVENT_QUOTA_BUCKETS) {
+      for (const [candidate, value] of eventQuotaBuckets) {
+        if (now >= value.resetAt) eventQuotaBuckets.delete(candidate);
+      }
+      if (eventQuotaBuckets.size >= MAX_EVENT_QUOTA_BUCKETS) {
+        const oldest = eventQuotaBuckets.keys().next().value;
+        if (oldest) eventQuotaBuckets.delete(oldest);
+      }
+    }
+    bucket = { count: 0, resetAt: now + EVENT_QUOTA_WINDOW_MS };
+    eventQuotaBuckets.set(key, bucket);
+  }
+  bucket.count += count;
+  return bucket.count <= limit;
+}
+
+export function resetEventIngestQuotaForTest(): void {
+  eventQuotaBuckets.clear();
+}
 const PRIVATE_HEADERS = {
   'Cache-Control': 'private, no-store',
   Vary: 'Authorization, Cookie, X-Sonic-Key, X-CFSolara-Key, X-Sonic-Anon-Id, X-Sonic-Personalization',
@@ -209,6 +242,26 @@ export async function onRequest({
 
   if (validEvents.length === 0) {
     return sonicError('INVALID_EVENT_TYPE', 'No valid event types or actions found in payload', 400);
+  }
+
+  const quotaNow = Date.now();
+  const clientIp = getPublicClientIp(request);
+  const rawAnonId = (request.headers.get('x-sonic-anon-id') || '').trim();
+  const subjectQuotaKey = /^anon_[A-Za-z0-9_-]{8,64}$/.test(rawAnonId)
+    ? `anon:${sha256Hex(rawAnonId).slice(0, 32)}`
+    : `ip:${clientIp}`;
+  if (
+    !bumpEventQuota(`ip:${clientIp}`, EVENT_QUOTA_PER_IP, validEvents.length, quotaNow) ||
+    !bumpEventQuota(subjectQuotaKey, EVENT_QUOTA_PER_SUBJECT, validEvents.length, quotaNow)
+  ) {
+    const limited = sonicError(
+      'EVENT_QUOTA_EXCEEDED',
+      'Event ingestion quota exceeded; retry in a minute',
+      429,
+      { provider: 'sonic-events' },
+    );
+    limited.headers.set('Retry-After', '60');
+    return limited;
   }
 
   // Primary Hop: forward to Linux VPS Sonic Engine when configured

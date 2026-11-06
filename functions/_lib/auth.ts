@@ -42,7 +42,8 @@ export function resetOAuthStateReplayCacheForTest(): void {
 }
 
 // ── Optional KV-backed immediate API Key revocation ──
-// Enabled only when a KV binding is present and SONIC_ENABLE_KEY_REVOCATION=1.
+// Enabled by default whenever a KV binding is present; set
+// SONIC_ENABLE_KEY_REVOCATION=0 only to explicitly accept non-revocable keys.
 // Positive/negative lookups are cached briefly per isolate; revocation therefore
 // propagates to other isolates within KEY_REVOCATION_CACHE_TTL_MS, while the local
 // isolate sees the revocation immediately.
@@ -53,7 +54,7 @@ const keyRevocationCache = new Map<string, { revoked: boolean; until: number }>(
 export function isKeyRevocationKvEnabled(env: AppEnv): boolean {
   const kv = env?.SONIC_KEY_REVOCATION_KV;
   return (
-    isEnvEnabled(env?.SONIC_ENABLE_KEY_REVOCATION, false) &&
+    isEnvEnabled(env?.SONIC_ENABLE_KEY_REVOCATION, true) &&
     Boolean(kv) &&
     typeof kv.get === 'function' &&
     typeof kv.put === 'function'

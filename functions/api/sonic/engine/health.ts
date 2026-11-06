@@ -4,7 +4,12 @@
 // Fails closed with HTTP 503 if SQLite fell back to memory, storage is read-only/corrupted, or free disk space is critically low.
 
 import { handleOptions, jsonResponse } from '../../../_lib/http';
-import { checkEngineAccess, getRateLimitConfigStatus } from '../../../_lib/sonic/security';
+import {
+  buildRateLimitErrorResponse,
+  checkEngineAccess,
+  evaluateGatewayRateLimit,
+  getRateLimitConfigStatus,
+} from '../../../_lib/sonic/security';
 import { getSonicConfig, isEnvEnabled } from '../../../_lib/sonic/config';
 import { fetchWithRuntimeBudget } from '../../../_lib/sonic/local-engine';
 import { getLicensingAuditSummary, getContentPolicyReadiness } from '../../../_lib/sonic/licensing';
@@ -33,6 +38,11 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
   const denied = checkEngineAccess(request, env);
   if (denied) return denied;
+
+  // Health probes are authenticated but cheap to repeat; bound them as well so a
+  // compromised key cannot turn readiness into unbounded DB/sidecar work.
+  const rateLimitDecision = await evaluateGatewayRateLimit(request, env, 'engine-health');
+  if (!rateLimitDecision.allowed) return buildRateLimitErrorResponse(rateLimitDecision);
 
   const cfg = getSonicConfig(env);
   const release = getReleaseMetadata(env);

@@ -7,7 +7,7 @@ import {
   SONIC_ALLOWED_MUSIC_DOMAINS,
   validateSafeUrl,
 } from '../functions/_lib/sonic/security';
-import { probeStreamPhysicalQuality } from '../functions/_lib/sonic/native-protocols';
+import { probeStreamPhysicalQuality, fetchProviderUrl } from '../functions/_lib/sonic/native-protocols';
 
 const ALLOWED = ['music.com'];
 
@@ -26,6 +26,33 @@ describe('SSRF: special IPv6 representations', () => {
     expect(isBlockedSsrfHost('::ffff:0:10.0.0.1')).toBe(true);
     expect(isBlockedSsrfHost('::ffff:0:169.254.169.254')).toBe(true);
     expect(isBlockedSsrfHost('[::ffff:0:192.168.1.1]')).toBe(true);
+  });
+
+  it('blocks IPv4-mapped addresses (::ffff:a.b.c.d) that hide loopback/private IPv4', () => {
+    expect(isBlockedSsrfHost('::ffff:127.0.0.1')).toBe(true);
+    expect(isBlockedSsrfHost('::ffff:10.0.0.1')).toBe(true);
+    expect(isBlockedSsrfHost('::ffff:169.254.169.254')).toBe(true);
+    expect(isBlockedSsrfHost('::ffff:192.168.1.1')).toBe(true);
+    expect(isBlockedSsrfHost('::ffff:8.8.8.8')).toBe(false);
+  });
+
+  it('blocks 0.0.0.0, [::], and unspecified addresses', () => {
+    expect(isBlockedSsrfHost('0.0.0.0')).toBe(true);
+    expect(isBlockedSsrfHost('[::]')).toBe(true);
+    expect(isBlockedSsrfHost('::')).toBe(true);
+  });
+
+  it('blocks decimal and hex obfuscated IPv4 loopback (2130706433, 0x7f000001)', () => {
+    expect(isBlockedSsrfHost('2130706433')).toBe(true);
+    expect(isBlockedSsrfHost('0x7f000001')).toBe(true);
+    expect(isBlockedSsrfHost('0x7f.0.0.1')).toBe(true);
+    expect(isBlockedSsrfHost('0177.0.0.1')).toBe(true);
+  });
+
+  it('blocks decimal and hex obfuscated private IPs', () => {
+    expect(isBlockedSsrfHost('0xA9FEA9FE')).toBe(true);
+    expect(isBlockedSsrfHost('0x0A000001')).toBe(true);
+    expect(isBlockedSsrfHost('0xC0A80001')).toBe(true);
   });
 
   it('still allows public IPv4-translated addresses', () => {
@@ -138,6 +165,18 @@ describe('safeFetch: DNS and redirect boundaries', () => {
     expect(calls).toBe(3);
   });
 
+  it('rejects HTTPS to HTTP protocol downgrade on redirects', async () => {
+    vi.stubGlobal('fetch', async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: 'http://cdn.music.com/downgraded.mp3' },
+      }),
+    );
+    await expect(
+      safeFetch('https://cdn.music.com/a.mp3', undefined, { allowedDomains: ALLOWED }),
+    ).rejects.toThrow('Protocol downgrade');
+  });
+
   it('aborts when the upstream does not respond before the deadline', async () => {
     vi.stubGlobal('fetch', (_input: any, init?: RequestInit) => {
       return new Promise((_resolve, reject) => {
@@ -227,5 +266,63 @@ describe('SSRF: physical stream probes use the shared safeFetch policy', () => {
     );
     expect(result).toEqual({ streamType: 'unavailable', totalBytes: 0, ratio: 0 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Provider redirect hardening', () => {
+  it('follows an allowed cross-origin provider redirect but strips cookies', async () => {
+    const calls: Array<{ url: string; headers: Headers }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      calls.push({ url: String(url), headers });
+      if (calls.length === 1) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: 'https://m701.music.126.net/redirected' },
+        });
+      }
+      return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+
+    const response = await fetchProviderUrl('https://music.163.com/api', {
+      headers: { Cookie: 'MUSIC_U=secret', 'X-Real-IP': '1.2.3.4' },
+    });
+    expect(response.status).toBe(200);
+    expect(calls).toHaveLength(2);
+    expect(calls[0].headers.get('cookie')).toBe('MUSIC_U=secret');
+    expect(calls[1].headers.get('cookie')).toBeNull();
+    expect(calls[1].headers.get('x-real-ip')).toBeNull();
+  });
+
+  it('keeps cookies on a same-origin redirect', async () => {
+    const calls: Array<{ headers: Headers }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ headers: new Headers(init?.headers) });
+      if (calls.length === 1) {
+        return new Response(null, { status: 307, headers: { location: '/next' } });
+      }
+      return new Response('ok', { status: 200 });
+    }));
+    await fetchProviderUrl('https://music.163.com/a', { headers: { Cookie: 'sid=1' } });
+    expect(calls[1].headers.get('cookie')).toBe('sid=1');
+  });
+
+  it('rejects external and downgrade redirect targets', async () => {
+    for (const location of ['https://evil.example/path', 'http://127.0.0.1/internal', 'https://169.254.169.254/latest']) {
+      const fetchMock = vi.fn(async () => new Response(null, { status: 302, headers: { location } }));
+      vi.stubGlobal('fetch', fetchMock);
+      await expect(fetchProviderUrl('https://music.163.com/api')).rejects.toThrow();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('caps the redirect chain', async () => {
+    let n = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, {
+      status: 302,
+      headers: { location: `/hop-${++n}` },
+    })));
+    await expect(fetchProviderUrl('https://music.163.com/start')).rejects.toThrow('Too many provider redirects');
+    expect(n).toBe(4);
   });
 });

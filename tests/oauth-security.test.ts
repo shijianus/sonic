@@ -330,7 +330,7 @@ describe('Session-backed API key management', () => {
     const res = await handleAuthLogout({
       request: new Request('https://sonic.example.com/api/auth/logout', {
         method: 'POST',
-        headers: { Cookie: cookie },
+        headers: { Cookie: cookie, Origin: 'https://sonic.example.com' },
       }),
       env: env() as any,
     });

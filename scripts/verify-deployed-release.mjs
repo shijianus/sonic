@@ -24,6 +24,7 @@ if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'lo
 const manifest = JSON.parse(readFileSync(resolve(process.cwd(), 'dist/release.json'), 'utf8'));
 const engineSecret = String(process.env.SONIC_ENGINE_SECRET || '').trim();
 const failures = [];
+let accessMode = '';
 const check = (condition, message) => { if (!condition) failures.push(message); };
 
 try {
@@ -52,6 +53,44 @@ try {
     check(health?.release?.dirty === false, 'health reports a dirty release');
     check(health?.readiness?.contentPolicy?.ok === true, 'content policy readiness is not ok');
     check(health?.readiness?.access?.ok === true, 'access readiness is not ok');
+    accessMode = String(health?.readiness?.access?.mode || '').trim().toLowerCase();
+  }
+
+  // Negative auth probes. Pages routing is case-insensitive, so every gate must
+  // reject mixed-case variants exactly like its canonical path. A release that
+  // returns 200 here has a policy bypass and must not be promoted.
+  const anonymousStatus = async (probePath) => {
+    const response = await fetch(`${base}${probePath}`, {
+      redirect: 'manual',
+      headers: { 'Cache-Control': 'no-cache' },
+      signal: AbortSignal.timeout(15000),
+    });
+    void response.body?.cancel?.().catch(() => {});
+    return response.status;
+  };
+  for (const probePath of [
+    '/api/sonic/engine/health',
+    '/API/sonic/engine/health',
+    '/Api/Sonic/Engine/Health',
+  ]) {
+    const status = await anonymousStatus(probePath);
+    check(
+      status === 401 || status === 403,
+      `anonymous ${probePath} must be rejected (got HTTP ${status})`,
+    );
+  }
+  if (accessMode === 'invite') {
+    for (const probePath of [
+      '/api/sonic/recommend/trending',
+      '/API/sonic/recommend/trending',
+      '/Api/sonic/recommend/trending',
+    ]) {
+      const status = await anonymousStatus(probePath);
+      check(
+        status === 401 || status === 403,
+        `invite mode leaked ${probePath} to an anonymous caller (got HTTP ${status})`,
+      );
+    }
   }
 } catch (error) {
   failures.push(error?.message || String(error));

@@ -30,12 +30,17 @@ import { MemoryRecommendStore, normalizeRecommendRetentionDays } from '../functi
 import { upsertTrackMvEntities } from '../functions/_lib/sonic/recommend/entity-store';
 import { recordSqliteMetric, redactSensitiveString } from '../functions/_lib/sonic/observability';
 
+// Hard ceiling for the shared canonical catalog. Search traffic is persisted
+// into this table, so an unbounded catalog is a disk-exhaustion vector.
+const MAX_CANONICAL_TRACKS = 100_000;
+
 export class SqliteRecommendStore implements RecommendStore {
   public readonly kind = 'sqlite' as const;
   private db: DatabaseSync;
   private writeCounter = 0;
   private retentionDays: number;
   private lastRetentionAt = 0;
+  private canonicalTrackCount = -1;
 
   constructor(public readonly dbPath: string = ':memory:', retentionDays: number | string = process.env.SONIC_RECOMMEND_RETENTION_DAYS || 90) {
     this.retentionDays = normalizeRecommendRetentionDays(retentionDays);
@@ -303,6 +308,14 @@ export class SqliteRecommendStore implements RecommendStore {
     }
   }
 
+  private currentTrackCount(): number {
+    if (this.canonicalTrackCount < 0) {
+      const row = this.db.prepare('SELECT COUNT(*) AS c FROM canonical_tracks').get() as { c?: number } | undefined;
+      this.canonicalTrackCount = Number(row?.c || 0);
+    }
+    return this.canonicalTrackCount;
+  }
+
   upsertTrack(incoming: CanonicalTrack): void {
     if (!incoming?.canonicalTrackId) return;
     this.beforeWrite();
@@ -317,6 +330,15 @@ export class SqliteRecommendStore implements RecommendStore {
         canonicalTrackId: `${incoming.canonicalTrackId}_${incoming.duration || 'alt'}`,
       };
     }
+
+    // The catalog is shared by every user and search results are persisted into
+    // it. Without a hard ceiling, anonymous search traffic can grow the SQLite
+    // file without bound. Existing rows still refresh; only brand-new rows are
+    // refused once the cap is reached.
+    const targetExisted = finalTrack.canonicalTrackId === incoming.canonicalTrackId
+      ? Boolean(existing)
+      : Boolean(this.getTrack(finalTrack.canonicalTrackId));
+    if (!targetExisted && this.currentTrackCount() >= MAX_CANONICAL_TRACKS) return;
 
     const artistNorm = compactNormalize(finalTrack.canonicalArtist);
     const payloadJson = JSON.stringify(finalTrack);
@@ -380,6 +402,7 @@ export class SqliteRecommendStore implements RecommendStore {
       )
       .run(finalTrack.canonicalTrackId, titleTokens, artistTokens, albumTokens, pinyinTokens, genreTokens);
     upsertTrackMvEntities(this, finalTrack);
+    if (!targetExisted && this.canonicalTrackCount >= 0) this.canonicalTrackCount += 1;
   }
 
   upsertTracks(tracks: CanonicalTrack[]): void {
@@ -394,6 +417,8 @@ export class SqliteRecommendStore implements RecommendStore {
       try {
         this.db.exec('ROLLBACK');
       } catch {}
+      // The in-memory counter may have advanced for rows that were rolled back.
+      this.canonicalTrackCount = -1;
       throw err;
     }
   }

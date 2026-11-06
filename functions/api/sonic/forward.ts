@@ -110,6 +110,14 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
       const range = request.headers.get('Range');
       if (range) forwardHeaders.set('Range', range);
 
+      const forwardMaxBytes =
+        type === 'audio'
+          ? 128 * 1024 * 1024
+          : type === 'cover'
+            ? 16 * 1024 * 1024
+            : type === 'lyrics' || type === 'catalog'
+              ? 8 * 1024 * 1024
+              : 32 * 1024 * 1024;
       const upstreamResp = await safeFetch(
         valResult.url,
         {
@@ -122,7 +130,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
           allowedDomains,
           maxRedirects: 3,
           timeoutMs: 15000,
-          maxBytes: 128 * 1024 * 1024,
+          maxBytes: forwardMaxBytes,
           includeMetadata: true,
         },
       );
@@ -227,7 +235,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
         },
       );
     } catch (err: any) {
-      return sonicError('SEARCH_ERROR', err?.message || 'Search forward failed', 502, {
+      return sonicError('SEARCH_ERROR', redactSensitiveString(err?.message || 'Search forward failed'), 502, {
         provider: 'forward',
       });
     }
@@ -370,7 +378,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
     return resp;
   } catch (err: any) {
     const latencyMs = Date.now() - startTime;
-    return sonicError('FORWARD_LYRICS_ERROR', err?.message || 'Lyrics forward failed', 500, {
+    return sonicError('FORWARD_LYRICS_ERROR', redactSensitiveString(err?.message || 'Lyrics forward failed'), 500, {
       provider: 'forward',
       latencyMs,
     });

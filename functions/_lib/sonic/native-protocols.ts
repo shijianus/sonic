@@ -19,9 +19,128 @@ const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1';
 
 // A caller's signal supplements, rather than replaces, the provider's deadline.
+const PROVIDER_REDIRECT_HOST_SUFFIXES = [
+  'music.163.com',
+  '163.com',
+  '126.net',
+  'qq.com',
+  'gtimg.cn',
+  'kugou.com',
+  'kuwo.cn',
+  'lrclib.net',
+  'amll.dev',
+];
+
+function isAllowedProviderHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/\.+$/, '');
+  return PROVIDER_REDIRECT_HOST_SUFFIXES.some((suffix) => h === suffix || h.endsWith(`.${suffix}`));
+}
+
+/**
+ * Provider JSON/API fetch with redirect validation.
+ *
+ * Native protocol calls carry provider cookies (NETEASE_COOKIE / QQ_COOKIE /
+ * KUGOU_COOKIE). Following a provider-controlled redirect with those headers is
+ * a credential-leak and SSRF risk, so every hop is restricted to the provider
+ * host families, HTTPS only, and cookies are stripped on an origin change.
+ */
+export async function fetchProviderUrl(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  timeoutMs = 8000,
+  signal?: AbortSignal,
+): Promise<Response> {
+  const deadline = Date.now() + Math.max(1, timeoutMs);
+  let currentUrl = new URL(
+    typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url,
+  );
+  let method = String(init.method || 'GET').toUpperCase();
+  let body = init.body;
+  const headers = new Headers(init.headers);
+  let redirects = 0;
+
+  while (true) {
+    if (currentUrl.protocol !== 'https:' || !isAllowedProviderHost(currentUrl.hostname)) {
+      throw new Error('Provider request target is not an authorized HTTPS host');
+    }
+    const remaining = Math.max(1, deadline - Date.now());
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(new DOMException('Provider request timeout', 'TimeoutError')),
+      remaining,
+    );
+    const onAbort = () => controller.abort(signal?.reason);
+    if (signal) {
+      if (signal.aborted) onAbort();
+      else signal.addEventListener('abort', onAbort, { once: true });
+    }
+    let response: Response;
+    try {
+      response = await fetch(currentUrl.toString(), {
+        ...init,
+        method,
+        headers,
+        body: method === 'GET' || method === 'HEAD' ? undefined : body,
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    }
+
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const location = response.headers.get('location');
+    if (!location) return response;
+    void response.body?.cancel().catch(() => {});
+    if (++redirects > 3) throw new Error('Too many provider redirects');
+
+    const nextUrl = new URL(location, currentUrl);
+    if (nextUrl.protocol !== 'https:' || !isAllowedProviderHost(nextUrl.hostname)) {
+      throw new Error('Provider redirect target is not an authorized HTTPS host');
+    }
+    if (nextUrl.origin !== currentUrl.origin) {
+      for (const name of [
+        'cookie',
+        'authorization',
+        'proxy-authorization',
+        'x-real-ip',
+        'x-forwarded-for',
+      ]) {
+        headers.delete(name);
+      }
+    }
+    if (response.status === 303 || ((response.status === 301 || response.status === 302) && method === 'POST')) {
+      method = 'GET';
+      body = undefined;
+      headers.delete('content-type');
+    } else if (
+      body !== undefined &&
+      body !== null &&
+      typeof body !== 'string' &&
+      !(body instanceof URLSearchParams) &&
+      !(body instanceof Uint8Array) &&
+      !(body instanceof ArrayBuffer)
+    ) {
+      throw new Error('Streaming provider bodies cannot be replayed across redirects');
+    }
+    currentUrl = nextUrl;
+  }
+}
+
 async function nativeFetch(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 8000, signal?: AbortSignal): Promise<Response> {
   signal?.throwIfAborted();
-  const response = await fetchWithRuntimeBudget(input, init, { timeoutMs, signals: [signal] });
+  const target = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    throw new Error('Invalid provider URL');
+  }
+  const response =
+    url.protocol === 'https:' && isAllowedProviderHost(url.hostname)
+      ? await fetchProviderUrl(input, init, timeoutMs, signal)
+      : await fetchWithRuntimeBudget(input, { ...init, redirect: 'error' }, { timeoutMs, signals: [signal] });
   if (!response.ok) void response.body?.cancel().catch(() => {});
   return response;
 }

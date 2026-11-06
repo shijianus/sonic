@@ -5,7 +5,7 @@ import type { AppEnv } from '../../../_lib/types';
 import { jsonResponse, handleOptions } from '../../../_lib/http';
 import { getSonicConfig } from '../../../_lib/sonic/config';
 import { callLocalEngineJson } from '../../../_lib/sonic/local-engine';
-import { buildGatewayHeaders, guardGatewayRequest, sonicError } from '../../../_lib/sonic/route-helpers';
+import { buildGatewayHeaders, clampQueryParam, guardGatewayRequest, sonicError } from '../../../_lib/sonic/route-helpers';
 import {
   buildPrivacySafeCacheHeaders,
   getMultiEntityRecommendationsForYou,
@@ -83,12 +83,14 @@ export async function onRequest({
     ? parseFloat(url.searchParams.get('temperature') || '0.25')
     : undefined;
   const excludeIds = (url.searchParams.get('exclude') || '')
+    .slice(0, 2048)
     .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
+    .map((s) => s.trim().slice(0, 128))
+    .filter(Boolean)
+    .slice(0, 100);
 
-  const feedParam = (url.searchParams.get('feed') || '').trim().toLowerCase();
-  const typesParam = url.searchParams.get('types') || '';
+  const feedParam = (url.searchParams.get('feed') || '').trim().toLowerCase().slice(0, 32);
+  const typesParam = (url.searchParams.get('types') || '').slice(0, 128);
   const isMixedFeed =
     feedParam === 'mixed' ||
     request.headers.get('X-Sonic-Feed') === 'mixed' ||
@@ -153,9 +155,9 @@ export async function onRequest({
       {
         mode,
         count,
-        seedTrackId: url.searchParams.get('seedTrackId') || url.searchParams.get('trackId') || undefined,
-        seedTitle: url.searchParams.get('seedTitle') || url.searchParams.get('title') || undefined,
-        seedArtist: url.searchParams.get('seedArtist') || url.searchParams.get('artist') || undefined,
+        seedTrackId: clampQueryParam(url.searchParams.get('seedTrackId') || url.searchParams.get('trackId'), 128),
+        seedTitle: clampQueryParam(url.searchParams.get('seedTitle') || url.searchParams.get('title')),
+        seedArtist: clampQueryParam(url.searchParams.get('seedArtist') || url.searchParams.get('artist')),
         excludeIds,
         diversity: Number.isFinite(diversity) ? diversity : undefined,
         temperature: Number.isFinite(temperature) ? temperature : undefined,
@@ -187,7 +189,7 @@ export async function onRequest({
       },
     );
   } catch (err: any) {
-    return sonicError('RECOMMEND_ERROR', err?.message || 'Failed to compute recommendations', 500, {
+    return sonicError('RECOMMEND_ERROR', 'Failed to compute recommendations', 500, {
       provider: 'recommend-for-you',
       latencyMs: Date.now() - start,
       degraded,

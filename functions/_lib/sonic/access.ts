@@ -3,7 +3,7 @@
 
 import { base64UrlDecode, base64UrlEncode, readCookie, shouldUseSecureCookie } from '../auth';
 import { jsonResponse } from '../http';
-import { hasValidEngineSecret } from './security';
+import { hasValidEngineSecret, canonicalPolicyPath, timingSafeEqualStr } from './security';
 import { isProductionDeployment } from './environment';
 import { sha256Hex } from './crypto';
 import type { AppEnv } from '../types';
@@ -188,7 +188,10 @@ export async function redeemAccessInvite(
   // Pages without a durable store use the independent signed-session path.
   if (!repository) {
     const configured = String(env.SONIC_INVITE_CODES || '').split(',').map(value => value.trim()).filter(Boolean);
-    const matched = configured.some(value => hashInviteCode(value) === codeHash);
+    const matched = configured.some(value => {
+      const configuredHash = hashInviteCode(value);
+      return configuredHash !== null && timingSafeEqualStr(configuredHash, codeHash);
+    });
     if (!matched) return { ok: false, code: 'invalid' };
     const recordBase = {
       createdAt: nowMs,
@@ -301,15 +304,29 @@ export async function verifyAccessSession(
   }
 }
 
-export async function revokeAccessSession(request: Request, env: AppEnv, nowMs = Date.now()): Promise<void> {
+export interface AccessSessionRevocation {
+  /** True only when a durable store confirmed the revocation. */
+  revoked: boolean;
+  /** True when a durable store is available to make revocation meaningful. */
+  durable: boolean;
+}
+
+export async function revokeAccessSession(
+  request: Request,
+  env: AppEnv,
+  nowMs = Date.now(),
+): Promise<AccessSessionRevocation> {
   const token = readAccessSessionToken(request);
   const hash = token ? hashSessionToken(token) : null;
   const repository = getAccessRepository(env);
-  if (!hash || !repository?.revokeSession) return;
+  const durable = Boolean(repository?.revokeSession);
+  if (!hash || !repository?.revokeSession) return { revoked: false, durable };
   try {
     await repository.revokeSession(getStoreKey(ACCESS_SESSION_HASH_PREFIX, hash), nowMs);
+    return { revoked: true, durable: true };
   } catch {
     // Cookie clearing remains safe; the next request will fail closed if the store is unavailable.
+    return { revoked: false, durable: true };
   }
 }
 
@@ -334,7 +351,7 @@ export async function requireAccess(request: Request, env: AppEnv): Promise<Resp
   }
   const mode = getAccessMode(env);
   if (mode === 'open') return null;
-  const path = new URL(request.url).pathname.replace(/\/+$/, '') || '/';
+  const path = canonicalPolicyPath(request);
   const publicPath =
     path === '/api/access/session' ||
     path === '/api/access/invite' ||

@@ -43,9 +43,10 @@ export function hasValidEngineSecret(request: Request, env?: AppEnv): boolean {
   const configured = env?.SONIC_ENGINE_SECRET ? String(env.SONIC_ENGINE_SECRET).trim() : '';
   if (!configured || configured.length < 32) return false;
   const headerKey = request.headers.get('X-Sonic-Engine-Key')?.trim() || '';
-  if (headerKey && timingSafeEqualStr(headerKey, configured)) {
-    return true;
-  }
+  if (!headerKey) return false;
+  if (timingSafeEqualStr(headerKey, configured)) return true;
+  const previous = (env as any)?.SONIC_ENGINE_SECRET_PREV ? String((env as any).SONIC_ENGINE_SECRET_PREV).trim() : '';
+  if (previous && previous.length >= 32 && timingSafeEqualStr(headerKey, previous)) return true;
   return false;
 }
 
@@ -53,8 +54,28 @@ export function normalizeEnginePathname(pathname: string): string {
   return pathname.replace(/\/+$/, '') || '/';
 }
 
+/**
+ * Path used for authorization decisions.
+ *
+ * Cloudflare Pages matches Functions routes case-insensitively (its generated
+ * router compiles `path-to-regexp` without `sensitive`), so every security check
+ * must make the same decision for `/api/...`, `/API/...` and encoded variants.
+ * Never use the raw pathname for an allow/deny decision.
+ */
+export function canonicalPolicyPath(input: string | Request): string {
+  const raw = typeof input === 'string' ? input : new URL(input.url).pathname;
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    // Keep the raw value when it is not valid percent-encoding; it cannot match
+    // a canonical route and therefore fails closed against the /api prefix.
+  }
+  return decoded.replace(/\/+$/, '').toLowerCase() || '/';
+}
+
 export function requiresEngineAuth(request: Request, env?: AppEnv): boolean {
-  const pathname = normalizeEnginePathname(new URL(request.url).pathname);
+  const pathname = canonicalPolicyPath(request);
   const isEngineSurface =
     pathname === '/api' ||
     pathname.startsWith('/api/') ||
@@ -172,10 +193,13 @@ export function checkStagingAccessGate(request: Request, env?: AppEnv): Response
   if (queryToken && (request.method === 'GET' || request.method === 'HEAD') && timingSafeEqualStr(queryToken, rawToken)) {
     url.searchParams.delete('staging_token');
     const secure = shouldUseSecureCookie(url) ? '; Secure' : '';
+    // Collapse leading slashes so a path such as `//evil.example` cannot turn the
+    // bootstrap redirect into a protocol-relative cross-origin redirect.
+    const safePath = `/${url.pathname.replace(/^\/+/, '')}`;
     return new Response(null, {
       status: 302,
       headers: {
-        Location: url.pathname + (url.search || ''),
+        Location: safePath + (url.search || ''),
         'Set-Cookie': `${SONIC_STAGING_COOKIE}=${encodeURIComponent(rawToken)}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=86400`,
         'Cache-Control': 'no-store',
         'Referrer-Policy': 'no-referrer',
@@ -275,7 +299,7 @@ export function extractClientIp(request: Request, env?: AppEnv): string {
     : getPublicClientIp(request);
 }
 
-export function isSameOriginRequest(request: Request): boolean {
+export function isSameOriginRequest(request: Request, strict = false): boolean {
   let expectedOrigin = '';
   try {
     expectedOrigin = new URL(request.url).origin;
@@ -294,6 +318,9 @@ export function isSameOriginRequest(request: Request): boolean {
   }
   const fetchSite = request.headers.get('sec-fetch-site');
   if (fetchSite) return fetchSite === 'same-origin' || fetchSite === 'none';
+  // In strict mode (cookie-authenticated writes), missing browser headers
+  // means we cannot verify origin — reject defensively.
+  if (strict) return false;
   // Non-browser clients that manually attach a Cookie and a custom method are allowed;
   // browsers attach Origin/Referer/Sec-Fetch-Site to unsafe requests.
   return true;
