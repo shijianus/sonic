@@ -10,6 +10,10 @@ import {
   safeFetch,
   hasSensitiveMediaQuery,
   isSafeFetchCapacityError,
+  acquireStreamSlot,
+  releaseStreamSlot,
+  getStreamSlotLimit,
+  getPublicClientIp,
 } from '../../_lib/sonic/security';
 import { getSonicConfig } from '../../_lib/sonic/config';
 import {
@@ -74,6 +78,65 @@ function streamCacheControl(target: URL, upstreamHeaders: Headers, status: numbe
 
 const VALID_PARTIAL_CONTENT_RANGE = /^bytes (\d+)-(\d+)\/(\d+|\*)$/i;
 const VALID_UNSATISFIABLE_CONTENT_RANGE = /^bytes \*\/(\d+)$/i;
+
+/**
+ * Per-IP concurrent stream guard (audit P1-3). A slot is acquired only when a
+ * long-lived audio body is actually handed back — policy rejections and
+ * resolution failures never occupy one. flush() fires on graceful completion,
+ * cancel() on client disconnect/upstream failure; both release exactly once.
+ */
+function streamConcurrencyGuard(request: Request): Response | null {
+  const clientIp = getPublicClientIp(request);
+  if (acquireStreamSlot(clientIp)) return null;
+  recordStreamMetric('err_429');
+  return jsonResponse(
+    {
+      brand: 'Sonic',
+      error: {
+        code: 'STREAM_CONCURRENCY_LIMIT',
+        message: `Too many concurrent audio streams from this client (max ${getStreamSlotLimit()})`,
+      },
+    },
+    { status: 429, headers: corsHeaders({ 'Cache-Control': 'no-store', 'Retry-After': '5' }) },
+  );
+}
+
+function attachStreamSlotRelease(response: Response, ip: string): Response {
+  let released = false;
+  const releaseOnce = () => {
+    if (released) return;
+    released = true;
+    releaseStreamSlot(ip);
+  };
+  if (!response.body) {
+    releaseOnce();
+    return response;
+  }
+  // `cancel` on the transformer fires when the consumer aborts; TS dom lib
+  // predates the dictionary member but Workers/Node 18+ implement it.
+  const transformer = {
+    flush() {
+      releaseOnce();
+    },
+    cancel() {
+      releaseOnce();
+    },
+  } as any;
+  const body = response.body.pipeThrough(new TransformStream(transformer));
+  return new Response(body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  });
+}
+
+/** Acquire a stream slot and wrap the audio body so the slot tracks its lifetime. */
+function boundAudioResponse(request: Request, makeResponse: () => Response): Response {
+  const denied = streamConcurrencyGuard(request);
+  if (denied) return denied;
+  const ip = getPublicClientIp(request);
+  return attachStreamSlotRelease(makeResponse(), ip);
+}
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
@@ -226,10 +289,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
             outHeaders.set('X-Sonic-Via', 'local-engine');
             if (engineStream.response.status === 206) recordStreamMetric('proxied_206');
             else if (engineStream.response.status === 200) recordStreamMetric('proxied_200');
-            return new Response(engineStream.response.body, {
+            return boundAudioResponse(request, () => new Response(engineStream.response.body, {
               status: engineStream.response.status,
               headers: outHeaders,
-            });
+            }));
           }
           recordStreamMetric('degraded');
         }
@@ -242,7 +305,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         if (cfg.enableLocalEngine && !isFaultId) {
           const h = new Headers(fallbackResp.headers);
           h.set('X-Sonic-Degraded', '1');
-          return new Response(fallbackResp.body, { status: fallbackResp.status, headers: h });
+          return boundAudioResponse(request, () => new Response(fallbackResp.body, { status: fallbackResp.status, headers: h }));
         }
         return fallbackResp;
       }
@@ -317,6 +380,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         timeoutMs: 15000,
         maxBytes: 256 * 1024 * 1024,
         includeMetadata: true,
+        pool: 'media',
       },
     );
 
@@ -528,11 +592,11 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     }
 
     recordStreamMetric(status === 206 ? 'proxied_206' : 'proxied_200');
-    return new Response(upstream.body, {
+    return boundAudioResponse(request, () => new Response(upstream.body, {
       status,
       statusText: upstream.statusText,
       headers,
-    });
+    }));
   } catch (err: any) {
     request.signal.throwIfAborted();
     if (isSafeFetchCapacityError(err)) {

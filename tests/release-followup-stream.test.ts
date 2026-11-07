@@ -8,6 +8,7 @@ vi.mock('../functions/_lib/sonic/local-engine', async (original) => ({
 }));
 
 import { buildStreamCacheIdentifier, resolvePlayableStream, type ResolvedStreamInfo } from '../functions/_lib/sonic/native-protocols';
+import { computeContentPolicyEpoch } from '../functions/_lib/sonic/licensing';
 import { clearSonicMemoryCacheForTest, getSonicCachedJson, putSonicCachedJson } from '../functions/_lib/sonic/cache';
 import { onRequest as stream } from '../functions/api/music/stream';
 import { resetRateLimitsForTest } from '../functions/_lib/sonic/security';
@@ -26,7 +27,9 @@ const info = (name: string, extra: Partial<ResolvedStreamInfo> = {}): ResolvedSt
 const engineSuccess = (value: ResolvedStreamInfo) => ({ ok: true, data: { ok: true, data: value }, latencyMs: 1, status: 200, circuitState: 'CLOSED' });
 const engineFailure = () => ({ ok: false, data: { ok: false }, error: 'unavailable', latencyMs: 1, status: 503, circuitState: 'OPEN', skippedByCircuit: true });
 const opts = { id: '1001', source: 'netease', quality: '320', title: 'Track', artist: 'Artist' };
-const cacheId = buildStreamCacheIdentifier(opts);
+// Stream cache keys embed the content-policy epoch (audit P1-7): the seeded
+// entry must be written under the exact key the resolver will look up.
+const cacheId = buildStreamCacheIdentifier({ ...opts, policyEpoch: computeContentPolicyEpoch(env) });
 const request = (query = '', init: RequestInit = {}) => new Request(`https://sonic.test/api/music/stream?id=1001&source=netease&title=Track&artist=Artist${query}`, init);
 const deferred = <T>() => {
   let resolve!: (value: T) => void;

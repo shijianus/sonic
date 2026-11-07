@@ -27,6 +27,13 @@ function isTestAlertAllowed(ip: string): boolean {
       for (const [k, v] of testAlertBuckets) {
         if (now >= v.resetAt) testAlertBuckets.delete(k);
       }
+      // All entries may still be active: hard-evict the oldest so the map
+      // can never grow past its bound (audit P2-13).
+      while (testAlertBuckets.size >= 256) {
+        const oldest = testAlertBuckets.keys().next().value;
+        if (!oldest) break;
+        testAlertBuckets.delete(oldest);
+      }
     }
     testAlertBuckets.set(ip, bucket);
   }

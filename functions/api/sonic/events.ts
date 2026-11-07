@@ -32,6 +32,45 @@ const EVENT_QUOTA_PER_SUBJECT = 600;
 const MAX_EVENT_QUOTA_BUCKETS = 4096;
 const eventQuotaBuckets = new Map<string, { count: number; resetAt: number }>();
 
+// Per-minute quotas alone still allow ~5.76M events/day/IP. Daily UTC-day
+// buckets (best-effort per isolate on Pages; durable on the single-process
+// Engine) cut that ceiling, while the SQLite row caps / max_page_count remain
+// the hard backstop (audit P0-1).
+const DEFAULT_DAILY_EVENT_QUOTA_PER_IP = 200_000;
+const DEFAULT_DAILY_EVENT_QUOTA_PER_SUBJECT = 50_000;
+const MAX_DAILY_QUOTA_BUCKETS = 4096;
+const dailyQuotaBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function dailyQuotaLimit(envValue: unknown, fallback: number): number {
+  const parsed = Number(envValue);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function nextUtcMidnight(now: number): number {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+}
+
+function bumpDailyEventQuota(key: string, limit: number, count: number, now = Date.now()): boolean {
+  let bucket = dailyQuotaBuckets.get(key);
+  const resetAt = nextUtcMidnight(now);
+  if (!bucket || bucket.resetAt !== resetAt) {
+    if (dailyQuotaBuckets.size >= MAX_DAILY_QUOTA_BUCKETS) {
+      for (const [candidate, value] of dailyQuotaBuckets) {
+        if (value.resetAt !== resetAt) dailyQuotaBuckets.delete(candidate);
+      }
+      if (dailyQuotaBuckets.size >= MAX_DAILY_QUOTA_BUCKETS) {
+        const oldest = dailyQuotaBuckets.keys().next().value;
+        if (oldest) dailyQuotaBuckets.delete(oldest);
+      }
+    }
+    bucket = { count: 0, resetAt };
+    dailyQuotaBuckets.set(key, bucket);
+  }
+  bucket.count += count;
+  return bucket.count <= limit;
+}
+
 function bumpEventQuota(key: string, limit: number, count: number, now = Date.now()): boolean {
   let bucket = eventQuotaBuckets.get(key);
   if (!bucket || now >= bucket.resetAt) {
@@ -53,6 +92,7 @@ function bumpEventQuota(key: string, limit: number, count: number, now = Date.no
 
 export function resetEventIngestQuotaForTest(): void {
   eventQuotaBuckets.clear();
+  dailyQuotaBuckets.clear();
 }
 const PRIVATE_HEADERS = {
   'Cache-Control': 'private, no-store',
@@ -77,6 +117,18 @@ function erasureIncomplete(data: Record<string, unknown>): Response {
   return response;
 }
 
+function storageBudgetExceeded(start: number): Response {
+  const response = sonicError(
+    'EVENT_STORAGE_BUDGET_EXCEEDED',
+    'Event storage budget exhausted; ingestion temporarily refused',
+    507,
+    { provider: 'sonic-events', latencyMs: Date.now() - start, degraded: true, retryable: false },
+  );
+  for (const [key, value] of Object.entries(PRIVATE_HEADERS)) response.headers.set(key, value);
+  response.headers.set('Retry-After', '600');
+  return response;
+}
+
 function engineRejected(result: { status?: number; data?: any; errorCode?: string }, start: number, circuitState?: string): Response {
   if (result.errorCode === 'ENGINE_IDENTITY_UNAVAILABLE') {
     const response = sonicError('ENGINE_IDENTITY_UNAVAILABLE', 'Verified inter-service identity is unavailable', 503, {
@@ -87,6 +139,7 @@ function engineRejected(result: { status?: number; data?: any; errorCode?: strin
     return response;
   }
   if (result.data?.error?.code === 'EVENT_ERASURE_INCOMPLETE') return erasureIncomplete(result.data.data || {});
+  if (result.data?.error?.code === 'EVENT_STORAGE_BUDGET_EXCEEDED') return storageBudgetExceeded(start);
   if (result.status && result.status >= 400 && result.status < 500 && result.data?.brand === 'Sonic' && result.data?.error?.code) {
     return jsonResponse(result.data, { status: result.status, headers: buildGatewayHeaders(PRIVATE_HEADERS, false, circuitState) });
   }
@@ -263,6 +316,19 @@ export async function onRequest({
     limited.headers.set('Retry-After', '60');
     return limited;
   }
+  if (
+    !bumpDailyEventQuota(`dip:${clientIp}`, dailyQuotaLimit(env?.SONIC_EVENTS_DAILY_PER_IP, DEFAULT_DAILY_EVENT_QUOTA_PER_IP), validEvents.length, quotaNow) ||
+    !bumpDailyEventQuota(`dsub:${subjectQuotaKey}`, dailyQuotaLimit(env?.SONIC_EVENTS_DAILY_PER_SUBJECT, DEFAULT_DAILY_EVENT_QUOTA_PER_SUBJECT), validEvents.length, quotaNow)
+  ) {
+    const limited = sonicError(
+      'EVENT_DAILY_QUOTA_EXCEEDED',
+      'Daily event ingestion quota exceeded; retry tomorrow',
+      429,
+      { provider: 'sonic-events' },
+    );
+    limited.headers.set('Retry-After', '3600');
+    return limited;
+  }
 
   // Primary Hop: forward to Linux VPS Sonic Engine when configured
   let degraded = false;
@@ -305,7 +371,8 @@ export async function onRequest({
   let result: Awaited<ReturnType<typeof ingestBehaviorEvents>>;
   try {
     result = await ingestBehaviorEvents(validEvents, identity, env);
-  } catch {
+  } catch (err: any) {
+    if (err?.code === 'RECOMMEND_STORE_BUDGET_EXCEEDED') return storageBudgetExceeded(start);
     return storageUnavailable(start);
   }
 

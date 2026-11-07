@@ -1,6 +1,7 @@
 import type { AppEnv, HighPrecisionLyricPayload, LyricFetchOptions, LyricLine, LyricSyncType, LyricWord, SongItem } from './types';
 import { getSonicConfig } from './sonic/config';
 import { createRuntimeAbortBudget, fetchWithRuntimeBudget } from './sonic/local-engine';
+import { fetchProviderDirect } from './sonic/provider-fetch';
 import { isSourceEnabledByPolicy } from './sonic/licensing';
 import { getSyntheticTrackSpec, searchSyntheticCatalog } from './sonic/synthetic-media';
 import {
@@ -15,8 +16,11 @@ import {
 const DEFAULT_API_BASE = 'https://music-api.gdstudio.xyz/api.php';
 const KUWO_HOST_PATTERN = /(^|\.)kuwo\.cn$/i;
 
+// Legacy provider crawl path. No redirects are followed at all: a provider 302
+// to an internal/metadata address must never trigger a second request, and every
+// target is pinned to an authorized HTTPS provider host family (audit P1-2).
 function timedFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetchWithRuntimeBudget(input, init, { timeoutMs: 8000 });
+  return fetchProviderDirect(input, init, 8000, init?.signal);
 }
 
 export function getMusicApiBase(env: AppEnv): string {
@@ -1240,8 +1244,8 @@ async function crawlKugouBySearch(
     // 渠道 1：通过酷狗 master song search (mobilecdn + song_search_v2) 获取录音室母带版本与哈希值
     try {
       const searchApis = [
-        `http://mobilecdn.kugou.com/api/v3/search/song?keyword=${encodeURIComponent(query)}&page=1&pagesize=5`,
-        `http://songsearch.kugou.com/song_search_v2?keyword=${encodeURIComponent(query)}&page=1&pagesize=5&clientver=&platform=WebFilter`,
+        `https://mobilecdn.kugou.com/api/v3/search/song?keyword=${encodeURIComponent(query)}&page=1&pagesize=5`,
+        `https://songsearch.kugou.com/song_search_v2?keyword=${encodeURIComponent(query)}&page=1&pagesize=5&clientver=&platform=WebFilter`,
       ];
       for (const sUrl of searchApis) {
         try {
@@ -1258,7 +1262,7 @@ async function crawlKugouBySearch(
               const sDur = typeof item.duration === 'number' ? item.duration : (item.Duration || 0);
               if (!hash || !sSong) continue;
 
-              const lUrl = `http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(sSong)}&hash=${hash}&timelength=${sDur * 1000}`;
+              const lUrl = `https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(sSong)}&hash=${hash}&timelength=${sDur * 1000}`;
               const lRes = await timedFetch(lUrl, { signal,
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
               });
@@ -1290,7 +1294,7 @@ async function crawlKugouBySearch(
     if (targetTitle && targetTitle !== query) directQueries.push(targetTitle);
     for (const dq of directQueries) {
       const durParam = targetDuration ? `&timelength=${Math.round(targetDuration * 1000)}` : '';
-      const dUrl = `http://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(dq)}${durParam}`;
+      const dUrl = `https://lyrics.kugou.com/search?ver=1&man=yes&client=pc&keyword=${encodeURIComponent(dq)}${durParam}`;
       try {
         const dRes = await timedFetch(dUrl, { signal, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' } });
         if (dRes.ok) {
@@ -1389,7 +1393,7 @@ async function crawlKugouBySearch(
 
         // 1. 优先尝试获取并解码毫秒级逐字 KRC 格式
         try {
-          const krcUrl = `http://lyrics.kugou.com/download?ver=1&client=pc&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=krc&charset=utf8`;
+          const krcUrl = `https://lyrics.kugou.com/download?ver=1&client=pc&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=krc&charset=utf8`;
           const krcRes = await timedFetch(krcUrl, { signal,
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
           });
@@ -1530,7 +1534,7 @@ async function crawlKugouBySearch(
 
         // 2. 降级尝试获取普通行级 LRC
         try {
-          const lrcUrl = `http://lyrics.kugou.com/download?ver=1&client=pc&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=lrc&charset=utf8`;
+          const lrcUrl = `https://lyrics.kugou.com/download?ver=1&client=pc&id=${candidate.id}&accesskey=${candidate.accesskey}&fmt=lrc&charset=utf8`;
           const lrcRes = await timedFetch(lrcUrl, { signal,
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
           });
@@ -1637,6 +1641,15 @@ export function generateEnhancedLrc(lines: LyricLine[]): string {
     .join('\n');
 }
 
+function escapeTtmlText(unsafe: string): string {
+  return unsafe
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 export function generateTtml(lines: LyricLine[], title?: string, artist?: string): string {
   const paragraphs = lines
     .map((line) => {
@@ -1663,8 +1676,8 @@ export function generateTtml(lines: LyricLine[], title?: string, artist?: string
 <tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:itunes="http://music.apple.com/lyric-ttml-extensions">
   <head>
     <metadata>
-      <ttm:title>${(title || '').replace(/&/g, '&amp;')}</ttm:title>
-      <ttm:agent type="person">${(artist || '').replace(/&/g, '&amp;')}</ttm:agent>
+      <ttm:title>${escapeTtmlText(title || '')}</ttm:title>
+      <ttm:agent type="person">${escapeTtmlText(artist || '')}</ttm:agent>
     </metadata>
   </head>
   <body>

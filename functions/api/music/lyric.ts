@@ -32,7 +32,11 @@ export async function onRequest({ request, env, waitUntil }: { request: Request;
 
   // 1. 尝试从 Cloudflare Cache API 检索缓存
   const cache = typeof caches !== 'undefined' ? (caches as any).default : null;
+  // Cache-busting params must never reach the key: every unique `_t` value
+  // would otherwise create a new edge-cache entry (audit P2-1).
   const cacheKeyUrl = new URL(request.url);
+  cacheKeyUrl.searchParams.delete('nocache');
+  cacheKeyUrl.searchParams.delete('_t');
   cacheKeyUrl.searchParams.sort();
   cacheKeyUrl.searchParams.set('_v', '2.5');
   const cacheKey = new Request(cacheKeyUrl.toString(), { method: 'GET' });
@@ -143,7 +147,7 @@ export async function onRequest({ request, env, waitUntil }: { request: Request;
       );
     }
 
-    if (cache && response.status === 200) {
+    if (cache && response.status === 200 && !bypassCache) {
       try {
         const cachePromise = cache.put(cacheKey, response.clone());
         if (typeof waitUntil === 'function') {

@@ -2,7 +2,7 @@ import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import { searchTracks } from '../../_lib/music';
 import { getSonicConfig } from '../../_lib/sonic/config';
 import { isSourceEnabledByPolicy } from '../../_lib/sonic/licensing';
-import { recordLicensingBlockMetric } from '../../_lib/sonic/observability';
+import { recordLicensingBlockMetric, redactSensitiveString } from '../../_lib/sonic/observability';
 import { callLocalEngineJson, getLocalEngineCircuitSnapshot } from '../../_lib/sonic/local-engine';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse, extractClientIp } from '../../_lib/sonic/security';
 import type { AppEnv } from '../../_lib/types';
@@ -106,6 +106,6 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   } catch (err: any) {
     request.signal.throwIfAborted();
     console.error('[Sonic Music Search Error]', err);
-    return errorResponse(err?.message || '搜索曲库失败', 502);
+    return errorResponse(redactSensitiveString(err?.message || '搜索曲库失败'), 502);
   }
 }

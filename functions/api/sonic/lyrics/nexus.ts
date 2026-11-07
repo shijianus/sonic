@@ -8,6 +8,7 @@ import { jsonResponse, errorResponse } from '../../../_lib/http';
 import { parseLyricsParams, sonicError, handleOptions, buildGatewayHeaders } from '../../../_lib/sonic/route-helpers';
 import { resolveNexusLyrics } from '../../../_lib/sonic/nexus-lyrics';
 import { getSonicCachedJson, putSonicCachedJson } from '../../../_lib/sonic/cache';
+import { redactSensitiveString } from '../../../_lib/sonic/observability';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from '../../../_lib/sonic/security';
 
 export async function handleNexusLyricsRequest(
@@ -137,7 +138,7 @@ export async function handleNexusLyricsRequest(
   } catch (err: any) {
     request.signal.throwIfAborted();
     console.error('[Sonic Nexus Lyrics Error]', err);
-    return sonicError('INTERNAL_ERROR', err?.message || 'Failed to resolve nexus lyrics', 502, {
+    return sonicError('INTERNAL_ERROR', redactSensitiveString(err?.message || 'Failed to resolve nexus lyrics'), 502, {
       latencyMs: Date.now() - startTime,
       provider: 'nexus',
     });

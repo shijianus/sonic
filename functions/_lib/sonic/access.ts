@@ -9,6 +9,9 @@ import { sha256Hex } from './crypto';
 import type { AppEnv } from '../types';
 
 export const SONIC_ACCESS_COOKIE = 'sonic_access';
+// __Host- prefix (audit P1-6): the prefixed name is written on secure origins and
+// both names are read/cleared during the migration window.
+export const SONIC_ACCESS_COOKIE_HOST_PREFIXED = `__Host-${SONIC_ACCESS_COOKIE}`;
 export const ACCESS_INVITE_HASH_PREFIX = 'sonic:access:invite:';
 export const ACCESS_SESSION_HASH_PREFIX = 'sonic:access:session:';
 
@@ -154,20 +157,28 @@ function getStoreKey(prefix: string, hash: string): string {
 }
 
 export function readAccessSessionToken(request: Request): string | undefined {
-  const token = readCookie(request, SONIC_ACCESS_COOKIE);
+  const token = readCookie(request, SONIC_ACCESS_COOKIE_HOST_PREFIXED) ?? readCookie(request, SONIC_ACCESS_COOKIE);
   if (!token || token.length > MAX_ACCESS_SESSION_TOKEN_LENGTH || !/^[A-Za-z0-9_.-]+$/.test(token)) return undefined;
   return token;
 }
 
 export function buildAccessSessionCookie(token: string, expiresAt: number, requestUrl: URL): string {
   const maxAge = Math.max(0, Math.min(MAX_ACCESS_SESSION_MAX_AGE_SEC, Math.floor((expiresAt - Date.now()) / 1000)));
-  const secure = shouldUseSecureCookie(requestUrl) ? '; Secure' : '';
-  return `${SONIC_ACCESS_COOKIE}=${encodeURIComponent(token)}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
+  const secure = shouldUseSecureCookie(requestUrl);
+  const secureAttr = secure ? '; Secure' : '';
+  const name = secure ? SONIC_ACCESS_COOKIE_HOST_PREFIXED : SONIC_ACCESS_COOKIE;
+  return `${name}=${encodeURIComponent(token)}; HttpOnly${secureAttr}; SameSite=Lax; Path=/; Max-Age=${maxAge}`;
 }
 
-export function buildClearAccessSessionCookie(requestUrl: URL): string {
-  const secure = shouldUseSecureCookie(requestUrl) ? '; Secure' : '';
-  return `${SONIC_ACCESS_COOKIE}=; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+export function buildClearAccessSessionCookie(requestUrl: URL): string[] {
+  const secure = shouldUseSecureCookie(requestUrl);
+  const secureAttr = secure ? '; Secure' : '';
+  // Clear both names (independent Set-Cookie headers) so a legacy pre-__Host-
+  // cookie cannot outlive logout.
+  return [
+    `${SONIC_ACCESS_COOKIE_HOST_PREFIXED}=; HttpOnly${secureAttr}; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+    `${SONIC_ACCESS_COOKIE}=; HttpOnly${secureAttr}; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+  ];
 }
 
 export type AccessRedeemResult =

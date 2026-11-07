@@ -132,6 +132,9 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
           timeoutMs: 15000,
           maxBytes: forwardMaxBytes,
           includeMetadata: true,
+          // Audio forwards share the media pool so slow streams cannot starve
+          // cover/JSON proxying (audit P1-3).
+          pool: type === 'audio' ? 'media' : 'json',
         },
       );
 

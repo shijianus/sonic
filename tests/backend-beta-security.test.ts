@@ -166,20 +166,34 @@ describe('public beta: signed URLs across redirects', () => {
 });
 
 describe('public beta: independent first-byte and active-body budgets', () => {
-  it('retains 64 first-byte slots and rejects the 65th pending fetch', async () => {
+  it('retains 16 JSON-pool first-byte slots and rejects the 17th pending fetch', async () => {
     const releases: Array<(r: Response) => void> = [];
     vi.stubGlobal('fetch', () => new Promise<Response>((resolve) => releases.push(resolve)));
-    const pending = Array.from({ length: 64 }, () => safeFetch(MEDIA, undefined, OPTIONS));
+    const pending = Array.from({ length: 16 }, () => safeFetch(MEDIA, undefined, OPTIONS));
     await Promise.resolve();
     await expect(safeFetch(MEDIA, undefined, OPTIONS)).rejects.toThrow('concurrency limit');
     releases.forEach((resolve) => resolve(new Response(null, { status: 204 })));
     await Promise.all(pending);
   });
-  it('bounds 65 unfinished bodies even after headers finish; cancellation frees exactly one slot', async () => {
+  it('keeps the media pool independent so 16 JSON slots cannot starve streaming', async () => {
+    const releases: Array<(r: Response) => void> = [];
+    vi.stubGlobal('fetch', () => new Promise<Response>((resolve) => releases.push(resolve)));
+    const jsonOptions = { ...OPTIONS, pool: 'json' as const };
+    const pending = Array.from({ length: 16 }, () => safeFetch(MEDIA, undefined, jsonOptions));
+    await Promise.resolve();
+    const mediaPending = safeFetch(MEDIA, undefined, { ...OPTIONS, pool: 'media' });
+    // Yield until every pending fetch (16 JSON + 1 media) has registered its resolver.
+    while (releases.length < 17) await Promise.resolve();
+    releases.forEach((resolve) => resolve(new Response(null, { status: 204 })));
+    const [mediaResponse] = await Promise.all([mediaPending, ...pending]);
+    // Not rejected: the media pool still has room while the JSON pool is exhausted.
+    expect(mediaResponse.status).toBe(204);
+  });
+  it('bounds 17 unfinished JSON bodies even after headers finish; cancellation frees exactly one slot', async () => {
     const canceled = vi.fn();
     const fetchSpy = vi.fn(async () => new Response(new ReadableStream({ cancel: canceled })));
     vi.stubGlobal('fetch', fetchSpy);
-    const held = await Promise.all(Array.from({ length: 64 }, async () => remember(await safeFetch(MEDIA, undefined, OPTIONS))));
+    const held = await Promise.all(Array.from({ length: 16 }, async () => remember(await safeFetch(MEDIA, undefined, OPTIONS))));
     await expect(safeFetch(MEDIA, undefined, OPTIONS)).rejects.toThrow('body concurrency limit');
     await held[0].body!.cancel();
     const next = remember(await safeFetch(MEDIA, undefined, OPTIONS));
@@ -224,19 +238,22 @@ describe('public beta: independent first-byte and active-body budgets', () => {
     vi.useFakeTimers();
     const canceled = vi.fn();
     vi.stubGlobal('fetch', async () => new Response(new ReadableStream({ start(c) { c.enqueue(new Uint8Array(1)); }, cancel: canceled })));
-    const held = await Promise.all(Array.from({ length: 64 }, () => safeFetch(MEDIA, undefined, { ...OPTIONS, maxBytes: 0, bodyIdleTimeoutMs: 10 })));
+    const held = await Promise.all(Array.from({ length: 16 }, () => safeFetch(MEDIA, undefined, { ...OPTIONS, maxBytes: 0, bodyIdleTimeoutMs: 10 })));
     await expect(safeFetch(MEDIA, undefined, { ...OPTIONS, maxBytes: 0 })).rejects.toThrow('body concurrency limit');
     await vi.advanceTimersByTimeAsync(11);
     for (const r of held) await expect(r.text()).rejects.toThrow('idle timeout');
-    expect(canceled).toHaveBeenCalledTimes(65); // The refused 65th response is canceled as well.
+    expect(canceled).toHaveBeenCalledTimes(17); // The refused 17th response is canceled as well.
     vi.stubGlobal('fetch', async () => audio());
     expect(await (await safeFetch(MEDIA, undefined, OPTIONS)).text()).toBe('audio');
   });
   it('stream and forward expose overload as retryable 503 without changing the error envelope', async () => {
     vi.stubGlobal('fetch', async () => new Response(new ReadableStream()));
-    await Promise.all(Array.from({ length: 64 }, async () => remember(await safeFetch(MEDIA, undefined, OPTIONS))));
+    // stream/forward draw from the media pool: exhaust exactly that pool.
+    await Promise.all(Array.from({ length: 48 }, async () => remember(await safeFetch(MEDIA, undefined, { ...OPTIONS, pool: 'media' }))));
     for (const handler of [stream, forward]) {
-      const r = await handler({ request: request(`/api/music/stream?url=${encodeURIComponent(MEDIA)}`), env: {} });
+      // forward draws from the media pool only for type=audio requests.
+      const suffix = handler === forward ? '&type=audio' : '';
+      const r = await handler({ request: request(`/api/music/stream?url=${encodeURIComponent(MEDIA)}${suffix}`), env: {} });
       expect(r.status).toBe(503);
       expect(r.headers.get('Retry-After')).toBeTruthy();
       expect((await r.json() as any).error.code).toBe('UPSTREAM_BUSY');

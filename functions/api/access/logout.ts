@@ -21,7 +21,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
   const revocation = await revokeAccessSession(request, env);
   const headers = new Headers(NO_STORE_HEADERS);
-  headers.append('Set-Cookie', buildClearAccessSessionCookie(new URL(request.url)));
+  for (const cookie of buildClearAccessSessionCookie(new URL(request.url))) headers.append('Set-Cookie', cookie);
   return jsonResponse(
     {
       brand: 'Sonic',

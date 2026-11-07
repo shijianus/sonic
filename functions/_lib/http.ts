@@ -2,9 +2,12 @@ export function corsHeaders(extra?: HeadersInit): Headers {
   const headers = new Headers();
   headers.set('Access-Control-Allow-Origin', '*');
   headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, HEAD, OPTIONS');
+  // Cross-origin pages must never be able to probe the engine/staging credential
+  // headers: they are server-to-server secrets and stay out of every browser
+  // facing allowlist (audit P1-5).
   headers.set(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Engine-Key, X-Sonic-Staging-Token, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, X-Shijianus-Device-Id, Range',
+    'Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, Range',
   );
   headers.set('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges, X-Sonic-Release, X-RateLimit-Backend, X-RateLimit-Degraded');
   // API payloads are JSON/text only; never let a browser treat one as an active document.

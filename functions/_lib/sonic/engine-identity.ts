@@ -35,11 +35,27 @@ async function keyFor(secret: string, usage: 'sign' | 'verify'): Promise<CryptoK
   return crypto.subtle.importKey('raw', encoder.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, [usage]);
 }
 
-function secretFor(env?: AppEnv): string | undefined {
-  const secret = String(env?.SONIC_ENGINE_IDENTITY_SECRET || '').trim();
+function isAcceptableSecret(secret: string, env?: AppEnv): boolean {
   const reused = [env?.SONIC_ENGINE_SECRET, env?.SONIC_SECRET, env?.SOLARA_SECRET, env?.SONIC_SECRET_PREV]
     .some(value => Boolean(value) && String(value).trim() === secret);
-  return secret.length >= 32 && !reused ? secret : undefined;
+  return secret.length >= 32 && !reused;
+}
+
+function secretFor(env?: AppEnv): string | undefined {
+  const secret = String(env?.SONIC_ENGINE_IDENTITY_SECRET || '').trim();
+  return isAcceptableSecret(secret, env) ? secret : undefined;
+}
+
+/**
+ * Rotation window key (audit P1-4). During a rolling Pages/Engine deploy the old
+ * identity secret may still sign in-flight assertions; the previous value is
+ * accepted for verification only and never used for signing.
+ */
+function previousSecretFor(env?: AppEnv): string | undefined {
+  const secret = String(env?.SONIC_ENGINE_IDENTITY_SECRET_PREV || '').trim();
+  if (!isAcceptableSecret(secret, env)) return undefined;
+  if (secret === secretFor(env)) return undefined;
+  return secret;
 }
 
 export function getEngineIdentityReadiness(env?: AppEnv) {
@@ -48,8 +64,9 @@ export function getEngineIdentityReadiness(env?: AppEnv) {
     (config.runtime === 'linux-engine' || config.enableLocalEngine);
   const required = productionHop || isEnvEnabled(env?.SONIC_REQUIRE_ENGINE_IDENTITY, false);
   const configured = Boolean(secretFor(env));
+  const previousConfigured = Boolean(previousSecretFor(env));
   const invalid = Boolean(String(env?.SONIC_ENGINE_IDENTITY_SECRET || '').trim()) && !configured;
-  return { required, configured, ok: !invalid && (!required || configured) };
+  return { required, configured, previousConfigured, ok: !invalid && (!required || configured) };
 }
 
 function pathFor(value: string): string {
@@ -87,7 +104,8 @@ export function isAccountIdentityPath(path: string): boolean {
 
 async function verifyAssertion(request: Request, env?: AppEnv, nowMs = Date.now()): Promise<IdentityAssertion | null> {
   const secret = secretFor(env);
-  if (!secret || env?.SONIC_RUNTIME !== 'linux-engine' || !hasValidEngineSecret(request, env)) return null;
+  const previousSecret = previousSecretFor(env);
+  if ((!secret && !previousSecret) || env?.SONIC_RUNTIME !== 'linux-engine' || !hasValidEngineSecret(request, env)) return null;
   const assertion = request.headers.get(ENGINE_IDENTITY_HEADER) || '';
   if (!assertion || assertion.length > 2048) return null;
   try {
@@ -95,7 +113,12 @@ async function verifyAssertion(request: Request, env?: AppEnv, nowMs = Date.now(
     if (parts.length !== 2 || !parts.every(part => /^[a-zA-Z0-9_-]+$/.test(part))) return null;
     const signature = base64UrlDecode(parts[1]);
     if (signature.byteLength !== 32 || base64UrlEncode(signature) !== parts[1]) return null;
-    if (!await crypto.subtle.verify('HMAC', await keyFor(secret, 'verify'), new Uint8Array(signature), encoder.encode(DOMAIN + parts[0]))) return null;
+    const signedPayload = encoder.encode(DOMAIN + parts[0]);
+    // The primary key signs; the previous key only verifies in-flight assertions
+    // from before a rotation, so the rolling window never breaks inter-service calls.
+    const verified = (secret && await crypto.subtle.verify('HMAC', await keyFor(secret, 'verify'), new Uint8Array(signature), signedPayload)) ||
+      (previousSecret && await crypto.subtle.verify('HMAC', await keyFor(previousSecret, 'verify'), new Uint8Array(signature), signedPayload));
+    if (!verified) return null;
     const payload = JSON.parse(decoder.decode(base64UrlDecode(parts[0]))) as IdentityAssertion;
     const now = Math.floor(nowMs / 1000);
     if (payload.v !== 1 || !Number.isInteger(payload.iat) || !Number.isInteger(payload.exp) || payload.iat > now + 5 || payload.exp <= now || payload.exp - payload.iat > 30 || payload.iat > payload.exp) return null;
@@ -131,7 +154,7 @@ export async function requireValidEngineIdentity(request: Request, env?: AppEnv)
   if (env?.SONIC_RUNTIME !== 'linux-engine') return null;
   const presented = request.headers.has(ENGINE_IDENTITY_HEADER) || request.headers.has(ENGINE_IDENTITY_REQUIRED_HEADER);
   const personalized = ['authorization', 'x-sonic-key', 'x-cfsolara-key', 'x-api-key', 'x-sonic-anon-id', 'x-sonic-context']
-    .some(header => Boolean(request.headers.get(header))) || /(?:^|;\s*)sonic_session=/.test(request.headers.get('cookie') || '');
+    .some(header => Boolean(request.headers.get(header))) || /(?:^|;\s*)(?:__Host-)?sonic_session=/.test(request.headers.get('cookie') || '');
   if (!presented && !(getEngineIdentityReadiness(env).required && personalized)) return null;
   const identity = await verifyEngineIdentity(request, env);
   if (!identity) throw new EngineIdentityError();

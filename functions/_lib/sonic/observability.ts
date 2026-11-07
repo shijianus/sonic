@@ -339,7 +339,7 @@ export function redactSensitiveString(raw: unknown): string {
     .replace(/((?:authorization|x-sonic-engine-key|x-sonic-staging-token|x-api-key)\s*[=:]\s*)[^\r\n,;]+/gi, '$1[REDACTED]')
     .replace(/((?:set-cookie|cookie)\s*:\s*)[^\r\n]+/gi, '$1[REDACTED]')
     .replace(/((?:[a-z0-9_-]*(?:secret|password)|access[_-]?token|refresh[_-]?token)\s*=\s*)[^\s&;,"']+/gi, '$1[REDACTED]')
-    .replace(/(sonic_session|sonic_oauth_state|sonic_oauth_verifier|sonic_staging_access)=[^;\s"']+/gi, '$1=[REDACTED]')
+    .replace(/((?:__Host-)?(?:sonic_session|sonic_access|sonic_staging_access)|sonic_oauth_state|sonic_oauth_verifier)=[^;\s"']+/gi, '$1=[REDACTED]')
     .replace(SENSITIVE_PARAM_PATTERN, '$1[REDACTED]')
     .slice(0, 512);
 }

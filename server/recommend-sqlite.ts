@@ -33,6 +33,21 @@ import { recordSqliteMetric, redactSensitiveString } from '../functions/_lib/son
 // Hard ceiling for the shared canonical catalog. Search traffic is persisted
 // into this table, so an unbounded catalog is a disk-exhaustion vector.
 const MAX_CANONICAL_TRACKS = 100_000;
+// Hard row ceilings for anonymous-writable tables. Every one of these is fed by
+// public traffic, so without a cap a single client can grow the SQLite file
+// without bound (audit P0-1: ~213 bytes/event => ~1.2 GB/day/IP unbounded).
+// Operators may tighten the budgets via env; the defaults stay generous.
+const MAX_BEHAVIOR_EVENTS = readPositiveEnvInt('SONIC_RECOMMEND_MAX_EVENT_ROWS', 2_000_000);
+const MAX_USER_ENTITY_FEEDBACK = readPositiveEnvInt('SONIC_RECOMMEND_MAX_FEEDBACK_ROWS', 1_000_000);
+// Catalog entities/relations are public-write-adjacent (every successful mv/*
+// response ingests up to 100 rows), so they get their own budgets (audit P1-1).
+const MAX_ENTITIES = readPositiveEnvInt('SONIC_RECOMMEND_MAX_ENTITIES', 50_000);
+const MAX_ENTITY_RELATIONS = readPositiveEnvInt('SONIC_RECOMMEND_MAX_ENTITY_RELATIONS', 200_000);
+
+function readPositiveEnvInt(name: string, fallback: number): number {
+  const parsed = Number(process.env[name]);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
 
 export class SqliteRecommendStore implements RecommendStore {
   public readonly kind = 'sqlite' as const;
@@ -41,14 +56,46 @@ export class SqliteRecommendStore implements RecommendStore {
   private retentionDays: number;
   private lastRetentionAt = 0;
   private canonicalTrackCount = -1;
+  private entityCount = -1;
+  private lastDiskCheckAt = 0;
+  private lastDiskCheckOk = true;
+  private anonEventRetentionDays: number;
 
   constructor(public readonly dbPath: string = ':memory:', retentionDays: number | string = process.env.SONIC_RECOMMEND_RETENTION_DAYS || 90) {
     this.retentionDays = normalizeRecommendRetentionDays(retentionDays);
+    const configuredAnonDays = readPositiveEnvInt('SONIC_ANON_EVENT_RETENTION_DAYS', 7);
+    this.anonEventRetentionDays = Math.min(this.retentionDays, Math.max(1, configuredAnonDays));
     if (dbPath !== ':memory:') {
-      const dir = path.dirname(path.resolve(dbPath));
+      const resolved = path.resolve(dbPath);
+      const dir = path.dirname(resolved);
       fs.mkdirSync(dir, { recursive: true });
+      // The DB holds per-user behavioral data: refuse to open anything that is
+      // not a plain regular file (a symlink or directory swap would bypass the
+      // permission model), then pin owner-only modes on it and its sidecars.
+      if (fs.existsSync(resolved)) {
+        const stat = fs.lstatSync(resolved);
+        if (!stat.isFile()) {
+          throw new Error(`Recommend DB path is not a regular file: ${resolved}`);
+        }
+      }
     }
     this.db = new DatabaseSync(dbPath);
+    if (dbPath !== ':memory:' && process.platform !== 'win32') {
+      try {
+        const resolved = path.resolve(dbPath);
+        fs.chmodSync(resolved, 0o600);
+        for (const suffix of ['-wal', '-shm']) {
+          const sidecar = `${resolved}${suffix}`;
+          if (fs.existsSync(sidecar)) fs.chmodSync(sidecar, 0o600);
+        }
+        const parent = path.dirname(resolved);
+        if ((fs.statSync(parent).mode & 0o077) !== 0) {
+          fs.chmodSync(parent, 0o700);
+        }
+      } catch {
+        // Best-effort hardening (e.g. read-only mount); startup continues.
+      }
+    }
     try {
       this.initSchema();
       this.pruneRetention();
@@ -65,7 +112,22 @@ export class SqliteRecommendStore implements RecommendStore {
       PRAGMA busy_timeout = 3000;
       PRAGMA temp_store = MEMORY;
       PRAGMA cache_size = -16000;
-
+      PRAGMA foreign_keys = ON;
+    `);
+    // Storage budget (audit P0-1): cap the database file so a flood of anonymous
+    // events cannot exhaust the volume. The PRAGMA fails when an existing file is
+    // already larger than the budget — keep the store usable in that case and let
+    // retention pruning shrink it back under the ceiling.
+    const maxDbBytes = readPositiveEnvInt('SONIC_RECOMMEND_DB_MAX_BYTES', 1024 * 1024 * 1024);
+    try {
+      const pageSizeRow = this.db.prepare('PRAGMA page_size').get() as { page_size?: number } | undefined;
+      const pageSize = Number(pageSizeRow?.page_size || 4096) || 4096;
+      const maxPages = Math.max(1024, Math.floor(maxDbBytes / pageSize));
+      this.db.exec(`PRAGMA max_page_count = ${maxPages};`);
+    } catch {
+      recordSqliteMetric('write_error');
+    }
+    this.db.exec(`
       CREATE TABLE IF NOT EXISTS canonical_tracks (
         canonical_track_id TEXT PRIMARY KEY,
         provider TEXT NOT NULL,
@@ -255,7 +317,11 @@ export class SqliteRecommendStore implements RecommendStore {
     // SQLite cannot drop an inline PK/UNIQUE constraint. Rebuild only the affected
     // tables in one write transaction; any unexpected schema/duplicate fails closed.
     // Inspect indexes as well as table_info: some deployments have event_id UNIQUE.
+    // FK enforcement must stay OFF for the rebuild: dropping the parent
+    // behavior_events table with foreign_keys=ON would fire the contributions'
+    // ON DELETE CASCADE and silently erase every retained contribution row.
     const quote = (name: string) => `"${name.replace(/"/g, '""')}"`;
+    this.db.exec('PRAGMA foreign_keys = OFF');
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const columns = this.db.prepare('PRAGMA table_info(behavior_events)').all() as Array<{ name: string }>;
@@ -299,6 +365,8 @@ export class SqliteRecommendStore implements RecommendStore {
     } catch (error) {
       this.db.exec('ROLLBACK');
       throw error;
+    } finally {
+      this.db.exec('PRAGMA foreign_keys = ON');
     }
   }
 
@@ -306,6 +374,45 @@ export class SqliteRecommendStore implements RecommendStore {
     if (++this.writeCounter >= 1500 || Date.now() - this.lastRetentionAt >= 3600_000) {
       this.pruneRetention();
     }
+  }
+
+  /**
+   * Write-path disk gate (audit P0-1). The health endpoint alone cannot stop a
+   * flood: anonymous event writes must be refused once the SQLite volume is
+   * below the free-space threshold, instead of filling the disk until SQLite
+   * itself crashes. Result is cached briefly to keep statfs off the hot path.
+   */
+  private ensureDiskBudget(): void {
+    if (this.dbPath === ':memory:') return;
+    const now = Date.now();
+    if (now - this.lastDiskCheckAt > 30_000) {
+      this.lastDiskCheckAt = now;
+      try {
+        const minFreeMb = readPositiveEnvInt('SONIC_MIN_FREE_DISK_MB', 64);
+        const dir = path.dirname(path.resolve(this.dbPath));
+        if (typeof fs.statfsSync === 'function') {
+          const stat = fs.statfsSync(dir);
+          const freeBytes = Number(stat.bavail) * Number(stat.bsize || 4096);
+          this.lastDiskCheckOk = freeBytes >= minFreeMb * 1024 * 1024;
+        } else {
+          this.lastDiskCheckOk = true;
+        }
+      } catch {
+        // Unreadable statfs must not brick all writes; the health check reports it.
+        this.lastDiskCheckOk = true;
+      }
+    }
+    if (!this.lastDiskCheckOk) {
+      throw new RecommendStoreBudgetExceededError('disk_below_threshold');
+    }
+  }
+
+  private currentEntityCount(): number {
+    if (this.entityCount < 0) {
+      const row = this.db.prepare('SELECT COUNT(*) AS c FROM entities').get() as { c?: number } | undefined;
+      this.entityCount = Number(row?.c || 0);
+    }
+    return this.entityCount;
   }
 
   private currentTrackCount(): number {
@@ -543,6 +650,7 @@ export class SqliteRecommendStore implements RecommendStore {
     if (!event?.eventId || !event?.subjectKey) {
       return { inserted: false, deduplicated: false };
     }
+    this.ensureDiskBudget();
     this.beforeWrite();
     const stmt = this.db.prepare(`
       INSERT INTO behavior_events (
@@ -552,22 +660,33 @@ export class SqliteRecommendStore implements RecommendStore {
         WHERE NOT EXISTS (SELECT 1 FROM user_entity_feedback WHERE subject_key = ? AND feedback_id = ?)
       ON CONFLICT(subject_key, event_id) DO NOTHING
     `);
-    const info = stmt.run(
-      event.eventId,
-      event.subjectKey,
-      event.type,
-      event.canonicalTrackId ?? null,
-      event.artistKey ?? null,
-      event.genres ? JSON.stringify(event.genres) : null,
-      event.language ?? null,
-      event.query ?? null,
-      event.weight,
-      event.progressRatio ?? null,
-      event.createdAt,
-      event.trackRef ?? null,
-      event.subjectKey,
-      event.eventId,
-    );
+    let info;
+    try {
+      info = stmt.run(
+        event.eventId,
+        event.subjectKey,
+        event.type,
+        event.canonicalTrackId ?? null,
+        event.artistKey ?? null,
+        event.genres ? JSON.stringify(event.genres) : null,
+        event.language ?? null,
+        event.query ?? null,
+        event.weight,
+        event.progressRatio ?? null,
+        event.createdAt,
+        event.trackRef ?? null,
+        event.subjectKey,
+        event.eventId,
+      );
+    } catch (err: any) {
+      // The max_page_count budget turning the file full must surface as an
+      // explicit capacity error (507 at the gateway), never a silent drop.
+      if (err?.code === 'SQLITE_FULL' || /database or disk is full/i.test(String(err?.message))) {
+        recordSqliteMetric('write_error');
+        throw new RecommendStoreBudgetExceededError('sqlite_full');
+      }
+      throw err;
+    }
 
     const inserted = Number(info.changes) > 0;
     return {
@@ -737,6 +856,11 @@ export class SqliteRecommendStore implements RecommendStore {
   upsertEntity(entity: SonicEntity): void {
     if (!entity?.id || !entity?.type) return;
     this.beforeWrite();
+    // Hard ceiling (audit P1-1): public mv/* responses ingest entities on every
+    // successful upstream response. Refreshes of known rows stay allowed; only
+    // brand-new rows are refused once the cap is reached.
+    const exists = this.db.prepare(`SELECT 1 FROM entities WHERE entity_id = ?`).get(entity.id);
+    if (!exists && this.currentEntityCount() >= MAX_ENTITIES) return;
     const stmt = this.db.prepare(`
       INSERT INTO entities (
         entity_id, entity_type, title, subtitle, artist_id, artist_name,
@@ -772,6 +896,7 @@ export class SqliteRecommendStore implements RecommendStore {
       entity.updatedAt || Date.now(),
       JSON.stringify(entity.payload || {}),
     );
+    if (!exists && this.entityCount >= 0) this.entityCount += 1;
   }
 
   upsertEntities(entities: SonicEntity[]): void {
@@ -812,6 +937,12 @@ export class SqliteRecommendStore implements RecommendStore {
     if (!rel?.parentId || !rel?.childId) return;
     this.beforeWrite();
     const relationId = rel.relationId || `${rel.parentId}:::${rel.childId}:::${rel.relationType}`;
+    // Hard ceiling (audit P1-1): relations grow with every ingested MV catalog row.
+    const exists = this.db.prepare(`SELECT 1 FROM entity_relations WHERE relation_id = ?`).get(relationId);
+    if (!exists) {
+      const row = this.db.prepare(`SELECT COUNT(*) AS c FROM entity_relations`).get() as { c?: number } | undefined;
+      if (Number(row?.c || 0) >= MAX_ENTITY_RELATIONS) return;
+    }
     const stmt = this.db.prepare(`
       INSERT INTO entity_relations (
         relation_id, parent_id, parent_type, child_id, child_type,
@@ -877,6 +1008,7 @@ export class SqliteRecommendStore implements RecommendStore {
     if (!feedback?.feedbackId || !feedback?.subjectKey || !feedback?.entityId) {
       return { inserted: false, deduplicated: false };
     }
+    this.ensureDiskBudget();
     this.beforeWrite();
     const stmt = this.db.prepare(`
       INSERT INTO user_entity_feedback (
@@ -941,6 +1073,9 @@ export class SqliteRecommendStore implements RecommendStore {
     const days = normalizeRecommendRetentionDays(retentionDays);
     const now = Date.now();
     const cutoff = now - days * 24 * 3600 * 1000;
+    // Anonymous subjects rotate IDs freely, so their raw rows are only useful
+    // short-term; authenticated rows keep the full retention window (audit P0-1).
+    const anonCutoff = now - this.anonEventRetentionDays * 24 * 3600 * 1000;
     this.db.exec('SAVEPOINT sonic_recommend_retention');
     try {
       this.db.prepare(`DELETE FROM search_query_contributions WHERE created_at < ? OR NOT EXISTS (
@@ -952,14 +1087,27 @@ export class SqliteRecommendStore implements RecommendStore {
           AND e.event_id = cooccurrence_contributions.event_id AND e.created_at >= ?
       )`).run(cutoff, cutoff);
       this.db.prepare(`DELETE FROM behavior_events WHERE created_at < ?`).run(cutoff);
+      this.db.prepare(`DELETE FROM behavior_events WHERE created_at < ? AND subject_key LIKE 'anon_%'`).run(anonCutoff);
       this.db.prepare(`DELETE FROM user_entity_feedback WHERE created_at < ?`).run(cutoff);
+      this.db.prepare(`DELETE FROM user_entity_feedback WHERE created_at < ? AND subject_key LIKE 'anon_%'`).run(anonCutoff);
       this.db.prepare(`DELETE FROM search_queries WHERE updated_at < ?`).run(cutoff);
       this.db.prepare(`DELETE FROM track_cooccurrence WHERE updated_at < ?`).run(cutoff);
       this.db.prepare(`DELETE FROM user_radar_profiles WHERE updated_at < ?`).run(cutoff);
+      // Entities/relations were previously never pruned (audit P1-1); expire
+      // untouched catalog rows on the same window and drop relations whose MV
+      // parent vanished. A child may be a canonical track (canonical_tracks)
+      // rather than an entity, so only the parent side decides orphaning.
+      this.db.prepare(`DELETE FROM entity_relations WHERE created_at < ?`).run(cutoff);
+      this.db.prepare(`DELETE FROM entities WHERE updated_at < ?`).run(cutoff);
+      this.db.prepare(`DELETE FROM entity_relations WHERE NOT EXISTS (
+        SELECT 1 FROM entities p WHERE p.entity_id = entity_relations.parent_id
+      )`).run();
+      this.enforceRowCaps();
       this.db.exec('RELEASE sonic_recommend_retention');
       this.retentionDays = days;
       this.lastRetentionAt = now;
       this.writeCounter = 0;
+      this.entityCount = -1;
     } catch (error) {
       try {
         this.db.exec('ROLLBACK TO sonic_recommend_retention; RELEASE sonic_recommend_retention');
@@ -967,6 +1115,38 @@ export class SqliteRecommendStore implements RecommendStore {
       recordSqliteMetric('write_error');
       throw error;
     }
+  }
+
+  /**
+   * Absolute row ceilings for anonymous-writable tables (audit P0-1/P1-1). The
+   * per-minute quotas bound the rate; these caps bound the total regardless of
+   * how many identities an attacker rotates. Oldest rows are evicted first.
+   */
+  private enforceRowCaps(): void {
+    const caps: Array<[string, string, number]> = [
+      ['behavior_events', 'created_at', MAX_BEHAVIOR_EVENTS],
+      ['user_entity_feedback', 'created_at', MAX_USER_ENTITY_FEEDBACK],
+    ];
+    for (const [table, column, cap] of caps) {
+      const row = this.db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c?: number } | undefined;
+      const count = Number(row?.c || 0);
+      if (count <= cap) continue;
+      this.db.prepare(
+        `DELETE FROM ${table} WHERE rowid IN (
+           SELECT rowid FROM ${table} ORDER BY ${column} ASC LIMIT ?
+         )`,
+      ).run(count - cap);
+    }
+    // Deleting events orphans their contribution rows; CASCADE only covers the
+    // FK-declared tables and only when the parent delete comes from the FK path.
+    this.db.prepare(`DELETE FROM search_query_contributions WHERE NOT EXISTS (
+      SELECT 1 FROM behavior_events e WHERE e.subject_key = search_query_contributions.subject_key
+        AND e.event_id = search_query_contributions.event_id
+    )`).run();
+    this.db.prepare(`DELETE FROM cooccurrence_contributions WHERE NOT EXISTS (
+      SELECT 1 FROM behavior_events e WHERE e.subject_key = cooccurrence_contributions.subject_key
+        AND e.event_id = cooccurrence_contributions.event_id
+    )`).run();
   }
 
   close(): void {
@@ -1106,6 +1286,15 @@ export class RecommendStorePersistenceError extends Error {
       }`,
     );
     this.name = 'RecommendStorePersistenceError';
+  }
+}
+
+/** Storage budget exhausted (disk below threshold or SQLite file full). */
+export class RecommendStoreBudgetExceededError extends Error {
+  readonly code = 'RECOMMEND_STORE_BUDGET_EXCEEDED';
+  constructor(public readonly reason: 'disk_below_threshold' | 'sqlite_full') {
+    super(`Recommendation store storage budget exceeded (${reason})`);
+    this.name = 'RecommendStoreBudgetExceededError';
   }
 }
 

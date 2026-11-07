@@ -499,8 +499,28 @@ function collectEnabledSourceIds(f: EffectiveContentFlags): string[] {
   return list;
 }
 
-export function isSourceEnabledByPolicy(source: string, env?: AppEnv): boolean {
-  const norm = normalizeSourceId(source);
+/**
+ * Deterministic fingerprint of the effective content policy. Cached stream/lyrics
+ * keys embed this so a policy change (e.g. disabling a source) invalidates old
+ * entries instead of serving content the current policy forbids.
+ */
+export function computeContentPolicyEpoch(env?: AppEnv): string {
+  const f = evaluateContentFlags(env);
+  return [
+    f.policyMode,
+    f.allowedSources.join(','),
+    `n${f.enableNetease ? 1 : 0}`,
+    `q${f.enableQq ? 1 : 0}`,
+    `k${f.enableKugou ? 1 : 0}`,
+    `w${f.enableKuwo ? 1 : 0}`,
+    `s${f.enableSynthetic ? 1 : 0}`,
+    `u${f.enableUnblock ? 1 : 0}`,
+    `g${f.enableGdstudio ? 1 : 0}`,
+    `l${f.enableLyriva ? 1 : 0}`,
+  ].join(':');
+}
+
+export function isSourceEnabledByPolicy(source: string, env?: AppEnv): boolean {  const norm = normalizeSourceId(source);
   const f = evaluateContentFlags(env);
   if (norm === 'sonic') {
     // 'sonic' is the aggregated canonical alias; allowed if at least one audio/catalog source is enabled

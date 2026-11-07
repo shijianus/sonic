@@ -61,7 +61,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     'Cache-Control': 'no-store',
     Vary: 'Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, Cookie',
   });
-  headers.append('Set-Cookie', buildClearSessionCookie(new URL(request.url)));
+  for (const cookie of buildClearSessionCookie(new URL(request.url))) headers.append('Set-Cookie', cookie);
   recordOAuthMetric('revoke');
 
   return jsonResponse(

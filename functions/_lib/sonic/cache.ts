@@ -48,6 +48,17 @@ export function buildSonicCacheKey(namespace: string, identifier: string): strin
   return `sonic:${namespace}:${cleanId}`;
 }
 
+/**
+ * Environment-scoped cache key. A shared KV namespace between staging and
+ * production must never cross-feed cached streams/lyrics (signed URLs, synthetic
+ * test data), so every key carries the declared SONIC_ENV label.
+ */
+function envScopedCacheKey(namespace: string, identifier: string, env?: AppEnv): string {
+  const envLabel = String(env?.SONIC_ENV || '').trim().toLowerCase() || 'dev';
+  if (!/^[a-z0-9._-]{1,40}$/.test(envLabel)) return buildSonicCacheKey(namespace, identifier);
+  return buildSonicCacheKey(`${envLabel}:${namespace}`, identifier);
+}
+
 function getEdgeCache(): any | null {
   try {
     return typeof caches !== 'undefined' ? (caches as any).default || null : null;
@@ -74,7 +85,7 @@ export async function getSonicCachedJson<T>(
   env?: AppEnv,
   options?: { allowStale?: boolean },
 ): Promise<CacheHitResult<T> | null> {
-  const key = buildSonicCacheKey(namespace, identifier);
+  const key = envScopedCacheKey(namespace, identifier, env);
   const now = Date.now();
   const allowStale = Boolean(options?.allowStale);
 
@@ -146,7 +157,7 @@ export async function putSonicCachedJson<T>(
   env?: AppEnv,
   waitUntil?: (promise: Promise<any>) => void,
 ): Promise<void> {
-  const key = buildSonicCacheKey(namespace, identifier);
+  const key = envScopedCacheKey(namespace, identifier, env);
   const now = Date.now();
   const effectiveStaleSec = Math.max(freshTtlSec, staleTtlSec);
   const json = JSON.stringify(value);

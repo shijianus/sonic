@@ -10,6 +10,19 @@ export function isOAuthEnabled(env?: AppEnv): boolean {
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export const SONIC_SESSION_COOKIE = 'sonic_session';
+// __Host- prefix (audit P1-6): browsers refuse a prefixed cookie from any
+// subdomain and require Secure + Path=/ + no Domain, so a sibling subdomain can
+// no longer shadow the host-only session cookie (session fixation / logout confusion).
+export const SONIC_SESSION_COOKIE_HOST_PREFIXED = `__Host-${SONIC_SESSION_COOKIE}`;
+
+export function shouldUseHostPrefixedCookie(requestUrl: URL): boolean {
+  return shouldUseSecureCookie(requestUrl);
+}
+
+/** Read a cookie under its __Host- name first, then the legacy name (migration window). */
+export function readCookieWithHostPrefix(request: Request, legacyName: string, hostPrefixedName: string): string | undefined {
+  return readCookie(request, hostPrefixedName) ?? readCookie(request, legacyName);
+}
 export const SONIC_SESSION_MAX_AGE_SEC = 30 * 86400;
 export const SONIC_OAUTH_STATE_COOKIE = 'sonic_oauth_state';
 export const SONIC_OAUTH_VERIFIER_COOKIE = 'sonic_oauth_verifier';
@@ -234,13 +247,21 @@ export function buildSessionCookie(token: string, expiresAt: string, requestUrl:
     ? Math.floor((expiresMs - Date.now()) / 1000)
     : SONIC_SESSION_MAX_AGE_SEC;
   const maxAgeSec = Math.max(0, Math.min(SONIC_SESSION_MAX_AGE_SEC, maxAge));
-  const secure = shouldUseSecureCookie(requestUrl) ? '; Secure' : '';
-  return `${SONIC_SESSION_COOKIE}=${token}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}`;
+  const secure = shouldUseSecureCookie(requestUrl);
+  const secureAttr = secure ? '; Secure' : '';
+  const name = secure ? SONIC_SESSION_COOKIE_HOST_PREFIXED : SONIC_SESSION_COOKIE;
+  return `${name}=${token}; HttpOnly${secureAttr}; SameSite=Lax; Path=/; Max-Age=${maxAgeSec}`;
 }
 
-export function buildClearSessionCookie(requestUrl: URL): string {
-  const secure = shouldUseSecureCookie(requestUrl) ? '; Secure' : '';
-  return `${SONIC_SESSION_COOKIE}=; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+export function buildClearSessionCookie(requestUrl: URL): string[] {
+  const secure = shouldUseSecureCookie(requestUrl);
+  const secureAttr = secure ? '; Secure' : '';
+  // Clear both names (independent Set-Cookie headers) so a legacy pre-__Host-
+  // cookie cannot outlive logout.
+  return [
+    `${SONIC_SESSION_COOKIE_HOST_PREFIXED}=; HttpOnly${secureAttr}; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+    `${SONIC_SESSION_COOKIE}=; HttpOnly${secureAttr}; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`,
+  ];
 }
 
 export function readCookie(request: Request, name: string): string | undefined {
@@ -324,6 +345,8 @@ export async function exchangeCode(
   const response = await fetch(config.tokenUrl, {
     method: 'POST',
     cache: 'no-store',
+    // A 30x from the token endpoint must never replay the client secret (P2-9).
+    redirect: 'error',
     headers: {
       'Content-Type': contentType,
       Accept: 'application/json',
@@ -369,6 +392,8 @@ export async function fetchUserInfo(
 
   const response = await fetch(config.userInfoUrl, {
     cache: 'no-store',
+    // A 30x must never replay the bearer access token to another origin (P2-9).
+    redirect: 'error',
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Accept: 'application/json',
@@ -704,7 +729,7 @@ export function extractAuthCredentials(request: Request): {
     return { token: bearerToken, apiKey: headerCredential, source: 'header' };
   }
 
-  const cookieToken = readCookie(request, SONIC_SESSION_COOKIE);
+  const cookieToken = readCookieWithHostPrefix(request, SONIC_SESSION_COOKIE, SONIC_SESSION_COOKIE_HOST_PREFIXED);
   if (cookieToken) {
     return { token: cookieToken, apiKey: cookieToken, source: 'cookie' };
   }

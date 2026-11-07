@@ -1,4 +1,4 @@
-import { fetchWithRuntimeBudget } from '../local-engine';
+import { fetchProviderUrl } from '../native-protocols';
 // Sonic Provider — Kugou Music (酷狗音乐)
 // True word-level KRC decryption & search
 
@@ -99,13 +99,17 @@ export const kugouProvider: SonicProviderAdapter = {
     const page = options?.page || 1;
 
     try {
-      const sUrl = `http://mobilecdn.kugou.com/api/v3/search/song?keyword=${encodeURIComponent(query)}&page=${page}&pagesize=${count}`;
-      const sRes = await fetchWithRuntimeBudget(sUrl, {
+      // HTTPS-only via the provider boundary: the legacy plaintext HTTP endpoint
+      // allowed trivial MITM injection of search results (audit P1-2).
+      const sUrl = `https://mobilecdn.kugou.com/api/v3/search/song?keyword=${encodeURIComponent(query)}&page=${page}&pagesize=${count}`;
+      const sRes = await fetchProviderUrl(sUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
-        signal: options?.signal,
-      }, { timeoutMs: config.timeoutMs });
+      }, config.timeoutMs, options?.signal);
       if (!sRes.ok) return [];
-      const sJson = (await sRes.json()) as any;
+      const sJson = await (async () => {
+        try { return await sRes.json(); } catch { return null; }
+      })() as any;
+      if (!sJson) return [];
       const items = Array.isArray(sJson.data?.info) ? sJson.data.info : [];
       if (!Array.isArray(items)) return [];
 
