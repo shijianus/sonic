@@ -112,10 +112,10 @@ const handleLogin = () => {
 
 const handleLogout = async () => {
   closeMenu()
-  await authStore.logout()
+  const signedOut = await authStore.logout()
   toastStore.show({
-    message: t('account.logoutSuccess') || '已退出登录',
-    type: 'info',
+    message: t(signedOut ? 'account.logoutSuccess' : 'account.logoutFailed'),
+    type: signedOut ? 'info' : 'error',
   })
 }
 </script>

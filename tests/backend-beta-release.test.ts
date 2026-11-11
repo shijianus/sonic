@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 import { backupDatabase, digestFile, verifyDatabase } from '../scripts/backup-recommend-db.mjs';
 import { restoreDatabase } from '../scripts/restore-recommend-db.mjs';
 import { SqliteRecommendStore } from '../server/recommend-sqlite';
@@ -276,6 +277,75 @@ describe('beta release SQLite backup and offline recovery', () => {
     fs.writeFileSync(filename, JSON.stringify({ ...ready, generation: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', phase: 'erasing' }));
     expect(() => new SqliteRecommendStore(files.target)).toThrow(/does not match the retained/);
     expect(() => restoreDatabase(files.backup, files.target, { offline: true })).toThrow(/preserves acknowledged erasures/);
+  });
+
+  it.each([false, true])('restarts after abrupt erasure interruption (SQLite committed=%s)', committed => {
+    const files = fixture();
+    const guardPath = files.target + '.erasure-recovery.json';
+    const subject = 'usr_interrupted_erasure';
+    const store = new SqliteRecommendStore(files.target);
+    store.recordEvent({ subjectKey: subject, eventId: 'before-interruption', type: 'search', query: 'old', createdAt: Date.now(), weight: 1 });
+    store.close();
+    const ready = JSON.parse(fs.readFileSync(guardPath, 'utf8'));
+    backupDatabase(files.target, files.backup);
+
+    const helper = pathToFileURL(path.join(root, 'scripts/recommend-recovery-guard.mjs')).href;
+    const child = spawnSync(process.execPath, ['--experimental-sqlite', '--input-type=module', '-e', `
+      import fs from 'node:fs';
+      import { DatabaseSync } from 'node:sqlite';
+      const [target, helper, subject, committed] = process.argv.slice(1);
+      const { eraseWithRecoveryGuard } = await import(helper);
+      const db = new DatabaseSync(target);
+      const rename = fs.renameSync;
+      const interrupt = () => process.platform === 'win32' ? process.exit(73) : process.kill(process.pid, 'SIGKILL');
+      fs.renameSync = (from, to) => {
+        const phase = to === target + '.erasure-recovery.json' && JSON.parse(fs.readFileSync(from, 'utf8')).phase;
+        if (committed === 'true' && phase === 'ready') interrupt();
+        rename(from, to);
+        if (committed === 'false' && phase === 'erasing') interrupt();
+      };
+      eraseWithRecoveryGuard(db, target, () => db.prepare('DELETE FROM behavior_events WHERE subject_key = ?').run(subject));
+    `, files.target, helper, subject, String(committed)], { encoding: 'utf8' });
+    if (process.platform === 'win32') expect(child.status, child.stderr).toBe(73);
+    else expect(child.signal, child.stderr).toBe('SIGKILL');
+
+    const pending = JSON.parse(fs.readFileSync(guardPath, 'utf8'));
+    expect(pending).toMatchObject({ lineage: ready.lineage, phase: 'erasing', previousGeneration: ready.generation });
+    expect(pending.generation).not.toBe(ready.generation);
+    expect(() => backupDatabase(files.target, files.source)).toThrow(/backup does not match the ready retained generation/);
+    expect(fs.existsSync(files.source)).toBe(false);
+    fs.copyFileSync(guardPath, files.source + '.erasure-recovery.json');
+    expect(() => restoreDatabase(files.backup, files.source, { offline: true })).toThrow(/preserves acknowledged erasures/);
+    expect(fs.existsSync(files.source)).toBe(false);
+
+    const recovered = new SqliteRecommendStore(files.target);
+    try {
+      expect(recovered.getStats().erasureRecoveryVersion).toBe(1);
+      expect(recovered.getUserEvents(subject)).toHaveLength(committed ? 0 : 1);
+      expect(JSON.parse(fs.readFileSync(guardPath, 'utf8'))).toEqual({ ...ready,
+        generation: committed ? pending.generation : ready.generation });
+    } finally { recovered.close(); }
+    if (committed) expect(() => restoreDatabase(files.backup, files.target, { offline: true })).toThrow(/preserves acknowledged erasures/);
+    else expect(restoreDatabase(files.backup, files.target, { offline: true })).toMatchObject({ ok: true, events: 1 });
+  });
+
+  it.each(['missing', 'tampered'])('rejects event writes and new snapshots with a %s live guard', state => {
+    const files = fixture();
+    const filename = files.target + '.erasure-recovery.json';
+    const store = new SqliteRecommendStore(files.target);
+    try {
+      const ready = fs.readFileSync(filename, 'utf8');
+      if (state === 'missing') fs.unlinkSync(filename);
+      else fs.writeFileSync(filename, JSON.stringify({ ...JSON.parse(ready), generation: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' }));
+      const write = vi.fn(() => 'accepted');
+      expect(() => store.withEventEpoch('usr_untrusted_recovery', null, write)).toThrow(/ready retained generation/);
+      expect(write).not.toHaveBeenCalled();
+      expect(() => backupDatabase(files.target, files.backup)).toThrow(/backup does not match the ready retained generation/);
+      expect(fs.existsSync(files.backup)).toBe(false);
+      fs.writeFileSync(filename, ready);
+      expect(store.withEventEpoch('usr_untrusted_recovery', null, write)).toBe('accepted');
+      expect(backupDatabase(files.target, files.backup)).toMatchObject({ ok: true });
+    } finally { store.close(); }
   });
 
   it('upgrades an existing legacy store in place and rejects untracked personal backups', () => {

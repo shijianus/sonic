@@ -68,6 +68,8 @@ export const useAudio = () => {
     audioStore.playSong(song, index)
   }
 
+  const beginDeferredPlayback = () => audioStore.beginDeferredPlayback()
+
   const pause = () => {
     audioStore.pause()
   }
@@ -292,6 +294,7 @@ export const useAudio = () => {
 
     // 播放控制
     play,
+    beginDeferredPlayback,
     pause,
     resume,
     togglePlay,

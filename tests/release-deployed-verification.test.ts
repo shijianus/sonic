@@ -1,10 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { pathToFileURL } from 'node:url';
+import { verifyProductionPagesBinding } from '../scripts/pages-release-lib.mjs';
 import { onRequest as health } from '../functions/api/sonic/engine/health';
 import { resetLocalEngineCircuitForTest } from '../functions/_lib/sonic/local-engine';
 
@@ -37,6 +39,25 @@ function fixture() {
 }
 
 const artifactDigest = 'c'.repeat(64);
+const productionEngine = 'https://engine.example.test';
+const productionProject = 'sonic-prod';
+const cloudflarePath = `/client/v4/accounts/${'a'.repeat(32)}/pages/projects/${productionProject}`;
+const productionEnv = {
+  CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32), CLOUDFLARE_API_TOKEN: 'fixture-api-token',
+  CF_PAGES_PROJECT: productionProject, CF_PAGES_BRANCH: 'main',
+  SONIC_ACCESS_MODE: 'invite', SONIC_ALLOWED_SOURCES: 'netease,qq',
+};
+
+function productionProjectResponse(overrides: Record<string, string> = {}) {
+  return {
+    name: productionProject, production_branch: 'main', subdomain: `${productionProject}.pages.dev`,
+    deployment_configs: { production: { env_vars: Object.fromEntries(Object.entries({
+      SONIC_LOCAL_ENGINE_URL: productionEngine, SONIC_ACCESS_MODE: 'invite', SONIC_ENV: 'production',
+      SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'qq, netease', ...overrides,
+    }).map(([key, value]) => [key, { type: 'plain_text', value }])) } },
+  };
+}
+
 type ServeOptions = {
   dirty?: boolean; access?: string; healthRedirect?: string; manifestRedirect?: string;
   engine?: boolean; compiled?: boolean; erasureRecoveryVersion?: number; peer?: Record<string, unknown>;
@@ -120,6 +141,68 @@ async function runVerifier(root: string, base: string, overrides: Record<string,
 }
 
 describe('deployed release verification', () => {
+  it.each(['canonical', 'custom', 'pending', 'wrong-domain'] as const)('validates Pages origin ownership (%s)', async kind => {
+    const hostname = kind === 'canonical' ? `${productionProject}.pages.dev` : 'production.example.test';
+    const cloudflare = vi.fn(async (input: string | URL, init: RequestInit) => {
+      const url = new URL(input);
+      expect(url.origin).toBe('https://api.cloudflare.com');
+      expect(new Headers(init.headers).get('authorization')).toBe('Bearer fixture-api-token');
+      expect(new Headers(init.headers).has('x-sonic-engine-key')).toBe(false);
+      expect(init.redirect).toBe('error');
+      if (url.pathname === cloudflarePath) return Response.json({ success: true, result: productionProjectResponse() });
+      expect(url.pathname).toBe(`${cloudflarePath}/domains/${hostname}`);
+      return Response.json({ success: true, result: {
+        name: kind === 'wrong-domain' ? 'other.example.test' : hostname, status: kind === 'pending' ? 'pending' : 'active',
+      } });
+    });
+    vi.stubGlobal('fetch', cloudflare);
+    const verification = verifyProductionPagesBinding({ pagesOrigin: `https://${hostname}`, engineOrigin: productionEngine, env: productionEnv });
+    if (kind === 'canonical' || kind === 'custom') await expect(verification).resolves.toBeUndefined();
+    else await expect(verification).rejects.toThrow('not an active domain');
+    expect(cloudflare).toHaveBeenCalledTimes(kind === 'canonical' ? 1 : 2);
+  });
+
+  it.each([
+    ['SONIC_LOCAL_ENGINE_URL', 'https://other.example.test', 'Engine binding'],
+    ['SONIC_ENABLE_LOCAL_ENGINE', '0', 'Engine binding'],
+    ['SONIC_ENV', 'preview', 'Pages runtime and production environment'],
+    ['SONIC_RUNTIME', 'linux-engine', 'Pages runtime and production environment'],
+    ['SONIC_ACCESS_MODE', 'open', 'access mode'],
+    ['SONIC_CONTENT_POLICY', 'default', 'source allowlist'],
+    ['SONIC_ALLOWED_SOURCES', 'netease', 'source allowlist'],
+    ['SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT', '0', 'rate-limit policy'],
+    ['SONIC_RATE_LIMIT_FAIL_CLOSED', '0', 'rate-limit policy'],
+  ])('checks configured production policy before probing hosts (%s)', async (key, value, reason) => {
+    vi.stubGlobal('fetch', async () => Response.json({ success: true, result: productionProjectResponse({ [key]: value }) }));
+    await expect(verifyProductionPagesBinding({ pagesOrigin: `https://${productionProject}.pages.dev`, engineOrigin: productionEngine, env: productionEnv }))
+      .rejects.toThrow(reason);
+  });
+
+  it('treats remote verification as production by default and refuses an unowned origin before sending an Engine key', async () => {
+    const { root } = fixture();
+    const preload = join(root, 'mock-cloudflare.mjs');
+    const networkLog = join(root, 'network.log');
+    const host = 'unowned.example.test';
+    writeFileSync(preload, `import { appendFileSync } from 'node:fs';
+      globalThis.fetch = async (input, init) => {
+        const { origin, pathname } = new URL(input);
+        appendFileSync(${JSON.stringify(networkLog)}, JSON.stringify({ origin, pathname, engineKey: new Headers(init?.headers).has('x-sonic-engine-key') }) + '\\n');
+        if (origin !== 'https://api.cloudflare.com') throw new Error('Unexpected non-Cloudflare probe');
+        if (pathname === ${JSON.stringify(cloudflarePath)}) return Response.json({ success: true, result: ${JSON.stringify(productionProjectResponse())} });
+        return Response.json({ success: false }, { status: 404 });
+      };`);
+    const result = await runVerifier(root, `https://${host}`, {
+      ...productionEnv, SONIC_DEPLOY_VERIFY_ENGINE_URL: productionEngine, SONIC_DEPLOY_EXPECTED_ARTIFACT_DIGEST: artifactDigest,
+      NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Unable to verify the production Pages project or domain');
+    expect(readFileSync(networkLog, 'utf8').trim().split('\n').map(line => JSON.parse(line))).toEqual([
+      { origin: 'https://api.cloudflare.com', pathname: cloudflarePath, engineKey: false },
+      { origin: 'https://api.cloudflare.com', pathname: `${cloudflarePath}/domains/${host}`, engineKey: false },
+    ]);
+  });
+
   it('requires a distinct Engine origin for production verification', async () => {
     const { root } = fixture();
     const result = await runVerifier(root, 'https://sonic.example.com', { SONIC_DEPLOY_ENV: 'production' });

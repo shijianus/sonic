@@ -9,6 +9,20 @@ import { useAuthStore } from '@/stores/modules/auth'
 const erasedEventEpoch = 'a'.repeat(32)
 const consentKey = 'sonic:personalization-consent'
 const deviceKey = 'sonic:recommendation-device-id'
+const accountEpochKey = 'sonic:account-event-epoch'
+
+function verifiedAccount(id: string) {
+  const auth = useAuthStore()
+  auth.user = { id, email: `${id}@example.test`, name: id }
+  auth.isAuthenticated = true
+  auth.lastSyncTime = Date.now()
+  auth.sessionRevision++
+  return auth
+}
+
+function accountEpoch(accountId: string, eventEpoch: string | null) {
+  return Response.json({ brand: 'Sonic', data: { eventTarget: `account:${accountId}`, eventEpoch } })
+}
 
 function optedInStore() {
   const store = useRecommendStore()
@@ -223,15 +237,14 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
   it('匿名或账号身份变化后不发送旧队列', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}))
     const rec = optedInStore()
-    const auth = useAuthStore()
     rec.recordEvent({ type: 'favorite', track: { id: 1 } })
     localStorage.setItem(deviceKey, 'anon_replacement000001')
     await rec.flushEvents()
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(rec.anonId).toBe('anon_replacement000001')
 
-    auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
-    auth.isAuthenticated = true
+    const auth = verifiedAccount('user-A')
+    localStorage.setItem(accountEpochKey, JSON.stringify({ accountId: 'user-A', value: erasedEventEpoch }))
     rec.recordEvent({ type: 'favorite', track: { id: 2 } })
     auth.user = null
     auth.isAuthenticated = false
@@ -266,11 +279,11 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
   it('已有账号在关闭个性化后仍可清除服务端画像', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(erasedProfile('authenticated'))
+      .mockResolvedValueOnce(Response.json({}))
+      .mockResolvedValueOnce(accountEpoch('user-B', null))
       .mockResolvedValue(Response.json({}))
     const rec = useRecommendStore()
-    const auth = useAuthStore()
-    auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
-    auth.isAuthenticated = true
+    verifiedAccount('user-A')
     rec.setPersonalizationEnabled(false)
     expect(rec.anonId).toBe('')
 
@@ -281,19 +294,18 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     await rec.flushEvents()
     expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))).toMatchObject({ eventEpoch: erasedEventEpoch })
 
-    auth.user = { id: 'user-B', email: 'b@example.test', name: 'B' }
+    verifiedAccount('user-B')
+    await rec.prepareAccountEventEpoch()
     rec.recordEvent({ type: 'favorite', track: { id: 2 } })
     await rec.flushEvents()
-    expect(JSON.parse(String(fetchSpy.mock.calls[2][1]?.body))).not.toHaveProperty('eventEpoch')
+    expect(JSON.parse(String(fetchSpy.mock.calls[3][1]?.body))).not.toHaveProperty('eventEpoch')
   })
 
   it('清除账号画像时不发送访客 ID，保留独立的访客画像标识', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile('authenticated'))
     const rec = optedInStore()
     const guestId = rec.ensureAnonId()
-    const auth = useAuthStore()
-    auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
-    auth.isAuthenticated = true
+    verifiedAccount('user-A')
 
     expect(await rec.clearAllRecommendationProfile()).toBe(true)
     expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({ 'X-Sonic-Erasure-Target': 'account:user-A' })
@@ -364,9 +376,8 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
       }, { status: 409 }))
       .mockResolvedValueOnce(Response.json({ brand: 'Sonic', data: { accepted: 1 } }))
     const rec = optedInStore()
-    const auth = useAuthStore()
-    auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
-    auth.isAuthenticated = true
+    verifiedAccount('user-A')
+    localStorage.setItem(accountEpochKey, JSON.stringify({ accountId: 'user-A', value: erasedEventEpoch }))
 
     rec.recordEvent({ type: 'favorite', track: { id: 1 } })
     await rec.flushEvents()
@@ -379,6 +390,62 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     }
     expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body)).events.map((event: { track: { id: number } }) => event.track.id))
       .toEqual([2])
+  })
+
+  it('retains a confirmed clear marker across reload, and cached account display cannot authorize a lookup or send', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(erasedProfile('authenticated'))
+      .mockResolvedValueOnce(Response.json({}))
+    const original = optedInStore()
+    const account = verifiedAccount('user-A')
+    expect(await original.clearAllRecommendationProfile()).toBe(true)
+
+    setActivePinia(createPinia())
+    const reload = useRecommendStore()
+    const cached = useAuthStore()
+    cached.user = account.user
+    cached.isAuthenticated = true
+    await reload.prepareAccountEventEpoch()
+    reload.recordEvent({ type: 'favorite', track: { id: 1 } })
+    await reload.flushEvents()
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+
+    verifiedAccount('user-A')
+    reload.recordEvent({ type: 'favorite', track: { id: 2 } })
+    await reload.flushEvents()
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))).toMatchObject({
+      eventEpoch: erasedEventEpoch, events: [{ track: { id: 2 } }],
+    })
+  })
+
+  it('drops events captured before the verified marker, including a lookup that finishes after an account switch', async () => {
+    const earlier = delayedResponse()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockReturnValueOnce(earlier.promise)
+      .mockResolvedValueOnce(accountEpoch('user-B', erasedEventEpoch))
+      .mockResolvedValueOnce(Response.json({}))
+    const rec = optedInStore()
+    verifiedAccount('user-A')
+    const preparingA = rec.prepareAccountEventEpoch()
+    rec.recordEvent({ type: 'favorite', track: { id: 1 } })
+    verifiedAccount('user-B')
+    rec.recordEvent({ type: 'favorite', track: { id: 2 } })
+    await rec.prepareAccountEventEpoch()
+    earlier.finish(accountEpoch('user-A', 'b'.repeat(32)))
+    await preparingA
+    rec.recordEvent({ type: 'favorite', track: { id: 3 } })
+    await rec.flushEvents()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(3)
+    for (const [index, id] of [[0, 'user-A'], [1, 'user-B']] as const) {
+      expect(fetchSpy.mock.calls[index]).toEqual(['/api/sonic/events?view=event-epoch', {
+        cache: 'no-store', headers: { 'X-Sonic-Event-Target': `account:${id}` },
+      }])
+    }
+    expect(JSON.parse(String(fetchSpy.mock.calls[2][1]?.body))).toMatchObject({
+      eventEpoch: erasedEventEpoch, events: [{ track: { id: 3 } }],
+    })
   })
 
   it('画像已清除时丢弃待发与失败的旧上报，仅为新上报采用新代次', async () => {

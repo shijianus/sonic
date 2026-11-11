@@ -256,6 +256,46 @@ describe('Follow-up identity and consent over the actual events hop', () => {
     }
   });
 
+  it.each(['Pages with Engine', 'local SQLite'])('returns a private event marker only for the requested verified account (%s)', async (runtime) => {
+    const authority = engine();
+    const throughEngine = runtime === 'Pages with Engine';
+    const env = throughEngine ? edge() : { ...edge(), SONIC_LOCAL_ENGINE_URL: '', RECOMMEND_STORE: authority.RECOMMEND_STORE };
+    const hop = engineHop(authority);
+    const accountA = await createSession(env, { email: 'epoch-a@example.invalid', name: 'A', avatar: '' });
+    const accountB = await createSession(env, { email: 'epoch-b@example.invalid', name: 'B', avatar: '' });
+    const cookieA = { Cookie: `sonic_session=${accountA.apiKey}`, Origin: 'https://edge.followup.test' };
+    const cookieB = { Cookie: `sonic_session=${accountB.apiKey}`, Origin: 'https://edge.followup.test' };
+    const target = 'X-Sonic-Event-Target';
+    const eventTarget = `account:${accountA.id}`;
+    const lookup = (headers: Record<string, string>) => events({ request: incoming('GET', '?view=event-epoch', headers), env });
+
+    for (const headers of [cookieA, { [target]: eventTarget }, { ...cookieB, [target]: eventTarget },
+      { ...cookieA, [target]: eventTarget, 'X-Sonic-Personalization': 'off' }]) {
+      const mismatch = await lookup(headers);
+      expect(mismatch.status).toBe(409);
+      expect(await mismatch.json()).toMatchObject({ error: { code: 'EVENT_IDENTITY_MISMATCH' } });
+    }
+    expect(hop).not.toHaveBeenCalled();
+    expect(await (await lookup({ ...cookieA, [target]: eventTarget })).json()).toEqual({
+      brand: 'Sonic', data: { eventTarget, eventEpoch: null },
+    });
+    const erased = await events({ request: incoming('DELETE', '', { ...cookieA, 'X-Sonic-Erasure-Target': eventTarget }), env });
+    expect(erased.status).toBe(200);
+    const { data } = await erased.json();
+    const current = await lookup({ ...cookieA, [target]: eventTarget });
+    expect(current.status).toBe(200);
+    expect(current.headers.get('cache-control')).toBe('private, no-store');
+    expect(data.eventEpoch).toMatch(/^[a-f0-9]{32}$/);
+    expect(await current.json()).toEqual({ brand: 'Sonic', data: { eventTarget, eventEpoch: data.eventEpoch } });
+    if (throughEngine) {
+      const [url, init] = hop.mock.calls[0];
+      expect(String(url)).toContain('?view=event-epoch');
+      const forwarded = new Headers(init?.headers);
+      expect(forwarded.has('Cookie')).toBe(false);
+      expect(forwarded.has(ENGINE_IDENTITY_HEADER)).toBe(true);
+    }
+  });
+
   it('refuses a legacy public acknowledgement for an opt-in subject', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ brand: 'Sonic', data: { ok: true, privacyMode: 'public', accepted: 0, ignoredByPrivacy: 1, storageKind: 'none' } }));
     const response = await events({ request: incoming(), env: edge() });

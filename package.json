@@ -13,7 +13,7 @@
     "build:engine": "node scripts/build-engine.mjs",
     "build:server": "npm run build:engine",
     "start:engine": "node --experimental-sqlite dist-server/index.mjs",
-    "deploy": "npm run build && node scripts/deploy-pages.mjs",
+    "deploy": "node scripts/deploy-pages.mjs",
     "lint": "npm run lint:theme && pnpm --dir player run lint",
     "lint:theme": "node scripts/lint-theme.mjs",
     "backup:db": "node --experimental-sqlite scripts/backup-recommend-db.mjs",

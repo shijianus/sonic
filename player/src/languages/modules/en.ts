@@ -827,6 +827,7 @@ export default {
     loginPrompt: 'Sonic accounts are fully powered by EpoMail. Sign in to sync your playlists and access HQ audio.',
     syncSuccess: 'Account status synced',
     logoutSuccess: 'Signed out successfully',
+    logoutFailed: 'Could not sign out. Try again.',
   },
   accountSync: {
     title: 'Account data sync',

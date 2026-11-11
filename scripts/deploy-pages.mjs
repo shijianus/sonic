@@ -2,7 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
-import { buildPagesDeploymentTree, parseDeploymentOrigin, readStagingAcceptance } from './pages-release-lib.mjs';
+import { buildPagesDeploymentTree, parseDeploymentOrigin, readStagingAcceptance, verifyProductionPagesBinding } from './pages-release-lib.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -10,28 +10,6 @@ function requireEnv(name) {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required for production promotion`);
   return value;
-}
-
-async function verifyProductionBinding(project, branch, engineOrigin) {
-  const account = requireEnv('CLOUDFLARE_ACCOUNT_ID');
-  if (!/^[0-9a-f]{32}$/i.test(account)) throw new Error('CLOUDFLARE_ACCOUNT_ID is invalid');
-  const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${account}/pages/projects/${project}`, {
-    redirect: 'error',
-    headers: { Authorization: `Bearer ${requireEnv('CLOUDFLARE_API_TOKEN')}`, Accept: 'application/json' },
-    signal: AbortSignal.timeout(15000),
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || payload?.success !== true || payload.result?.name !== project) {
-    throw new Error(`Unable to verify the production Pages project (HTTP ${response.status})`);
-  }
-  if (payload.result.production_branch !== branch) throw new Error('CF_PAGES_BRANCH differs from the project production branch');
-  const variables = payload.result.deployment_configs?.production?.env_vars;
-  const configuredEngine = variables?.SONIC_LOCAL_ENGINE_URL?.value;
-  const enabled = String(variables?.SONIC_ENABLE_LOCAL_ENGINE?.value ?? '').trim();
-  if (!configuredEngine || parseDeploymentOrigin(configuredEngine) !== engineOrigin ||
-      (enabled && !/^(?:1|true|on|yes)$/i.test(enabled))) {
-    throw new Error('Production Pages Engine binding differs from SONIC_DEPLOY_VERIFY_ENGINE_URL or is disabled');
-  }
 }
 
 async function deploy() {
@@ -76,7 +54,7 @@ async function deploy() {
       throw new Error('Production promotion requires a clean release manifest for the checked-out commit');
     }
     readStagingAcceptance(acceptanceFile, manifest, pagesArtifactDigest, { production: true });
-    await verifyProductionBinding(project, branch, engineOrigin);
+    await verifyProductionPagesBinding({ pagesOrigin: verifyOrigin, engineOrigin });
 
     const verify = (...args) => {
       const result = spawnSync(process.execPath, ['scripts/verify-deployed-release.mjs', ...args], {

@@ -4,9 +4,9 @@ import LazyImage from '@/components/Ui/LazyImage.vue'
 import Pagination from '@/components/Ui/Pagination.vue'
 import { Song } from '@/stores/interface'
 import { useAudio } from '@/composables/useAudio'
+import { useSearchSuggestions } from '@/composables/useSearchSuggestions'
 import { useGlobalStore } from '@/stores/modules/global'
 import { storeToRefs } from 'pinia'
-import { useDebounceFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { Swiper, SwiperSlide } from 'swiper/vue'
 import { EffectCreative } from 'swiper/modules'
@@ -63,7 +63,7 @@ const checkSearchPayload = (payload: any) => {
 }
 
 const { t } = useI18n()
-const { setPlaylist, play } = useAudio()
+const { setPlaylist, play, beginDeferredPlayback } = useAudio()
 const route = useRoute()
 const router = useRouter()
 const globalStore = useGlobalStore()
@@ -73,7 +73,6 @@ interface MobileSearchState {
   q: string
   placeholder: string
   tab: SearchTab
-  suggest: string[]
   loading: boolean
   suggestVisible: boolean
   hasSearched: boolean
@@ -96,7 +95,6 @@ const state = reactive<MobileSearchState>({
   q: '',
   placeholder: '',
   tab: 'song',
-  suggest: [],
   loading: false,
   suggestVisible: false,
   hasSearched: false,
@@ -119,7 +117,6 @@ const {
   q,
   placeholder,
   tab,
-  suggest,
   loading,
   suggestVisible,
   hasSearched,
@@ -138,6 +135,16 @@ const {
   mvPageSize,
   mvTotal,
 } = toRefs(state)
+
+const suggest = useSearchSuggestions(
+  () => state.suggestVisible ? state.q : '',
+  async (term, signal) => {
+    const res = await searchSuggest({ keywords: term, type: 'mobile' }, signal)
+    const list = (res as any)?.result?.allMatch
+    return Array.isArray(list) ? list.map(item => item.keyword).slice(0, 8) : []
+  },
+  300
+)
 
 const searchErrors = reactive<Record<SearchTab, SearchErrorKind>>({ song: '', playlist: '', mv: '' })
 
@@ -204,28 +211,6 @@ const fetchHot = async () => {
   }
 }
 
-// 搜索建议：300ms 防抖，并用 AbortController 丢弃过期请求
-let suggestAbort: AbortController | null = null
-const fetchSuggest = async () => {
-  const term = state.q.trim()
-  suggestAbort?.abort()
-  if (!term) {
-    state.suggest = []
-    return
-  }
-  const controller = new AbortController()
-  suggestAbort = controller
-  try {
-    const res = await searchSuggest({ keywords: term, type: 'mobile' }, controller.signal)
-    if (controller.signal.aborted) return
-    const list = (res as any)?.result?.allMatch || []
-    state.suggest = list.map((i: any) => i.keyword).slice(0, 8)
-  } catch {
-    if (!controller.signal.aborted) state.suggest = []
-  }
-}
-const debouncedFetchSuggest = useDebounceFn(fetchSuggest, 300)
-
 const syncQueryToUrl = (term: string) => {
   const current = String(route.query.q || '').trim()
   if (current === term) return
@@ -260,7 +245,6 @@ const resetResults = () => {
 const runSearch = async (keyword: string) => {
   const term = keyword.trim()
   if (!term) return
-  suggestAbort?.abort()
   state.q = term
   state.hasSearched = true
   state.suggestVisible = false
@@ -437,18 +421,6 @@ onMounted(async () => {
   document.addEventListener('click', handleDocClick)
 })
 
-watch(
-  () => state.q,
-  value => {
-    if (!value.trim()) {
-      suggestAbort?.abort()
-      state.suggest = []
-      return
-    }
-    debouncedFetchSuggest()
-  }
-)
-
 // 地址栏/浏览器前后退改变关键词时保持页面同步
 watch(
   () => route.query.q,
@@ -497,7 +469,7 @@ watch(
 )
 
 const handleSuggestClick = (s: string) => {
-  runSearch(s)
+  if (suggest.value.includes(s)) runSearch(s)
 }
 
 const clearQuery = () => {
@@ -505,7 +477,6 @@ const clearQuery = () => {
   searchGeneration += 1
   state.q = ''
   selectedTags.value = []
-  state.suggest = []
   state.suggestVisible = false
   state.hasSearched = false
   resetResults()
@@ -532,8 +503,8 @@ const handleDocClick = (e: MouseEvent) => {
   if (el && target && !el.contains(target)) state.suggestVisible = false
 }
 onUnmounted(() => {
-  suggestAbort?.abort()
   searchAbort?.abort()
+  cancelPlaylistPlay()
   document.removeEventListener('click', handleDocClick)
 })
 
@@ -568,11 +539,24 @@ const playAllSongs = () => {
 
 // 歌单卡片播放按钮:拉取歌单曲目并直接起播(UI-033,不再是纯装饰)
 const playingPlaylistId = ref<string | number | null>(null)
+let playlistPlayRequest: AbortController | undefined
+const cancelPlaylistPlay = () => {
+  playlistPlayRequest?.abort()
+  playlistPlayRequest = undefined
+  playingPlaylistId.value = null
+}
+watch(() => route.fullPath, cancelPlaylistPlay, { flush: 'sync' })
+
 const playPlaylistCard = async (p: PlaylistData) => {
-  if (!p?.id || playingPlaylistId.value) return
+  if (!p?.id || playingPlaylistId.value === p.id) return
+  cancelPlaylistPlay()
+  const request = new AbortController()
+  playlistPlayRequest = request
+  const ownsPlayback = beginDeferredPlayback()
   playingPlaylistId.value = p.id
   try {
-    const res: any = await playlistTrackAll({ id: p.id, limit: 100 })
+    const res: any = await playlistTrackAll({ id: p.id, limit: 100 }, request.signal)
+    if (request.signal.aborted || !ownsPlayback()) return
     const list: Song[] = (res?.songs || []).map(mapToStoreSong)
     if (!list.length) {
       useToastStore().show({ message: t('common.loadFailed'), type: 'error' })
@@ -581,9 +565,11 @@ const playPlaylistCard = async (p: PlaylistData) => {
     setPlaylist(list, 0)
     play(list[0], 0)
   } catch {
-    useToastStore().show({ message: t('common.loadFailed'), type: 'error' })
+    if (!request.signal.aborted && ownsPlayback()) {
+      useToastStore().show({ message: t('common.loadFailed'), type: 'error' })
+    }
   } finally {
-    playingPlaylistId.value = null
+    if (playlistPlayRequest === request) cancelPlaylistPlay()
   }
 }
 
@@ -1073,6 +1059,10 @@ watch(
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition: all 0.2s ease;
+}
+
+.dropdown-leave-active {
+  pointer-events: none;
 }
 
 .dropdown-enter-from,

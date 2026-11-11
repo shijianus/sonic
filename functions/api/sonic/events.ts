@@ -203,6 +203,46 @@ export async function onRequest({
   const config = getSonicConfig(env);
   const privateHeaders = PRIVATE_HEADERS;
 
+  if (method === 'GET' && new URL(request.url).searchParams.get('view') === 'event-epoch') {
+    const identity = await resolveUserIdentity(request, env);
+    const target = request.headers.get(INGEST_TARGET_HEADER);
+    if (identity.mode !== 'authenticated' || !identity.subjectKey ||
+        (target === null ? config.runtime !== 'linux-engine' : !matchesEventTarget(target, identity))) {
+      return jsonResponse({
+        brand: 'Sonic', error: { code: 'EVENT_IDENTITY_MISMATCH', message: 'Refresh your session before looking up the event marker' },
+      }, { status: 409, headers: buildGatewayHeaders(privateHeaders) });
+    }
+    // Only Pages sees the public account ID. The Engine assertion carries the
+    // verified pseudonymous subject, so the gateway adds the checked target.
+    const eventTarget = identity.userId ? `account:${identity.userId}` : undefined;
+    if (config.enableLocalEngine) {
+      const engine = await callLocalEngineJson('/api/sonic/events?view=event-epoch', env, {
+        request, method: 'GET', timeoutMs: config.engineTimeoutMs, resolvedIdentity: identity,
+      });
+      const data = engine.data?.data;
+      if (engine.ok && engine.data?.brand === 'Sonic' && data?.privacyMode === 'authenticated' &&
+          (data.eventEpoch === null || isEventEpoch(data.eventEpoch))) {
+        return jsonResponse({ brand: 'Sonic', data: { eventTarget, eventEpoch: data.eventEpoch } }, {
+          headers: buildGatewayHeaders(privateHeaders, false, engine.circuitState),
+        });
+      }
+      return engineRejected(engine, start, engine.circuitState);
+    }
+    const store = getRecommendStore(env);
+    if (store.kind !== 'sqlite' || !store.getEventEpoch) return storageUnavailable(start);
+    try {
+      return jsonResponse({
+        brand: 'Sonic', data: {
+          ...(eventTarget ? { eventTarget } : { privacyMode: identity.mode }), eventEpoch: store.getEventEpoch(identity.subjectKey),
+        },
+      }, {
+        headers: buildGatewayHeaders(privateHeaders),
+      });
+    } catch {
+      return storageUnavailable(start);
+    }
+  }
+
   if (method === 'GET') {
     if (config.enableLocalEngine) {
       const engineRes = await callLocalEngineJson<any>('/api/sonic/events', env, {

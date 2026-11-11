@@ -5,6 +5,7 @@ import { dirname, resolve } from 'node:path'
 import { compileScript, parse } from 'vue/compiler-sfc'
 import ts from 'typescript'
 import * as Vue from 'vue'
+import * as searchSuggestions from '@/composables/useSearchSuggestions'
 import * as transformers from '@/utils/transformers'
 
 // Compile only the components under test: the shared Vitest config intentionally has no
@@ -23,6 +24,7 @@ const route = Vue.reactive({ query: { q: 'fixture' } })
 const router = { push: vi.fn(), replace: vi.fn() }
 const audio = {
   currentSong, isPlaying, isLoading, setPlaylist, play, togglePlay, next: vi.fn(),
+  beginDeferredPlayback: vi.fn(() => () => true),
   currentTime: Vue.ref(0), formattedCurrentTime: Vue.ref('0:00'), formattedDuration: Vue.ref('0:20'),
 }
 const recommendStore = { recordEvent: vi.fn(), buildRequestHeaders: () => ({}), personalizationEnabled: false }
@@ -50,6 +52,7 @@ const dependencies: Record<string, unknown> = {
   '@/api/recommend': { fetchSmartSearch },
   '@/composables/useAudio': { useAudio: () => audio },
   '@/composables/useLyrics': { useLyrics: () => ({ mergedLines: Vue.ref([]), activeTimeline: Vue.ref([]), fetchLyrics: vi.fn() }) },
+  '@/composables/useSearchSuggestions': searchSuggestions,
   '@/stores/modules/settings': { useSettingsStore: () => Vue.reactive({ footerLyrics: { enabled: false, modes: [] } }) },
   '@/stores/modules/global': { useGlobalStore: () => globalStore },
   '@/stores/modules/recommend': { useRecommendStore: () => recommendStore },

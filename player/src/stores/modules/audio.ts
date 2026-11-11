@@ -83,9 +83,11 @@ let activeQualitySwitch: QualitySwitch | null = null
 const restoredBlobUrls = new Set<string>()
 /** 播放操作代次：新的切歌/重试会使旧的异步结果失效 */
 let playbackGeneration = 0
+let deferredPlaybackIntent: symbol | undefined
 const metadataControllers = new Set<AbortController>()
 const advancePlaybackGeneration = () => {
   playbackGeneration += 1
+  deferredPlaybackIntent = undefined
   const cancelledQualitySwitch = activeQualitySwitch
   activeQualitySwitch = null
   cancelledQualitySwitch?.controller.abort()
@@ -626,6 +628,13 @@ export const useAudioStore = defineStore('audio', {
       eventsBound = true
     },
 
+    // A user may request playback before the playlist contents are available.
+    beginDeferredPlayback(): () => boolean {
+      const intent = Symbol()
+      deferredPlaybackIntent = intent
+      return () => deferredPlaybackIntent === intent
+    },
+
     /** 播放歌曲（自动获取缺失的播放地址） */
     async playSong(song?: Song, index?: number, force = false): Promise<void> {
       this.initAudio()
@@ -1140,6 +1149,7 @@ export const useAudioStore = defineStore('audio', {
 
     // 暂停播放
     pause() {
+      deferredPlaybackIntent = undefined
       if (!this.audio.audio) return
       if (activeQualitySwitch) {
         activeQualitySwitch.resumePlayback = false
@@ -1164,6 +1174,7 @@ export const useAudioStore = defineStore('audio', {
 
     // 继续播放
     resume() {
+      deferredPlaybackIntent = undefined
       if (activeQualitySwitch) {
         activeQualitySwitch.resumePlayback = true
         return
@@ -1771,6 +1782,7 @@ export const useAudioStore = defineStore('audio', {
 
     // 设置播放列表
     setPlaylist(songs: Song[], startIndex: number = 0) {
+      deferredPlaybackIntent = undefined
       this.audio.playlist = [...songs]
       this.audio.originalPlaylist = [...songs]
 

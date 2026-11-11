@@ -22,6 +22,18 @@ export interface AuthState {
   isAuthenticated: boolean
   isLoading: boolean
   lastSyncTime: number
+  sessionRevision: number
+}
+
+const requests = new WeakMap<object, { verification: number; logout: Promise<boolean> | null }>()
+
+function requestsFor(store: object) {
+  let state = requests.get(store)
+  if (!state) {
+    state = { verification: 0, logout: null }
+    requests.set(store, state)
+  }
+  return state
 }
 
 function localProfile(user: UserInfo): UserInfo {
@@ -36,6 +48,7 @@ export const useAuthStore = defineStore('auth', {
     isAuthenticated: false,
     isLoading: false,
     lastSyncTime: 0,
+    sessionRevision: 0,
   }),
 
   getters: {
@@ -44,6 +57,7 @@ export const useAuthStore = defineStore('auth', {
     userAvatar: state => state.user?.avatar || '',
     userInitial: state => (state.user?.name || state.user?.email || 'U').charAt(0).toUpperCase(),
     userRole: state => state.user?.role || 'user',
+    verifiedAccountId: state => state.isAuthenticated && state.lastSyncTime > 0 ? state.user?.id : undefined,
   },
 
   actions: {
@@ -80,12 +94,17 @@ export const useAuthStore = defineStore('auth', {
 
     /** Server verification is authoritative; cached profile data never grants account access. */
     async checkAuth(force = false): Promise<UserInfo | null> {
+      const requests = requestsFor(this)
+      if (requests.logout) return null
       const now = Date.now()
-      if (!force && this.isAuthenticated && this.user && now - this.lastSyncTime < 5000) return this.user
+      if (!force && this.verifiedAccountId && now - this.lastSyncTime < 5000) return this.user
+      const verification = ++requests.verification
       this.isLoading = true
       try {
         const response = await httpGet<{ ok: boolean; user?: UserInfo }>('/auth/user')
+        if (verification !== requests.verification) return null
         if (response?.ok && response.user) {
+          if (this.verifiedAccountId !== response.user.id) this.sessionRevision++
           this.user = localProfile(response.user)
           this.isAuthenticated = true
           this.lastSyncTime = now
@@ -96,6 +115,8 @@ export const useAuthStore = defineStore('auth', {
       } catch {
         // A network/API failure must not turn stale local profile data into a verified user.
       }
+      if (verification !== requests.verification) return null
+      if (this.verifiedAccountId) this.sessionRevision++
       this.user = null
       this.isAuthenticated = false
       this.lastSyncTime = now
@@ -108,16 +129,32 @@ export const useAuthStore = defineStore('auth', {
       if (typeof window !== 'undefined') window.location.href = '/api/auth/login'
     },
 
-    async logout(): Promise<void> {
+    async logout(): Promise<boolean> {
+      const requests = requestsFor(this)
+      if (requests.logout) return requests.logout
+      ++requests.verification
       this.isLoading = true
+      const logout = (async () => {
+        try {
+          const response = await httpPost<{ ok?: boolean }>('/auth/logout')
+          if (response?.ok !== true) return false
+          this.sessionRevision++
+          this.user = null
+          this.isAuthenticated = false
+          this.lastSyncTime = 0
+          this.deactivateLibrary()
+          return true
+        } catch {
+          return false
+        }
+      })()
+      requests.logout = logout
       try {
-        await httpPost('/auth/logout')
-      } catch {}
-      this.user = null
-      this.isAuthenticated = false
-      this.lastSyncTime = 0
-      this.deactivateLibrary()
-      this.isLoading = false
+        return await logout
+      } finally {
+        requests.logout = null
+        this.isLoading = false
+      }
     },
 
     openProfile(): void {

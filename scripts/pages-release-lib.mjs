@@ -22,6 +22,78 @@ export function parseDeploymentOrigin(value, { allowLoopback = false } = {}) {
   return url.origin;
 }
 
+export function deploymentSourceIds(value) {
+  return [...new Set(String(value ?? '').split(',').map(source => source.trim().toLowerCase()).filter(Boolean))].sort();
+}
+
+async function readCloudflarePages(path, token) {
+  const response = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
+    redirect: 'error',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    signal: AbortSignal.timeout(15000),
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || payload?.success !== true || !payload.result) {
+    throw new Error(`Unable to verify the production Pages project or domain (HTTP ${response.status})`);
+  }
+  return payload.result;
+}
+
+function enabledByDefault(value) {
+  return value === undefined || value === null || value === '' || /^(?:1|true|on|yes)$/i.test(String(value).trim());
+}
+
+export async function verifyProductionPagesBinding({ pagesOrigin, engineOrigin, env = process.env }) {
+  const account = env.CLOUDFLARE_ACCOUNT_ID?.trim();
+  const token = env.CLOUDFLARE_API_TOKEN?.trim();
+  const project = env.CF_PAGES_PROJECT?.trim();
+  const branch = env.CF_PAGES_BRANCH?.trim();
+  if (!/^[0-9a-f]{32}$/i.test(account || '')) throw new Error('A valid CLOUDFLARE_ACCOUNT_ID is required');
+  if (!token) throw new Error('CLOUDFLARE_API_TOKEN is required to verify the production Pages project');
+  if (!/^[a-z0-9-]{1,63}$/.test(project || '') || project === 'sonic-staging') {
+    throw new Error('A production CF_PAGES_PROJECT is required');
+  }
+  const path = `/accounts/${account}/pages/projects/${project}`;
+  const configured = await readCloudflarePages(path, token);
+  if (configured.name !== project || !configured.production_branch || (branch && configured.production_branch !== branch)) {
+    throw new Error('CF_PAGES_PROJECT or CF_PAGES_BRANCH differs from the production project');
+  }
+  if (pagesOrigin) {
+    const { hostname, port } = new URL(parseDeploymentOrigin(pagesOrigin));
+    if (port) throw new Error('Production Pages verification requires the default HTTPS port');
+    if (hostname !== String(configured.subdomain ?? '').toLowerCase()) {
+      const domain = await readCloudflarePages(`${path}/domains/${encodeURIComponent(hostname)}`, token);
+      if (String(domain.name ?? '').toLowerCase() !== hostname || domain.status !== 'active') {
+        throw new Error('Production Pages verification origin is not an active domain of the configured project');
+      }
+    }
+  }
+
+  const variables = configured.deployment_configs?.production?.env_vars;
+  const value = key => variables?.[key]?.value;
+  const configuredEngine = value('SONIC_LOCAL_ENGINE_URL');
+  if (!configuredEngine || parseDeploymentOrigin(configuredEngine) !== engineOrigin || !enabledByDefault(value('SONIC_ENABLE_LOCAL_ENGINE'))) {
+    throw new Error('Production Pages Engine binding differs from SONIC_DEPLOY_VERIFY_ENGINE_URL or is disabled');
+  }
+  const normalized = key => String(value(key) ?? '').trim().toLowerCase();
+  const environment = normalized('SONIC_ENV');
+  if ((environment && environment !== 'production') || normalized('SONIC_RUNTIME') === 'linux-engine') {
+    throw new Error('Production Pages must use the Pages runtime and production environment');
+  }
+  const expectedAccess = env.SONIC_ACCESS_MODE?.trim().toLowerCase();
+  if (!['open', 'invite'].includes(expectedAccess) || normalized('SONIC_ACCESS_MODE') !== expectedAccess) {
+    throw new Error('Production Pages SONIC_ACCESS_MODE differs from the expected access mode');
+  }
+  const expectedSources = deploymentSourceIds(env.SONIC_ALLOWED_SOURCES);
+  if (!['strict', 'strict-allowlist', 'allowlist', 'controlled-beta'].includes(normalized('SONIC_CONTENT_POLICY')) ||
+      !expectedSources.length || JSON.stringify(deploymentSourceIds(value('SONIC_ALLOWED_SOURCES'))) !== JSON.stringify(expectedSources)) {
+    throw new Error('Production Pages content policy differs from the expected source allowlist');
+  }
+  if (!enabledByDefault(value('SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT')) || !enabledByDefault(value('SONIC_RATE_LIMIT_FAIL_CLOSED'))) {
+    throw new Error('Production Pages rate-limit policy must require the distributed limiter and fail closed');
+  }
+}
+
 function isStagingPreview(value) {
   return typeof value === 'string' && /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sonic-staging\.pages\.dev$/.test(value);
 }

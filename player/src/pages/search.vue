@@ -8,7 +8,8 @@ import PageSkeleton from '@/components/PageSkeleton.vue'
 import TabGroup from '@/components/Ui/TabGroup.vue'
 import Button from '@/components/Ui/Button.vue'
 import { searchHotDetail, searchDefault } from '@/api'
-import { fetchSmartSuggest, type SmartSuggestionItem } from '@/api/recommend'
+import { fetchSmartSuggest } from '@/api/recommend'
+import { useSearchSuggestions } from '@/composables/useSearchSuggestions'
 import { useGlobalStore } from '@/stores/modules/global'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { storeToRefs } from 'pinia'
@@ -48,9 +49,11 @@ const searchInput = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 const inputFocused = ref(false)
 const placeholder = ref('')
-const liveSuggestions = ref<SmartSuggestionItem[]>([])
-let suggestTimer: ReturnType<typeof setTimeout> | null = null
-
+const liveSuggestions = useSearchSuggestions(
+  () => inputFocused.value ? searchInput.value : '',
+  (term, signal) => fetchSmartSuggest(term, recommendStore.buildRequestHeaders(false), signal),
+  160
+)
 
 // 当前选中的多个风格标签列表（支持多角度组合，相斥维度自动替换）
 const selectedTags = ref<ExploreTagItem[]>([])
@@ -64,25 +67,6 @@ const selectedTagQuery = computed(() => {
     .sort((a, b) => (groupOrder[a.group] || 99) - (groupOrder[b.group] || 99))
     .map(t => t.name)
     .join(' ')
-})
-
-watch(searchInput, (val) => {
-  if (suggestTimer) clearTimeout(suggestTimer)
-  const term = val.trim()
-  if (!term) {
-    liveSuggestions.value = []
-    return
-  }
-  suggestTimer = setTimeout(async () => {
-    try {
-      const list = await fetchSmartSuggest(term, recommendStore.buildRequestHeaders(false))
-      if (searchInput.value.trim() === term) {
-        liveSuggestions.value = list
-      }
-    } catch {
-      liveSuggestions.value = []
-    }
-  }, 160)
 })
 
 const playAllSongs = () => {
@@ -284,6 +268,7 @@ const maxScore = computed(() => {
           />
           <input
             ref="inputRef"
+            data-testid="page-search-input"
             v-model="searchInput"
             type="text"
             :placeholder="placeholder || $t('common.search.placeholder')"

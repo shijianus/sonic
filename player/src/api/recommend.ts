@@ -377,8 +377,25 @@ type SonicEventPostResult =
   | { status: 'sent' | 'identity-mismatch' | 'retry' }
   | { status: 'epoch-mismatch'; eventEpoch?: string | null }
 
-function isEventEpoch(value: unknown): value is string {
+export function isEventEpoch(value: unknown): value is string {
   return typeof value === 'string' && /^[a-f0-9]{32}$/.test(value)
+}
+
+export async function fetchAccountEventEpoch(accountId: string): Promise<{ eventEpoch: string | null } | null> {
+  const target = `account:${accountId}`
+  try {
+    const response = await fetch('/api/sonic/events?view=event-epoch', {
+      cache: 'no-store', headers: { 'X-Sonic-Event-Target': target },
+    })
+    if (!response.ok) return null
+    const result = await response.json()
+    const epoch = result?.data?.eventEpoch
+    return result?.brand === 'Sonic' && result.data?.eventTarget === target && (epoch === null || isEventEpoch(epoch))
+      ? { eventEpoch: epoch }
+      : null
+  } catch {
+    return null
+  }
 }
 
 export async function postSonicEvents(

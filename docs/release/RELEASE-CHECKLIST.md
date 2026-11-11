@@ -136,7 +136,7 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
    | `lyricsSync` | 歌词随播放及拖动同步 |
    | `imageAndSqliteRollback` | 使用保留清除保护的配套镜像和可验证快照回滚，确认已清除事件和旧批次保持不可用 |
 
-3. 准备候选 Engine 并核对其编译身份和私有健康检查。设置 `CF_PAGES_PROJECT`、`CF_PAGES_BRANCH`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN` 和上述两个验证 origin。保留已验收的 `dist/`，运行 `node scripts/deploy-pages.mjs`。脚本先核对验收记录、目标项目生产分支和 Engine 绑定，再直接验证 Engine。上传后会重新验证 Engine，并确认实际 Pages 能访问同一 Engine，同时检查访问模式、白名单、分布式限流和匿名鉴权。上传后校验失败时按回滚手册恢复兼容版本。
+3. 准备候选 Engine 并核对其编译身份和私有健康检查。设置 `CF_PAGES_PROJECT`、`CF_PAGES_BRANCH`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN` 和上述两个验证 origin。`SONIC_DEPLOY_VERIFY_URL` 使用项目默认 Pages 域名或在该项目已激活的自定义域名。保留已验收的 `dist/`，运行 `npm run deploy` 提升该构建。脚本在上传前核对验收记录、域名归属、生产分支、Engine 绑定、访问模式、内容白名单和限流策略，然后直接验证 Engine。上传后会重新验证 Engine，并确认实际 Pages 能访问同一 Engine，同时检查访问模式、白名单、分布式限流和匿名鉴权。单独运行 `npm run verify:deployed` 核验生产时同样使用 Cloudflare 项目信息校验目标地址。上传后校验失败时按回滚手册恢复兼容版本。
 
 ## E. 部署后冒烟（真实 HTTP）
 

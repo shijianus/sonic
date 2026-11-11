@@ -16,6 +16,7 @@ import Pinia from '@/stores'
 import 'virtual:svg-icons-register'
 import { useGlobalStore } from '@/stores/modules/global'
 import { useAuthStore } from '@/stores/modules/auth'
+import { useRecommendStore } from '@/stores/modules/recommend'
 import { storeToRefs } from 'pinia'
 import { watch } from 'vue'
 import { useWindowSize, useDebounceFn, usePreferredDark } from '@vueuse/core'
@@ -37,6 +38,12 @@ Object.entries(animationDirectives).forEach(([name, directive]) => {
 app.mount('#app')
 
 const authStore = useAuthStore()
+const recommendStore = useRecommendStore()
+watch(
+  [() => authStore.verifiedAccountId, () => authStore.sessionRevision, () => recommendStore.personalizationEnabled],
+  () => { void recommendStore.prepareAccountEventEpoch() },
+  { immediate: true }
+)
 void authStore.checkAuth()
 
 const globalStore = useGlobalStore()

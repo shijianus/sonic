@@ -809,6 +809,7 @@ export default {
     loginPrompt: 'Sonic 账户全权由 EpoMail 驱动，登录后畅享云端歌单与专属高质音源。',
     syncSuccess: '账户状态已同步',
     logoutSuccess: '已安全退出登录',
+    logoutFailed: '退出登录失败，请重试。',
   },
   accountSync: {
     title: '账号数据同步',

@@ -31,7 +31,9 @@ function readGuardFile(database) {
   }
   const value = JSON.parse(fs.readFileSync(filename, 'utf8'));
   if (value?.version !== ERASURE_RECOVERY_VERSION || !isId(value.lineage) || !isId(value.generation) ||
-      !['ready', 'initializing', 'erasing'].includes(value.phase)) {
+      !['ready', 'initializing', 'erasing'].includes(value.phase) ||
+      (value.previousGeneration !== undefined && (value.phase !== 'erasing' ||
+        !isId(value.previousGeneration) || value.previousGeneration === value.generation))) {
     throw refuses('the retained guard is invalid');
   }
   return value;
@@ -90,11 +92,14 @@ function writeTransaction(db, perform) {
 function confirmGeneration(db, database) {
   const state = readDatabaseGuard(db);
   const retained = readGuardFile(database);
-  if (!matches(state, retained)) {
+  // A pending clear cannot have been acknowledged. SQLite determines whether
+  // that one transaction committed or rolled back. Older guard formats can
+  // prove a commit only by matching the new generation.
+  const rolledBack = retained?.phase === 'erasing' && state && state.lineage === retained.lineage &&
+    state.generation === retained.previousGeneration;
+  if (!matches(state, retained) && !rolledBack) {
     throw refuses('SQLite does not match the retained erasure generation');
   }
-  // A crash between SQLite COMMIT and sealing the guard is recoverable only
-  // when SQLite already contains the pending generation.
   if (retained.phase !== 'ready') writeGuardFile(database, state, 'ready');
   return state;
 }
@@ -129,13 +134,13 @@ export function eraseWithRecoveryGuard(db, database, erase) {
   db.exec('PRAGMA synchronous=FULL');
   try {
     const result = writeTransaction(db, () => {
-      const { lineage } = confirmGeneration(db, database);
+      const { lineage, generation: previousGeneration } = confirmGeneration(db, database);
       const result = erase();
       const generation = randomUUID();
       db.prepare('UPDATE recommendation_recovery_guard SET generation = ? WHERE singleton = 1').run(generation);
       // Retain the new generation durably before SQLite can acknowledge the
       // clear. An older main file cannot match it, including after a crash.
-      writeGuardFile(database, { lineage, generation }, 'erasing');
+      writeGuardFile(database, { lineage, generation, previousGeneration }, 'erasing');
       return result;
     });
     writeTransaction(db, () => confirmGeneration(db, database));
@@ -151,6 +156,19 @@ export function verifiedErasureRecoveryVersion(db, database) {
     throw refuses('SQLite does not match a ready retained generation');
   }
   return ERASURE_RECOVERY_VERSION;
+}
+
+export function assertBackupPreservesErasures(snapshot, source) {
+  const db = new DatabaseSync(snapshot, { readOnly: true });
+  try {
+    const state = readDatabaseGuard(db);
+    const retained = readGuardFile(source);
+    if ((state || retained) && (retained?.phase !== 'ready' || !matches(state, retained))) {
+      throw refuses('backup does not match the ready retained generation; confirm Engine recovery and retry');
+    }
+  } finally {
+    db.close();
+  }
 }
 
 function hasPersonalEvents(db) {

@@ -2,12 +2,13 @@
 // Engine preflight: node scripts/verify-deployed-release.mjs --engine-only https://engine.example.com
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parseDeploymentOrigin } from './pages-release-lib.mjs';
+import { deploymentSourceIds, parseDeploymentOrigin, verifyProductionPagesBinding } from './pages-release-lib.mjs';
 import { validateReleaseManifest } from './release-inputs.mjs';
 
 const identityFields = ['schemaVersion', 'baseCommit', 'sourceDigest', 'releaseId', 'buildTime', 'dirty'];
 const protectedHealth = '/api/sonic/engine/health';
-const allowedSourceIds = value => [...new Set(value.split(',').map(source => source.trim().toLowerCase()).filter(Boolean))].sort();
+const nonProductionModes = new Set(['staging', 'preview', 'development', 'test', 'local']);
+const loopbackHosts = new Set(['127.0.0.1', 'localhost', '[::1]']);
 
 function healthReleaseMatches(release, manifest) {
   return release?.releaseCommit === manifest.baseCommit && release?.sourceDigest === manifest.sourceDigest &&
@@ -69,20 +70,23 @@ async function verifyEngine(origin, { manifest, secret, production, expectedAcce
 }
 
 async function verify() {
-  const production = process.env.SONIC_DEPLOY_ENV === 'production';
   const engineOnly = process.argv[2] === '--engine-only';
-  const originOptions = { allowLoopback: !production };
+  const mode = process.env.SONIC_DEPLOY_ENV?.trim().toLowerCase();
   const engineTarget = engineOnly ? process.argv[3] || process.env.SONIC_DEPLOY_VERIFY_ENGINE_URL : process.env.SONIC_DEPLOY_VERIFY_ENGINE_URL;
-  if ((production || engineOnly) && !engineTarget) throw new Error('SONIC_DEPLOY_VERIFY_ENGINE_URL is required to verify the Engine');
+  if (engineOnly && !engineTarget) throw new Error('SONIC_DEPLOY_VERIFY_ENGINE_URL is required to verify the Engine');
+  const target = engineOnly ? engineTarget : process.argv[2] || process.env.SONIC_DEPLOY_VERIFY_URL;
+  const base = parseDeploymentOrigin(target, { allowLoopback: mode !== 'production' });
+  const production = mode === 'production' || (!nonProductionModes.has(mode) && !loopbackHosts.has(new URL(base).hostname));
+  const originOptions = { allowLoopback: !production };
+  if (production && !engineTarget) throw new Error('SONIC_DEPLOY_VERIFY_ENGINE_URL is required to verify the Engine');
   const engineOrigin = engineTarget ? parseDeploymentOrigin(engineTarget, originOptions) : undefined;
-  const base = engineOnly ? engineOrigin : parseDeploymentOrigin(process.argv[2] || process.env.SONIC_DEPLOY_VERIFY_URL, originOptions);
   if (!engineOnly && base === engineOrigin) throw new Error('Pages and Engine verification require distinct origins');
   const manifest = validateReleaseManifest(JSON.parse(readFileSync(resolve(process.cwd(), 'dist/release.json'), 'utf8')));
   const secret = process.env.SONIC_ENGINE_SECRET?.trim();
   if (!secret) throw new Error('SONIC_ENGINE_SECRET is required to verify the protected health endpoint');
   const expectedAccess = process.env.SONIC_ACCESS_MODE?.trim().toLowerCase();
   const expectedArtifact = process.env.SONIC_DEPLOY_EXPECTED_ARTIFACT_DIGEST?.trim();
-  const expectedSources = allowedSourceIds(process.env.SONIC_ALLOWED_SOURCES || '');
+  const expectedSources = deploymentSourceIds(process.env.SONIC_ALLOWED_SOURCES);
   if (expectedAccess && !['open', 'invite', 'legacy-staging'].includes(expectedAccess)) {
     throw new Error('SONIC_ACCESS_MODE is invalid');
   }
@@ -93,6 +97,7 @@ async function verify() {
     throw new Error('Production verification requires explicit expected access mode and allowed sources');
   }
 
+  if (production) await verifyProductionPagesBinding({ pagesOrigin: engineOnly ? undefined : base, engineOrigin });
   if (engineOrigin) await verifyEngine(engineOrigin, { manifest, secret, production, expectedAccess, expectedSources });
   if (engineOnly) {
     console.log(JSON.stringify({ ok: true, engineOrigin, releaseId: manifest.releaseId, sourceDigest: manifest.sourceDigest }));

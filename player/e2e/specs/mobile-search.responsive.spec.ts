@@ -1,4 +1,4 @@
-import { test, expect, horizontalOverflow } from '../fixtures'
+import { test, expect, expectPaused, expectPlaying, getAudio, horizontalOverflow } from '../fixtures'
 
 // These run in the mobile Chromium project; routes are deterministic local fixtures.
 for (const width of [360, 390]) {
@@ -94,5 +94,85 @@ for (const width of [360, 390]) {
       await expect(page.getByTestId('search-retry')).toHaveCount(0)
       expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
     })
+  })
+}
+
+test('mobile suggestions disappear when the query changes and return for the current query', async ({ page }, testInfo) => {
+  const pending = Promise.withResolvers<void>()
+  const deliver = Promise.withResolvers<void>()
+  await page.route('**/api/search/suggest?**', async route => {
+    const term = new URL(route.request().url()).searchParams.get('keywords')
+    if (term === 'new-mobile') {
+      pending.resolve()
+      await deliver.promise
+    }
+    const keyword = term === 'old-mobile' ? 'Obsolete mobile suggestion' : 'Current mobile suggestion'
+    return route.fulfill({ json: { code: 200, result: { allMatch: [{ keyword }] } } })
+  })
+
+  try {
+    await page.goto('/#/search')
+    const input = page.locator('input.search-input')
+    await input.fill('old-mobile')
+    const obsolete = page.getByRole('button', { name: 'Obsolete mobile suggestion' })
+    await expect(obsolete).toBeVisible()
+    await input.fill('new-mobile')
+    await pending.promise
+    await expect(obsolete).toHaveCount(0)
+    deliver.resolve()
+    await expect(page.getByRole('button', { name: 'Current mobile suggestion' })).toBeVisible()
+    expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
+    await testInfo.attach('current-mobile-suggestion', { body: await page.screenshot(), contentType: 'image/png' })
+  } finally {
+    deliver.resolve()
+  }
+})
+
+for (const action of ['select a song', 'pause'] as const) {
+  test(`a pending mobile playlist does not replace playback after ${action}`, async ({ page }) => {
+    const pending = Promise.withResolvers<void>()
+    const deliver = Promise.withResolvers<void>()
+    await page.route('**/api/cloudsearch?**', route => {
+      if (new URL(route.request().url()).searchParams.get('type') !== '1000') return route.continue()
+      return route.fulfill({ json: { code: 200, result: {
+        playlists: [{ id: 8001, name: 'Pending playlist', trackCount: 1, coverImgUrl: '' }], playlistCount: 1,
+      } } })
+    })
+    await page.route('**/api/playlist/track/all?**', async route => {
+      pending.resolve()
+      await deliver.promise
+      return route.fulfill({ json: { songs: [{ id: 9003, name: 'Old playlist song', dt: 20000 }], songCount: 1 } })
+    })
+
+    try {
+      await page.goto('/#/search?q=rock')
+      const row = page.getByTestId('search-song-results').getByTestId('song-row-9002')
+      if (action === 'pause') {
+        await row.click()
+        await expectPlaying(page)
+      }
+      await page.getByRole('button', { name: 'Playlists', exact: true }).click()
+      const playlist = page.getByRole('button', { name: 'Play: Pending playlist' })
+      await playlist.click()
+      await pending.promise
+      if (action === 'select a song') {
+        await page.getByRole('button', { name: 'Songs', exact: true }).click()
+        await row.click()
+        await expectPlaying(page)
+      } else {
+        await page.getByTestId('player-toggle').click()
+        await expectPaused(page)
+      }
+      const response = page.waitForResponse(result => result.url().includes('/api/playlist/track/all?') && result.status() === 200)
+      deliver.resolve()
+      await response
+      await expect(playlist.locator('.animate-spin')).toHaveCount(0)
+      await expect(page.getByTestId('now-playing-title')).toHaveText('Test Song Two')
+      const media = await getAudio(page)
+      expect(media?.src).toContain('id=9002')
+      expect(media?.paused).toBe(action === 'pause')
+    } finally {
+      deliver.resolve()
+    }
   })
 }

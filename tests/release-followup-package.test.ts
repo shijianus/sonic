@@ -104,6 +104,19 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
     expect(() => parseDeploymentOrigin(target)).toThrow(/canonical HTTPS/);
   });
 
+  it('promotes the already accepted artifact through the normal npm deploy entrypoint', () => {
+    const root = temporary();
+    const { scripts: { deploy } } = JSON.parse(readFileSync(join(repo, 'package.json'), 'utf8'));
+    put(root, 'package.json', JSON.stringify({ scripts: { deploy, build: 'node rebuild.mjs' } }));
+    put(root, 'dist/index.html', 'accepted output');
+    put(root, 'rebuild.mjs', "import { writeFileSync } from 'node:fs'; writeFileSync('dist/index.html', 'rebuilt output');");
+    put(root, 'scripts/deploy-pages.mjs', "import { readFileSync } from 'node:fs'; console.log(readFileSync('dist/index.html', 'utf8'));");
+    const result = spawnSync('npm run deploy --silent', { cwd: root, encoding: 'utf8', shell: true });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe('accepted output');
+    expect(readFileSync(join(root, 'dist/index.html'), 'utf8')).toBe('accepted output');
+  });
+
   it('blocks production deployment before invoking Wrangler when Staging evidence is missing', () => {
     const root = fixture();
     put(root, '.gitignore', '/dist/\n');

@@ -172,8 +172,10 @@ export const albumDetail = (params: { id: number | string }) => httpGet('/album'
 export const playlistDetail = (params: { id: number; s?: number }) =>
   httpGet('/playlist/detail', params)
 
-export const playlistTrackAll = (params: { id: number | string; limit?: number; offset?: number }) =>
-  httpGet('/playlist/track/all', params)
+export const playlistTrackAll = (
+  params: { id: number | string; limit?: number; offset?: number },
+  signal?: AbortSignal
+) => httpGet('/playlist/track/all', params, { signal })
 
 export const userPlaylist = (params: { uid: number; limit?: number; offset?: number }) =>
   httpGet('/user/playlist', params)

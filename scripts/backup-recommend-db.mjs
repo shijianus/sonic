@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { syncDirectory } from './recommend-recovery-guard.mjs';
+import { assertBackupPreservesErasures, syncDirectory } from './recommend-recovery-guard.mjs';
 
 export { syncDirectory };
 
@@ -87,7 +87,7 @@ export function digestFile(file) {
   } finally { fs.closeSync(fd); }
 }
 
-export function backupDatabase(source, destination) {
+export function backupDatabase(source, destination, { storedSnapshot = false } = {}) {
   source = path.resolve(source);
   destination = path.resolve(destination);
   assertDatabaseFile(source);
@@ -109,6 +109,8 @@ export function backupDatabase(source, destination) {
     const stats = verifyDatabase(staging);
     syncFile(staging);
     const sha256 = digestFile(staging);
+    // Offline restore checks the snapshot against the destination's guard.
+    if (!storedSnapshot) assertBackupPreservesErasures(staging, source);
     // Atomic publication without clobbering a destination created since our initial check.
     fs.linkSync(staging, destination);
     fs.unlinkSync(staging);

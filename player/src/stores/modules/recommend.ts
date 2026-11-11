@@ -16,7 +16,9 @@ import { useToastStore } from './toast'
 import { safeStorage } from '@/utils/safeStorage'
 import {
   deleteSonicEvents,
+  fetchAccountEventEpoch,
   fetchRecommendForYou,
+  isEventEpoch,
   postSonicEvents,
   type RecommendSongItem,
   type SonicEventPayload,
@@ -40,6 +42,7 @@ interface RecommendStoreState {
 const ANON_ID_PATTERN = /^anon_[a-zA-Z0-9_-]{8,64}$/
 const ANON_ID_KEY = 'sonic:recommendation-device-id'
 const PERSONALIZATION_CONSENT_KEY = 'sonic:personalization-consent'
+const ACCOUNT_EVENT_EPOCH_KEY = 'sonic:account-event-epoch'
 const CONSENT_REVISION_PATTERN = /^[a-f0-9]{24}$/
 
 function randomHex(): string {
@@ -61,6 +64,19 @@ function generateAnonId(): string {
 function readConsentRevision(): string | null {
   const value = safeStorage.getItem(PERSONALIZATION_CONSENT_KEY)
   return value && CONSENT_REVISION_PATTERN.test(value) ? value : null
+}
+
+function readAccountEventEpoch(accountId: string): string | undefined {
+  try {
+    const saved = JSON.parse(safeStorage.getItem(ACCOUNT_EVENT_EPOCH_KEY) || '{}')
+    if (saved?.accountId === accountId && isEventEpoch(saved.value)) return saved.value
+  } catch {}
+  return undefined
+}
+
+function saveAccountEventEpoch(accountId: string, value: string | null) {
+  if (value !== null) safeStorage.setItem(ACCOUNT_EVENT_EPOCH_KEY, JSON.stringify({ accountId, value }))
+  else if (readAccountEventEpoch(accountId) !== undefined) safeStorage.removeItem(ACCOUNT_EVENT_EPOCH_KEY)
 }
 
 function restoreAnonId(): string {
@@ -98,7 +114,8 @@ interface DeliveryState {
   generation: number
   pending: SonicEventPayload[]
   identity: string | null
-  eventEpoch: { subject: string; value: string } | null
+  eventEpoch: { identity: string; value: string | null } | null
+  epochLookup: { generation: number; promise: Promise<void> } | null
   timer: ReturnType<typeof setTimeout> | null
   writes: Set<Promise<void>>
   clearing: Promise<boolean> | null
@@ -109,19 +126,19 @@ const deliveries = new WeakMap<object, DeliveryState>()
 function deliveryFor(store: object): DeliveryState {
   let delivery = deliveries.get(store)
   if (!delivery) {
-    delivery = { consentRevision: null, generation: 0, pending: [], identity: null, eventEpoch: null, timer: null, writes: new Set(), clearing: null }
+    delivery = { consentRevision: null, generation: 0, pending: [], identity: null, eventEpoch: null, epochLookup: null, timer: null, writes: new Set(), clearing: null }
     deliveries.set(store, delivery)
   }
   return delivery
 }
 
 function currentAccountId(): string | undefined {
-  const auth = useAuthStore()
-  return auth.isAuthenticated ? auth.user?.id : undefined
+  return useAuthStore().verifiedAccountId
 }
 
 function deliveryIdentity(anonId: string): string {
-  return JSON.stringify([anonId, currentAccountId() ?? null])
+  const auth = useAuthStore()
+  return JSON.stringify([anonId, auth.verifiedAccountId ?? null, auth.sessionRevision])
 }
 
 function stopFlushTimer(delivery: DeliveryState) {
@@ -142,6 +159,7 @@ function syncConsent(store: RecommendStoreState, delivery = deliveryFor(store)):
   const revision = readConsentRevision()
   if (delivery.consentRevision !== revision) {
     discardPending(delivery)
+    delivery.eventEpoch = null
     delivery.consentRevision = revision
   }
   store.personalizationEnabled = revision !== null
@@ -265,6 +283,37 @@ export const useRecommendStore = defineStore('recommend', {
       )
     },
 
+    async prepareAccountEventEpoch(): Promise<void> {
+      const delivery = deliveryFor(this)
+      const accountId = currentAccountId()
+      if (!accountId || delivery.clearing || !syncConsent(this, delivery)) return
+      const anonId = this.ensureAnonId()
+      if (!anonId) return
+      const identity = deliveryIdentity(anonId)
+      if (delivery.identity !== identity) {
+        discardPending(delivery)
+        delivery.identity = identity
+      }
+      if (delivery.eventEpoch?.identity === identity) return
+      const saved = readAccountEventEpoch(accountId)
+      if (saved !== undefined) {
+        delivery.eventEpoch = { identity, value: saved }
+        return
+      }
+      const generation = delivery.generation
+      if (delivery.epochLookup?.generation === generation) return delivery.epochLookup.promise
+      const promise = fetchAccountEventEpoch(accountId).then((result) => {
+        if (!result || !syncConsent(this, delivery) || delivery.clearing || delivery.generation !== generation ||
+            deliveryIdentity(syncAnonId(this, delivery)) !== identity) return
+        delivery.eventEpoch = { identity, value: result.eventEpoch }
+        saveAccountEventEpoch(accountId, result.eventEpoch)
+      }).finally(() => {
+        if (delivery.epochLookup?.generation === generation) delivery.epochLookup = null
+      })
+      delivery.epochLookup = { generation, promise }
+      return promise
+    },
+
     recordEvent(payload: SonicEventPayload, immediate = false) {
       const delivery = deliveryFor(this)
       if (delivery.clearing) return
@@ -274,6 +323,14 @@ export const useRecommendStore = defineStore('recommend', {
       if (delivery.identity !== identity) {
         discardPending(delivery)
         delivery.identity = identity
+      }
+      const auth = useAuthStore()
+      if (auth.isAuthenticated && !auth.verifiedAccountId) return
+      if (auth.verifiedAccountId && delivery.eventEpoch?.identity !== identity) {
+        void this.prepareAccountEventEpoch()
+        // Events captured before learning the server's epoch cannot be restamped
+        // after a concurrent erasure. A verified local marker is available now.
+        if (delivery.eventEpoch?.identity !== identity) return
       }
       const evId =
         payload.eventId ||
@@ -316,8 +373,7 @@ export const useRecommendStore = defineStore('recommend', {
       const accountId = currentAccountId()
       const expectedMode = accountId ? 'authenticated' : 'anonymous-opt-in'
       const target = accountId ? `account:${accountId}` : 'anonymous-opt-in'
-      const subject = accountId ? target : this.anonId
-      const eventEpoch = delivery.eventEpoch?.subject === subject ? delivery.eventEpoch.value : undefined
+      const eventEpoch = delivery.eventEpoch?.identity === identity ? delivery.eventEpoch.value ?? undefined : undefined
       headers['X-Sonic-Event-Target'] = target
       if (!syncConsent(this, delivery) || delivery.generation !== generation ||
         deliveryIdentity(syncAnonId(this, delivery)) !== identity) return
@@ -328,7 +384,8 @@ export const useRecommendStore = defineStore('recommend', {
           // Discard unsent events and invalidate other writes from before the erasure.
           discardPending(delivery)
           if (result.eventEpoch !== undefined) {
-            delivery.eventEpoch = result.eventEpoch === null ? null : { subject, value: result.eventEpoch }
+            delivery.eventEpoch = { identity, value: result.eventEpoch }
+            if (accountId) saveAccountEventEpoch(accountId, result.eventEpoch)
           }
           return
         }
@@ -487,6 +544,7 @@ export const useRecommendStore = defineStore('recommend', {
       const delivery = deliveryFor(this)
       if (delivery.clearing) return delivery.clearing
       const accountId = currentAccountId()
+      if (useAuthStore().isAuthenticated && !accountId) return false
       const anonId = syncAnonId(this, delivery)
       // An expired account session must not silently delete the guest profile.
       // Guest erasure still needs the old device ID after personalization is off.
@@ -505,9 +563,10 @@ export const useRecommendStore = defineStore('recommend', {
         syncConsent(this, delivery)
         this.dislikedTracks = []
         if (accountId && result.eventEpoch) {
-          delivery.eventEpoch = { subject: `account:${accountId}`, value: result.eventEpoch }
+          delivery.eventEpoch = { identity, value: result.eventEpoch }
+          saveAccountEventEpoch(accountId, result.eventEpoch)
         } else if (mode === 'anonymous-opt-in') {
-          if (delivery.eventEpoch?.subject === anonId) delivery.eventEpoch = null
+          if (delivery.eventEpoch?.identity === identity) delivery.eventEpoch = null
           safeStorage.setItem(ANON_ID_KEY, this.personalizationEnabled ? generateAnonId() : '')
           syncAnonId(this, delivery)
         }

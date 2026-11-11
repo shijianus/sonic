@@ -43,7 +43,7 @@ export function restoreDatabase(backupFile, targetFile, { offline = false, io = 
       preRestoreSafetyCopy = `${targetFile}.pre-restore-${new Date().toISOString().replace(/[:.]/g, '-')}-${token}.sqlite`;
     }
     checkCapacity(directory, fs.statSync(backupFile).size + 2 * (originalStat?.size || 0));
-    const expected = backupDatabase(backupFile, staging);
+    const expected = backupDatabase(backupFile, staging, { storedSnapshot: true });
     assertSnapshotPreservesErasures(staging, targetFile, db);
     if (db) {
       db.exec(`VACUUM INTO '${preRestoreSafetyCopy.replace(/'/g, "''")}'`);

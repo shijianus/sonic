@@ -781,6 +781,7 @@ export class SqliteRecommendStore implements RecommendStore {
     // Serialize the generation check and writes against clearUserEvents across connections.
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      if (this.dbPath !== ':memory:') verifiedErasureRecoveryVersion(this.db, this.dbPath);
       const current = this.getEventEpoch(subjectKey);
       if (current !== expected) throw new EventEpochMismatchError(current);
       const result = write();

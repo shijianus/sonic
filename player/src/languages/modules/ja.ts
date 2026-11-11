@@ -825,6 +825,7 @@ export default {
     loginPrompt: 'Sonic のアカウント管理は EpoMail が担っています。ログインするとプレイリスト同期や高音質音源をご利用いただけます。',
     syncSuccess: 'アカウント状態を同期しました',
     logoutSuccess: '安全にログアウトしました',
+    logoutFailed: 'ログアウトできませんでした。もう一度お試しください。',
   },
   accountSync: {
     title: 'アカウントデータ同期',

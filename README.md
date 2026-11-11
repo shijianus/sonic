@@ -345,7 +345,7 @@ node scripts/prepare-pages-preview.mjs --promote-staging --deploy
 node scripts/verify-staging-live.mjs --stable > "$SONIC_PRODUCTION_ACCEPTANCE_FILE"
 ```
 
-在仓库外保存验收文件，并在稳定 Staging 的记录中补齐[发布清单](docs/release/RELEASE-CHECKLIST.md#pages-生产提升)要求的实测证据。保留已验收的 `dist/`，设置生产项目、分支及 Pages 与 Engine 验证地址，再运行 `node scripts/deploy-pages.mjs`。上传前校验生产绑定、Engine 编译身份及持久存储，上传后再从实际 Pages 核对同一 Engine 和线上安全配置。
+在仓库外保存验收文件，并在稳定 Staging 的记录中补齐[发布清单](docs/release/RELEASE-CHECKLIST.md#pages-生产提升)要求的实测证据。保留已验收的 `dist/`，设置生产项目、分支及 Pages 与 Engine 验证地址，再运行 `npm run deploy` 提升同一构建。上传前通过 Cloudflare API 核对生产分支、Pages 默认域名或已激活的自定义域名、Engine 绑定与策略，然后检查 Engine 编译身份及持久存储。上传后再从实际 Pages 核对同一 Engine 和线上安全配置。
 
 Pages 项目、Secret、KV、`RATE_LIMITER`、OAuth 回调和 Tunnel/DNS 需在目标环境配置。
 
