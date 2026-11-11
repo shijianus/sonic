@@ -42,40 +42,52 @@ const STORE_DOWNLOAD = 'downloaded_music'
 const DB_VERSION = 2
 
 let globalDbPromise: Promise<IDBDatabase> | null = null
+let databaseDeletion: Promise<void> | null = null
 
 /** 关闭并删除整个本地音乐数据库（用于“清除全部本地数据”） */
 export async function deleteMusicDatabase(): Promise<void> {
   if (typeof indexedDB === 'undefined') return
-  if (globalDbPromise) {
-    try {
-      const db = await globalDbPromise
-      db.close()
-    } catch {
-      // 数据库未成功打开时直接继续删除
+  if (databaseDeletion) return databaseDeletion
+
+  const opening = globalDbPromise
+  globalDbPromise = null
+  void opening?.then(db => db.close(), () => {})
+
+  const request = indexedDB.deleteDatabase(DB_NAME)
+  databaseDeletion = new Promise<void>((resolve, reject) => {
+    request.onsuccess = () => {
+      databaseDeletion = null
+      resolve()
     }
-    globalDbPromise = null
-  }
-  await new Promise<void>((resolve, reject) => {
-    const request = indexedDB.deleteDatabase(DB_NAME)
-    request.onsuccess = () => resolve()
-    request.onerror = () => reject(request.error)
-    request.onblocked = () => resolve()
+    request.onerror = () => {
+      databaseDeletion = null
+      reject(request.error)
+    }
+    // 浏览器仍保留受阻的删除请求，等待它结束期间复用当前结果。
+    request.onblocked = () => reject(new Error('Another tab is holding the local music database open'))
   })
+  return databaseDeletion
 }
 
 function openDatabase(): Promise<IDBDatabase> {
+  if (databaseDeletion) return databaseDeletion.then(openDatabase)
   if (globalDbPromise) return globalDbPromise
 
-  globalDbPromise = new Promise((resolve, reject) => {
+  const opening = new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
 
     request.onerror = () => {
-      globalDbPromise = null
+      if (globalDbPromise === opening) globalDbPromise = null
       reject(request.error)
     }
 
     request.onsuccess = () => {
-      resolve(request.result)
+      const db = request.result
+      db.onversionchange = () => {
+        db.close()
+        if (globalDbPromise === opening) globalDbPromise = null
+      }
+      resolve(db)
     }
 
     request.onupgradeneeded = (event) => {
@@ -89,7 +101,8 @@ function openDatabase(): Promise<IDBDatabase> {
     }
   })
 
-  return globalDbPromise
+  globalDbPromise = opening
+  return opening
 }
 
 async function executeInStore<T>(
