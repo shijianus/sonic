@@ -347,6 +347,10 @@ jobs:
     needs: quality
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    container:
+      # Match player/pnpm-lock.yaml. Chromium and its OS libraries are baked in.
+      image: mcr.microsoft.com/playwright:v1.56.1-noble@sha256:f1e7e01021efd65dd1a2c56064be399f3e4de00fd021ac561325f2bfbb2b837a
+      options: --init --shm-size=1g
     steps:
       - uses: actions/checkout@v4
 
@@ -370,19 +374,35 @@ jobs:
       - name: Build frontend for E2E
         run: pnpm --dir player build
 
-      - name: Install Chromium system dependencies
-        run: pnpm --dir player exec playwright install-deps chromium
-
-      - name: Install the lockfile's Playwright Chromium
-        run: pnpm --dir player exec playwright install chromium --only-shell
+      - name: Verify the lockfile's Playwright Chromium launches
+        timeout-minutes: 2
+        run: |
+          pnpm --dir player exec node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { createRequire } from 'node:module';
+          import { chromium } from '@playwright/test';
+          const require = createRequire(import.meta.url);
+          assert.equal(require('@playwright/test/package.json').version, '1.56.1');
+          const browser = await chromium.launch();
+          try {
+            const page = await browser.newPage();
+            await page.setContent('<title>Sonic browser CI</title>');
+            assert.equal(await page.title(), 'Sonic browser CI');
+            console.log(`Chromium ${browser.version()}`);
+          } finally {
+            await browser.close();
+          }
+          NODE
 
       # e2e/mock-server.mjs 提供确定性 /api Mock 与本地生成的 20s WAV；
       # 本作业验证前端行为，不代表真实 CDN/OAuth/上游音源已验收。
       - name: Run browser E2E
+        id: browser
+        timeout-minutes: 20
         run: pnpm --dir player exec playwright test
 
       - name: Upload Playwright report
-        if: failure()
+        if: ${{ !cancelled() && (steps.browser.outcome == 'success' || steps.browser.outcome == 'failure') }}
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
