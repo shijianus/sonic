@@ -60,3 +60,40 @@ test('launch refuses missing or reused credentials and ephemeral or shared datab
     assert.throws(() => engineEnvironment({ ...env, ...overrides }, manifest, root), reason);
   }
 });
+
+test('launch rejects recommendation memory fallback for persistent releases', () => {
+  const production = { ...env, SONIC_ENV: 'production', SONIC_ALLOWED_SOURCES: 'netease' };
+  for (const config of [env, production]) {
+    assert.throws(
+      () => engineEnvironment({ ...config, SONIC_RECOMMEND_ALLOW_MEMORY_FALLBACK: '1' }, manifest, root),
+      /SONIC_RECOMMEND_ALLOW_MEMORY_FALLBACK/,
+    );
+    assert.doesNotThrow(
+      () => engineEnvironment({ ...config, SONIC_RECOMMEND_ALLOW_MEMORY_FALLBACK: '0' }, manifest, root),
+    );
+  }
+});
+
+test('production preflight refuses unapproved or unusable content sources', () => {
+  const production = { ...env, SONIC_ENV: 'production', SONIC_ALLOWED_SOURCES: 'netease' };
+  assert.doesNotThrow(() => engineEnvironment(production, manifest, root));
+  assert.throws(
+    () => engineEnvironment({ ...production, SONIC_ALLOWED_SOURCES: 'netease,unknown' }, manifest, root),
+    /unapproved_sources/,
+  );
+  assert.throws(
+    () => engineEnvironment({ ...production, SONIC_ENABLE_NETEASE: '0' }, manifest, root),
+    /no_runtime_enabled_sources/,
+  );
+});
+
+test('production preflight refuses prohibited switches even with approved sources', () => {
+  const production = { ...env, SONIC_ENV: 'production', SONIC_ALLOWED_SOURCES: 'netease' };
+  for (const name of ['SONIC_ENABLE_UNBLOCK', 'SONIC_ENABLE_GDSTUDIO', 'SONIC_ENABLE_LYRIVA']) {
+    assert.throws(
+      () => engineEnvironment({ ...production, [name]: ' YeS ' }, manifest, root),
+      new RegExp(`PROHIBITED.*${name}`),
+    );
+    assert.doesNotThrow(() => engineEnvironment({ ...production, [name]: '0' }, manifest, root));
+  }
+});

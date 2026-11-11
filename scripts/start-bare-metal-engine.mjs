@@ -2,7 +2,12 @@ import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createJiti } from 'jiti';
 import { validateReleaseManifest, verifyRelease } from './release-inputs.mjs';
+
+const jiti = createJiti(import.meta.url, { fsCache: false });
+const { CONTENT_SOURCE_LICENSING_REGISTRY, getContentPolicyReadiness } = jiti('../functions/_lib/sonic/licensing.ts');
+const { isEnvEnabled } = jiti('../functions/_lib/sonic/config.ts');
 
 export function engineEnvironment(env, manifest, root) {
   validateReleaseManifest(manifest);
@@ -27,6 +32,9 @@ export function engineEnvironment(env, manifest, root) {
     throw new Error('Engine service, identity and signing keys must be independent');
   }
 
+  if (env.SONIC_RECOMMEND_ALLOW_MEMORY_FALLBACK === '1') {
+    throw new Error('Unset SONIC_RECOMMEND_ALLOW_MEMORY_FALLBACK or set it to 0 for a persistent bare-metal Engine');
+  }
   const paths = ['SONIC_RECOMMEND_DB_PATH', 'SONIC_ACCOUNT_DB_PATH', 'SONIC_ACCESS_DB_PATH']
     .flatMap((name, index) => {
       const value = env[name]?.trim();
@@ -53,11 +61,24 @@ export function engineEnvironment(env, manifest, root) {
   if (env.SONIC_STATIC_DIR && resolve(root, env.SONIC_STATIC_DIR) !== staticDir) {
     throw new Error('SONIC_STATIC_DIR must point to the verified release dist directory');
   }
-  return {
+  const configured = {
     ...env, ...release, NODE_ENV: 'production', HOST: '127.0.0.1', PORT: port,
     SONIC_STATIC_DIR: staticDir, SONIC_RUNTIME: 'linux-engine',
     SONIC_REQUIRE_RELEASE_METADATA: '1', SONIC_REQUIRE_ENGINE_IDENTITY: '1',
   };
+  const contentPolicy = getContentPolicyReadiness(configured);
+  if (!contentPolicy.ok) {
+    throw new Error(`Content policy is not deployment-ready: ${contentPolicy.reason || 'misconfigured'}`);
+  }
+  if (contentPolicy.production) {
+    const enabledProhibited = Object.values(CONTENT_SOURCE_LICENSING_REGISTRY)
+      .filter(source => source.authorizationStatus === 'PROHIBITED' && isEnvEnabled(configured[source.envSwitch], false))
+      .map(source => source.envSwitch);
+    if (enabledProhibited.length > 0) {
+      throw new Error(`PROHIBITED content source switches are enabled in production: ${enabledProhibited.join(', ')}; set them to 0 and redeploy`);
+    }
+  }
+  return configured;
 }
 
 function start(root, args) {
