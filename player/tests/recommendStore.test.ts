@@ -6,8 +6,8 @@ import { useRecommendStore } from '@/stores/modules/recommend'
 import { useLibraryStore } from '@/stores/modules/library'
 import { useAuthStore } from '@/stores/modules/auth'
 
-function erasedProfile() {
-  return Response.json({ brand: 'Sonic', data: { cleared: true, storageKind: 'sqlite', removedEvents: 1 } })
+function erasedProfile(privacyMode = 'anonymous-opt-in') {
+  return Response.json({ brand: 'Sonic', data: { privacyMode, cleared: true, storageKind: 'sqlite', removedEvents: 1 } })
 }
 
 function delayedResponse() {
@@ -127,7 +127,10 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
 
     previousPost.finish(new Response(null, { status: 503 }))
     await vi.waitFor(() => expect(fetchSpy.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'DELETE']))
-    expect(fetchSpy.mock.calls[1][1]?.headers).toMatchObject({ 'X-Sonic-Anon-Id': originalId })
+    expect(fetchSpy.mock.calls[1][1]?.headers).toMatchObject({
+      'X-Sonic-Anon-Id': originalId,
+      'X-Sonic-Erasure-Target': 'anonymous-opt-in',
+    })
     deletion.finish(erasedProfile())
     expect(await clearing).toBe(true)
     expect(await duplicate).toBe(true)
@@ -184,7 +187,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
   })
 
   it('已有账号在关闭个性化后仍可清除服务端画像', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile())
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile('authenticated'))
     const rec = useRecommendStore()
     const auth = useAuthStore()
     auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
@@ -193,11 +196,11 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     expect(rec.anonId).toBe('')
 
     expect(await rec.clearAllRecommendationProfile()).toBe(true)
-    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({})
+    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({ 'X-Sonic-Erasure-Target': 'account:user-A' })
   })
 
   it('清除账号画像时不发送访客 ID，保留独立的访客画像标识', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile())
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile('authenticated'))
     const rec = useRecommendStore()
     const guestId = rec.ensureAnonId()
     const auth = useAuthStore()
@@ -205,7 +208,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     auth.isAuthenticated = true
 
     expect(await rec.clearAllRecommendationProfile()).toBe(true)
-    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({})
+    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({ 'X-Sonic-Erasure-Target': 'account:user-A' })
     expect(rec.anonId).toBe(guestId)
   })
 
@@ -218,6 +221,17 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
 
     expect(await rec.clearAllRecommendationProfile()).toBe(false)
     expect(rec.anonId).toBe(originalId)
+  })
+
+  it('账号画像的成功响应不能确认访客画像删除', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile('authenticated'))
+    const rec = useRecommendStore()
+    const originalId = rec.ensureAnonId()
+    rec.dislikeSong({ id: 1000, name: '保留', artist: '测试' })
+
+    expect(await rec.clearAllRecommendationProfile()).toBe(false)
+    expect(rec.anonId).toBe(originalId)
+    expect(rec.dislikedCount).toBe(1)
   })
 
   it('事件批量发送失败后整批回到队首,随下一次批量一起重试', async () => {

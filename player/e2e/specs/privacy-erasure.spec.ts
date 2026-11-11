@@ -1,8 +1,8 @@
 import { test, expect } from '../fixtures'
 
-test('a failed remote erasure preserves the anonymous profile ID for retry', async ({ page }, testInfo) => {
+test('an erasure identity conflict preserves the anonymous profile ID for retry', async ({ page }, testInfo) => {
   const anonId = 'anon_erasure_browser_001'
-  const deletes: string[] = []
+  const deletes: Array<{ anonId: string | undefined; target: string | undefined }> = []
   await page.addInitScript((id) => {
     localStorage.setItem('recommend', JSON.stringify({ personalizationEnabled: true, anonId: id }))
     localStorage.setItem('sonic-e2e-local-data', 'preserved')
@@ -10,12 +10,13 @@ test('a failed remote erasure preserves the anonymous profile ID for retry', asy
 
   await page.route('**/api/sonic/events', async (route) => {
     if (route.request().method() !== 'DELETE') return route.continue()
-    deletes.push(route.request().headers()['x-sonic-anon-id'] || '')
+    const headers = route.request().headers()
+    deletes.push({ anonId: headers['x-sonic-anon-id'], target: headers['x-sonic-erasure-target'] })
     if (deletes.length === 1) {
-      await route.fulfill({ status: 503, json: { brand: 'Sonic', error: { code: 'EVENT_ERASURE_INCOMPLETE' } } })
+      await route.fulfill({ status: 409, json: { brand: 'Sonic', error: { code: 'EVENT_ERASURE_IDENTITY_MISMATCH' } } })
     } else {
       await route.fulfill({ json: {
-        brand: 'Sonic', data: { cleared: true, storageKind: 'sqlite', removedEvents: 1 },
+        brand: 'Sonic', data: { privacyMode: 'anonymous-opt-in', cleared: true, storageKind: 'sqlite', removedEvents: 1 },
       } })
     }
   })
@@ -31,5 +32,6 @@ test('a failed remote erasure preserves the anonymous profile ID for retry', asy
 
   await page.getByRole('button', { name: 'Reset Recommendation Profile & Dislikes' }).click()
   await expect(page.getByText('Recommendation profile and disliked tracks cleared')).toBeVisible()
-  expect(deletes).toEqual([anonId, anonId])
+  const expected = { anonId, target: 'anonymous-opt-in' }
+  expect(deletes).toEqual([expected, expected])
 })

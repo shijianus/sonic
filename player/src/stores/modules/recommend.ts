@@ -416,27 +416,28 @@ export const useRecommendStore = defineStore('recommend', {
       if (delivery.clearing) return delivery.clearing
       const headers = this.buildRequestHeaders(false)
       const auth = useAuthStore()
-      const hasAccount = Boolean(auth.isAuthenticated && auth.user?.id)
+      const accountId = auth.isAuthenticated ? auth.user?.id : undefined
       const hasAnonId = ANON_ID_PATTERN.test(this.anonId)
       // An expired account session must not silently delete the guest profile.
       // Guest erasure still needs the old device ID after personalization is off.
-      if (hasAccount) {
+      if (accountId) {
         delete headers['X-Sonic-Anon-Id']
       } else if (hasAnonId) {
         headers['X-Sonic-Anon-Id'] = this.anonId
       }
-      const expectStoredProfile = hasAccount || hasAnonId
-      if (expectStoredProfile) delete headers['X-Sonic-Personalization']
+      const mode = accountId ? 'authenticated' : hasAnonId ? 'anonymous-opt-in' : 'public'
+      headers['X-Sonic-Erasure-Target'] = accountId ? `account:${accountId}` : mode
+      if (mode !== 'public') delete headers['X-Sonic-Personalization']
       const identity = deliveryIdentity(this.anonId)
       discardPending(delivery)
       // Drain all writes from this tab before DELETE. No new events can be
       // queued during erasure, including via pagehide or a failed batch retry.
       const clearing = waitForWrites(delivery.writes).then(async (drained) => {
         if (!drained || deliveryIdentity(this.anonId) !== identity) return false
-        const ok = await deleteSonicEvents(headers, expectStoredProfile)
+        const ok = await deleteSonicEvents(headers, mode)
         if (!ok || deliveryIdentity(this.anonId) !== identity) return false
         this.dislikedTracks = []
-        if (!hasAccount) this.anonId = this.personalizationEnabled ? generateAnonId() : ''
+        if (!accountId) this.anonId = this.personalizationEnabled ? generateAnonId() : ''
         return true
       })
       delivery.clearing = clearing

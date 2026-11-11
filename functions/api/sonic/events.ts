@@ -5,6 +5,7 @@
 // - GET: Inspect current privacy mode and high-level preference profile summary (no raw PII)
 
 import type { AppEnv } from '../../_lib/types';
+import { extractAuthCredentials } from '../../_lib/auth';
 import { jsonResponse, handleOptions } from '../../_lib/http';
 import { getSonicConfig } from '../../_lib/sonic/config';
 import { callLocalEngineJson } from '../../_lib/sonic/local-engine';
@@ -23,6 +24,7 @@ import {
 } from '../../_lib/sonic/recommend';
 
 const MAX_BODY_BYTES = 64 * 1024;
+const ERASURE_TARGET_HEADER = 'X-Sonic-Erasure-Target';
 // Events are the only anonymous write surface that feeds global popularity.
 // Bound both the network identity (IP) and the claimed subject so a single
 // client cannot amplify the store by replaying large batches.
@@ -228,22 +230,37 @@ export async function onRequest({
   }
 
   if (method === 'DELETE') {
+    const identity = await resolveUserIdentity(request, env);
+    const target = request.headers.get(ERASURE_TARGET_HEADER);
+    const resolvedTarget = identity.mode === 'authenticated'
+      ? identity.userId && `account:${identity.userId}`
+      : identity.mode;
+    const needsTarget = identity.mode === 'authenticated' && extractAuthCredentials(request).source === 'cookie';
+    if (target === null ? needsTarget : target !== resolvedTarget) {
+      return jsonResponse({
+        brand: 'Sonic',
+        error: { code: 'EVENT_ERASURE_IDENTITY_MISMATCH', message: 'Refresh your session before retrying recommendation data deletion' },
+      }, { status: 409, headers: buildGatewayHeaders(privateHeaders) });
+    }
     if (config.enableLocalEngine) {
       const engineRes = await callLocalEngineJson<any>('/api/sonic/events', env, {
         request, method: 'DELETE', timeoutMs: config.engineTimeoutMs, signal: request.signal,
+        ...(target !== null ? { resolvedIdentity: identity } : {}),
       });
+      const erasure = engineRes.data?.data;
       if (engineRes.ok && engineRes.data?.brand === 'Sonic' &&
-          ((engineRes.data?.data?.cleared === true && engineRes.data.data.storageKind === 'sqlite') ||
-            (engineRes.data?.data?.privacyMode === 'public' && engineRes.data.data.cleared === false && engineRes.data.data.removedEvents === 0)) &&
-          Number.isInteger(engineRes.data.data.removedEvents) && engineRes.data.data.removedEvents >= 0) {
+          erasure?.privacyMode === identity.mode &&
+          Number.isSafeInteger(erasure.removedEvents) && erasure.removedEvents >= 0 &&
+          (identity.mode === 'public'
+            ? erasure.cleared === false && erasure.removedEvents === 0
+            : erasure.cleared === true && erasure.storageKind === 'sqlite')) {
         // Authority's result/count, never an Edge OR-success. Clear stale local
         // read-fallback data only after the durable deletion is acknowledged.
-        try { clearUserRecommendationData(await resolveUserIdentity(request, env), env); } catch {}
+        try { clearUserRecommendationData(identity, env); } catch {}
         return jsonResponse(engineRes.data, { status: 200, headers: buildGatewayHeaders(privateHeaders, false, engineRes.circuitState) });
       }
       return engineRejected(engineRes, start, engineRes.circuitState);
     }
-    const identity = await resolveUserIdentity(request, env);
     if (identity.subjectKey && getRecommendStore(env).kind !== 'sqlite') return storageUnavailable(start);
     try {
       const localClear = await clearUserRecommendationDataAndExternal(identity, env);

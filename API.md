@@ -248,6 +248,8 @@ async function getRecommendations() {
 | `GET` | `/api/sonic/search/smart` | 智能混合搜索与自动补全建议 | `q`, `mode=search\|suggest`, `page`, `count`, `personalize=0\|1` |
 | `POST / DELETE / GET` | `/api/sonic/events` | 行为反馈上报与一键清除推荐画像（支持单曲及专辑/歌单/MV实体级反馈与双向软传播） | 请求体 `{ events: [...] }`；支持 `entity_type` (`track\|album\|playlist\|mv`)、`action` (`favorite\|play_complete\|watch_complete\|open\|add_to_playlist\|skip\|dislike`)；支持 `X-Sonic-Personalization: off` 隐私关闭 |
 
+同源客户端使用会话 Cookie 删除账户画像时，发送 `X-Sonic-Erasure-Target: account:<当前界面的账户 ID>`。访客可使用 `anonymous-opt-in` 并附带原匿名 ID，无画像时可使用 `public`。目标与服务端解析的身份不一致时返回 `409 EVENT_ERASURE_IDENTITY_MISMATCH`，刷新登录状态后再重试。带明确目标的画像删除通过 Pages 转发时使用 Engine 身份签名。
+
 站内热榜按窗口统计已登录且允许个性化的账户播放活动，`window=all` 使用存储保留期内的数据。匿名用户开启个性化后，其活动仍可用于自己的推荐。外部榜单分数通过 `popularity.externalChartScore` 单独返回。
 
 完整算法公式、实体图谱与多实体混合推荐设计请参阅 [`docs/recommend-multi-entity.md`](docs/recommend-multi-entity.md)、[`docs/recommendation/01-audit-and-selection.md`](docs/recommendation/01-audit-and-selection.md) 与 [`docs/recommendation/02-architecture-and-algorithms.md`](docs/recommendation/02-architecture-and-algorithms.md)。

@@ -394,8 +394,8 @@ export async function postSonicEvents(
 }
 
 export async function deleteSonicEvents(
-  headers: Record<string, string> = {},
-  expectStoredProfile = false
+  headers: Record<string, string>,
+  expectedMode: 'authenticated' | 'anonymous-opt-in' | 'public'
 ): Promise<boolean> {
   try {
     const resp = await fetch('/api/sonic/events', {
@@ -406,10 +406,11 @@ export async function deleteSonicEvents(
     const result = await resp.json()
     if (result?.brand !== 'Sonic') return false
     const data = result.data
+    if (data?.privacyMode !== expectedMode) return false
     if (!Number.isSafeInteger(data?.removedEvents) || data.removedEvents < 0) return false
-    if (data?.cleared === true && data.storageKind === 'sqlite') return true
-    return !expectStoredProfile && data?.privacyMode === 'public' && data.cleared === false &&
-      data.removedEvents === 0
+    return expectedMode === 'public'
+      ? data.cleared === false && data.removedEvents === 0
+      : data.cleared === true && data.storageKind === 'sqlite'
   } catch {
     return false
   }

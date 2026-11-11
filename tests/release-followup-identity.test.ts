@@ -132,10 +132,82 @@ describe('Follow-up identity and consent over the actual events hop', () => {
     expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(1);
     const read = await events({ request: incoming('GET', '?personalization=off'), env: edge() });
     expect(await read.json()).toMatchObject({ data: { privacyMode: 'public', totalEvents: 0 } });
-    const deleted = await events({ request: incoming('DELETE', '?personalize=false'), env: edge() });
+    const deleted = await events({ request: incoming('DELETE', '?personalize=false', { 'X-Sonic-Erasure-Target': 'public' }), env: edge() });
     expect(deleted.status).toBe(200);
     expect(await deleted.json()).toMatchObject({ data: { privacyMode: 'public', cleared: false, removedEvents: 0 } });
     expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(1);
+  });
+
+  it.each(['Pages with Engine', 'local SQLite'])('checks the intended erasure target before mutation (%s)', async (runtime) => {
+    const authority = engine();
+    const throughEngine = runtime === 'Pages with Engine';
+    const env = throughEngine ? edge() : { ...edge(), SONIC_LOCAL_ENGINE_URL: '', RECOMMEND_STORE: authority.RECOMMEND_STORE };
+    const hop = engineHop(authority);
+    const accountA = await createSession(env, { email: 'erasure-a@example.invalid', name: 'A', avatar: '' });
+    const accountB = await createSession(env, { email: 'erasure-b@example.invalid', name: 'B', avatar: '' });
+    const cookieA = { Cookie: `sonic_session=${accountA.apiKey}`, Origin: 'https://edge.followup.test' };
+    const cookieB = { Cookie: `sonic_session=${accountB.apiKey}`, Origin: 'https://edge.followup.test' };
+    const target = 'X-Sonic-Erasure-Target';
+    const subjects = [{}, cookieA, cookieB];
+    const readCounts = async () => Promise.all(subjects.map(async (headers) => {
+      const response = await events({ request: incoming('GET', '', headers), env });
+      expect(response.status).toBe(200);
+      return (await response.json()).data.totalEvents;
+    }));
+
+    for (const headers of subjects) {
+      expect((await events({ request: incoming('POST', '', headers), env })).status).toBe(200);
+    }
+    expect(await readCounts()).toEqual([1, 1, 1]);
+    hop.mockClear();
+    for (const headers of [
+      { ...cookieB, [target]: 'anonymous-opt-in' },
+      { ...cookieB, [target]: `account:${accountA.id}` },
+      { ...cookieB, [target]: 'public' },
+      { ...cookieB, [target]: 'account:' },
+      { [target]: `account:${accountA.id}` },
+      cookieB,
+    ]) {
+      const response = await events({ request: incoming('DELETE', '', headers), env });
+      expect(response.status).toBe(409);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      expect(await response.json()).toMatchObject({ error: { code: 'EVENT_ERASURE_IDENTITY_MISMATCH' } });
+    }
+    expect(hop).not.toHaveBeenCalled();
+    expect(await readCounts()).toEqual([1, 1, 1]);
+
+    hop.mockClear();
+    const cleared = await events({
+      request: incoming('DELETE', '', { ...cookieA, [target]: `account:${accountA.id}` }), env,
+    });
+    expect(cleared.status).toBe(200);
+    expect(await cleared.json()).toMatchObject({ data: { privacyMode: 'authenticated', cleared: true, removedEvents: 1 } });
+    if (throughEngine) {
+      const forwarded = new Headers(hop.mock.calls[0]?.[1]?.headers);
+      for (const name of [target, 'Cookie', 'X-Sonic-Anon-Id']) expect(forwarded.has(name)).toBe(false);
+      expect(forwarded.has(ENGINE_IDENTITY_HEADER)).toBe(true);
+    }
+    expect(await readCounts()).toEqual([1, 0, 1]);
+
+    const guestCleared = await events({ request: incoming('DELETE', '', { [target]: 'anonymous-opt-in' }), env });
+    expect(guestCleared.status).toBe(200);
+    expect(await guestCleared.json()).toMatchObject({ data: { privacyMode: 'anonymous-opt-in', cleared: true, removedEvents: 1 } });
+    expect(await readCounts()).toEqual([0, 0, 1]);
+
+    const keyCleared = await events({ request: incoming('DELETE', '', { 'X-Sonic-Key': accountB.apiKey }), env });
+    expect(keyCleared.status).toBe(200);
+    expect(await readCounts()).toEqual([0, 0, 0]);
+  });
+
+  it('refuses to forward a checked stored target without a signed identity', async () => {
+    const hop = vi.spyOn(globalThis, 'fetch');
+    const env = { ...edge(), SONIC_REQUIRE_ENGINE_IDENTITY: '0', SONIC_ENGINE_IDENTITY_SECRET: '' };
+    const response = await events({
+      request: incoming('DELETE', '', { 'X-Sonic-Erasure-Target': 'anonymous-opt-in' }), env,
+    });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: 'ENGINE_IDENTITY_UNAVAILABLE' } });
+    expect(hop).not.toHaveBeenCalled();
   });
 
   it('fails required configuration before a network request and reports missing readiness', async () => {

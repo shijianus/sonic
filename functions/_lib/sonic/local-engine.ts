@@ -294,6 +294,7 @@ export async function callLocalEngineJson<T = any>(
   options?: {
     request?: Request; method?: 'GET' | 'POST' | 'DELETE'; body?: string;
     timeoutMs?: number; signal?: AbortSignal; clientIp?: string;
+    resolvedIdentity?: UserIdentityContext;
   },
 ): Promise<LocalEngineCallResult<T>> {
   const cfg = getSonicConfig(env);
@@ -327,7 +328,7 @@ export async function callLocalEngineJson<T = any>(
       const accountSubject = accountRoute ? await resolveAuthenticatedSubject(options.request, env) : null;
       forwardedIdentity = accountRoute
         ? { mode: 'public', subjectKey: null, personalizationEnabled: false, isAuthenticated: false }
-        : await resolveUserIdentity(options.request, env);
+        : options.resolvedIdentity ?? await resolveUserIdentity(options.request, env);
       const optedOut = hasPersonalizationOptOut(options.request);
       if (optedOut) {
         headers['x-sonic-personalization'] = 'off';
@@ -343,7 +344,8 @@ export async function callLocalEngineJson<T = any>(
       if (assertion || optedOut || forwardedIdentity.mode === 'public') {
         for (const credential of ['authorization', 'cookie', 'x-sonic-key', 'x-cfsolara-key', 'x-api-key']) delete headers[credential];
       }
-      if ((readiness.required || accountRoute) && !assertion) throw new EngineIdentityError();
+      // A caller that has checked an erasure target must send that exact subject.
+      if ((readiness.required || accountRoute || options.resolvedIdentity?.subjectKey) && !assertion) throw new EngineIdentityError();
     }
     const response = await fetchWithRuntimeBudget(`${cfg.localEngineUrl}${pathWithQuery.startsWith('/') ? '' : '/'}${pathWithQuery}`, {
       method, headers, body: method !== 'GET' ? options?.body : undefined, redirect: 'error',
