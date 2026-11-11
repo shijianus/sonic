@@ -897,38 +897,42 @@ export const useAudioStore = defineStore('audio', {
      * 实现用户切歌或歌曲自然结束时 0 延迟瞬时起播
      */
     async preloadNextTrack() {
-      if (!this.audio.playlist.length) return
-      let nextIndex = this.audio.currentIndex + 1
-      if (nextIndex >= this.audio.playlist.length) {
-        if (this.audio.playMode === PlayMode.LIST) {
-          // 若启用了 Auto DJ 自动连续电台，在最后一首即将结束时静默续接相似推荐曲目
-          try {
-            const { useRecommendStore } = await import('./recommend')
-            const recStore = useRecommendStore()
-            if (recStore.autoDjEnabled && this.audio.currentSong) {
-              const moreSongs = await recStore.fetchAutoDjNextSongs(this.audio.currentSong, 5)
-              const existingIds = new Set(this.audio.playlist.map((s: { id: string | number }) => String(s.id)))
-              const fresh = moreSongs.filter((s) => !existingIds.has(String(s.id)))
-              if (fresh.length > 0) {
-                this.audio.playlist.push(...fresh)
-                if (this.audio.originalPlaylist.length > 0) {
-                  this.audio.originalPlaylist.push(...fresh)
-                }
-                nextIndex = this.audio.currentIndex + 1
-              } else {
-                nextIndex = 0
-              }
-            } else {
-              nextIndex = 0
+      const { playlist, originalPlaylist, currentSong, currentIndex } = this.audio
+      if (!playlist.length) return
+      let nextIndex = currentIndex + 1
+      if (nextIndex >= playlist.length) {
+        if (this.audio.playMode !== PlayMode.LIST) return
+        const generation = playbackGeneration
+        const canContinue = () =>
+          generation === playbackGeneration &&
+          this.audio.playlist === playlist &&
+          this.audio.originalPlaylist === originalPlaylist &&
+          this.audio.currentSong === currentSong &&
+          this.audio.currentIndex === currentIndex &&
+          this.audio.playMode === PlayMode.LIST &&
+          currentIndex + 1 === playlist.length
+        nextIndex = 0
+        // 若启用了 Auto DJ，在队尾即将结束时静默续接相似推荐曲目。
+        try {
+          const { useRecommendStore } = await import('./recommend')
+          if (!canContinue()) return
+          const recStore = useRecommendStore()
+          if (recStore.autoDjEnabled && currentSong) {
+            const moreSongs = await recStore.fetchAutoDjNextSongs(currentSong, 5)
+            if (!canContinue() || !recStore.autoDjEnabled) return
+            const existingIds = new Set(playlist.map((item: Song) => String(item.id)))
+            const fresh = moreSongs.filter(item => !existingIds.has(String(item.id)))
+            if (fresh.length > 0) {
+              playlist.push(...fresh)
+              if (originalPlaylist.length > 0) originalPlaylist.push(...fresh)
+              nextIndex = currentIndex + 1
             }
-          } catch {
-            nextIndex = 0
           }
-        } else {
-          return
+        } catch {
+          if (!canContinue()) return
         }
       }
-      const nextSong = this.audio.playlist[nextIndex]
+      const nextSong = playlist[nextIndex]
       if (nextSong && !nextSong.url && !nextSong.isLocal) {
         try {
           await this._fetchAndApplyUrl(nextSong)

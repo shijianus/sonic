@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createApp } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
-import type { Song } from '@/stores/interface'
+import { PlayMode, type Song } from '@/stores/interface'
 
 /**
  * 播放竞态回归（SONIC-P1-01/P1-02 前端部分）：
@@ -17,6 +17,7 @@ vi.mock('@/api', () => ({
 }))
 
 const { useAudioStore } = await import('@/stores/modules/audio')
+const { useRecommendStore } = await import('@/stores/modules/recommend')
 
 const song = (id: number, name = `歌曲 ${id}`, url?: string): Song =>
   ({
@@ -146,5 +147,36 @@ describe('播放竞态：暂停/停止/切歌使在途请求失效', () => {
     expect(store.audio.currentSong?.id).toBe(3003)
     expect(store.audio.currentIndex).toBe(2)
     expect(store.audio.playHistory.at(-1)?.id).toBe(3003)
+  })
+
+  it.each([
+    ['替换为含同一首歌的新队列', (store: ReturnType<typeof useAudioStore>, seed: Song) => store.setPlaylist([seed]), [4001]],
+    ['切换到单曲循环', (store: ReturnType<typeof useAudioStore>) => store.setPlayMode(PlayMode.SINGLE), [4001]],
+    ['关闭 Auto DJ', () => { useRecommendStore().autoDjEnabled = false }, [4001]],
+    ['保持当前播放队列', () => {}, [4001, 4002]],
+  ] as const)('Auto DJ 推荐返回前%s', async (_, changePlayback, expectedIds) => {
+    const store = useAudioStore()
+    const seed = song(4001, '当前歌曲', '/api/music/stream?id=4001')
+    store.setPlaylist([seed])
+    const started = deferred<string>()
+    const response = deferred<Response>()
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(input => {
+      started.resolve(String(input))
+      return response.promise
+    })
+    try {
+      const preloading = store.preloadNextTrack()
+      expect(await started.promise).toMatch(/^\/api\/sonic\/recommend\/for-you\?mode=next&count=5&seedTrackId=4001/)
+      changePlayback(store, seed)
+      response.resolve(Response.json({
+        data: { tracks: [{ id: 4002, title: '推荐歌曲', artist: '测试歌手', streamUrl: '/api/music/stream?id=4002' }] },
+      }))
+      await preloading
+
+      expect(store.audio.playlist.map(item => item.id)).toEqual(expectedIds)
+      expect(store.audio.originalPlaylist.map(item => item.id)).toEqual(expectedIds)
+    } finally {
+      fetchMock.mockRestore()
+    }
   })
 })
