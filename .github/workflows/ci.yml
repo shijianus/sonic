@@ -98,6 +98,8 @@ jobs:
       - name: Isolated mixed workload and local alert delivery
         run: |
           npm run build:engine
+          node --test tests/bare-metal-engine.test.mjs
+          node --experimental-sqlite scripts/verify-built-release.mjs
           npm run test:load
 
       - name: Root production dependency audit

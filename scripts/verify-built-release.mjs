@@ -10,7 +10,7 @@ import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const work = mkdtempSync(join(tmpdir(), 'sonic-release-http-'));
+const work = mkdtempSync(join(resolve(tmpdir()), 'sonic-release-http-'));
 const dbPath = join(work, 'recommend.sqlite');
 const engineKey = randomBytes(32).toString('hex');
 const signingKey = randomBytes(32).toString('hex');
@@ -24,12 +24,18 @@ const port = probe.address().port;
 await new Promise(resolve => probe.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 const headers = { 'X-Sonic-Engine-Key': engineKey, 'X-Sonic-Anon-Id': 'anon_release_http_a_20261102', 'X-Sonic-Personalization': 'on' };
+// The acceptance engine must never inherit live database paths, upstream
+// credentials, or adapter configuration from the operator's shell.
+const childEnv = Object.fromEntries(['PATH', 'SystemRoot', 'TEMP', 'TMP', 'TMPDIR']
+  .filter(name => process.env[name] !== undefined)
+  .map(name => [name, process.env[name]]));
 const env = {
-  ...process.env,
+  ...childEnv,
+  NODE_ENV: 'production',
   HOST: '127.0.0.1', PORT: String(port), SONIC_STATIC_DIR: resolve(root, 'dist'),
   SONIC_RECOMMEND_DB_PATH: dbPath, SONIC_ENGINE_SECRET: engineKey, SONIC_SECRET: signingKey,
   SONIC_ENGINE_IDENTITY_SECRET: identityKey, SONIC_REQUIRE_ENGINE_IDENTITY: '1',
-  SONIC_ENV: 'staging', SONIC_RUNTIME: 'linux-engine', SONIC_ENABLE_OAUTH: '0', SONIC_REQUIRE_AUTH: '0',
+  SONIC_ENV: 'staging', SONIC_RUNTIME: 'linux-engine', SONIC_ACCESS_MODE: 'open', SONIC_ENABLE_OAUTH: '0', SONIC_REQUIRE_AUTH: '0',
   SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'synthetic', SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: '1',
   SONIC_ENABLE_NETEASE: '0', SONIC_ENABLE_QQ: '0', SONIC_ENABLE_KUGOU: '0', SONIC_ENABLE_KUWO: '0',
   SONIC_ENABLE_LYRIVA: '0', SONIC_ENABLE_GDSTUDIO: '0', SONIC_ENABLE_AMLL: '0', SONIC_ENABLE_LRCLIB: '0',
@@ -156,10 +162,15 @@ try {
   assert.equal(restored.ok, true);
   assert.equal(restored.events, 2);
   check('offline verified restore recovers both subjects');
-  await start({ SONIC_ENV: 'production' });
+  // Production requires an effective authorized source. The only production
+  // media request below explicitly names synthetic, so the policy gate rejects
+  // it before resolution and no request reaches the authorized provider.
+  const productionHealth = await start({ SONIC_ENV: 'production', SONIC_ALLOWED_SOURCES: 'netease,synthetic', SONIC_ENABLE_NETEASE: '1' });
+  assert.equal(productionHealth.flags.enableSynthetic, false);
+  assert.deepEqual(productionHealth.readiness.contentPolicy.effectiveSources, ['netease']);
   const disabled = await request(stream);
-  assert.ok([403, 404].includes(disabled.status), `production synthetic source returned ${disabled.status}`);
-  await disabled.body?.cancel();
+  assert.equal(disabled.status, 403);
+  assert.equal((await disabled.json()).error?.code, 'SOURCE_DISABLED_BY_POLICY');
   check('production refuses the synthetic source even when its flag is enabled');
   await stop();
   const result = { ok: true, manifest, runtime: process.version, temporaryDatabase: dbPath, checks: outcomes };

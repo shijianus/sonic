@@ -238,6 +238,27 @@ curl --fail-with-body \
 
 引擎能服务根 `dist/` 的 SPA；只有执行 `build:engine` 不会生成前端。静态页面能打开，也不表示页面中的 API 已通过服务认证。
 
+### VPS 裸机部署（私有 Engine）
+
+从目标提交的干净工作树按锁文件安装依赖。更新版本时同时构建前端和 Engine，再执行隔离验收：
+
+```bash
+npm ci
+pnpm --dir player install --frozen-lockfile
+npm run build
+npm run build:engine
+node --experimental-sqlite scripts/verify-built-release.mjs
+```
+
+准备一个不纳入 Git 的服务环境文件。明确设置 `SONIC_ENV=staging|production`、`SONIC_ACCESS_MODE=open|invite`、`SONIC_CONTENT_POLICY=strict-allowlist` 和已审核的 `SONIC_ALLOWED_SOURCES`。为 `SONIC_RECOMMEND_DB_PATH` 使用绝对持久路径；如配置账号或邀请库，使用不同路径。邀请模式要求 `SONIC_ACCESS_DB_PATH`。三组服务、身份签名和 API Key 密钥分别使用独立的值。
+
+```bash
+node --env-file=/path/to/sonic-engine.env scripts/start-bare-metal-engine.mjs --check
+node --env-file=/path/to/sonic-engine.env scripts/start-bare-metal-engine.mjs
+```
+
+启动器校验源文件和构建清单，加载该版本的发布标识，并只监听 `127.0.0.1`。用服务管理器运行时，把第二条命令配置为启动命令。通过受信网关连接 Engine；真实浏览器播放、OAuth 和 API Key 撤销须通过配置了相应凭据及撤销存储的网关验收。
+
 ## 测试与质量检查
 
 ### 类型与 lint
