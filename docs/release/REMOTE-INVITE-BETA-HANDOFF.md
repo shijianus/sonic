@@ -58,6 +58,10 @@ SONIC_EXPECTED_STAGING_IMAGE_ID=sha256:<previous immutable image digest>
 
 这些值不得写入源码、报告、命令参数、浏览器 URL 或提交记录；远端脚本在缺少必要变量时应 fail closed。
 
+Staging Engine 默认仅启用 `synthetic`。在邀请门禁开启的同一候选发布上测试真实媒体时，可设置 `SONIC_STAGING_APPROVED_SOURCES`，按需从 `netease,qq,kugou,kuwo,amll,lrclib` 选择已获批准的来源。`python3 scripts/deploy-staging-engine.py --check-source-policy` 只打印会使用的内容策略与来源开关。保持 Pages 的受限访问门禁，并根据本次测试范围配置 Pages 白名单和真实 OAuth。
+
+候选 Engine 尝试启动后，部署失败会停止候选并保留当前 SQLite 数据与清除恢复保护。按回滚手册选用兼容版本和经过恢复保护验证的快照。
+
 
 
 在干净 checkout、受控临时数据和 Node/pnpm 锁定版本中执行：

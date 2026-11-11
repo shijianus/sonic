@@ -115,8 +115,14 @@ for (const width of [360, 390]) {
       const title = '完整曲名 Long title with every word visible — extended acoustic concert final movement'
       const artist = 'Sonic Acoustic Orchestra / 国际合作演出者 / ALongUnbrokenArtistIdentifierThatMustWrapWithoutOverflow'
       await page.route('**/api/sonic/search/nexus?**', route => route.fulfill({ json: { data: { tracks: [{ platformId: '9002', title, artist, duration: 20000, streamUrl: '/api/music/stream?id=9002' }], total: 1 } } }))
-      // Short deterministic lyrics keep this a metadata-layout test, not a lyric overflow test.
-      await page.route('**/api/sonic/lyrics/nexus?**', route => route.fulfill({ json: { data: { syncedLyrics: [{ startMs: 0, text: 'Fixture lyric' }] } } }))
+      await page.route('**/api/sonic/lyrics/nexus?**', route => route.fulfill({ json: {
+        brand: 'Sonic',
+        data: { syncedLyrics: [
+          { startMs: 0, text: 'Morning tide' },
+          { startMs: 7_000, text: 'Crossing the harbor' },
+          { startMs: 14_000, text: 'Lights on shore' },
+        ] },
+      } }))
       await page.goto('/#/search?q=release-mobile-long-title')
       await page.getByTestId('search-song-results').getByTestId('song-row-9002').click()
       await expectPlaying(page)
@@ -173,9 +179,22 @@ for (const width of [360, 390]) {
       await expectCompleteText(lyricsTitle, title)
       await expectCompleteText(dialog.getByText(artist, { exact: true }).filter({ visible: true }), artist)
       expect(await dialog.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
-      await testInfo.attach(`lyrics-complete-title-${width}`, { body: await page.screenshot({ path: testInfo.outputPath(`lyrics-complete-title-${width}.png`) }), contentType: 'image/png' })
       await controls.getByRole('button', { name: 'Pause', exact: true }).click()
       await expectPaused(page)
+      const lyricLines = dialog.locator('.lyrics-container .lyric-line')
+      await expect(lyricLines).toHaveCount(3)
+      const activeLyric = dialog.locator('.lyrics-container .lyric-line.current')
+      const progress = controls.getByRole('slider', { name: 'Playback progress', exact: true })
+      await progress.press('Home')
+      await expect(activeLyric).toContainText('Morning tide')
+      const bounds = await progress.boundingBox()
+      expect(bounds).not.toBeNull()
+      await progress.tap({ position: { x: bounds!.width / 2, y: bounds!.height / 2 } })
+      await expect.poll(async () => (await getAudio(page))?.currentTime ?? 0).toBeGreaterThan(9)
+      expect((await getAudio(page))?.currentTime ?? 0).toBeLessThan(11)
+      await expect(activeLyric).toContainText('Crossing the harbor')
+      await expect(activeLyric).toBeInViewport()
+      await testInfo.attach(`lyrics-complete-title-${width}`, { body: await page.screenshot({ path: testInfo.outputPath(`lyrics-complete-title-${width}.png`) }), contentType: 'image/png' })
     })
   })
 }

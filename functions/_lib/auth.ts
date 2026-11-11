@@ -698,7 +698,8 @@ export async function createSession(
     id: uid,
     email,
     name: userInfo.name || email.split('@')[0],
-    avatar: userInfo.avatar || `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(email)}`,
+    // The player renders the account's initial locally.
+    avatar: '',
     role,
     apiKey,
     createdAt: new Date(nowSec * 1000).toISOString(),
@@ -822,7 +823,7 @@ export async function verifyAuth(
       id: uid,
       email,
       name: email.split('@')[0],
-      avatar: `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(email)}`,
+      avatar: '',
       role: sanitizeRole(payload.role),
       apiKey,
       createdAt: new Date(payload.iat * 1000).toISOString(),

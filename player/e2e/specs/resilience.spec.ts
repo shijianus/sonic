@@ -1,6 +1,49 @@
 import { test, expect, getAudio, expectPlaying, expectPaused } from '../fixtures'
 import type { Page } from '@playwright/test'
 
+test.describe('cover flight with default motion', () => {
+  test.use({ reducedMotion: 'no-preference' })
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/#/playlist/123')
+    await page.getByTestId('song-row-9002').getByRole('heading').click()
+    await expectPlaying(page)
+    await expect(page.locator('.shared-element-clone')).toHaveCount(0)
+  })
+
+  test('pause cancels the selected song while the cover is in flight', async ({ page }) => {
+    // Dispatch both interactions in one browser turn, even on a slow CI worker.
+    const duringFlight = await page.evaluate(() => {
+      document.querySelector<HTMLElement>('[data-testid="song-row-9003"] h3')!.click()
+      const started = document.querySelectorAll('.shared-element-clone').length
+      document.querySelector<HTMLElement>('[data-testid="player-toggle"]')!.click()
+      return started
+    })
+    expect(duringFlight).toBe(1)
+    await expect(page.locator('.shared-element-clone')).toHaveCount(0)
+    // Allow media startup for a stale post-animation intent to surface.
+    await page.waitForTimeout(800)
+    expect((await getAudio(page))?.paused).toBe(true)
+    await expect(page.getByTestId('now-playing-title')).toHaveText('Test Song Three')
+    await expect(page.getByTestId('player-toggle')).toHaveAttribute('aria-label', 'Play')
+  })
+
+  test('rapid row selections followed by Next cannot be reversed by the cover flights', async ({ page }) => {
+    const duringFlights = await page.evaluate(() => {
+      document.querySelector<HTMLElement>('[data-testid="song-row-9001"] h3')!.click()
+      document.querySelector<HTMLElement>('[data-testid="song-row-9003"] h3')!.click()
+      const started = document.querySelectorAll('.shared-element-clone').length
+      document.querySelector<HTMLElement>('[data-testid="player-next"]')!.click()
+      return started
+    })
+    expect(duringFlights).toBe(2)
+    await expect(page.locator('.shared-element-clone')).toHaveCount(0)
+    await expectPlaying(page)
+    await expect(page.getByTestId('now-playing-title')).toHaveText('Test Song Four')
+    expect((await getAudio(page))?.src).toContain('id=9004')
+  })
+})
+
 async function holdOldTrackUrl(page: Page) {
   const matches = (url: URL) => url.pathname === '/api/song/url/v1' && url.searchParams.get('id') === '9001'
   let markRequested!: () => void

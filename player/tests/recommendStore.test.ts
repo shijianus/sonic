@@ -7,6 +7,14 @@ import { useLibraryStore } from '@/stores/modules/library'
 import { useAuthStore } from '@/stores/modules/auth'
 
 const erasedEventEpoch = 'a'.repeat(32)
+const consentKey = 'sonic:personalization-consent'
+const deviceKey = 'sonic:recommendation-device-id'
+
+function optedInStore() {
+  const store = useRecommendStore()
+  store.setPersonalizationEnabled(true)
+  return store
+}
 
 function erasedProfile(privacyMode = 'anonymous-opt-in') {
   return Response.json({
@@ -40,7 +48,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
   })
 
   it('开启个性化时自动生成合法的 anonId 并注入 X-Sonic-Anon-Id 与 X-Sonic-Context', () => {
-    const rec = useRecommendStore()
+    const rec = optedInStore()
     const lib = useLibraryStore()
     lib.toggleLikeSong({ id: 186016, name: '晴天', artist: '周杰伦', duration: 269000 })
 
@@ -52,14 +60,66 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
   })
 
   it('关闭个性化后立即返回 X-Sonic-Personalization: off 且不再附带 anonId 或上下文', () => {
-    const rec = useRecommendStore()
-    rec.ensureAnonId()
+    const rec = optedInStore()
     rec.setPersonalizationEnabled(false)
 
     const headers = rec.buildRequestHeaders(true)
     expect(headers).toEqual({ 'X-Sonic-Personalization': 'off' })
     expect(headers['X-Sonic-Anon-Id']).toBeUndefined()
     expect(headers['X-Sonic-Context']).toBeUndefined()
+  })
+
+  it('旧版自动开启不等于明确同意，保留旧匿名 ID 供画像删除', async () => {
+    const legacyId = 'anon_previous_release_id'
+    localStorage.setItem('recommend', JSON.stringify({ personalizationEnabled: true, anonId: legacyId }))
+    const rec = useRecommendStore()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile())
+
+    expect(rec.personalizationEnabled).toBe(false)
+    expect(rec.buildRequestHeaders()).toEqual({ 'X-Sonic-Personalization': 'off' })
+    expect(localStorage.getItem(deviceKey)).toBe(legacyId)
+    rec.recordEvent({ type: 'search', query: 'private legacy query' }, true)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(await rec.clearAllRecommendationProfile()).toBe(true)
+    expect(fetchSpy).toHaveBeenCalledExactlyOnceWith('/api/sonic/events', {
+      method: 'DELETE',
+      headers: { 'X-Sonic-Anon-Id': legacyId, 'X-Sonic-Erasure-Target': 'anonymous-opt-in' },
+    })
+    expect(localStorage.getItem(deviceKey)).toBe('')
+  })
+
+  it('另一标签页关闭时，即使 storage 事件未送达，pagehide 也会丢弃待发队列', () => {
+    const rec = optedInStore()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}))
+    rec.recordEvent({ type: 'search', query: 'queued before opt-out' })
+
+    localStorage.removeItem(consentKey)
+    window.dispatchEvent(new Event('pagehide'))
+    expect(rec.personalizationEnabled).toBe(false)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('跨标签关闭后立即重新开启不会恢复旧队列或失败中的旧请求', async () => {
+    const rec = optedInStore()
+    const prior = delayedResponse()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockReturnValueOnce(prior.promise)
+      .mockResolvedValueOnce(Response.json({}))
+    rec.recordEvent({ type: 'search', query: 'old in-flight' })
+    const writing = rec.flushEvents()
+    rec.recordEvent({ type: 'search', query: 'old queued' })
+
+    localStorage.removeItem(consentKey)
+    localStorage.setItem(consentKey, 'f'.repeat(24))
+    prior.finish(new Response(null, { status: 503 }))
+    await writing
+
+    rec.recordEvent({ type: 'search', query: 'new after opt-in' })
+    await rec.flushEvents()
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body)).events).toMatchObject([
+      { type: 'search', query: 'new after opt-in' },
+    ])
   })
 
   it('不感兴趣曲目支持标记、查询与撤销，并持久化在列表中', () => {
@@ -89,7 +149,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
       .spyOn(globalThis, 'fetch')
       .mockImplementation(async (_url, init) => init?.method === 'DELETE' ? erasedProfile() : Response.json({}))
 
-    const rec = useRecommendStore()
+    const rec = optedInStore()
     rec.dislikeSong({ id: 999, name: '不喜欢', artist: '某歌手' })
     expect(rec.dislikedCount).toBe(1)
 
@@ -106,8 +166,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
   it('推荐画像删除失败时保留本地画像和匿名身份以便重试', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('unavailable', { status: 503 }))
 
-    const rec = useRecommendStore()
-    rec.ensureAnonId()
+    const rec = optedInStore()
     const previousAnonId = rec.anonId
     rec.dislikeSong({ id: 1000, name: '保留', artist: '测试' })
 
@@ -126,7 +185,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
       const { events } = JSON.parse(String(init?.body))
       return events[0].track.id === 1 ? previousPost.promise : Response.json({})
     })
-    const rec = useRecommendStore()
+    const rec = optedInStore()
     const originalId = rec.ensureAnonId()
     rec.recordEvent({ type: 'favorite', track: { id: 1 } }, true)
     rec.recordEvent({ type: 'favorite', track: { id: 2 } })
@@ -163,12 +222,13 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
 
   it('匿名或账号身份变化后不发送旧队列', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}))
-    const rec = useRecommendStore()
+    const rec = optedInStore()
     const auth = useAuthStore()
     rec.recordEvent({ type: 'favorite', track: { id: 1 } })
-    rec.anonId = 'anon_replacement000001'
+    localStorage.setItem(deviceKey, 'anon_replacement000001')
     await rec.flushEvents()
     expect(fetchSpy).not.toHaveBeenCalled()
+    expect(rec.anonId).toBe('anon_replacement000001')
 
     auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
     auth.isAuthenticated = true
@@ -186,7 +246,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
       const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) =>
         init?.method === 'DELETE' ? erasedProfile() : pendingPost.promise
       )
-      const rec = useRecommendStore()
+      const rec = optedInStore()
       const originalId = rec.ensureAnonId()
       rec.recordEvent({ type: 'favorite', track: { id: 1 } }, true)
       const first = rec.clearAllRecommendationProfile()
@@ -229,7 +289,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
 
   it('清除账号画像时不发送访客 ID，保留独立的访客画像标识', async () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile('authenticated'))
-    const rec = useRecommendStore()
+    const rec = optedInStore()
     const guestId = rec.ensureAnonId()
     const auth = useAuthStore()
     auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
@@ -244,7 +304,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({
       brand: 'Sonic', data: { cleared: false, storageKind: 'memory', privacyMode: 'public', removedEvents: 0 },
     }))
-    const rec = useRecommendStore()
+    const rec = optedInStore()
     const originalId = rec.ensureAnonId()
 
     expect(await rec.clearAllRecommendationProfile()).toBe(false)
@@ -253,7 +313,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
 
   it('账号画像的成功响应不能确认访客画像删除', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile('authenticated'))
-    const rec = useRecommendStore()
+    const rec = optedInStore()
     const originalId = rec.ensureAnonId()
     rec.dislikeSong({ id: 1000, name: '保留', artist: '测试' })
 
@@ -265,9 +325,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
   it.each([502, 409])('事件发送遇到可重试的 HTTP %s 时整批回到队首', async (status) => {
     vi.useFakeTimers()
     try {
-      const rec = useRecommendStore()
-      rec.personalizationEnabled = true
-      rec.anonId = 'anon_testretry0000000000000a'
+      const rec = optedInStore()
 
       const postCalls: Array<{ url: string; body?: string }> = []
       vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any, init?: any) => {
@@ -305,7 +363,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
         brand: 'Sonic', error: { code: 'EVENT_INGEST_IDENTITY_MISMATCH' },
       }, { status: 409 }))
       .mockResolvedValueOnce(Response.json({ brand: 'Sonic', data: { accepted: 1 } }))
-    const rec = useRecommendStore()
+    const rec = optedInStore()
     const auth = useAuthStore()
     auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
     auth.isAuthenticated = true
@@ -330,7 +388,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
       .mockReturnValueOnce(conflict.promise)
       .mockReturnValueOnce(previousPost.promise)
       .mockResolvedValueOnce(Response.json({}))
-    const rec = useRecommendStore()
+    const rec = optedInStore()
 
     rec.recordEvent({ type: 'favorite', track: { id: 1 } })
     const first = rec.flushEvents()
@@ -362,7 +420,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     const fetchSpy = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(epochMismatch(eventEpoch, mode))
       .mockResolvedValueOnce(Response.json({}))
-    const rec = useRecommendStore()
+    const rec = optedInStore()
 
     rec.recordEvent({ type: 'favorite', track: { id: 1 } })
     await rec.flushEvents()
@@ -378,7 +436,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     vi.useFakeTimers()
     try {
       const rec = useRecommendStore()
-      rec.personalizationEnabled = false
+      expect(rec.personalizationEnabled).toBe(false)
       const fetchMock = vi.spyOn(globalThis, 'fetch')
 
       rec.recordEvent({ type: 'favorite', track: { id: 3, title: '演员', artist: '薛之谦' } })

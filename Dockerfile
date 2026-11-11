@@ -43,13 +43,10 @@ RUN npm ci
 COPY functions ./functions
 COPY server ./server
 COPY tsconfig.json ./
-RUN ./node_modules/.bin/esbuild server/index.ts \
-  --bundle \
-  --platform=node \
-  --target=node22 \
-  --format=esm \
-  --outfile=dist-server/index.mjs \
-  --banner:js="import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
+COPY scripts/build-engine.mjs scripts/release-artifacts.mjs scripts/release-inputs.mjs ./scripts/
+COPY scripts/recommend-recovery-guard.mjs ./scripts/
+COPY --from=frontend /app/player/dist/release.json ./dist/release.json
+RUN npm run build:engine -- --partial-docker-stage
 
 FROM node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914 AS runtime
 ARG SONIC_RELEASE_COMMIT=unknown
@@ -79,6 +76,7 @@ ENV SONIC_RECOMMEND_DB_PATH=/app/data/sonic-recommend.sqlite
 COPY --from=frontend /app/player/dist ./dist
 COPY --from=engine /app/dist-server ./dist-server
 COPY scripts/backup-recommend-db.mjs scripts/restore-recommend-db.mjs scripts/verify-observability-and-alerts.mjs ./scripts/
+COPY scripts/recommend-recovery-guard.mjs ./scripts/
 COPY favicon.png favicon.svg ./dist/
 COPY LICENSE THIRD_PARTY_NOTICES.md package.json ./
 RUN mkdir -p /app/data \

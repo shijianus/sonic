@@ -257,7 +257,7 @@ node --env-file=/path/to/sonic-engine.env scripts/start-bare-metal-engine.mjs --
 node --env-file=/path/to/sonic-engine.env scripts/start-bare-metal-engine.mjs
 ```
 
-启动器校验源文件和构建清单，加载该版本的发布标识，并只监听 `127.0.0.1`。用服务管理器运行时，把第二条命令配置为启动命令。通过受信网关连接 Engine；真实浏览器播放、OAuth 和 API Key 撤销须通过配置了相应凭据及撤销存储的网关验收。
+启动器核对源文件、前端和 Engine 产物的摘要及发布身份，并只监听 `127.0.0.1`。前端与 Engine 必须依次执行上述构建命令，以生成同一发布的产物记录。Engine 的健康端点报告构建时嵌入的发布身份。用服务管理器运行时，把第二条命令配置为启动命令。通过受信网关连接 Engine，真实浏览器播放、OAuth 和 API Key 撤销须通过配置了相应凭据及撤销存储的网关验收。
 
 ## 测试与质量检查
 
@@ -345,7 +345,7 @@ node scripts/prepare-pages-preview.mjs --promote-staging --deploy
 node scripts/verify-staging-live.mjs --stable > "$SONIC_PRODUCTION_ACCEPTANCE_FILE"
 ```
 
-在仓库外保存验收文件，并在稳定 Staging 的记录中补齐[发布清单](docs/release/RELEASE-CHECKLIST.md#pages-生产提升)要求的实测证据。设置生产项目、分支和环境后运行 `node scripts/deploy-pages.mjs`。脚本校验发布提交、源码摘要与 Pages 产物摘要，并在部署后从线上读取发布身份和安全配置。`npm run deploy` 会先重新构建，只有构建产物与已验收产物完全一致时才会继续。
+在仓库外保存验收文件，并在稳定 Staging 的记录中补齐[发布清单](docs/release/RELEASE-CHECKLIST.md#pages-生产提升)要求的实测证据。保留已验收的 `dist/`，设置生产项目、分支及 Pages 与 Engine 验证地址，再运行 `node scripts/deploy-pages.mjs`。上传前校验生产绑定、Engine 编译身份及持久存储，上传后再从实际 Pages 核对同一 Engine 和线上安全配置。
 
 Pages 项目、Secret、KV、`RATE_LIMITER`、OAuth 回调和 Tunnel/DNS 需在目标环境配置。
 
@@ -362,9 +362,9 @@ docker compose ps
 docker compose logs -f sonic-engine
 ```
 
-镜像分三阶段构建前端、打包引擎并以非 root 用户运行。Engine 默认绑定宿主 `127.0.0.1:8080`，SQLite 使用命名卷 `sonic-data:/app/data`；ncm-api 只加入 `sonic-internal` 网络。公开访问还需自己配置可信入口，不能把侧车直接暴露成公共网关。
+镜像分三阶段构建前端、打包引擎并以非 root 用户运行。Engine 默认绑定宿主 `127.0.0.1:8080`，SQLite 使用命名卷 `sonic-data:/app/data`。需要 NCM 时，在 `.env` 设置 `SONIC_NCM_API_URL=http://ncm-api:3000`，再执行 `docker compose --profile ncm up -d --build`。侧车只加入 `sonic-internal` 网络，健康状态可通过 Engine 的受保护健康端点核验。
 
-镜像基础标签为 `node:22-alpine`，不是 digest 固定的完全锁定供应链。`Dockerfile.ncm` 固定侧车包版本 `@neteasecloudmusicapienhanced/api@4.41.1`，构建仍需访问包源。
+两个镜像的 Node 基底都固定 digest。NCM 侧车以 `npm ci` 安装 `ncm-sidecar/package-lock.json` 中固定的 `4.41.1` 及传递依赖。
 
 备份、恢复与回滚见 [`docs/OPERATIONS.md`](docs/OPERATIONS.md) 和 [`docs/RUNBOOK-ROLLBACK.md`](docs/RUNBOOK-ROLLBACK.md)。`backup:db` 会创建文件；`restore:db` 会替换目标数据库，须按手册停机并先备份，不能作为无副作用的验证命令。
 

@@ -1,5 +1,6 @@
-import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { writeArtifactReceipt } from './release-artifacts.mjs'
 
 const root = process.cwd()
 const source = resolve(root, 'player/dist')
@@ -19,4 +20,6 @@ for (const file of ['favicon.png', 'favicon.svg']) {
   if (existsSync(candidate)) cpSync(candidate, resolve(target, file))
 }
 
+const manifest = JSON.parse(readFileSync(resolve(target, 'release.json'), 'utf8'))
+writeArtifactReceipt(target, 'frontend', manifest)
 console.log(`[build] copied ${source} -> ${target}`)

@@ -46,7 +46,7 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 1. 在完整解压目录、任何 Docker build **之前**执行带 `--index` 的核验；staging 构建脚本必须先调用此 Node-only helper。后续根目录已有运行结果时，可用 `node scripts/write-release-manifest.mjs --digest` 重新算全量源摘要，但这不能替代首次严格解压核验。
 2. 从同一 `release.json` 取 `baseCommit` → `SONIC_RELEASE_COMMIT`、`sourceDigest` → `SONIC_SOURCE_DIGEST`、`releaseId` → `SONIC_RELEASE_ID`、`buildTime` → `SONIC_BUILD_TIME`、`dirty` → `SONIC_RELEASE_DIRTY`，全部传给 Docker build；参见 [回滚手册 §2](../RUNBOOK-ROLLBACK.md#2-部署前强制检查清单)。不得把新构建时间/旧 SHA 拼接成另一份身份。
 3. Docker 前端 stage 只有 `player` 和 manifest helpers。`--partial-docker-stage` 明确只复制传入身份并输出警告，不冒充全源码摘要对比；普通 writer（包括 `--digest`）始终重算并核对任何传入摘要。
-4. 两份 Dockerfile 使用已在 2026-11-02 staging 构建验证的同一 `node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914`，不是升级基底。前端 frozen pnpm lock、引擎 `npm ci`。NCM 侧车顶层包固定 `4.41.1`，但全局 npm 安装没有独立传递依赖锁；不能宣称侧车逐字节可复现，发布时另存已构建侧车镜像 digest。
+4. 两份 Dockerfile 使用已在 2026-11-02 staging 构建验证的同一 `node:22-alpine@sha256:fe4f6d74e20370acb04ad889077d14d0f64a9c8ea6a42bc60cddf1e844699914`。前端 frozen pnpm lock、引擎 `npm ci`。NCM 侧车从独立的 `ncm-sidecar/package-lock.json` 安装 `4.41.1` 与传递依赖。启用 `ncm` profile 时核对 Engine 报告的侧车健康状态并保留侧车镜像 digest。
 5. `docker-compose.yml` 的两个 build context 都是包根目录，两份 Dockerfile 必须存在。仅做结构验证可用 `docker compose --env-file /dev/null config --no-interpolate --no-env-resolution --quiet`，不读取 `.env`。真实 build/run 需运维在源码包之外保管并按部署方式提供配置/密钥；不要把配置回打入包。
 6. 构建后核对 OCI labels、前端 `release.json`、Engine health 的五个身份值。安装/编译通过不等于 UI、音频、真实上游或当前服务回滚通过；相应浏览器和运行环境证据单列。
 
@@ -89,9 +89,9 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 | # | 检查项 | 结果 | 所需输入 |
 |---|---|---|---|
 | C1 | 真实 OAuth 登录/回调/刷新/退出/撤销 | NOT RUN | 测试账号 + Staging |
-| C2 | 真实 CDN Range/206、Seek、暂停恢复 | PARTIAL | 第一方 CC0 合成源经真实 Pages→Tunnel→Engine 200/206/416 逐字节 PASS；商业 CDN BLOCKED（待授权） |
+| C2 | 真实 CDN Range/206、Seek、暂停恢复 | PARTIAL | 历史第一方 CC0 合成源已验证 200/206/416；当前候选须逐个验收启用的获准音频源 |
 | C3 | 真实 403/429/断网降级 | PASS（合成故障注入） | `syn-fault-403/429/500/timeout` 实测 403/429/502/504 |
-| C4 | 逐源音源/歌词/封面授权 | BLOCKED | 负责人/法务书面确认未到位；已 `strict-allowlist` 服务端强制关闭 |
+| C4 | 逐源音源/歌词/封面授权 | 部署核验待完成 | 2026-11-05 已记录负责人批准的范围；核对归档文件、实际生产白名单和获准样本，见 [内容来源矩阵](../CONTENT-LICENSING-MATRIX.md) |
 | C5 | Staging 部署与版本 SHA 一致 | PASS（agy 环境） | `sonic-staging.pages.dev`；`X-Sonic-Release`/`releaseCommit` 等于部署 SHA |
 | C6 | 应用版本回滚演练（RTO/RPO） | PASS（agy 环境） | 回滚 RTO 2,406 ms、前向恢复 1,756 ms、RPO 0 |
 | C7 | 监控/告警（5xx/P95/健康/存储） | PASS（agy 环境） | metrics 端点 + 脱敏 + Webhook 实测送达 |
@@ -112,13 +112,13 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 - [ ] Pages 环境不得设置 `SONIC_RUNTIME=linux-engine`；该变量只属于 VPS Engine。
 - [ ] 多 isolate Pages 生产必须绑定 `RATE_LIMITER`；生产默认要求分布式限流，缺失时 API 与 health 会 fail-closed（503），不得依赖 isolate 内存限流。
 - [ ] 交付后真实环境验收按根目录 `CHECKLIST.log` 执行；完整管理员后台、配额/封禁/审计等滥用治理由 Epomail 统一开发并签字。
-- [ ] 生产部署必须设置 `SONIC_DEPLOY_VERIFY_URL`（线上域名）并保留 `SONIC_ENGINE_SECRET`，部署后脚本会核对 `/release.json`、`X-Sonic-Release` 与 health 的 release/contentPolicy/access 五元组；无法验证时不得上线。
+- [ ] 设置 `SONIC_DEPLOY_VERIFY_URL`（生产 Pages）和 `SONIC_DEPLOY_VERIFY_ENGINE_URL`（生产 Engine），均为不同的 HTTPS origin。核对 Tunnel connector 在线和 Engine 私有健康检查，并准备读取目标 Pages 项目配置的 Cloudflare 凭据。
 - [ ] 生产/内测环境配置 `SONIC_SECRET`、`SONIC_ENGINE_SECRET`（≥32 字符，随机）。
 - [ ] 确认 `SONIC_ENABLE_UNBLOCK=0`、`SONIC_ENABLE_GDSTUDIO=0`、`SONIC_ENABLE_LYRIVA=0`。
 - [ ] 仅启用已授权音源；未授权源不可达。
 - [ ] 内测访问控制生效（Access/Basic Auth/IP 白名单），`robots`/响应头禁止索引。
 - [ ] 若启用 Shijianus-Blog 随身听桥接，构建时必须设置 `VITE_SONIC_BRIDGE_ORIGINS=https://<blog-origin>`；未设置时跨站桥接按安全默认拒绝（只允许同源）。
-- [ ] 公测前确认事件写入配额生效（每 IP 4,000/min、每匿名 subject 600/min，超出 429）。
+- [ ] 公测前确认持久事件写入配额按可信客户端 IP 和已验证身份独立生效（每 IP 4,000/min、每身份 600/min，超出 429）。公开模式的事件应被忽略且不占用持久事件配额。
 - [ ] OAuth 未验收时隐藏登录入口，关闭需身份的写操作。
 - [ ] 备份当前 SQLite，记录备份路径与校验结果。
 - [ ] 记录上一可回滚版本 SHA 与构建产物位置。
@@ -127,16 +127,16 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 ### Pages 生产提升
 
 1. 在独立预览部署并运行 `verify-staging-live.mjs`，将输出存到仓库外，用 `SONIC_STAGING_ACCEPTANCE_FILE` 指定该记录。用 `prepare-pages-preview.mjs --promote-staging --deploy` 将同一份 `dist/` 提升到稳定 Staging。
-2. 在稳定 Staging 运行 `verify-staging-live.mjs --stable`，将输出存到 `SONIC_PRODUCTION_ACCEPTANCE_FILE` 指定的仓库外路径。保留输出字段，并在 `productionChecks` 下为以下四项分别填写 `{ "ok": true, "evidence": "受控验收记录的位置" }`。记录应对应本次发布的 `baseCommit`、`sourceDigest` 和 `pagesArtifactDigest`。
+2. 在稳定 Staging 运行 `verify-staging-live.mjs --stable`，将输出存到 `SONIC_PRODUCTION_ACCEPTANCE_FILE` 指定的仓库外路径。保留生成的 `engineRelease`、`engineErasureRecoveryVersion` 和 `eventEpochLiveVerified`。真实音源验收须在同一产物的邀请制 Staging 上显式配置 `SONIC_STAGING_APPROVED_SOURCES`，并核对 Pages 与 Engine 实际白名单。在 `productionChecks` 下为以下四项分别填写 `{ "ok": true, "evidence": "受控验收记录的位置" }`。记录应对应本次发布的 `baseCommit`、`sourceDigest` 和 `pagesArtifactDigest`。
 
    | 字段 | 验收 |
    | --- | --- |
    | `oauthLoginAndRevocation` | 真实 OAuth 登录、退出与撤销 |
    | `authorizedMediaPlaybackAndSeek` | 获准音源起播、拖动和 `Range 206/416` |
    | `lyricsSync` | 歌词随播放及拖动同步 |
-   | `imageAndSqliteRollback` | 恢复上一镜像和对应 SQLite 快照并核对数据 |
+   | `imageAndSqliteRollback` | 使用保留清除保护的配套镜像和可验证快照回滚，确认已清除事件和旧批次保持不可用 |
 
-3. 显式设置 `CF_PAGES_PROJECT`、`CF_PAGES_BRANCH`、`SONIC_DEPLOY_VERIFY_URL`（生产 HTTPS origin）和上面的生产环境设置。保留原 `dist/`，运行 `node scripts/deploy-pages.mjs`。脚本会在上线前校验接受记录，在上线后检查实际身份、访问模式、内容白名单、分布式限流和匿名鉴权。如果上线后校验失败，按回滚手册恢复上一版本。
+3. 准备候选 Engine 并核对其编译身份和私有健康检查。设置 `CF_PAGES_PROJECT`、`CF_PAGES_BRANCH`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN` 和上述两个验证 origin。保留已验收的 `dist/`，运行 `node scripts/deploy-pages.mjs`。脚本先核对验收记录、目标项目生产分支和 Engine 绑定，再直接验证 Engine。上传后会重新验证 Engine，并确认实际 Pages 能访问同一 Engine，同时检查访问模式、白名单、分布式限流和匿名鉴权。上传后校验失败时按回滚手册恢复兼容版本。
 
 ## E. 部署后冒烟（真实 HTTP）
 

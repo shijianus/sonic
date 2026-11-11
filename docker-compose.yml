@@ -1,5 +1,6 @@
 services:
   ncm-api:
+    profiles: [ncm]
     build:
       context: .
       dockerfile: Dockerfile.ncm
@@ -44,9 +45,6 @@ services:
     init: true
     # Runtime drains for 60s; keep 15s for final SQLite close and process exit.
     stop_grace_period: 75s
-    depends_on:
-      ncm-api:
-        condition: service_healthy
     env_file:
       - .env
     environment:
@@ -64,7 +62,8 @@ services:
       SONIC_SECRET: "${SONIC_SECRET:?Set a private signing secret}"
       PORT: "8080"
       HOST: "0.0.0.0"
-      SONIC_NCM_API_URL: "http://ncm-api:3000"
+      SONIC_NCM_API_URL: "${SONIC_NCM_API_URL:-}"
+      SONIC_NCM_REQUIRED: "${SONIC_NCM_REQUIRED:-0}"
       SONIC_CONTENT_POLICY: "${SONIC_CONTENT_POLICY:-strict-allowlist}"
       SONIC_ALLOWED_SOURCES: "${SONIC_ALLOWED_SOURCES:-netease,qq,kugou,kuwo,amll,lrclib}"
       SONIC_ENABLE_OAUTH: "${SONIC_ENABLE_OAUTH:-1}"

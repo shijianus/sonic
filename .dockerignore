@@ -11,6 +11,9 @@
 !THIRD_PARTY_NOTICES.md
 !favicon.png
 !favicon.svg
+!ncm-sidecar/
+!ncm-sidecar/package.json
+!ncm-sidecar/package-lock.json
 !functions/
 !functions/**
 !server/
@@ -33,8 +36,11 @@
 !scripts/
 !scripts/write-release-manifest.mjs
 !scripts/release-inputs.mjs
+!scripts/build-engine.mjs
+!scripts/release-artifacts.mjs
 !scripts/backup-recommend-db.mjs
 !scripts/restore-recommend-db.mjs
+!scripts/recommend-recovery-guard.mjs
 !scripts/verify-observability-and-alerts.mjs
 
 # Never re-include secrets, dependency caches or generated output via source dirs.

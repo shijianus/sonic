@@ -60,6 +60,7 @@ const clearAllLocalData = async () => {
     let localStorageOk = true
     let musicDatabaseOk = true
     try {
+      recommendStore.setPersonalizationEnabled(false)
       localStorage.clear()
       sessionStorage.clear()
     } catch {
@@ -128,6 +129,7 @@ const clearAllLocalData = async () => {
         <button
           type="button"
           role="switch"
+          :aria-label="t('recommend.privacy.personalizationTitle')"
           :aria-checked="recommendStore.personalizationEnabled"
           @click="handleTogglePersonalization"
           class="border-glass relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors"

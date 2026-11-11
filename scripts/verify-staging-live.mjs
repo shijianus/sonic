@@ -270,24 +270,43 @@ async function selectDeployment(apiPath, manifest, suppliedUrl, stable = false) 
   passed('Cloudflare confirms an isolated preview branch for this manifest and commit');
   return { base, branch, branchUrl: `https://${branch}.sonic-staging.pages.dev`, deploymentId: deployment.id };
 }
-async function verifyRelease(base, engine, headers, secrets, manifest) {
+export async function verifyRelease(base, engine, headers, secrets, manifest) {
   let response = await request(`${base}/release.json`, { headers });
   ensure(response.status === 200 && response.headers.get('x-sonic-release') === manifest.releaseId, 'FRONTEND_RELEASE_RESPONSE_FAILED');
   ensure(frontendMatches(await json(response), manifest), 'FRONTEND_RELEASE_MANIFEST_MISMATCH');
   response = await request(`${base}/api/sonic/engine/health`, { headers: { ...headers, 'X-Sonic-Engine-Key': secrets.SONIC_ENGINE_SECRET } });
   ensure(response.status === 200 && response.headers.get('x-sonic-release') === manifest.releaseId, 'EDGE_HEALTH_OR_RELEASE_HEADER_FAILED');
   const edgeHealth = await json(response);
-  ensure(edgeHealth.runtime === 'cf-pages' && releaseMatches(edgeHealth.release, manifest), 'EDGE_RELEASE_IDENTITY_MISMATCH');
+  ensure(edgeHealth.ok === true && edgeHealth.runtime === 'cf-pages' && ['staging', 'preview'].includes(edgeHealth.release?.environment) &&
+    releaseMatches(edgeHealth.release, manifest), 'EDGE_RELEASE_IDENTITY_MISMATCH');
   const pagesArtifactDigest = edgeHealth.release?.pagesArtifactDigest;
   ensure(/^[a-f0-9]{64}$/.test(pagesArtifactDigest || ''), 'EDGE_PAGES_ARTIFACT_DIGEST_MISSING');
+  response = await request(`${engine}/api/sonic/engine/health`);
+  ensure(response.status === 401 && (await json(response)).error?.code === 'ENGINE_UNAUTHORIZED', 'ENGINE_ANONYMOUS_GATE_FAILED');
   const engineHealth = await health(engine, secrets);
-  ensure(releaseMatches(engineHealth.release, manifest), 'ENGINE_RELEASE_IDENTITY_MISMATCH');
+  const release = engineHealth.release;
+  ensure(release?.environment === 'staging' && release.engineIdentityCompiled === true && releaseMatches(release, manifest), 'ENGINE_RELEASE_IDENTITY_MISMATCH');
+  ensure(engineHealth.recommendEngine.persistenceExpected === true && engineHealth.recommendEngine.storageHealthy === true &&
+    engineHealth.recommendEngine.disk?.writable === true, 'STAGING_ENGINE_STORAGE_NOT_WRITABLE');
+  ensure(engineHealth.recommendEngine.erasureRecoveryVersion === 1, 'STAGING_ENGINE_ERASURE_RECOVERY_UNVERIFIED');
   ensure(engineHealth.readiness?.identity?.ok === true && engineHealth.readiness.identity.configured === true && engineHealth.readiness.identity.required === true, 'ENGINE_IDENTITY_NOT_READY');
   ensure(edgeHealth.readiness?.identity?.ok === true && edgeHealth.readiness.identity.configured === true, 'EDGE_IDENTITY_NOT_READY');
   response = await request(`${engine}/release.json`, { headers: { 'X-Sonic-Engine-Key': secrets.SONIC_ENGINE_SECRET } });
   ensure(response.status === 200 && frontendMatches(await json(response), manifest), 'ENGINE_FRONTEND_MANIFEST_MISMATCH');
-  passed('preview headers, frontend manifest, compiled Edge identity and durable Engine identity match');
-  return pagesArtifactDigest;
+  passed('Pages and Engine release identities match and direct Engine health is private and durable');
+  return {
+    pagesArtifactDigest,
+    engineStorage: engineHealth.recommendEngine.storageKind,
+    engineErasureRecoveryVersion: engineHealth.recommendEngine.erasureRecoveryVersion,
+    engineRelease: {
+      baseCommit: release.releaseCommit,
+      sourceDigest: release.sourceDigest,
+      releaseId: release.releaseId,
+      buildTime: release.buildTime,
+      dirty: release.dirty,
+      engineIdentityCompiled: release.engineIdentityCompiled,
+    },
+  };
 }
 async function verifySearchAndMedia(base, headers, manifest) {
   let response = await request(`${base}/api/music/search?q=Sonic&source=synthetic&count=5`, { headers });
@@ -329,45 +348,79 @@ function signIdentity(secrets, subject, mode, method, path, secretOverride) {
 function subjectFor(prefix, raw) {
   return prefix + '_' + createHash('sha256').update(`sonic-subj-v1:${prefix}:${raw}`).digest('hex').slice(0, 24);
 }
-async function verifyEvents(base, engine, headers, secrets) {
+function isEventEpoch(value) {
+  return typeof value === 'string' && /^[a-f0-9]{32}$/.test(value);
+}
+async function verifyErasureEpoch(send, readEngine, priorEpoch, eventPayload, privacyMode) {
+  const delayed = eventPayload('delayed', priorEpoch);
+  const { data: erased } = await send({ method: 'DELETE' });
+  ensure(erased?.cleared === true && erased.removedEvents === 1 && erased.storageKind === 'sqlite' &&
+    isEventEpoch(erased.eventEpoch) && erased.eventEpoch !== priorEpoch, 'DURABLE_ERASURE_EPOCH_NOT_ROTATED');
+  const { data: stateAfterErase } = await readEngine();
+  ensure(stateAfterErase?.totalEvents === 0 && stateAfterErase.eventEpoch === erased.eventEpoch, 'ERASURE_EPOCH_NOT_PERSISTED');
+
+  const rejected = await send({ method: 'POST', body: delayed, status: 409 });
+  ensure(rejected.error?.code === 'EVENT_EPOCH_MISMATCH' && rejected.data?.eventEpoch === erased.eventEpoch &&
+    rejected.data.privacyMode === privacyMode, 'STALE_EVENT_EPOCH_NOT_REJECTED');
+  ensure((await readEngine()).data?.totalEvents === 0, 'STALE_EVENT_MUTATED_ERASED_SUBJECT');
+
+  const current = eventPayload('current', erased.eventEpoch);
+  const accepted = await send({ method: 'POST', body: current });
+  ensure(accepted.data?.accepted === 1 && accepted.data?.storageKind === 'sqlite' &&
+    accepted.meta?.via === 'local-engine', 'CURRENT_EVENT_EPOCH_NOT_ACKNOWLEDGED');
+  const { data: final } = await readEngine();
+  ensure(final?.totalEvents === 1 && final.eventEpoch === erased.eventEpoch &&
+    final.recentQueries?.includes(current.events[0].query) && !final.recentQueries.includes(delayed.events[0].query), 'CURRENT_EVENT_EPOCH_NOT_PERSISTED');
+}
+
+export async function verifyEvents(base, engine, headers, secrets) {
   const run = randomBytes(12).toString('hex');
   const subjects = [`anon_live_${run}_a`, `anon_live_${run}_b`];
   const queries = [`live-${run}-a`, `live-${run}-b`];
   const engineHeaders = { 'X-Sonic-Engine-Key': secrets.SONIC_ENGINE_SECRET };
-  async function events(origin, subject, method = 'GET', body, extra = {}, query = '') {
+  async function events(origin, subject, { method = 'GET', body, extra = {}, query = '', status = 200 } = {}) {
     const path = '/api/sonic/events' + query;
-    const directIdentity = origin === engine ? {
-      'X-Sonic-Verified-Identity': signIdentity(secrets, subjectFor('anon', subject), 'anonymous-opt-in', method, path),
-      'X-Sonic-Identity-Required': '1',
-    } : {};
+    const identity = origin === base
+      ? { ...headers, 'X-Sonic-Anon-Id': subject, 'X-Sonic-Personalization': 'on' }
+      : { ...engineHeaders,
+          'X-Sonic-Verified-Identity': signIdentity(secrets, subjectFor('anon', subject), 'anonymous-opt-in', method, path),
+          'X-Sonic-Identity-Required': '1' };
     const response = await request(`${origin}${path}`, {
       method,
-      headers: { ...(origin === base ? headers : engineHeaders), ...directIdentity, 'X-Sonic-Anon-Id': subject, 'X-Sonic-Personalization': 'on', ...(body ? { 'Content-Type': 'application/json' } : {}), ...extra },
+      headers: { ...identity, ...(body ? { 'Content-Type': 'application/json' } : {}), ...extra },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-    ensure(response.status === 200, 'EVENTS_HTTP_FAILED');
+    ensure(response.status === status, status === 409 ? 'STALE_EVENT_EPOCH_NOT_REJECTED' : 'EVENTS_HTTP_FAILED');
     ensure(/private/.test(response.headers.get('cache-control') || '') && /no-store/.test(response.headers.get('cache-control') || ''), 'EVENTS_PRIVACY_CACHE_FAILED');
-    return json(response);
+    const value = await json(response);
+    ensure(value.brand === 'Sonic', 'EVENTS_RESPONSE_INVALID');
+    return value;
   }
-  const payload = index => ({ events: [{ type: 'search', query: queries[index], eventId: `live_event_${run}` }] });
-  let cleanupFailed = false;
-  let verified = false;
+  const payload = (index, eventEpoch, suffix = '') => ({
+    eventEpoch,
+    events: [{ type: 'search', query: `${queries[index]}${suffix}`, eventId: `live_event_${run}${suffix}` }],
+  });
+  const epochs = [];
+  const ingestTarget = { 'X-Sonic-Event-Target': 'anonymous-opt-in' };
+  const erasureTarget = { 'X-Sonic-Erasure-Target': 'anonymous-opt-in' };
   try {
     for (const subject of subjects) {
       const value = await events(base, subject);
-      ensure(value.data?.totalEvents === 0 && value.data?.privacyMode === 'anonymous-opt-in' && value.data?.storageKind === 'sqlite', 'NEW_SUBJECT_NOT_EMPTY_OR_DURABLE');
+      ensure(value.data?.totalEvents === 0 && value.data?.privacyMode === 'anonymous-opt-in' && value.data?.storageKind === 'sqlite' &&
+        (value.data.eventEpoch === null || isEventEpoch(value.data.eventEpoch)), 'NEW_SUBJECT_NOT_EMPTY_OR_DURABLE');
+      epochs.push(value.data.eventEpoch);
     }
-    const ignored = await events(base, subjects[0], 'POST', payload(0), { 'X-Sonic-Personalization': 'off' });
+    const ignored = await events(base, subjects[0], { method: 'POST', body: payload(0, epochs[0]), extra: { 'X-Sonic-Personalization': 'off' } });
     ensure(ignored.data?.accepted === 0 && ignored.data?.ignoredByPrivacy === 1 && ignored.data?.storageKind === 'none', 'EXPLICIT_CONSENT_OPT_OUT_FAILED');
     for (const query of ['?personalize=0', '?personalization=off', '?personalize=on&personalization=false']) {
-      const optedOut = await events(base, subjects[0], 'POST', payload(0), {}, query);
+      const optedOut = await events(base, subjects[0], { method: 'POST', body: payload(0, epochs[0]), query });
       ensure(optedOut.data?.accepted === 0 && optedOut.data?.ignoredByPrivacy === 1 && optedOut.data?.privacyMode === 'public', 'QUERY_CONSENT_HOP_FAILED');
     }
     for (let index = 0; index < subjects.length; index++) {
-      const accepted = await events(base, subjects[index], 'POST', payload(index));
+      const accepted = await events(base, subjects[index], { method: 'POST', body: payload(index, epochs[index]), extra: ingestTarget });
       ensure(accepted.data?.accepted === 1 && accepted.data?.storageKind === 'sqlite' && accepted.meta?.via === 'local-engine', 'EVENT_NOT_ACKNOWLEDGED_BY_DURABLE_ENGINE');
     }
-    const retry = await events(base, subjects[0], 'POST', payload(0));
+    const retry = await events(base, subjects[0], { method: 'POST', body: payload(0, epochs[0]), extra: ingestTarget });
     ensure(retry.data?.accepted === 0 && retry.data?.deduplicated === 1 && retry.data?.storageKind === 'sqlite', 'EVENT_RETRY_IDEMPOTENCY_FAILED');
     for (let index = 0; index < subjects.length; index++) {
       for (const origin of [base, engine]) {
@@ -375,26 +428,30 @@ async function verifyEvents(base, engine, headers, secrets) {
         ensure(value.data?.totalEvents === 1 && value.data?.storageKind === 'sqlite' && value.data?.recentQueries?.includes(queries[index]) && !value.data.recentQueries.includes(queries[1 - index]), 'EVENT_SUBJECT_ISOLATION_OR_ENGINE_PARITY_FAILED');
       }
     }
-    const cleared = await events(base, subjects[0], 'DELETE');
-    ensure(cleared.data?.cleared === true && cleared.data?.removedEvents === 1 && cleared.data?.storageKind === 'sqlite', 'DURABLE_SUBJECT_DELETE_FAILED');
-    ensure((await events(engine, subjects[0])).data?.totalEvents === 0 && (await events(engine, subjects[1])).data?.totalEvents === 1, 'DELETE_CROSSED_SUBJECT_BOUNDARY');
-    verified = true;
+    await verifyErasureEpoch(
+      options => events(base, subjects[0], { ...options, extra: options.method === 'DELETE' ? erasureTarget : ingestTarget }),
+      () => events(engine, subjects[0]),
+      epochs[0],
+      (label, epoch) => payload(0, epoch, `-${label}`),
+      'anonymous-opt-in',
+    );
+    ensure((await events(engine, subjects[1])).data?.totalEvents === 1, 'DELETE_CROSSED_SUBJECT_BOUNDARY');
   } finally {
     // These fresh random subjects belong exclusively to this run; never delete existing tester data.
+    let cleanupFailed = false;
     for (const subject of subjects) {
       try {
-        const result = await events(engine, subject, 'DELETE');
+        const result = await events(engine, subject, { method: 'DELETE', extra: erasureTarget });
         ensure(result.data?.cleared === true && result.data?.storageKind === 'sqlite', 'TEST_SUBJECT_CLEANUP_FAILED');
         ensure((await events(engine, subject)).data?.totalEvents === 0, 'TEST_SUBJECT_CLEANUP_FAILED');
       } catch { cleanupFailed = true; }
     }
     ensure(!cleanupFailed, 'TEST_SUBJECT_CLEANUP_FAILED');
   }
-  ensure(verified, 'LIVE_EVENTS_VERIFICATION_FAILED');
-  passed('consent, SQLite acknowledgements, two-subject isolation, retry deduplication and authoritative deletion');
+  passed('anonymous consent, durable isolation, deduplication and erasure epoch verified through Pages and Engine');
   passed('temporary live-test subjects deleted and absence confirmed directly on Engine');
 }
-async function verifyAuthenticatedIdentity(base, engine, headers, secrets) {
+export async function verifyAuthenticatedIdentity(base, engine, headers, secrets) {
   ensure(secrets.SONIC_SECRET && secrets.SONIC_ENGINE_IDENTITY_SECRET, 'AUTHENTICATED_STAGING_KEYS_MISSING');
   const id = randomBytes(12).toString('hex');
   const email = `staging-validation-${id}@example.invalid`;
@@ -406,34 +463,43 @@ async function verifyAuthenticatedIdentity(base, engine, headers, secrets) {
   const input = `sonic_live_v2.${header}.${payload}`;
   const token = input + '.' + createHmac('sha256', secrets.SONIC_SECRET).update(input).digest('base64url');
   const path = '/api/sonic/events';
-  async function call(origin, method = 'GET', body) {
-    const auth = origin === base ? { ...headers, 'X-Sonic-Key': token } : {
+  async function call(origin, { method = 'GET', body, status = 200 } = {}) {
+    const auth = origin === base ? { ...headers, 'X-Sonic-Key': token,
+      ...(method === 'POST' ? { 'X-Sonic-Event-Target': `account:test_${id}` } : {}),
+      ...(method === 'DELETE' ? { 'X-Sonic-Erasure-Target': `account:test_${id}` } : {}),
+    } : {
       'X-Sonic-Engine-Key': secrets.SONIC_ENGINE_SECRET,
       'X-Sonic-Verified-Identity': signIdentity(secrets, subject, 'authenticated', method, path),
       'X-Sonic-Identity-Required': '1',
     };
     const response = await request(origin + path, { method, headers: { ...auth, 'Content-Type': 'application/json' }, ...(body ? { body: JSON.stringify(body) } : {}) });
-    ensure(response.status === 200, 'AUTHENTICATED_HOP_HTTP_FAILED');
+    ensure(response.status === status, status === 409 ? 'STALE_EVENT_EPOCH_NOT_REJECTED' : 'AUTHENTICATED_HOP_HTTP_FAILED');
+    ensure(/private/.test(response.headers.get('cache-control') || '') && /no-store/.test(response.headers.get('cache-control') || ''), 'EVENTS_PRIVACY_CACHE_FAILED');
     const value = await json(response);
-    ensure(value.data?.privacyMode === 'authenticated' && value.data?.storageKind === 'sqlite', 'AUTHENTICATED_HOP_DOWNGRADED');
-    return value.data;
+    ensure(value.brand === 'Sonic' && value.data?.privacyMode === 'authenticated' &&
+      (status !== 200 || value.data?.storageKind === 'sqlite'), 'AUTHENTICATED_HOP_DOWNGRADED');
+    return value;
   }
+  const eventPayload = (label, eventEpoch) => ({ eventEpoch, events: [{
+    type: 'search', query: `authenticated-staging-${id}-${label}`, eventId: `authenticated_${id}_${label}`,
+  }] });
   try {
-    ensure((await call(base)).totalEvents === 0, 'AUTH_TEST_SUBJECT_NOT_EMPTY');
-    const posted = await call(base, 'POST', { events: [{ type: 'search', query: 'authenticated-staging-' + id, eventId: 'authenticated_' + id }] });
-    ensure(posted.accepted === 1, 'AUTH_TEST_WRITE_NOT_ACKNOWLEDGED');
-    ensure((await call(engine)).totalEvents === 1, 'AUTH_TEST_ENGINE_SUBJECT_MISMATCH');
-    ensure((await call(base, 'DELETE')).cleared === true && (await call(engine)).totalEvents === 0, 'AUTH_TEST_ERASURE_FAILED');
+    const { data: initial } = await call(base);
+    ensure(initial.totalEvents === 0 && (initial.eventEpoch === null || isEventEpoch(initial.eventEpoch)), 'AUTH_TEST_SUBJECT_NOT_EMPTY');
+    const posted = await call(base, { method: 'POST', body: eventPayload('initial', initial.eventEpoch) });
+    ensure(posted.data.accepted === 1 && posted.meta?.via === 'local-engine', 'AUTH_TEST_WRITE_NOT_ACKNOWLEDGED');
+    ensure((await call(engine)).data.totalEvents === 1, 'AUTH_TEST_ENGINE_SUBJECT_MISMATCH');
+    await verifyErasureEpoch(options => call(base, options), () => call(engine), initial.eventEpoch, eventPayload, 'authenticated');
     const wrong = await request(engine + path, { headers: {
       'X-Sonic-Engine-Key': secrets.SONIC_ENGINE_SECRET,
       'X-Sonic-Verified-Identity': signIdentity(secrets, subject, 'authenticated', 'GET', path, randomBytes(32).toString('hex')),
       'X-Sonic-Identity-Required': '1',
     } });
     ensure(wrong.status === 503 && (await json(wrong)).error?.code === 'ENGINE_IDENTITY_UNAVAILABLE', 'IDENTITY_MISMATCH_NOT_REJECTED');
-    passed('authenticated Edge and Engine subject parity, durable write/delete, and invalid signature rejection');
+    passed('authenticated subject parity, erasure epoch and invalid Engine signature rejection');
   } finally {
-    const cleanup = await call(engine, 'DELETE');
-    ensure(cleanup.cleared === true && (await call(engine)).totalEvents === 0, 'AUTH_TEST_CLEANUP_FAILED');
+    const { data: cleanup } = await call(engine, { method: 'DELETE' });
+    ensure(cleanup.cleared === true && (await call(engine)).data.totalEvents === 0, 'AUTH_TEST_CLEANUP_FAILED');
   }
 }
 
@@ -488,7 +554,7 @@ async function selfTest() {
 async function main() {
   const { values } = parseArgs({ options: { preflight: { type: 'boolean' }, stable: { type: 'boolean' }, 'serve-browser': { type: 'boolean' }, 'self-test': { type: 'boolean' }, manifest: { type: 'string' }, url: { type: 'string' }, help: { type: 'boolean' } }, strict: true });
   if (values.help) {
-    console.log('Read-only preflight: node scripts/verify-staging-live.mjs --preflight\nPost-deploy checks: node scripts/verify-staging-live.mjs [--manifest path] [--url isolated-preview-url]\nPost-deploy checks and one-use browser entry: node scripts/verify-staging-live.mjs --serve-browser\nLocal security checks: node scripts/verify-staging-live.mjs --self-test\nExisting Cloudflare auth and the fixed authorized SSH connection are required. No config or credentials are written. Live checks create and delete only two fresh random test subjects.');
+    console.log('Read-only preflight: node scripts/verify-staging-live.mjs --preflight\nPost-deploy checks: node scripts/verify-staging-live.mjs [--manifest path] [--url isolated-preview-url]\nStable Staging checks: node scripts/verify-staging-live.mjs --stable\nPost-deploy checks and one-use browser entry: node scripts/verify-staging-live.mjs --serve-browser\nLocal security checks: node scripts/verify-staging-live.mjs --self-test\nExisting Cloudflare auth and the fixed authorized SSH connection are required. No config or credentials are written. Live checks create fresh random subjects and verify their cleanup.');
     return;
   }
   if (values['self-test']) return selfTest();
@@ -510,7 +576,7 @@ async function main() {
     validateManifest(manifest);
     const target = await selectDeployment(project.apiPath, manifest, values.url, Boolean(values.stable));
     const headers = await verifyAccess(target.base, secrets, manifest);
-    const pagesArtifactDigest = await verifyRelease(target.base, project.metadata.engineUrl, headers, secrets, manifest);
+    const pairedRelease = await verifyRelease(target.base, project.metadata.engineUrl, headers, secrets, manifest);
     await verifySearchAndMedia(target.base, headers, manifest);
     ensure(project.metadata.independentIdentityBindingPresent && secrets.SONIC_ENGINE_IDENTITY_SECRET, 'INDEPENDENT_IDENTITY_NOT_DEPLOYED');
     await verifyEvents(target.base, project.metadata.engineUrl, headers, secrets);
@@ -523,14 +589,21 @@ async function main() {
       process.once('SIGINT', stop);
       process.once('SIGTERM', stop);
     } else {
-      console.log(JSON.stringify({ ok: true, mode: 'staging-live', ...target, ...manifest, pagesArtifactDigest, engineStorage: 'sqlite', independentIdentityBindingPresent: project.metadata.independentIdentityBindingPresent, authenticatedIdentityAssertionLiveVerified: true, oauthLoginVerified: false, authenticationLimitation: 'An ephemeral signed staging subject verifies the real identity hop; the external OAuth provider login is not exercised', checks }, null, 2));
+      console.log(JSON.stringify({
+        ok: true, mode: 'staging-live', ...target, ...manifest, ...pairedRelease,
+        independentIdentityBindingPresent: project.metadata.independentIdentityBindingPresent,
+        authenticatedIdentityAssertionLiveVerified: true, eventEpochLiveVerified: true, oauthLoginVerified: false,
+        authenticationLimitation: 'Ephemeral signed staging subjects exercise the identity hop. External OAuth requires separate verification.', checks,
+      }, null, 2));
     }
   } finally {
     for (const key of Object.keys(secrets)) secrets[key] = '';
   }
 }
-main().catch(error => {
-  const code = error instanceof SafeError ? error.message : 'STAGING_VERIFICATION_FAILED';
-  console.error(JSON.stringify({ ok: false, code, checks }, null, 2));
-  process.exitCode = 1;
-});
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    const code = error instanceof SafeError ? error.message : 'STAGING_VERIFICATION_FAILED';
+    console.error(JSON.stringify({ ok: false, code, checks }, null, 2));
+    process.exitCode = 1;
+  });
+}

@@ -28,12 +28,14 @@ function isStagingPreview(value) {
 
 export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest, { production = false } = {}) {
   const fail = () => { throw new Error('Accepted live Staging evidence must match this exact release and Pages output'); };
+  const identityMatches = value => ['baseCommit', 'releaseId', 'sourceDigest', 'buildTime', 'dirty'].every(key => value?.[key] === manifest[key]);
   if (evidence?.ok !== true || evidence.mode !== 'staging-live' ||
-      evidence.engineStorage !== 'sqlite' || evidence.independentIdentityBindingPresent !== true ||
-      evidence.authenticatedIdentityAssertionLiveVerified !== true ||
+      evidence.engineStorage !== 'sqlite' || evidence.engineErasureRecoveryVersion !== 1 || evidence.independentIdentityBindingPresent !== true ||
+      evidence.authenticatedIdentityAssertionLiveVerified !== true || evidence.eventEpochLiveVerified !== true ||
+      evidence.engineRelease?.engineIdentityCompiled !== true || !identityMatches(evidence.engineRelease) ||
       !/^[a-f0-9]{64}$/.test(pagesArtifactDigest) || evidence.pagesArtifactDigest !== pagesArtifactDigest ||
       !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(evidence.deploymentId || '') ||
-      !['baseCommit', 'releaseId', 'sourceDigest', 'buildTime', 'dirty'].every(key => evidence[key] === manifest[key])) fail();
+      !identityMatches(evidence)) fail();
   const checks = evidence.checks;
   if (!Array.isArray(checks) || checks.length < 12 ||
       checks.some(check => check?.ok !== true || typeof check.name !== 'string' || !check.name.trim()) ||

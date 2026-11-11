@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSession } from '../functions/_lib/auth';
 import type { AppEnv } from '../functions/_lib/types';
-import { onRequest as events } from '../functions/api/sonic/events';
+import { onRequest as events, resetEventIngestQuotaForTest } from '../functions/api/sonic/events';
 import { onRequest as health } from '../functions/api/sonic/engine/health';
 import { callLocalEngineJson, resetLocalEngineCircuitForTest } from '../functions/_lib/sonic/local-engine';
-import { ENGINE_IDENTITY_HEADER, ENGINE_IDENTITY_REQUIRED_HEADER, issueEngineIdentity, requireValidEngineIdentity, getEngineIdentityReadiness } from '../functions/_lib/sonic/engine-identity';
+import { ENGINE_IDENTITY_HEADER, ENGINE_IDENTITY_REQUIRED_HEADER, issueEngineIdentity, getEngineIdentityReadiness } from '../functions/_lib/sonic/engine-identity';
 import { resolveUserIdentity } from '../functions/_lib/sonic/recommend/identity';
 import { SqliteRecommendStore } from '../server/recommend-sqlite';
+import { sanitizeInboundHeaders } from '../server/request-adapter';
 import { MemoryRecommendStore } from '../functions/_lib/sonic/recommend/memory-store';
+import { verifyAuthenticatedIdentity, verifyEvents, verifyRelease } from '../scripts/verify-staging-live.mjs';
 
 const serviceKey = 'followup-service-key-at-least-32-characters-long';
 const assertionKey = 'followup-identity-key-at-least-32-characters-long';
@@ -32,30 +34,95 @@ function incoming(method = 'POST', query = '', headers: Record<string, string> =
 function engineHop(env: AppEnv) {
   return vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => events({ request: new Request(String(url), init), env }));
 }
-afterEach(() => { vi.restoreAllMocks(); resetLocalEngineCircuitForTest(); for (const store of stores.splice(0)) store.close(); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  resetLocalEngineCircuitForTest();
+  resetEventIngestQuotaForTest();
+  for (const store of stores.splice(0)) store.close();
+});
+
+describe('Live Staging release probes', () => {
+  const base = 'https://edge.followup.test';
+  const peer = 'https://engine.followup.test';
+  const secrets = { SONIC_ENGINE_SECRET: serviceKey, SONIC_ENGINE_IDENTITY_SECRET: assertionKey, SONIC_SECRET: userKey };
+
+  it('checks stale and current epochs through both identity modes and clears the test subjects', async () => {
+    const edgeEnv = edge();
+    const engineEnv = engine();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const request = new Request(String(url), init);
+      return events({ request, env: new URL(request.url).origin === base ? edgeEnv : engineEnv });
+    });
+    await verifyEvents(base, peer, {}, secrets);
+    await verifyAuthenticatedIdentity(base, peer, {}, secrets);
+    expect(engineEnv.RECOMMEND_STORE.getStats().eventCount).toBe(0);
+  });
+
+  it('rejects a stale event acknowledged by Pages and still clears temporary data', async () => {
+    const edgeEnv = edge();
+    const engineEnv = engine();
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const request = new Request(String(url), init);
+      const isPages = new URL(request.url).origin === base;
+      const response = await events({ request, env: isPages ? edgeEnv : engineEnv });
+      return isPages && response.status === 409 ? new Response(response.body, { headers: response.headers }) : response;
+    });
+    await expect(verifyEvents(base, peer, {}, secrets)).rejects.toThrow('STALE_EVENT_EPOCH_NOT_REJECTED');
+    expect(engineEnv.RECOMMEND_STORE.getStats().eventCount).toBe(0);
+  });
+
+  it('captures live release proof only for a private, compiled and writable matching Engine', async () => {
+    const manifest = { schemaVersion: 1, baseCommit: 'a'.repeat(40), sourceDigest: 'b'.repeat(64), releaseId: 'staging-check', buildTime: '2026-11-12T00:00:00.000Z', dirty: false };
+    const pagesArtifactDigest = 'c'.repeat(64);
+    const identity = { ok: true, configured: true, required: true };
+    let compiled = true;
+    let writable = true;
+    let recoveryVersion: number | undefined = 1;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const request = new Request(String(url), init);
+      const target = new URL(request.url);
+      const isPages = target.origin === base;
+      const headers = { 'x-sonic-release': manifest.releaseId };
+      if (target.pathname === '/release.json') return Response.json(manifest, { headers });
+      if (!request.headers.has('x-sonic-engine-key')) return Response.json({ error: { code: 'ENGINE_UNAUTHORIZED' } }, { status: 401 });
+      return Response.json({
+        ok: true,
+        runtime: isPages ? 'cf-pages' : 'linux-engine',
+        release: { ...manifest, releaseCommit: manifest.baseCommit, environment: 'staging', pagesArtifactDigest, engineIdentityCompiled: compiled },
+        readiness: { identity },
+        recommendEngine: { storageKind: 'sqlite', persistenceExpected: true, storageHealthy: true, disk: { writable }, erasureRecoveryVersion: recoveryVersion },
+      }, { headers });
+    });
+    await expect(verifyRelease(base, peer, {}, secrets, manifest)).resolves.toMatchObject({ pagesArtifactDigest, engineStorage: 'sqlite', engineErasureRecoveryVersion: 1, engineRelease: { baseCommit: manifest.baseCommit, engineIdentityCompiled: true } });
+    compiled = false;
+    await expect(verifyRelease(base, peer, {}, secrets, manifest)).rejects.toThrow('ENGINE_RELEASE_IDENTITY_MISMATCH');
+    compiled = true;
+    writable = false;
+    await expect(verifyRelease(base, peer, {}, secrets, manifest)).rejects.toThrow('STAGING_ENGINE_STORAGE_NOT_WRITABLE');
+    writable = true;
+    recoveryVersion = undefined;
+    await expect(verifyRelease(base, peer, {}, secrets, manifest)).rejects.toThrow('STAGING_ENGINE_ERASURE_RECOVERY_UNVERIFIED');
+  });
+});
 
 describe('Follow-up identity and consent over the actual events hop', () => {
   it.each(['?personalize=0', '?personalization=off', '?personalize=on&personalization=false', '?personalize=1&personalize=0'])('does not persist an opted-out query %s', async query => {
     const authority = engine();
-    engineHop(authority);
+    const hop = engineHop(authority);
     const response = await events({ request: incoming('POST', query), env: edge() });
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ data: { privacyMode: 'public', accepted: 0, ignoredByPrivacy: 1, storageKind: 'none' } });
+    expect(hop).not.toHaveBeenCalled();
     expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(0);
   });
 
-  it('keeps header opt-out authoritative and removes raw credentials and identity hints', async () => {
+  it('keeps header opt-out authoritative without forwarding credentials or events', async () => {
     const authority = engine();
-    const seen: Headers[] = [];
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
-      seen.push(new Headers(init?.headers));
-      return events({ request: new Request(String(url), init), env: authority });
-    });
+    const hop = engineHop(authority);
     const response = await events({ request: incoming('POST', '', { 'X-Sonic-Personalization': 'off', Cookie: 'ignored=value', 'X-Sonic-Key': 'not-a-user-token', 'X-Sonic-Context': 'e30' }), env: edge() });
     expect(response.status).toBe(200);
-    expect(seen[0].get('x-sonic-personalization')).toBe('off');
-    for (const name of ['authorization', 'cookie', 'x-sonic-key', 'x-sonic-anon-id', 'x-sonic-context']) expect(seen[0].has(name)).toBe(false);
-    expect(await requireValidEngineIdentity(new Request('https://engine.followup.test/api/sonic/events', { method: 'POST', headers: seen[0] }), authority)).toMatchObject(publicIdentity);
+    expect(await response.json()).toMatchObject({ data: { privacyMode: 'public', accepted: 0, ignoredByPrivacy: 1, storageKind: 'none' } });
+    expect(hop).not.toHaveBeenCalled();
     expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(0);
   });
 
@@ -107,6 +174,43 @@ describe('Follow-up identity and consent over the actual events hop', () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ data: { privacyMode: 'authenticated', accepted: 1, storageKind: 'sqlite' } });
     expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(1);
+  });
+
+  it('isolates signed subject and visitor IP quotas through the Engine request adapter', async () => {
+    const authority = { ...engine(), SONIC_EVENTS_DAILY_PER_IP: '2', SONIC_EVENTS_DAILY_PER_SUBJECT: '1' };
+    const env = edge();
+    const hop = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const forwarded = new Headers(init?.headers);
+      expect(forwarded.has(ENGINE_IDENTITY_HEADER)).toBe(true);
+      expect(forwarded.has('x-sonic-anon-id')).toBe(false);
+      const headers = sanitizeInboundHeaders(Object.fromEntries(forwarded), '127.0.0.1');
+      return events({ request: new Request(String(url), { ...init, headers }), env: authority });
+    });
+    const submit = (subject: string, ip: string, optOut = false) => events({
+      request: incoming('POST', '', {
+        'CF-Connecting-IP': ip,
+        'X-Sonic-Anon-Id': `anon_quota_subject_${subject}`,
+        'X-Sonic-Event-Target': optOut ? 'public' : 'anonymous-opt-in',
+        ...(optOut ? { 'X-Sonic-Personalization': 'off' } : {}),
+      }),
+      env,
+    });
+
+    for (let i = 0; i < 3; i++) {
+      const response = await submit('aaaa', '203.0.113.10', true);
+      expect(await response.json()).toMatchObject({ data: { accepted: 0, ignoredByPrivacy: 1 } });
+    }
+    expect(hop).not.toHaveBeenCalled();
+    expect((await submit('aaaa', '203.0.113.10')).status).toBe(200);
+    const sameSubject = await submit('aaaa', '203.0.113.10');
+    expect(sameSubject.status).toBe(429);
+    expect(sameSubject.headers.get('Retry-After')).toBe('3600');
+    expect(await sameSubject.json()).toMatchObject({ error: { code: 'EVENT_DAILY_QUOTA_EXCEEDED' } });
+    expect((await submit('aaaa', '203.0.113.11')).status).toBe(429);
+    expect((await submit('bbbb', '203.0.113.10')).status).toBe(200);
+    expect((await submit('cccc', '203.0.113.10')).status).toBe(429);
+    expect((await submit('cccc', '203.0.113.11')).status).toBe(200);
+    expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(3);
   });
 
   it.each(['Pages with Engine', 'local SQLite'])('checks the intended event target before ingestion (%s)', async (runtime) => {

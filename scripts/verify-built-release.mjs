@@ -69,6 +69,7 @@ async function start(overrides = {}) {
         const health = await response.json();
         assert.equal(health.ok, true);
         assert.equal(health.recommendEngine?.storageKind, 'sqlite');
+        assert.equal(health.recommendEngine?.erasureRecoveryVersion, 1);
         return health;
       }
       await response.body?.cancel();
@@ -96,7 +97,8 @@ async function postEvent(identity, eventId, eventEpoch) {
   return response.json();
 }
 try {
-  const health = await start();
+  const health = await start({ SONIC_RELEASE_ID: 'incorrect-runtime-release', SONIC_SOURCE_DIGEST: 'f'.repeat(64) });
+  assert.equal(health.release.engineIdentityCompiled, true);
   assert.equal(health.release.releaseId, manifest.releaseId);
   assert.equal(health.release.sourceDigest, manifest.sourceDigest);
   check('compiled engine reports matching release identity');
@@ -167,6 +169,9 @@ try {
   assert.equal(rejection.error.code, 'EVENT_EPOCH_MISMATCH');
   assert.equal(rejection.data.eventEpoch, erasure.eventEpoch);
   assert.equal((await (await request('/api/sonic/events')).json()).data.totalEvents, 0);
+  const currentBackupPath = join(work, 'post-erasure-backup.sqlite');
+  const currentBackup = JSON.parse(execFileSync(process.execPath, ['--experimental-sqlite', resolve(root, 'scripts/backup-recommend-db.mjs'), dbPath, currentBackupPath], { env, encoding: 'utf8' }));
+  assert.equal(currentBackup.events, 1);
   const fresh = await postEvent('anon_release_http_a_20261102', 'release_post_erase_event', erasure.eventEpoch);
   assert.equal(fresh.data.accepted, 1);
   check('erasure marker survives restart and fences held writes over HTTP');
@@ -174,10 +179,23 @@ try {
   const recovered = new DatabaseSync(dbPath);
   recovered.exec('PRAGMA wal_checkpoint(TRUNCATE)');
   recovered.close();
-  const restored = JSON.parse(execFileSync(process.execPath, ['--experimental-sqlite', resolve(root, 'scripts/restore-recommend-db.mjs'), backupPath, dbPath, '--offline'], { env, encoding: 'utf8' }));
+  const restore = snapshot => execFileSync(process.execPath, ['--experimental-sqlite', resolve(root, 'scripts/restore-recommend-db.mjs'), snapshot, dbPath, '--offline'], { env, encoding: 'utf8', stdio: 'pipe' });
+  assert.throws(() => restore(backupPath), error => /snapshot cannot prove it preserves acknowledged erasures/.test(error.stderr));
+  const restored = JSON.parse(restore(currentBackupPath));
   assert.equal(restored.ok, true);
-  assert.equal(restored.events, 2);
-  check('offline verified restore recovers both subjects');
+  assert.equal(restored.events, 1);
+  await start();
+  const afterRestore = (await (await request('/api/sonic/events')).json()).data;
+  assert.equal(afterRestore.totalEvents, 0);
+  assert.equal(afterRestore.eventEpoch, erasure.eventEpoch);
+  const otherProfile = (await (await request('/api/sonic/events', { headers: { 'X-Sonic-Anon-Id': 'anon_release_http_b_20261102' } })).json()).data;
+  assert.equal(otherProfile.totalEvents, 1);
+  const oldBatch = await request('/api/sonic/events', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: heldBody,
+  });
+  assert.equal(oldBatch.status, 409);
+  await stop();
+  check('offline restore refuses pre-erasure snapshots and keeps the erased profile empty and its old batches fenced');
   // Production requires an effective authorized source. The only production
   // media request below explicitly names synthetic, so the policy gate rejects
   // it before resolution and no request reaches the authorized provider.

@@ -254,7 +254,7 @@ async function getRecommendations() {
 
 画像清除成功后，SQLite 在同一事务更新该画像的 `eventEpoch`。GET 和成功的 DELETE 返回当前标记，没有清除标记且未发生匿名标记轮换时 GET 返回 `null`。POST 请求体可携带 `{ events, eventEpoch }`，标记应与事件入队时的画像版本绑定。收到 `409 EVENT_EPOCH_MISMATCH` 时，丢弃旧批次和同代待发事件，仅对后续新事件使用响应的当前标记。公开模式保持零写入。现有 API Key 调用可以用同一身份 GET 获取标记，标记为 `null` 时可省略。
 
-达到 `SONIC_RECOMMEND_MAX_ANON_ERASURE_ROWS`（默认 250,000）后，下一次需要新增匿名清除标记的请求在同一事务轮换匿名标记并继续清除。其他访客的旧批次需要丢弃，已存事件和账户标记不受匿名轮换影响。生产发布需让 Pages 和 Engine 同步支持 `eventEpoch`。回滚时需保留对标记的验证，恢复清除前的数据库快照会恢复该快照中的旧数据与标记。
+达到 `SONIC_RECOMMEND_MAX_ANON_ERASURE_ROWS`（默认 250,000）后，下一次需要新增匿名清除标记的请求在同一事务轮换匿名标记并继续清除。其他访客的旧批次需要丢弃，已存事件和账户标记不受匿名轮换影响。生产发布需让 Pages 和 Engine 同步支持 `eventEpoch`。持久 SQLite 的离线恢复会拒绝与留存清除代次不同的快照，操作详见 [回滚手册](docs/RUNBOOK-ROLLBACK.md)。
 
 站内热榜按窗口统计已登录且允许个性化的账户播放活动，`window=all` 使用存储保留期内的数据。匿名用户开启个性化后，其活动仍可用于自己的推荐。外部榜单分数通过 `popularity.externalChartScore` 单独返回。
 

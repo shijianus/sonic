@@ -1,8 +1,9 @@
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createJiti } from 'jiti';
+import { verifyEngineArtifacts } from './release-artifacts.mjs';
 import { validateReleaseManifest, verifyRelease } from './release-inputs.mjs';
 
 const jiti = createJiti(import.meta.url, { fsCache: false });
@@ -97,11 +98,7 @@ function start(root, args) {
     }
   }
   const entry = resolve(root, 'dist-server/index.mjs');
-  for (const output of [entry, resolve(root, 'dist/index.html')]) {
-    if (!existsSync(output) || !lstatSync(output).isFile()) {
-      throw new Error('Build both the frontend and Engine before starting the release');
-    }
-  }
+  verifyEngineArtifacts(root, manifest);
   const env = engineEnvironment(process.env, manifest, root);
   if (args[0] === '--check') {
     console.log(JSON.stringify({ ok: true, releaseId: manifest.releaseId, sourceDigest: manifest.sourceDigest, host: env.HOST, port: Number(env.PORT) }));

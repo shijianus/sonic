@@ -5,6 +5,9 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { syncDirectory } from './recommend-recovery-guard.mjs';
+
+export { syncDirectory };
 
 export function assertDatabaseFile(file) {
   const stat = fs.lstatSync(file);
@@ -46,13 +49,6 @@ export function acquireMaintenanceLock(file, operation) {
 export function syncFile(file) {
   // Windows FlushFileBuffers requires a write-capable handle. These are owned snapshots.
   const fd = fs.openSync(file, 'r+');
-  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-}
-
-export function syncDirectory(directory) {
-  // Windows does not permit opening directories with fs.open; POSIX must persist the rename.
-  if (process.platform === 'win32') return;
-  const fd = fs.openSync(directory, 'r');
   try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 }
 

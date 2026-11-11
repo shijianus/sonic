@@ -3,6 +3,107 @@ import type { Page } from '@playwright/test'
 
 const eventEpoch = 'a'.repeat(32)
 
+function personalizationSwitch(page: Page) {
+  return page.getByRole('switch', { name: 'Smart Search & Personalized Recommendations' })
+}
+
+async function searchFromNav(page: Page, query: string) {
+  const search = page.getByTestId('nav-search-input')
+  await search.fill(query)
+  await search.press('Enter')
+}
+
+test('the first search stays public until a visitor explicitly enables personalization', async ({ page }) => {
+  const posts: string[] = []
+  await page.route('**/api/sonic/events', async route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    posts.push(...route.request().postDataJSON().events.map((event: { query?: string }) => event.query ?? ''))
+    await route.fulfill({ json: { brand: 'Sonic', data: { accepted: 1 } } })
+  })
+  await page.goto('/#/settings')
+  await expect(personalizationSwitch(page)).toHaveAttribute('aria-checked', 'false')
+  const publicSearch = page.waitForRequest(request => {
+    const url = new URL(request.url())
+    return url.pathname === '/api/sonic/search/smart' && url.searchParams.get('q') === 'first public search'
+  })
+  await searchFromNav(page, 'first public search')
+  const headers = (await publicSearch).headers()
+  expect(headers['x-sonic-personalization']).toBe('off')
+  expect(headers['x-sonic-anon-id']).toBeUndefined()
+  expect(headers['x-sonic-context']).toBeUndefined()
+  await page.evaluate(() => window.dispatchEvent(new Event('pagehide')))
+
+  await page.goto('/#/settings')
+  await personalizationSwitch(page).click()
+  await page.reload()
+  await expect(personalizationSwitch(page)).toHaveAttribute('aria-checked', 'true')
+  await searchFromNav(page, 'explicitly enabled search')
+  await expect.poll(() => posts).toEqual(['explicitly enabled search'])
+})
+
+test('opting out in one tab immediately disables uploads in another tab', async ({ context, page }) => {
+  const posts: string[] = []
+  await context.route('**/api/sonic/events', async route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    posts.push(...route.request().postDataJSON().events.map((event: { query?: string }) => event.query ?? ''))
+    await route.fulfill({ json: { brand: 'Sonic', data: { accepted: 1 } } })
+  })
+
+  await page.goto('/#/settings')
+  await personalizationSwitch(page).click()
+  await expect(personalizationSwitch(page)).toHaveAttribute('aria-checked', 'true')
+  const other = await context.newPage()
+  await other.goto('/#/settings')
+  await expect(personalizationSwitch(other)).toHaveAttribute('aria-checked', 'true')
+
+  await personalizationSwitch(page).click()
+  await expect(personalizationSwitch(other)).toHaveAttribute('aria-checked', 'false')
+  const otherSearch = other.waitForRequest(request => {
+    const url = new URL(request.url())
+    return url.pathname === '/api/sonic/search/smart' && url.searchParams.get('q') === 'search in other tab'
+  })
+  await searchFromNav(other, 'search in other tab')
+  const headers = (await otherSearch).headers()
+  expect(headers['x-sonic-personalization']).toBe('off')
+  expect(headers['x-sonic-anon-id']).toBeUndefined()
+  await other.evaluate(() => window.dispatchEvent(new Event('pagehide')))
+  await other.goto('/#/settings')
+  await expect(personalizationSwitch(other)).toHaveAttribute('aria-checked', 'false')
+  expect(posts).toEqual([])
+})
+
+test('cached and refreshed account profiles render local initials without loading remote avatars', async ({ page }) => {
+  const fakeEmail = 'private-avatar@example.invalid'
+  const avatar = `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(fakeEmail)}`
+  const remoteRequests: string[] = []
+  await page.route('https://api.dicebear.com/**', async route => {
+    remoteRequests.push(route.request().url())
+    await route.abort()
+  })
+  await page.addInitScript(user => {
+    localStorage.setItem('auth', JSON.stringify({ user, isAuthenticated: true }))
+  }, { id: 'avatar-account', email: fakeEmail, name: 'Cached Account', avatar })
+  let releaseProfile!: () => void
+  const profileReady = new Promise<void>(resolve => { releaseProfile = resolve })
+  await page.route('**/api/auth/user', async route => {
+    await profileReady
+    await route.fulfill({ json: { ok: true, user: { id: 'avatar-account', email: fakeEmail, name: 'Refreshed Account', avatar } } })
+  })
+
+  try {
+    await page.goto('/#/settings')
+    const account = page.getByRole('button', { name: 'Account menu' })
+    await expect(account).toContainText('Cached Account')
+    await expect(account.getByText('C', { exact: true })).toBeVisible()
+    releaseProfile()
+    await expect(account).toContainText('Refreshed Account')
+    await expect(account.getByText('R', { exact: true })).toBeVisible()
+    expect(remoteRequests).toEqual([])
+  } finally {
+    releaseProfile()
+  }
+})
+
 test('an erasure identity conflict preserves the anonymous profile ID for retry', async ({ page }, testInfo) => {
   const anonId = 'anon_erasure_browser_001'
   const deletes: Array<{ anonId: string | undefined; target: string | undefined }> = []
@@ -25,6 +126,7 @@ test('an erasure identity conflict preserves the anonymous profile ID for retry'
   })
 
   await page.goto('/#/settings')
+  await expect(personalizationSwitch(page)).toHaveAttribute('aria-checked', 'false')
   await page.getByRole('button', { name: 'Clear all local data', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Clear all local data?' })
   await expect(dialog).toBeVisible()
@@ -56,13 +158,12 @@ test('account erasure applies the returned epoch to subsequent behavior events',
   await expect(page.getByRole('button', { name: 'Account menu' })).toContainText('Erasure Test')
   await page.getByRole('button', { name: 'Reset Recommendation Profile & Dislikes' }).click()
   await expect(page.getByText('Recommendation profile and disliked tracks cleared')).toBeVisible()
+  await personalizationSwitch(page).click()
 
   const post = page.waitForRequest(request =>
     request.method() === 'POST' && new URL(request.url()).pathname === '/api/sonic/events'
   )
-  const search = page.getByTestId('nav-search-input')
-  await search.fill('post-erasure-search')
-  await search.press('Enter')
+  await searchFromNav(page, 'post-erasure-search')
   const request = await post
   expect(request.headers()['x-sonic-event-target']).toBe('account:erasure-account')
   expect(request.postDataJSON()).toMatchObject({

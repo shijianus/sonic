@@ -7,6 +7,9 @@ import { createHmac, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import {
+  assertRecoveryDatabasePresent, eraseWithRecoveryGuard, initializeErasureRecovery, verifiedErasureRecoveryVersion,
+} from '../scripts/recommend-recovery-guard.mjs';
 
 import type {
   CanonicalTrack,
@@ -79,13 +82,14 @@ export class SqliteRecommendStore implements RecommendStore {
       const resolved = path.resolve(dbPath);
       const dir = path.dirname(resolved);
       fs.mkdirSync(dir, { recursive: true });
+      assertRecoveryDatabasePresent(resolved);
       // The DB holds per-user behavioral data: refuse to open anything that is
       // not a plain regular file (a symlink or directory swap would bypass the
       // permission model), then pin owner-only modes on it and its sidecars.
       if (fs.existsSync(resolved)) {
         const stat = fs.lstatSync(resolved);
-        if (!stat.isFile()) {
-          throw new Error(`Recommend DB path is not a regular file: ${resolved}`);
+        if (!stat.isFile() || stat.nlink !== 1) {
+          throw new Error(`Recommend DB path is not a regular, unlinked file: ${resolved}`);
         }
       }
     }
@@ -108,6 +112,7 @@ export class SqliteRecommendStore implements RecommendStore {
     }
     try {
       this.initSchema();
+      if (dbPath !== ':memory:') initializeErasureRecovery(this.db, dbPath);
       this.pruneRetention();
     } catch (error) {
       this.db.close();
@@ -789,8 +794,7 @@ export class SqliteRecommendStore implements RecommendStore {
 
   clearUserEvents(subjectKey: string, eventEpoch?: string): number {
     if (!subjectKey) return 0;
-    this.db.exec('BEGIN IMMEDIATE');
-    try {
+    const erase = () => {
       const count = this.db.prepare(`SELECT COUNT(*) AS cnt FROM (
         SELECT event_id AS id FROM behavior_events WHERE subject_key = ?
         UNION SELECT feedback_id AS id FROM user_entity_feedback WHERE subject_key = ?
@@ -801,8 +805,14 @@ export class SqliteRecommendStore implements RecommendStore {
       this.db.prepare(`DELETE FROM user_entity_feedback WHERE subject_key = ?`).run(subjectKey);
       this.db.prepare(`DELETE FROM user_radar_profiles WHERE subject_key = ?`).run(subjectKey);
       if (eventEpoch) this.setEventEpoch(subjectKey, eventEpoch);
-      this.db.exec('COMMIT');
       return Number(count.cnt);
+    };
+    if (this.dbPath !== ':memory:') return eraseWithRecoveryGuard(this.db, this.dbPath, erase);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const count = erase();
+      this.db.exec('COMMIT');
+      return count;
     } catch (error) {
       try { this.db.exec('ROLLBACK'); } catch {}
       throw error;
@@ -920,7 +930,11 @@ export class SqliteRecommendStore implements RecommendStore {
       .all(cutoff, cutoff, pNorm, `${pNorm}%`, `%${prefix.trim()}%`, limit) as Array<{ query: string; count: number }>;
   }
 
-  getStats(): { trackCount: number; entityCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string } {
+  getStats(): {
+    trackCount: number; entityCount: number; eventCount: number; cooccurrencePairs: number;
+    storageKind: string; erasureRecoveryVersion?: number;
+  } {
+    const erasureRecoveryVersion = this.dbPath === ':memory:' ? undefined : verifiedErasureRecoveryVersion(this.db, this.dbPath);
     const tRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM canonical_tracks`).get() as { cnt: number };
     const entRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM entities`).get() as { cnt: number };
     const eRow = this.db.prepare(`SELECT COUNT(*) AS cnt FROM (
@@ -938,6 +952,7 @@ export class SqliteRecommendStore implements RecommendStore {
       eventCount: Number(eRow?.cnt || 0),
       cooccurrencePairs: Number(cRow?.cnt || 0),
       storageKind: this.kind,
+      ...(erasureRecoveryVersion === undefined ? {} : { erasureRecoveryVersion }),
     };
   }
 

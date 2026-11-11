@@ -46,53 +46,26 @@ const { setPlaylist, play, currentSong, isPlaying } = useAudio()
 const { t } = useI18n()
 const { flyTo, createRipple } = useSharedElement()
 
-// 歌曲封面飞行动画
-const playSongWithAnimation = async (song: Song, index: number, event?: MouseEvent) => {
-  try {
-    // 获取源封面元素和目标元素
-    const sourceCover = document.getElementById(`song-cover-${song.id}`)
-    const targetCover = document.getElementById('footer-cover')
+const playSongWithAnimation = (song: Song, index: number, event?: MouseEvent) => {
+  // Register the playback intent at selection time so pause and skip can cancel it.
+  setPlaylist(props.songs, index)
+  play(song, index)
+  emit('play', song, index)
 
-    // 如果有点击事件，添加涟漪效果
-    if (event && sourceCover) {
-      const container = sourceCover.closest('.song-item') as HTMLElement
-      if (container) {
-        createRipple(event, container, 'rgba(56,189,248, 0.3)')
-      }
-    }
+  if (prefersReducedMotion()) return
+  const sourceCover = document.getElementById(`song-cover-${song.id}`)
+  const targetCover = document.getElementById('footer-cover')
+  const container = sourceCover?.closest<HTMLElement>('.song-item')
+  if (event && container) createRipple(event, container, 'rgba(56,189,248, 0.3)')
 
-    // 减少动效偏好下直接播放，不执行飞行动画
-    if (prefersReducedMotion()) {
-      setPlaylist(props.songs, index)
-      play(props.songs[index], index)
-      emit('play', song, index)
-      return
-    }
-
-    // 如果能获取到元素，执行飞行动画
-    if (sourceCover && targetCover && song.cover) {
-      // 先设置播放列表
-      setPlaylist(props.songs, index)
-
-      // 执行抛物线飞行动画
-      await flyTo(sourceCover, targetCover, formatCoverUrl(song.cover, { size: 128, artist: song.artist }), {
-        duration: 0.25,
-        ease: 'power2.out',
-        borderRadius: { from: '8px', to: '8px' },
-        scale: { from: 1, to: 1 },
-        onComplete: () => {
-          // 动画完成后播放
-          play(props.songs[index], index)
-        }
-      })
-    } else {
-      // 降级：直接播放
-      setPlaylist(props.songs, index)
-      play(props.songs[index], index)
-    }
-
-    emit('play', song, index)
-  } catch {}
+  if (sourceCover && targetCover && song.cover) {
+    void flyTo(sourceCover, targetCover, formatCoverUrl(song.cover, { size: 128, artist: song.artist }), {
+      duration: 0.25,
+      ease: 'power2.out',
+      borderRadius: { from: '8px', to: '8px' },
+      scale: { from: 1, to: 1 },
+    }).catch(() => {})
+  }
 }
 
 const isCurrent = (s: Song) => {

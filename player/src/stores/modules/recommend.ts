@@ -13,6 +13,7 @@ import { useLibraryStore } from './library'
 import { useAudioStore } from './audio'
 import { useAuthStore } from './auth'
 import { useToastStore } from './toast'
+import { safeStorage } from '@/utils/safeStorage'
 import {
   deleteSonicEvents,
   fetchRecommendForYou,
@@ -37,18 +38,42 @@ interface RecommendStoreState {
 }
 
 const ANON_ID_PATTERN = /^anon_[a-zA-Z0-9_-]{8,64}$/
+const ANON_ID_KEY = 'sonic:recommendation-device-id'
+const PERSONALIZATION_CONSENT_KEY = 'sonic:personalization-consent'
+const CONSENT_REVISION_PATTERN = /^[a-f0-9]{24}$/
 
-function generateAnonId(): string {
+function randomHex(): string {
   const bytes = new Uint8Array(12)
   if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
     crypto.getRandomValues(bytes)
   } else {
     for (let i = 0; i < bytes.length; i++) bytes[i] = Math.floor(Math.random() * 256)
   }
-  const hex = Array.from(bytes)
+  return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, '0'))
     .join('')
-  return `anon_${hex}`
+}
+
+function generateAnonId(): string {
+  return `anon_${randomHex()}`
+}
+
+function readConsentRevision(): string | null {
+  const value = safeStorage.getItem(PERSONALIZATION_CONSENT_KEY)
+  return value && CONSENT_REVISION_PATTERN.test(value) ? value : null
+}
+
+function restoreAnonId(): string {
+  const saved = safeStorage.getItem(ANON_ID_KEY)
+  if (saved !== null) return ANON_ID_PATTERN.test(saved) ? saved : ''
+  try {
+    const legacy = JSON.parse(safeStorage.getItem('recommend') || '{}').anonId
+    if (typeof legacy === 'string' && ANON_ID_PATTERN.test(legacy)) {
+      safeStorage.setItem(ANON_ID_KEY, legacy)
+      return legacy
+    }
+  } catch {}
+  return ''
 }
 
 function encodeContextBase64Url(obj: Record<string, unknown>): string {
@@ -69,6 +94,7 @@ const MAX_PENDING_EVENTS = 40
 const DRAIN_TIMEOUT_MS = 15_000
 
 interface DeliveryState {
+  consentRevision: string | null
   generation: number
   pending: SonicEventPayload[]
   identity: string | null
@@ -83,7 +109,7 @@ const deliveries = new WeakMap<object, DeliveryState>()
 function deliveryFor(store: object): DeliveryState {
   let delivery = deliveries.get(store)
   if (!delivery) {
-    delivery = { generation: 0, pending: [], identity: null, eventEpoch: null, timer: null, writes: new Set(), clearing: null }
+    delivery = { consentRevision: null, generation: 0, pending: [], identity: null, eventEpoch: null, timer: null, writes: new Set(), clearing: null }
     deliveries.set(store, delivery)
   }
   return delivery
@@ -110,6 +136,28 @@ function discardPending(delivery: DeliveryState) {
   delivery.identity = null
 }
 
+function syncConsent(store: RecommendStoreState, delivery = deliveryFor(store)): boolean {
+  // Storage events can arrive after a queued timer or pagehide. Read the latest
+  // explicit choice before every send, including an off/on change between tasks.
+  const revision = readConsentRevision()
+  if (delivery.consentRevision !== revision) {
+    discardPending(delivery)
+    delivery.consentRevision = revision
+  }
+  store.personalizationEnabled = revision !== null
+  return store.personalizationEnabled
+}
+
+function syncAnonId(store: RecommendStoreState, delivery = deliveryFor(store)): string {
+  const value = safeStorage.getItem(ANON_ID_KEY)
+  const id = value && ANON_ID_PATTERN.test(value) ? value : ''
+  if (id !== store.anonId) {
+    discardPending(delivery)
+    store.anonId = id
+  }
+  return id
+}
+
 async function waitForWrites(writes: Set<Promise<void>>): Promise<boolean> {
   if (!writes.size) return true
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -125,9 +173,9 @@ async function waitForWrites(writes: Set<Promise<void>>): Promise<boolean> {
 
 export const useRecommendStore = defineStore('recommend', {
   state: (): RecommendStoreState => ({
-    personalizationEnabled: true,
+    personalizationEnabled: readConsentRevision() !== null,
     autoDjEnabled: true,
-    anonId: '',
+    anonId: restoreAnonId(),
     dislikedTracks: [],
   }),
 
@@ -137,15 +185,15 @@ export const useRecommendStore = defineStore('recommend', {
 
   actions: {
     ensureAnonId(): string {
-      if (!this.personalizationEnabled) return ''
-      if (!ANON_ID_PATTERN.test(this.anonId)) {
-        this.anonId = generateAnonId()
-      }
-      return this.anonId
+      if (!syncConsent(this)) return ''
+      const current = syncAnonId(this)
+      if (current) return current
+      safeStorage.setItem(ANON_ID_KEY, generateAnonId())
+      return syncAnonId(this)
     },
 
     buildRequestHeaders(includeContext = true): Record<string, string> {
-      if (!this.personalizationEnabled || deliveries.get(this)?.clearing) {
+      if (!syncConsent(this) || deliveries.get(this)?.clearing) {
         return {
           'X-Sonic-Personalization': 'off',
         }
@@ -153,9 +201,8 @@ export const useRecommendStore = defineStore('recommend', {
 
       const headers: Record<string, string> = {}
       const id = this.ensureAnonId()
-      if (id) {
-        headers['X-Sonic-Anon-Id'] = id
-      }
+      if (!id) return { 'X-Sonic-Personalization': 'off' }
+      headers['X-Sonic-Anon-Id'] = id
 
       // Browser sessions are authenticated by the HttpOnly `sonic_session` cookie set
       // by the OAuth callback; the SPA must not read or persist bearer API keys.
@@ -207,7 +254,7 @@ export const useRecommendStore = defineStore('recommend', {
         } catch {}
       }
 
-      return headers
+      return syncConsent(this) && syncAnonId(this) === id ? headers : { 'X-Sonic-Personalization': 'off' }
     },
 
     isSongDisliked(idOrCanonicalId?: string | number): boolean {
@@ -220,8 +267,10 @@ export const useRecommendStore = defineStore('recommend', {
 
     recordEvent(payload: SonicEventPayload, immediate = false) {
       const delivery = deliveryFor(this)
-      if (!this.personalizationEnabled || delivery.clearing) return
-      const identity = deliveryIdentity(this.ensureAnonId())
+      if (delivery.clearing) return
+      const anonId = this.ensureAnonId()
+      if (!anonId) return
+      const identity = deliveryIdentity(anonId)
       if (delivery.identity !== identity) {
         discardPending(delivery)
         delivery.identity = identity
@@ -254,9 +303,9 @@ export const useRecommendStore = defineStore('recommend', {
       const delivery = deliveries.get(this)
       if (!delivery) return
       stopFlushTimer(delivery)
-      if (delivery.clearing || delivery.pending.length === 0) return
-      const identity = deliveryIdentity(this.anonId)
-      if (!this.personalizationEnabled || delivery.identity !== identity) {
+      if (!syncConsent(this, delivery) || delivery.clearing || delivery.pending.length === 0) return
+      const identity = deliveryIdentity(syncAnonId(this, delivery))
+      if (delivery.identity !== identity) {
         discardPending(delivery)
         return
       }
@@ -270,9 +319,11 @@ export const useRecommendStore = defineStore('recommend', {
       const subject = accountId ? target : this.anonId
       const eventEpoch = delivery.eventEpoch?.subject === subject ? delivery.eventEpoch.value : undefined
       headers['X-Sonic-Event-Target'] = target
+      if (!syncConsent(this, delivery) || delivery.generation !== generation ||
+        deliveryIdentity(syncAnonId(this, delivery)) !== identity) return
       const write = postSonicEvents(batch, headers, { expectedMode, eventEpoch }).then((result) => {
-        if (delivery.clearing || !this.personalizationEnabled ||
-          delivery.generation !== generation || deliveryIdentity(this.anonId) !== identity) return
+        if (!syncConsent(this, delivery) || delivery.clearing ||
+          delivery.generation !== generation || deliveryIdentity(syncAnonId(this, delivery)) !== identity) return
         if (result.status === 'epoch-mismatch') {
           // Discard unsent events and invalidate other writes from before the erasure.
           discardPending(delivery)
@@ -422,44 +473,43 @@ export const useRecommendStore = defineStore('recommend', {
     },
 
     setPersonalizationEnabled(enabled: boolean) {
-      this.personalizationEnabled = enabled
-      if (!enabled) {
-        discardPending(deliveryFor(this))
+      if (enabled) {
+        if (!syncAnonId(this)) safeStorage.setItem(ANON_ID_KEY, generateAnonId())
+        safeStorage.setItem(PERSONALIZATION_CONSENT_KEY, randomHex())
       } else {
-        this.ensureAnonId()
+        safeStorage.removeItem(PERSONALIZATION_CONSENT_KEY)
       }
+      syncConsent(this)
+      syncAnonId(this)
     },
 
     async clearAllRecommendationProfile(): Promise<boolean> {
       const delivery = deliveryFor(this)
       if (delivery.clearing) return delivery.clearing
-      const headers = this.buildRequestHeaders(false)
       const accountId = currentAccountId()
-      const hasAnonId = ANON_ID_PATTERN.test(this.anonId)
+      const anonId = syncAnonId(this, delivery)
       // An expired account session must not silently delete the guest profile.
       // Guest erasure still needs the old device ID after personalization is off.
-      if (accountId) {
-        delete headers['X-Sonic-Anon-Id']
-      } else if (hasAnonId) {
-        headers['X-Sonic-Anon-Id'] = this.anonId
-      }
-      const mode = accountId ? 'authenticated' : hasAnonId ? 'anonymous-opt-in' : 'public'
-      headers['X-Sonic-Erasure-Target'] = accountId ? `account:${accountId}` : mode
-      if (mode !== 'public') delete headers['X-Sonic-Personalization']
-      const identity = deliveryIdentity(this.anonId)
+      const mode = accountId ? 'authenticated' : anonId ? 'anonymous-opt-in' : 'public'
+      const headers: Record<string, string> = { 'X-Sonic-Erasure-Target': accountId ? `account:${accountId}` : mode }
+      if (mode === 'anonymous-opt-in') headers['X-Sonic-Anon-Id'] = anonId
+      if (mode === 'public') headers['X-Sonic-Personalization'] = 'off'
+      const identity = deliveryIdentity(anonId)
       discardPending(delivery)
       // Drain all writes from this tab before DELETE. No new events can be
       // queued during erasure, including via pagehide or a failed batch retry.
       const clearing = waitForWrites(delivery.writes).then(async (drained) => {
-        if (!drained || deliveryIdentity(this.anonId) !== identity) return false
+        if (!drained || deliveryIdentity(syncAnonId(this, delivery)) !== identity) return false
         const result = await deleteSonicEvents(headers, mode)
-        if (!result || deliveryIdentity(this.anonId) !== identity) return false
+        if (!result || deliveryIdentity(syncAnonId(this, delivery)) !== identity) return false
+        syncConsent(this, delivery)
         this.dislikedTracks = []
         if (accountId && result.eventEpoch) {
           delivery.eventEpoch = { subject: `account:${accountId}`, value: result.eventEpoch }
-        } else if (!accountId) {
-          if (delivery.eventEpoch?.subject === this.anonId) delivery.eventEpoch = null
-          this.anonId = this.personalizationEnabled ? generateAnonId() : ''
+        } else if (mode === 'anonymous-opt-in') {
+          if (delivery.eventEpoch?.subject === anonId) delivery.eventEpoch = null
+          safeStorage.setItem(ANON_ID_KEY, this.personalizationEnabled ? generateAnonId() : '')
+          syncAnonId(this, delivery)
         }
         return true
       })
@@ -473,9 +523,7 @@ export const useRecommendStore = defineStore('recommend', {
   },
 
   persist: piniaPersistConfig<RecommendStoreState>('recommend', [
-    'personalizationEnabled',
     'autoDjEnabled',
-    'anonId',
     'dislikedTracks',
   ]),
 })
@@ -483,6 +531,14 @@ export const useRecommendStore = defineStore('recommend', {
 // 页面卸载/切后台时把防抖窗口内未上报的事件立即冲刷出去。
 // postSonicEvents 使用 fetch keepalive,页面关闭后浏览器仍会完成发送。
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key !== null && event.key !== PERSONALIZATION_CONSENT_KEY && event.key !== ANON_ID_KEY) return
+    const pinia = getActivePinia()
+    if (!pinia) return
+    const store = useRecommendStore(pinia)
+    syncConsent(store)
+    syncAnonId(store)
+  })
   const flushPendingOnHide = () => {
     const pinia = getActivePinia()
     if (pinia) void useRecommendStore(pinia).flushEvents()

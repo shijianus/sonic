@@ -74,10 +74,15 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
       ok: true, mode: 'staging-live', branch: 'rc-fixture', base: 'https://test.sonic-staging.pages.dev',
       branchUrl: 'https://rc-fixture.sonic-staging.pages.dev', deploymentId: '01234567-89ab-cdef-0123-456789abcdef',
       engineStorage: 'sqlite', independentIdentityBindingPresent: true, authenticatedIdentityAssertionLiveVerified: true,
+      engineRelease: { ...first.manifest, engineIdentityCompiled: true }, eventEpochLiveVerified: true, engineErasureRecoveryVersion: 1,
       checks: Array.from({ length: 12 }, (_, index) => ({ name: `check ${index}`, ok: true })),
     };
     expect(() => assertStagingAcceptance(preview, first.manifest, first.pagesArtifactDigest)).not.toThrow();
     expect(() => assertStagingAcceptance(preview, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/exact release/);
+    expect(() => assertStagingAcceptance({ ...preview, eventEpochLiveVerified: undefined }, first.manifest, first.pagesArtifactDigest)).toThrow(/exact release/);
+    expect(() => assertStagingAcceptance({ ...preview, engineErasureRecoveryVersion: undefined }, first.manifest, first.pagesArtifactDigest)).toThrow(/exact release/);
+    expect(() => assertStagingAcceptance({ ...preview, engineRelease: { ...preview.engineRelease, engineIdentityCompiled: false } }, first.manifest, first.pagesArtifactDigest)).toThrow(/exact release/);
+    expect(() => assertStagingAcceptance({ ...preview, engineRelease: { ...preview.engineRelease, baseCommit: 'b'.repeat(40) } }, first.manifest, first.pagesArtifactDigest)).toThrow(/exact release/);
 
     const stable = { ...preview, branch: 'staging', base: 'https://sonic-staging.pages.dev', branchUrl: 'https://sonic-staging.pages.dev' };
     expect(() => assertStagingAcceptance(stable, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/oauthLoginAndRevocation/);
@@ -118,7 +123,8 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
         ...process.env, CF_PAGES_PROJECT: project, CF_PAGES_BRANCH: 'main', SONIC_DEPLOY_ENV: 'production',
         SONIC_ENV: 'production', SONIC_ACCESS_MODE: 'invite', SONIC_RUNTIME: '', SONIC_SOURCE_DIGEST: '',
         SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'netease', SONIC_ENGINE_SECRET: 's'.repeat(48),
-        SONIC_DEPLOY_VERIFY_URL: 'https://production.example.test', SONIC_PRODUCTION_ACCEPTANCE_FILE: join(scripts, 'missing.json'),
+        SONIC_DEPLOY_VERIFY_URL: 'https://production.example.test', SONIC_DEPLOY_VERIFY_ENGINE_URL: 'https://engine.example.test',
+        SONIC_PRODUCTION_ACCEPTANCE_FILE: join(scripts, 'missing.json'),
         WRANGLER_CLI: wrangler, ALLOW_DIRTY_DEPLOY: '1', ALLOW_UNVERIFIED_DEPLOY: '1',
       },
     });

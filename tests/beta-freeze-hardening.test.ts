@@ -443,22 +443,31 @@ describe('P2-14: staging token failure budget', () => {
 
 describe('P0-1: events daily quota', () => {
   it('rejects event batches beyond the daily per-IP ceiling', async () => {
-    const env = { SONIC_EVENTS_DAILY_PER_IP: '10', SONIC_EVENTS_DAILY_PER_SUBJECT: '10' } as AppEnv;
-    const makeRequest = () => new Request('https://sonic.example.org/api/sonic/events', {
+    const { SqliteRecommendStore } = await import('../server/recommend-sqlite');
+    const store = new SqliteRecommendStore(':memory:');
+    const env = { SONIC_EVENTS_DAILY_PER_IP: '10', SONIC_EVENTS_DAILY_PER_SUBJECT: '20', RECOMMEND_STORE: store } as AppEnv;
+    const makeRequest = (id: string, optOut = false) => new Request('https://sonic.example.org/api/sonic/events', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'CF-Connecting-IP': '203.0.113.50',
-        'X-Sonic-Anon-Id': 'anon_quotatest1',
-        // Public zero-tracking mode: no store write, quota logic still runs.
-        'X-Sonic-Personalization': '0',
+        'X-Sonic-Client-IP': `198.51.100.${id}`,
+        'X-Sonic-Anon-Id': `anon_quotatest${id}`,
+        ...(optOut ? { 'X-Sonic-Personalization': '0' } : {}),
       },
       body: JSON.stringify({ events: Array.from({ length: 6 }, (_, i) => ({ type: 'play_start', eventId: `q${i}` })) }),
     });
-    const first = await eventsRoute({ request: makeRequest(), env });
-    expect(first.status).toBe(200);
-    const second = await eventsRoute({ request: makeRequest(), env });
-    expect(second.status).toBe(429);
-    expect(((await second.json()) as any).error.code).toBe('EVENT_DAILY_QUOTA_EXCEEDED');
+    try {
+      const ignored = await eventsRoute({ request: makeRequest('1', true), env });
+      expect(ignored.status).toBe(200);
+      expect(await ignored.json()).toMatchObject({ data: { accepted: 0, ignoredByPrivacy: 6 } });
+      const first = await eventsRoute({ request: makeRequest('1'), env });
+      expect(first.status).toBe(200);
+      const second = await eventsRoute({ request: makeRequest('2'), env });
+      expect(second.status).toBe(429);
+      expect(((await second.json()) as any).error.code).toBe('EVENT_DAILY_QUOTA_EXCEEDED');
+    } finally {
+      store.close();
+    }
   });
 });

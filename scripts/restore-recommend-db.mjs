@@ -5,6 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { assertSnapshotPreservesErasures } from './recommend-recovery-guard.mjs';
 import {
   acquireMaintenanceLock, assertDatabaseFile, assertNoSidecars, backupDatabase,
   checkCapacity, digestFile, syncDirectory, syncFile, verifyDatabase,
@@ -43,6 +44,7 @@ export function restoreDatabase(backupFile, targetFile, { offline = false, io = 
     }
     checkCapacity(directory, fs.statSync(backupFile).size + 2 * (originalStat?.size || 0));
     const expected = backupDatabase(backupFile, staging);
+    assertSnapshotPreservesErasures(staging, targetFile, db);
     if (db) {
       db.exec(`VACUUM INTO '${preRestoreSafetyCopy.replace(/'/g, "''")}'`);
       fs.chmodSync(preRestoreSafetyCopy, 0o600);

@@ -1,0 +1,13 @@
+{
+  "name": "sonic-ncm-sidecar",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@neteasecloudmusicapienhanced/api": "4.41.1"
+  },
+  "overrides": {
+    "get-uri": {
+      "basic-ftp": "6.2.6"
+    }
+  }
+}

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
-import { resolve } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { test } from 'node:test';
 import { engineEnvironment } from '../scripts/start-bare-metal-engine.mjs';
+import { verifyEngineArtifacts, writeArtifactReceipt } from '../scripts/release-artifacts.mjs';
 
 const root = resolve('bare-metal-test-release');
 const manifest = {
@@ -96,4 +99,28 @@ test('production preflight refuses prohibited switches even with approved source
     );
     assert.doesNotThrow(() => engineEnvironment({ ...production, [name]: '0' }, manifest, root));
   }
+});
+
+test('preflight rejects unverified, changed, and mismatched release outputs', t => {
+  const release = mkdtempSync(join(tmpdir(), 'sonic-bare-metal-'));
+  t.after(() => rmSync(release, { recursive: true, force: true }));
+  const frontend = join(release, 'dist');
+  const engine = join(release, 'dist-server');
+  mkdirSync(join(frontend, 'assets'), { recursive: true });
+  mkdirSync(engine);
+  writeFileSync(join(frontend, 'index.html'), '<script src="/assets/app.js"></script>');
+  writeFileSync(join(frontend, 'assets/app.js'), 'document.title = "Sonic";');
+  writeFileSync(join(engine, 'index.mjs'), 'export const built = true;');
+  assert.throws(() => verifyEngineArtifacts(release, manifest), /Missing or invalid frontend build receipt/);
+
+  writeArtifactReceipt(frontend, 'frontend', manifest);
+  writeArtifactReceipt(engine, 'engine', manifest);
+  assert.doesNotThrow(() => verifyEngineArtifacts(release, manifest));
+  assert.throws(() => verifyEngineArtifacts(release, { ...manifest, buildTime: '2026-11-02T00:00:00.000Z' }), /does not match/);
+
+  writeFileSync(join(engine, 'index.mjs'), 'process.exit(17);');
+  assert.throws(() => verifyEngineArtifacts(release, manifest), /engine build output checksum mismatch/);
+  writeFileSync(join(engine, 'index.mjs'), 'export const built = true;');
+  writeFileSync(join(frontend, 'assets/app.js'), 'document.title = "Stale";');
+  assert.throws(() => verifyEngineArtifacts(release, manifest), /frontend build output checksum mismatch/);
 });

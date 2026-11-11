@@ -93,6 +93,7 @@ async function runAuthTests() {
 
     assert(testSession.id === 'usr_epocanvas_001', 'User ID preserved');
     assert(testSession.email === 'developer@epocanvas.com', 'User email preserved');
+    assert(testSession.avatar === '', 'Session uses local initials instead of a remote avatar URL');
     assert(testSession.apiKey.startsWith('sonic_live_v2.'), 'API key has sonic_live_v2. prefix');
 
     const parts = testSession.apiKey.split('.');

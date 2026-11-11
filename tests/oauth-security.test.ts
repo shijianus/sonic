@@ -283,6 +283,7 @@ describe('Session-backed API key management', () => {
     expect(userRes.status).toBe(200);
     const userJson = await userRes.json();
     expect(userJson.user.email).toBe('alice@example.com');
+    expect(userJson.user.avatar).toBe('');
     expect(userJson.user.apiKey).toBeUndefined();
 
     // A cookie-only GET returns metadata only: key material requires an explicit

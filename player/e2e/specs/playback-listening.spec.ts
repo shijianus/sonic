@@ -4,7 +4,8 @@ test('真实音频跳到末尾不会上报完播，从头播放才会上报', as
   const events: Array<{ type: string; track?: { id: number | string }; playedSeconds?: number }> = []
   const eventTargets: Array<string | undefined> = []
   await page.addInitScript(() => {
-    localStorage.setItem('recommend', JSON.stringify({ personalizationEnabled: true, anonId: 'anon_playback_listening_e2e' }))
+    localStorage.setItem('sonic:personalization-consent', 'a'.repeat(24))
+    localStorage.setItem('recommend', JSON.stringify({ anonId: 'anon_playback_listening_e2e' }))
   })
   await page.route('**/api/sonic/events', async route => {
     if (route.request().method() !== 'POST') return route.fallback()

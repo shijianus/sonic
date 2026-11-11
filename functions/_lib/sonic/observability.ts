@@ -364,13 +364,14 @@ export interface ReleaseMetadata {
   releaseId?: string;
   sourceDigest?: string;
   pagesArtifactDigest?: string;
+  engineIdentityCompiled?: true;
   dirty: boolean;
 }
 
 export function getReleaseMetadata(env?: AppEnv): ReleaseMetadata {
   const e = (env || {}) as Record<string, any>;
   const procEnv = typeof process !== 'undefined' && process.env ? process.env : {};
-  const compiled = COMPILED_RELEASE as ReleaseMetadata & { baseCommit: string } | null;
+  const compiled = COMPILED_RELEASE;
   const rawCommit = String(compiled ? compiled.baseCommit : e.SONIC_RELEASE_COMMIT || e.CF_PAGES_COMMIT_SHA || procEnv.SONIC_RELEASE_COMMIT || procEnv.CF_PAGES_COMMIT_SHA || 'unknown').trim();
   // Keep the reported environment aligned with the same fail-closed policy used
   // by access and content licensing. A Pages preview without an explicit
@@ -394,6 +395,7 @@ export function getReleaseMetadata(env?: AppEnv): ReleaseMetadata {
     ...(releaseId && /^[a-z0-9][a-z0-9._-]{0,127}$/i.test(releaseId) ? { releaseId } : {}),
     ...(/^[a-f0-9]{64}$/i.test(sourceDigest) ? { sourceDigest } : {}),
     ...(pagesArtifactDigest && /^[a-f0-9]{64}$/.test(pagesArtifactDigest) ? { pagesArtifactDigest } : {}),
+    ...(compiled?.engineIdentityCompiled === true ? { engineIdentityCompiled: true } : {}),
     dirty: compiled ? compiled.dirty === true : isEnvEnabled(e.SONIC_RELEASE_DIRTY ?? procEnv.SONIC_RELEASE_DIRTY, false),
   };
 }

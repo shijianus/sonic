@@ -26,8 +26,7 @@ export default defineConfig({
     baseURL: BASE_URL,
     locale: 'en-US',
     timezoneId: 'UTC',
-    // 开启“减少动效”后列表点击直接起播，不再经过 250ms 封面飞行动画；
-    // 既贴近无障碍场景，也让竞态用例的时序可复现。
+    // 默认减少装饰动效以稳定布局检查，封面飞行用例单独验证默认动效。
     reducedMotion: 'reduce',
     trace: 'retain-on-failure',
     screenshot: process.env.E2E_CAPTURE_SCREENSHOTS === '1' ? 'on' : 'only-on-failure',

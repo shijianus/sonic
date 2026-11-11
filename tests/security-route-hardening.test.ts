@@ -23,6 +23,7 @@ import {
 import { expandQueryAliases } from '../functions/_lib/sonic/recommend/text-norm';
 import { isKeyRevocationKvEnabled } from '../functions/_lib/auth';
 import { onRequest as eventsHandler, resetEventIngestQuotaForTest } from '../functions/api/sonic/events';
+import { SqliteRecommendStore } from '../server/recommend-sqlite';
 
 const inviteEnv = {
   SONIC_ENV: 'production',
@@ -180,7 +181,8 @@ describe('key revocation default', () => {
 
 describe('anonymous event ingestion quota', () => {
   it('rejects a batch that exceeds the per-subject window', async () => {
-    const env = { SONIC_ENV: 'staging', SONIC_ACCESS_MODE: 'open' } as any;
+    const store = new SqliteRecommendStore();
+    const env = { SONIC_ENV: 'staging', SONIC_ACCESS_MODE: 'open', SONIC_RECOMMEND_OFFLINE: '1', RECOMMEND_STORE: store };
     const batch = JSON.stringify({
       events: Array.from({ length: 50 }, (_, index) => ({
         type: 'play_progress',
@@ -201,13 +203,18 @@ describe('anonymous event ingestion quota', () => {
       env,
     });
 
-    let lastStatus = 0;
-    for (let i = 0; i < 13; i += 1) {
-      const response = await send();
-      lastStatus = response.status;
-      await response.text();
+    try {
+      for (let i = 0; i < 12; i += 1) {
+        const response = await send();
+        expect(response.status).toBe(200);
+        await response.text();
+      }
+      const limited = await send();
+      expect(limited.status).toBe(429);
+      expect(await limited.json()).toMatchObject({ error: { code: 'EVENT_QUOTA_EXCEEDED' } });
+    } finally {
+      store.close();
     }
-    expect(lastStatus).toBe(429);
   });
 });
 

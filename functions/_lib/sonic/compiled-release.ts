@@ -4,7 +4,11 @@ export interface CompiledRelease {
   releaseId: string;
   buildTime: string;
   dirty: boolean;
-  pagesArtifactDigest: string;
+  pagesArtifactDigest?: string;
+  engineIdentityCompiled?: true;
 }
 
-export const COMPILED_RELEASE: CompiledRelease | null = null;
+declare const SONIC_COMPILED_ENGINE_RELEASE: CompiledRelease | null | undefined;
+
+export const COMPILED_RELEASE: CompiledRelease | null = typeof SONIC_COMPILED_ENGINE_RELEASE === 'undefined'
+  ? null : SONIC_COMPILED_ENGINE_RELEASE;

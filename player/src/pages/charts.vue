@@ -53,45 +53,57 @@ const newSongTypes = [
   { key: 16, labelKey: 'charts.types.korea', icon: 'icon-[mdi--star-four-points]' },
 ]
 
+let trendingRequestGeneration = 0
+
 const loadTrendingSongs = async () => {
+  const generation = ++trendingRequestGeneration
+  state.trendingLoading = true
   try {
-    state.trendingLoading = true
-    const res = await fetchRecommendTrending(
-      {
-        window: state.trendingWindow,
-        count: 50,
-        personalized: recommendStore.personalizationEnabled,
-      },
-      recommendStore.buildRequestHeaders(true)
-    )
-    if (res.tracks && res.tracks.length > 0) {
-      state.trendingSongs = res.tracks
-    } else {
-      const fallback = await topSong({ type: 0 })
-      state.trendingSongs = transformTopSongs(fallback as Record<string, unknown>, 50)
-    }
-  } catch (err) {
-    console.warn('[Charts] loadTrendingSongs failed, applying fallback:', err)
+    let tracks: SongData[] = []
     try {
-      const fallback = await topSong({ type: 0 })
-      state.trendingSongs = transformTopSongs(fallback as Record<string, unknown>, 50)
-    } catch (e) {
-      console.error('[Charts] fallback failed:', e)
+      const res = await fetchRecommendTrending(
+        {
+          window: state.trendingWindow,
+          count: 50,
+          personalized: recommendStore.personalizationEnabled,
+        },
+        recommendStore.buildRequestHeaders(true)
+      )
+      tracks = res.tracks
+    } catch (err) {
+      if (generation !== trendingRequestGeneration) return
+      console.warn('[Charts] loadTrendingSongs failed, applying fallback:', err)
     }
+    if (generation !== trendingRequestGeneration) return
+    if (!tracks.length) {
+      const fallback = await topSong({ type: 0 })
+      tracks = transformTopSongs(fallback as Record<string, unknown>, 50)
+    }
+    if (generation === trendingRequestGeneration) state.trendingSongs = tracks
+  } catch (err) {
+    if (generation !== trendingRequestGeneration) return
+    console.error('[Charts] fallback failed:', err)
+    state.trendingSongs = []
   } finally {
-    state.trendingLoading = false
+    if (generation === trendingRequestGeneration) state.trendingLoading = false
   }
 }
 
+let newSongRequestGeneration = 0
+
 const loadNewSongs = async () => {
+  const generation = ++newSongRequestGeneration
+  state.newSongLoading = true
   try {
-    state.newSongLoading = true
     const res = await topSong({ type: activeType.value })
+    if (generation !== newSongRequestGeneration) return
     state.songs = transformTopSongs(res as Record<string, unknown>)
   } catch (err) {
+    if (generation !== newSongRequestGeneration) return
     console.error('[Charts] loadNewSongs failed:', err)
+    state.songs = []
   } finally {
-    state.newSongLoading = false
+    if (generation === newSongRequestGeneration) state.newSongLoading = false
   }
 }
 

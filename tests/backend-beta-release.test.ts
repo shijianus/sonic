@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { DatabaseSync } from 'node:sqlite';
 import { backupDatabase, digestFile, verifyDatabase } from '../scripts/backup-recommend-db.mjs';
 import { restoreDatabase } from '../scripts/restore-recommend-db.mjs';
+import { SqliteRecommendStore } from '../server/recommend-sqlite';
 
 const temporaryDirectories: string[] = [];
 afterEach(() => {
@@ -197,5 +198,102 @@ describe('beta release SQLite backup and offline recovery', () => {
     expect(() => restoreDatabase(files.backup, files.target, { offline: true, io })).toThrow(/original target restored and verified/);
     expect(fs.existsSync(files.target)).toBe(false);
     expect(fs.existsSync(files.target + '.maintenance-lock')).toBe(false);
+  });
+
+  it('refuses pre-erasure snapshots and restores the verified current generation with other subjects intact', () => {
+    const files = fixture();
+    const currentBackup = files.backup + '.current';
+    const first = 'anon_first_subject';
+    const second = 'anon_other_subject';
+    const epoch = 'a'.repeat(32);
+    const writer = new SqliteRecommendStore(files.target);
+    const peer = new SqliteRecommendStore(files.target);
+    try {
+      for (const subjectKey of [first, second]) {
+        writer.recordEvent({ subjectKey, eventId: 'before-erasure', type: 'search', query: 'temporary', createdAt: Date.now(), weight: 1 });
+      }
+      backupDatabase(files.target, files.backup);
+      expect(peer.clearUserEvents(first, epoch)).toBe(1);
+      expect(writer.getEventEpoch(first)).toBe(epoch);
+      expect(writer.getStats().erasureRecoveryVersion).toBe(1);
+      backupDatabase(files.target, currentBackup);
+      writer.recordEvent({ subjectKey: first, eventId: 'after-erasure', type: 'search', query: 'fresh', createdAt: Date.now(), weight: 1 });
+    } finally {
+      peer.close();
+      writer.close();
+    }
+    const before = digestFile(files.target);
+    expect(() => restoreDatabase(files.backup, files.target, { offline: true })).toThrow(/preserves acknowledged erasures/);
+    expect(digestFile(files.target)).toBe(before);
+
+    // A lost main file does not permit an older snapshot to become a new database.
+    fs.renameSync(files.target, files.source);
+    expect(() => new SqliteRecommendStore(files.target)).toThrow(/protected database is missing/);
+    expect(() => restoreDatabase(files.backup, files.target, { offline: true })).toThrow(/preserves acknowledged erasures/);
+    expect(fs.existsSync(files.target)).toBe(false);
+    expect(restoreDatabase(currentBackup, files.target, { offline: true })).toMatchObject({ ok: true, events: 1 });
+
+    const recovered = new SqliteRecommendStore(files.target);
+    try {
+      expect(recovered.getUserEvents(first)).toEqual([]);
+      expect(recovered.getUserEvents(second).map(event => event.eventId)).toEqual(['before-erasure']);
+      expect(recovered.getEventEpoch(first)).toBe(epoch);
+      expect(() => recovered.withEventEpoch(first, null, () => undefined)).toThrow();
+      expect(recovered.withEventEpoch(first, epoch, () => 'current')).toBe('current');
+    } finally { recovered.close(); }
+  });
+
+  it('fails closed on a replaced or untracked protected database, including after anonymous epoch rollover', () => {
+    vi.stubEnv('SONIC_RECOMMEND_MAX_ANON_ERASURE_ROWS', '1');
+    const files = fixture();
+    const store = new SqliteRecommendStore(files.target);
+    try {
+      store.clearUserEvents('anon_first_subject', 'a'.repeat(32));
+      backupDatabase(files.target, files.backup);
+      store.clearUserEvents('anon_other_subject', 'b'.repeat(32));
+      expect(store.getEventEpoch('anon_first_subject')).not.toBe('a'.repeat(32));
+      backupDatabase(files.target, files.source);
+    } finally { store.close(); }
+    fs.copyFileSync(files.backup, files.target);
+    expect(() => new SqliteRecommendStore(files.target)).toThrow(/does not match the retained/);
+    expect(restoreDatabase(files.source, files.target, { offline: true })).toMatchObject({ ok: true });
+    fs.unlinkSync(files.target + '.erasure-recovery.json');
+    expect(() => new SqliteRecommendStore(files.target)).toThrow(/does not match the retained/);
+    expect(() => restoreDatabase(files.source, files.target, { offline: true })).toThrow(/preserves acknowledged erasures/);
+  });
+
+  it('seals a committed pending guard on startup and rejects a pending generation absent from SQLite', () => {
+    const files = fixture();
+    const filename = files.target + '.erasure-recovery.json';
+    const store = new SqliteRecommendStore(files.target);
+    store.close();
+    const ready = JSON.parse(fs.readFileSync(filename, 'utf8'));
+    fs.writeFileSync(filename, JSON.stringify({ ...ready, phase: 'erasing' }));
+    const recovered = new SqliteRecommendStore(files.target);
+    recovered.close();
+    expect(JSON.parse(fs.readFileSync(filename, 'utf8'))).toEqual(ready);
+    backupDatabase(files.target, files.backup);
+    fs.writeFileSync(filename, JSON.stringify({ ...ready, generation: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', phase: 'erasing' }));
+    expect(() => new SqliteRecommendStore(files.target)).toThrow(/does not match the retained/);
+    expect(() => restoreDatabase(files.backup, files.target, { offline: true })).toThrow(/preserves acknowledged erasures/);
+  });
+
+  it('upgrades an existing legacy store in place and rejects untracked personal backups', () => {
+    const files = fixture();
+    const store = new SqliteRecommendStore(files.target);
+    const subjectKey = 'usr_legacy_subject';
+    store.recordEvent({ subjectKey, eventId: 'legacy', type: 'search', query: 'old', createdAt: Date.now(), weight: 1 });
+    store.close();
+    const legacy = new DatabaseSync(files.target);
+    legacy.exec('DROP TABLE recommendation_recovery_guard');
+    legacy.close();
+    fs.unlinkSync(files.target + '.erasure-recovery.json');
+    backupDatabase(files.target, files.backup);
+    expect(() => restoreDatabase(files.backup, files.source, { offline: true })).toThrow(/preserves acknowledged erasures/);
+    const upgraded = new SqliteRecommendStore(files.target);
+    expect(upgraded.getUserEvents(subjectKey)).toHaveLength(1);
+    expect(upgraded.getStats().erasureRecoveryVersion).toBe(1);
+    upgraded.close();
+    expect(() => restoreDatabase(files.backup, files.target, { offline: true })).toThrow(/preserves acknowledged erasures/);
   });
 });

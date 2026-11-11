@@ -36,6 +36,7 @@ async function waitForHealth() {
 }
 
 const { response, health } = await waitForHealth();
+assert.equal(health.release.engineIdentityCompiled, true, 'Engine reports its embedded build identity');
 assert.equal(health.release.releaseCommit, manifest.baseCommit);
 assert.equal(health.release.environment, environment);
 for (const name of ['releaseId', 'sourceDigest', 'buildTime', 'dirty']) {

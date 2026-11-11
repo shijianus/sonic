@@ -11,7 +11,7 @@ import {
   getRateLimitConfigStatus,
 } from '../../../_lib/sonic/security';
 import { getSonicConfig, isEnvEnabled } from '../../../_lib/sonic/config';
-import { fetchWithRuntimeBudget } from '../../../_lib/sonic/local-engine';
+import { callLocalEngineJson, fetchWithRuntimeBudget, getLocalEngineCircuitSnapshot } from '../../../_lib/sonic/local-engine';
 import { getLicensingAuditSummary, getContentPolicyReadiness } from '../../../_lib/sonic/licensing';
 import {
   getAccessMode,
@@ -20,7 +20,6 @@ import {
   isAccessModeDeclaredInvalid,
   isAccessModeExplicit,
 } from '../../../_lib/sonic/access';
-import { getLocalEngineCircuitSnapshot } from '../../../_lib/sonic/local-engine';
 import { getEngineIdentityReadiness, requireValidEngineIdentity, EngineIdentityError } from '../../../_lib/sonic/engine-identity';
 import {
   getObservabilitySnapshot,
@@ -32,6 +31,44 @@ import {
 } from '../../../_lib/sonic/observability';
 import { getRecommendStore, isGorseEnabled, isMeilisearchEnabled } from '../../../_lib/sonic/recommend';
 import type { AppEnv } from '../../../_lib/types';
+
+interface EnginePeerHealth {
+  ok?: boolean;
+  runtime?: string;
+  release?: ReturnType<typeof getReleaseMetadata>;
+  readiness?: { identity?: { ok?: boolean; configured?: boolean; required?: boolean } };
+  recommendEngine?: { storageKind?: string; storageHealthy?: boolean; disk?: { ok?: boolean }; erasureRecoveryVersion?: number };
+}
+
+async function verifyConfiguredEngine(request: Request, env: AppEnv, engineUrl?: string) {
+  const target = engineUrl ? new URL(engineUrl) : undefined;
+  if (!target || target.pathname !== '/' || target.search || target.hash || target.origin === new URL(request.url).origin) {
+    return { ok: false, origin: target?.origin };
+  }
+  const probe = await callLocalEngineJson<EnginePeerHealth>('/api/sonic/engine/health', env, {
+    method: 'GET', signal: request.signal,
+  });
+  const health = probe.data;
+  const release = health?.release;
+  const identity = health?.readiness?.identity;
+  const storage = health?.recommendEngine;
+  return {
+    ok: probe.ok && health?.ok === true && health.runtime === 'linux-engine' &&
+      release?.engineIdentityCompiled === true && storage?.erasureRecoveryVersion === 1 &&
+      identity?.ok === true && identity.configured === true && identity.required === true &&
+      storage?.storageKind === 'sqlite' && storage.storageHealthy === true && storage.disk?.ok === true,
+    origin: target.origin,
+    status: probe.status,
+    runtime: health?.runtime,
+    release: release && {
+      releaseCommit: release.releaseCommit, sourceDigest: release.sourceDigest, releaseId: release.releaseId,
+      buildTime: release.buildTime, dirty: release.dirty, environment: release.environment,
+      engineIdentityCompiled: release.engineIdentityCompiled,
+    },
+    storageKind: storage?.storageKind,
+    erasureRecoveryVersion: storage?.erasureRecoveryVersion,
+  };
+}
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
@@ -46,6 +83,9 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
   const cfg = getSonicConfig(env);
   const release = getReleaseMetadata(env);
+  const enginePeer = cfg.runtime === 'cf-pages' && new URL(request.url).searchParams.get('verifyEngine') === '1'
+    ? await verifyConfiguredEngine(request, env, cfg.enableLocalEngine ? cfg.localEngineUrl : undefined)
+    : undefined;
   let ncmSidecarHealthy: boolean | null = null;
   let ncmSidecarLatencyMs: number | null = null;
 
@@ -149,7 +189,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     ok: accessReady,
   };
   const draining = Boolean(env.SONIC_DRAIN_STATE?.draining);
-  const ok = storageHealthy && sidecarReady && releaseReadiness.ok && contentPolicyReadiness.ok && accessReady && identityReadiness.ok && rateLimitReady && !draining;
+  const ok = storageHealthy && sidecarReady && releaseReadiness.ok && contentPolicyReadiness.ok && accessReady && identityReadiness.ok && rateLimitReady && !draining && enginePeer?.ok !== false;
   const degraded = Boolean(cfg.ncmApiUrl && !sidecarRequired && ncmSidecarHealthy === false);
   const reasons = [
     ...(!storageHealthy ? [storageError || 'storage_unhealthy'] : []),
@@ -160,6 +200,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     ...(!identityReadiness.ok ? ['engine_identity_unavailable'] : []),
     ...(!rateLimitReady ? ['distributed_rate_limiter_unavailable'] : []),
     ...(draining ? ['engine_draining'] : []),
+    ...(enginePeer?.ok === false ? ['configured_engine_unavailable'] : []),
   ];
 
   if (!storageHealthy) {
@@ -193,6 +234,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       },
       runtime: cfg.runtime,
       release,
+      enginePeer,
       timestamp: new Date().toISOString(),
       ncmSidecar: {
         configured: Boolean(cfg.ncmApiUrl),

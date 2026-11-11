@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "pnpm --dir player build && node scripts/write-release-manifest.mjs && node scripts/copy-dist.mjs",
-    "build:engine": "esbuild server/index.ts --bundle --platform=node --target=node22 --format=esm --outfile=dist-server/index.mjs --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build:engine": "node scripts/build-engine.mjs",
     "build:server": "npm run build:engine",
     "start:engine": "node --experimental-sqlite dist-server/index.mjs",
     "deploy": "npm run build && node scripts/deploy-pages.mjs",

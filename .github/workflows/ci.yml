@@ -176,6 +176,33 @@ jobs:
           assert.equal(labels['tech.epocanvas.sonic.dirty'], String(m.dirty));
           NODE
 
+      - name: Verify optional Compose profile and locked NCM sidecar health
+        run: |
+          set -euo pipefail
+          docker compose --env-file /dev/null config --no-interpolate --no-env-resolution --format json |
+            jq -e '.services["ncm-api"].profiles == ["ncm"] and (.services["sonic-engine"].depends_on == null)'
+          npm audit --prefix ncm-sidecar --omit=dev --audit-level=high
+          docker build -f Dockerfile.ncm -t sonic-ci-ncm:${{ github.sha }} .
+          docker run --rm -i --network none --cap-drop ALL --security-opt no-new-privileges sonic-ci-ncm:${{ github.sha }} node --input-type=commonjs <<'NODE'
+          const assert = require('node:assert/strict');
+          const { once } = require('node:events');
+          const { writeFileSync } = require('node:fs');
+          const { tmpdir } = require('node:os');
+          const { join } = require('node:path');
+          // The package's CLI creates this before registering with the provider.
+          writeFileSync(join(tmpdir(), 'anonymous_token'), '', { flag: 'wx' });
+          const { serveNcmApi } = require('@neteasecloudmusicapienhanced/api/server.js');
+          (async () => {
+            assert.notEqual(process.getuid(), 0);
+            assert.equal(process.env.ENABLE_UNBLOCK, 'false');
+            const { server } = await serveNcmApi({ host: '127.0.0.1', port: 3000, checkVersion: false });
+            if (!server.listening) await once(server, 'listening');
+            const response = await fetch('http://127.0.0.1:3000/inner/version', { signal: AbortSignal.timeout(5000) });
+            assert.equal(response.status, 200);
+            assert.equal((await response.json()).data.version, '4.41.1');
+          })().then(() => process.exit(0), error => { console.error(error); process.exit(1); });
+          NODE
+
       - name: Run container and verify auth-gated health endpoint
         env:
           ENGINE_SECRET: ci_engine_secret_at_least_32_characters_long

@@ -200,7 +200,7 @@ docker compose logs -f sonic-engine
 
 - 镜像多阶段构建：前端从 `player/pnpm-lock.yaml` 冻结安装并构建；引擎用 esbuild 打包；运行镜像只含 `dist/`、`dist-server/`、`LICENSE`。
 - 运行用户：`node`（非 root）；数据目录已 chown 给 `node`。
-- 端口：仅 `127.0.0.1:${SONIC_BIND_PORT:-8080}:8080` 映射到宿主；`ncm-api` 不暴露端口。
+- 端口：仅 `127.0.0.1:${SONIC_BIND_PORT:-8080}:8080` 映射到宿主。需要侧车时设置 `SONIC_NCM_API_URL=http://ncm-api:3000`，执行 `docker compose --profile ncm up -d --build`。侧车仅可从内部网络访问。若环境必须依赖该侧车，可设 `SONIC_NCM_REQUIRED=1` 使 Engine 健康检查明确反映侧车不可用。
 - 容器启用 `no-new-privileges` 与 `cap_drop: ALL`。
 - 若宿主目录以绑定挂载替代命名卷，需保证 UID 1000 可写。
 

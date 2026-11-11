@@ -24,6 +24,12 @@ export interface AuthState {
   lastSyncTime: number
 }
 
+function localProfile(user: UserInfo): UserInfo {
+  // Older API responses and persisted profiles can contain a remote avatar URL.
+  // The account controls already render an initial when no avatar is provided.
+  return { ...user, avatar: undefined }
+}
+
 export const useAuthStore = defineStore('auth', {
   state: (): AuthState => ({
     user: null,
@@ -80,12 +86,12 @@ export const useAuthStore = defineStore('auth', {
       try {
         const response = await httpGet<{ ok: boolean; user?: UserInfo }>('/auth/user')
         if (response?.ok && response.user) {
-          this.user = response.user
+          this.user = localProfile(response.user)
           this.isAuthenticated = true
           this.lastSyncTime = now
           this.isLoading = false
           void this.activateLibraryForUser(response.user.id, force)
-          return response.user
+          return this.user
         }
       } catch {
         // A network/API failure must not turn stale local profile data into a verified user.
@@ -123,5 +129,10 @@ export const useAuthStore = defineStore('auth', {
     },
   },
 
-  persist: piniaPersistConfig('auth', ['user', 'isAuthenticated']),
+  persist: {
+    ...piniaPersistConfig('auth', ['user', 'isAuthenticated']),
+    afterHydrate: ({ store }) => {
+      if (store.user) store.user = localProfile(store.user)
+    },
+  },
 })

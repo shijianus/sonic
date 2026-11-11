@@ -6,7 +6,40 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import time
+
+
+def staging_source_env(raw_sources):
+    # Keep this list aligned with docs/CONTENT-LICENSING-MATRIX.md. Operators
+    # must opt in to real sources for the same-artifact Staging media checks.
+    approved = {
+        'netease': 'SONIC_ENABLE_NETEASE', 'qq': 'SONIC_ENABLE_QQ',
+        'kugou': 'SONIC_ENABLE_KUGOU', 'kuwo': 'SONIC_ENABLE_KUWO',
+        'amll': 'SONIC_ENABLE_AMLL', 'lrclib': 'SONIC_ENABLE_LRCLIB',
+    }
+    selected = [part.strip() for part in raw_sources.split(',')] if raw_sources.strip() else []
+    if len(set(selected)) != len(selected) or any(source not in approved for source in selected):
+        raise ValueError('SONIC_STAGING_APPROVED_SOURCES must list distinct approved IDs: ' + ','.join(approved))
+    return {
+        'SONIC_CONTENT_POLICY': 'strict-allowlist',
+        'SONIC_ALLOWED_SOURCES': ','.join(['synthetic', *selected]),
+        'SONIC_ENABLE_SYNTHETIC_TEST_SOURCE': '1',
+        **{flag: '1' if source in selected else '0' for source, flag in approved.items()},
+        'SONIC_ENABLE_GDSTUDIO': '0', 'SONIC_ENABLE_LYRIVA': '0',
+        'SONIC_ENABLE_UNBLOCK': '0', 'SONIC_ENABLE_FREE_CROSS_MATCH': '0',
+    }
+
+
+try:
+    source_env = staging_source_env(os.environ.get('SONIC_STAGING_APPROVED_SOURCES', ''))
+except ValueError as error:
+    raise SystemExit(str(error)) from None
+if sys.argv[1:] == ['--check-source-policy']:
+    print(json.dumps(source_env))
+    raise SystemExit(0)
+if sys.argv[1:]:
+    raise SystemExit('Usage: deploy-staging-engine.py [--check-source-policy]')
 
 root = pathlib.Path(__file__).resolve().parent.parent
 build = json.loads((root / 'remote-build-result.json').read_text())
@@ -46,7 +79,7 @@ def exists(container):
 
 
 def health(container):
-    script = "fetch('http://127.0.0.1:8080/api/sonic/engine/health',{headers:{'X-Sonic-Engine-Key':process.env.SONIC_ENGINE_SECRET||''},signal:AbortSignal.timeout(10000)}).then(async r=>{const b=await r.json();if(!r.ok||!b.ok)process.exit(2);console.log(JSON.stringify({release:b.release,storage:b.recommendEngine.storageKind,ok:b.ok,flags:b.flags,licensing:b.licensing,identity:b.readiness?.identity}))}).catch(()=>process.exit(3))"
+    script = "fetch('http://127.0.0.1:8080/api/sonic/engine/health',{headers:{'X-Sonic-Engine-Key':process.env.SONIC_ENGINE_SECRET||''},signal:AbortSignal.timeout(10000)}).then(async r=>{const b=await r.json();if(!r.ok||!b.ok)process.exit(2);console.log(JSON.stringify({release:b.release,storage:b.recommendEngine.storageKind,erasureRecoveryVersion:b.recommendEngine.erasureRecoveryVersion,ok:b.ok,flags:b.flags,licensing:b.licensing,identity:b.readiness?.identity}))}).catch(()=>process.exit(3))"
     return json.loads(run(['docker', 'exec', container, 'node', '-e', script]))
 
 
@@ -103,11 +136,10 @@ backup = json.loads(run(['docker', 'exec', name, 'node', '--experimental-sqlite'
 assert backup['ok'] and re.fullmatch(r'[a-f0-9]{64}', backup['sha256'])
 assert hashlib.sha256((data_dir / pathlib.Path(backup_path).name).read_bytes()).hexdigest() == backup['sha256']
 (root / 'staging-pre-release-backup.json').write_text(json.dumps({'previousRelease': before, 'backup': backup, 'image': old['Config']['Image'], 'imageId': old['Image'], 'rollbackContainer': backup_name}, indent=2) + '\n')
-values = {'SONIC_ENV': 'staging', 'SONIC_RUNTIME': 'linux-engine', 'SONIC_REQUIRE_ENGINE_IDENTITY': '1', 'SONIC_RELEASE_COMMIT': release['baseCommit'], 'SONIC_RELEASE_ID': release['releaseId'], 'SONIC_SOURCE_DIGEST': release['sourceDigest'], 'SONIC_RELEASE_DIRTY': str(release['dirty']).lower(), 'SONIC_BUILD_TIME': release['buildTime'], 'SONIC_SHUTDOWN_TIMEOUT_MS': '60000', 'SONIC_RECOMMEND_DB_PATH': '/app/data/sonic-recommend.sqlite', 'SONIC_LOCAL_ENGINE_URL': '', 'SONIC_NCM_API_URL': '', 'SONIC_NCM_REQUIRED': '0', 'SONIC_REQUIRE_AUTH': '0', 'SONIC_ENABLE_OAUTH': '0', 'SONIC_CONTENT_POLICY': 'strict-allowlist', 'SONIC_ALLOWED_SOURCES': 'synthetic', 'SONIC_ENABLE_SYNTHETIC_TEST_SOURCE': '1'}
-values.update({k: '0' for k in ['SONIC_ENABLE_NETEASE', 'SONIC_ENABLE_QQ', 'SONIC_ENABLE_KUGOU', 'SONIC_ENABLE_KUWO', 'SONIC_ENABLE_GDSTUDIO', 'SONIC_ENABLE_LYRIVA', 'SONIC_ENABLE_AMLL', 'SONIC_ENABLE_LRCLIB', 'SONIC_ENABLE_UNBLOCK', 'SONIC_ENABLE_FREE_CROSS_MATCH']})
+values = {'SONIC_ENV': 'staging', 'SONIC_RUNTIME': 'linux-engine', 'SONIC_REQUIRE_ENGINE_IDENTITY': '1', 'SONIC_RELEASE_COMMIT': release['baseCommit'], 'SONIC_RELEASE_ID': release['releaseId'], 'SONIC_SOURCE_DIGEST': release['sourceDigest'], 'SONIC_RELEASE_DIRTY': str(release['dirty']).lower(), 'SONIC_BUILD_TIME': release['buildTime'], 'SONIC_SHUTDOWN_TIMEOUT_MS': '60000', 'SONIC_RECOMMEND_DB_PATH': '/app/data/sonic-recommend.sqlite', 'SONIC_LOCAL_ENGINE_URL': '', 'SONIC_NCM_API_URL': '', 'SONIC_NCM_REQUIRED': '0', 'SONIC_REQUIRE_AUTH': '0', 'SONIC_ENABLE_OAUTH': '0', **source_env}
 renamed = False
 stopped = False
-snapshot = None
+launch_attempted = False
 try:
     run(['docker', 'stop', '--time', '75', name])
     stopped = True
@@ -121,14 +153,17 @@ try:
     args = ['docker', 'run', '-d', '--name', name, '--restart', 'unless-stopped', '--stop-timeout', '75', '--env-file', str(env_file), '--env-file', str(identity_file), '-p', '127.0.0.1:18080:8080', '-v', str(data_dir) + ':/app/data']
     for k, v in values.items():
         args += ['-e', k + '=' + v]
+    # Once the new process may have accepted requests, an older directory or
+    # binary could resurrect an erased profile. Retain the live data and guard.
+    launch_attempted = True
     run(args + [image])
     deployment_identity()
     after = wait_health(name)
-    assert after['ok'] and after['storage'] == 'sqlite'
+    assert after['ok'] and after['storage'] == 'sqlite' and after['erasureRecoveryVersion'] == 1
     assert after['release']['releaseId'] == release['releaseId'] and after['release']['sourceDigest'] == release['sourceDigest']
-    assert after['release']['environment'] == 'staging'
+    assert after['release']['environment'] == 'staging' and after['release']['engineIdentityCompiled'] is True
     assert after['identity']['ok'] and after['identity']['configured'] and after['identity']['required']
-    assert after['licensing']['allowedSources'] == ['synthetic']
+    assert sorted(after['licensing']['allowedSources']) == sorted(values['SONIC_ALLOWED_SOURCES'].split(','))
     assert after['flags']['contentPolicy'] == 'strict-allowlist' and not after['flags']['enableOAuth']
     result = {'ok': True, 'phase': 'staging-engine-deployed', 'releaseId': release['releaseId'], 'sourceDigest': release['sourceDigest'], 'image': image, 'previousImage': old['Config']['Image'], 'rollbackContainer': backup_name, 'backup': backup, 'health': after, 'bind': '127.0.0.1:18080', 'dataMount': str(data_dir)}
     (root / 'staging-deployment-result.json').write_text(json.dumps(result, indent=2) + '\n')
@@ -136,26 +171,16 @@ try:
 except Exception as failure:
     rollback = {'ok': False, 'phase': 'staging-deployment-failed', 'rollbackReady': False}
     try:
-        if renamed:
+        if launch_attempted:
             if exists(name):
                 deployment_identity()
                 run(['docker', 'stop', '--time', '75', name])
                 assert not inspect(name)['State']['Running']
-                run(['docker', 'rm', name])
+            rollback['rollbackError'] = 'Candidate may have served requests; preserved current data and recovery guard. Use an erasure-compatible recovery target.'
+        elif renamed:
             assert inspect(backup_name)['Image'] == expected_old
-            assert snapshot_files(rollback_data) == snapshot
-            restore_dir = root / ('restore-data-' + str(time.time_ns()))
-            shutil.copytree(rollback_data, restore_dir)
-            assert snapshot_files(restore_dir) == snapshot
-            failed_data = data_dir.parent / ('sonic-staging-failed-' + release['sourceDigest'][:12] + '-' + str(time.time_ns()))
-            os.replace(data_dir, failed_data)
-            try:
-                os.replace(restore_dir, data_dir)
-            except Exception:
-                os.replace(failed_data, data_dir)
-                raise
             run(['docker', 'rename', backup_name, name])
-        if stopped:
+        if stopped and not launch_attempted:
             assert inspect(name)['Image'] == expected_old
             run(['docker', 'start', name])
             restored = wait_health(name)
