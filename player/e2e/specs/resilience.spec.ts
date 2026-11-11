@@ -1,4 +1,31 @@
 import { test, expect, getAudio, expectPlaying, expectPaused } from '../fixtures'
+import type { Page } from '@playwright/test'
+
+async function holdOldTrackUrl(page: Page) {
+  const matches = (url: URL) => url.pathname === '/api/song/url/v1' && url.searchParams.get('id') === '9001'
+  let markRequested!: () => void
+  const requested = new Promise<void>(resolve => { markRequested = resolve })
+  let unblock!: () => void
+  const held = new Promise<void>(resolve => { unblock = resolve })
+  await page.route(matches, async route => {
+    markRequested()
+    await held
+    await route.fulfill({ json: { data: [{ url: '/api/music/stream?id=9001' }] } })
+  })
+  return {
+    requested,
+    unblock,
+    async deliver() {
+      const oldResponse = page.waitForResponse(response => matches(new URL(response.url())))
+      unblock()
+      expect(await (await oldResponse).finished()).toBeNull()
+      // Give the browser a rendering turn to apply the delivered URL before inspecting media state.
+      await page.evaluate(() => new Promise<void>(resolve => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+      }))
+    },
+  }
+}
 
 /**
  * 异常与降级 E2E（SONIC-P1-02）。
@@ -7,39 +34,50 @@ import { test, expect, getAudio, expectPlaying, expectPaused } from '../fixtures
  */
 test.describe('异常与降级', () => {
   test('取流中暂停：迟到的 URL 不得在用户暂停后自动起播', async ({ page }) => {
-    await page.goto('/#/playlist/123')
-    await expect(page.getByTestId('song-row-9001')).toBeVisible()
+    const old = await holdOldTrackUrl(page)
+    try {
+      await page.goto('/#/playlist/123')
+      await page.getByTestId('song-row-9001').getByRole('heading').click()
+      await old.requested
+      const title = page.getByTestId('now-playing-title')
+      const toggle = page.getByTestId('player-toggle')
+      await expect(title).toHaveText('Test Song One')
+      await expect(toggle).toHaveAttribute('aria-label', 'Cancel')
+      await toggle.click()
+      await expect(toggle).toHaveAttribute('aria-label', 'Play')
 
-    // 9001 的播放地址接口延迟 900ms；等待进入“加载中（可取消）”状态后立即取消
-    await page.getByTestId('song-row-9001').getByRole('heading').click()
-    await expect(page.getByTestId('now-playing-title')).toHaveText('Test Song One')
-    const toggle = page.getByTestId('player-toggle')
-    await expect(toggle).toHaveAttribute('aria-label', 'Cancel')
-    await toggle.click()
-
-    await page.waitForTimeout(1600)
-    const audio = await getAudio(page)
-    expect(audio?.paused).toBe(true)
-    expect(audio?.currentTime ?? 0).toBeLessThan(0.5)
-    // 选中的歌曲信息保留，只是不自动播放
-    await expect(page.getByTestId('now-playing-title')).toHaveText('Test Song One')
+      await old.deliver()
+      const audio = await getAudio(page)
+      expect(audio?.paused).toBe(true)
+      expect(audio?.currentTime ?? 0).toBeLessThan(0.5)
+      await expect(title).toHaveText('Test Song One')
+    } finally {
+      old.unblock()
+    }
   })
 
   test('快速切歌：旧歌慢响应晚到不覆盖新歌状态', async ({ page }) => {
-    await page.goto('/#/playlist/123')
-    await expect(page.getByTestId('song-row-9001')).toBeVisible()
+    const old = await holdOldTrackUrl(page)
+    try {
+      await page.goto('/#/playlist/123')
+      await page.getByTestId('song-row-9001').getByRole('heading').click()
+      await old.requested
+      await page.getByTestId('song-row-9002').getByRole('heading').click()
 
-    // 9001 的 URL 慢 900ms；立即切到 9002（快）
-    await page.getByTestId('song-row-9001').getByRole('heading').click()
-    await page.getByTestId('song-row-9002').getByRole('heading').click()
+      const title = page.getByTestId('now-playing-title')
+      await expect(title).toHaveText('Test Song Two')
+      await expectPlaying(page)
+      const beforeOldResponse = (await getAudio(page))!.currentTime
 
-    await expect(page.getByTestId('now-playing-title')).toHaveText('Test Song Two')
-    await expectPlaying(page)
-    await page.waitForTimeout(1500)
-
-    await expect(page.getByTestId('now-playing-title')).toHaveText('Test Song Two')
-    await expect.poll(async () => (await getAudio(page))?.src ?? '').toContain('id=9002')
-    expect((await getAudio(page))?.paused).toBe(false)
+      await old.deliver()
+      await expect.poll(async () => (await getAudio(page))?.currentTime ?? 0).toBeGreaterThan(beforeOldResponse + 0.2)
+      await expect(title).toHaveText('Test Song Two')
+      const audio = await getAudio(page)
+      expect(audio?.src).toContain('id=9002')
+      expect(audio?.paused).toBe(false)
+    } finally {
+      old.unblock()
+    }
   })
 
   test('播放 403：给出明确错误提示，页面与播放器保持可用', async ({ page }) => {

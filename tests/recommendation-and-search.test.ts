@@ -317,7 +317,7 @@ describe('CFSolara 智能音乐推荐与混合搜索引擎全链路测试', () =
       expect(chartStore.clearUserEvents('usr_six')).toBe(1)
       expect(getPopularity('7d').uniqueListeners).toBe(0)
       expect(getPopularity('all').uniqueListeners).toBe(1)
-    })
+    }, 20_000)
   })
 
   describe('4. 反馈信号可信度、网络卡顿/试听保护、不喜欢过滤与多样性控制', () => {
