@@ -344,7 +344,7 @@ export async function callLocalEngineJson<T = any>(
       if (assertion || optedOut || forwardedIdentity.mode === 'public') {
         for (const credential of ['authorization', 'cookie', 'x-sonic-key', 'x-cfsolara-key', 'x-api-key']) delete headers[credential];
       }
-      // A caller that has checked an erasure target must send that exact subject.
+      // A caller that has checked an event target must send that exact subject.
       if ((readiness.required || accountRoute || options.resolvedIdentity?.subjectKey) && !assertion) throw new EngineIdentityError();
     }
     const response = await fetchWithRuntimeBudget(`${cfg.localEngineUrl}${pathWithQuery.startsWith('/') ? '' : '/'}${pathWithQuery}`, {

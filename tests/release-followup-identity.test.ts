@@ -109,11 +109,70 @@ describe('Follow-up identity and consent over the actual events hop', () => {
     expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(1);
   });
 
+  it.each(['Pages with Engine', 'local SQLite'])('checks the intended event target before ingestion (%s)', async (runtime) => {
+    const authority = engine();
+    const throughEngine = runtime === 'Pages with Engine';
+    const env = throughEngine ? edge() : { ...edge(), SONIC_LOCAL_ENGINE_URL: '', RECOMMEND_STORE: authority.RECOMMEND_STORE };
+    const hop = engineHop(authority);
+    const accountA = await createSession(env, { email: 'events-a@example.invalid', name: 'A', avatar: '' });
+    const accountB = await createSession(env, { email: 'events-b@example.invalid', name: 'B', avatar: '' });
+    const cookieA = { Cookie: `sonic_session=${accountA.apiKey}`, Origin: 'https://edge.followup.test' };
+    const cookieB = { Cookie: `sonic_session=${accountB.apiKey}`, Origin: 'https://edge.followup.test' };
+    const target = 'X-Sonic-Event-Target';
+    for (const headers of [
+      { ...cookieB, [target]: 'anonymous-opt-in' },
+      { ...cookieB, [target]: `account:${accountA.id}` },
+      { [target]: `account:${accountA.id}` },
+      { ...cookieB, [target]: 'account:' },
+      cookieB,
+      { ...cookieB, Cookie: 'sonic_session=invalid' },
+    ]) {
+      const response = await events({ request: incoming('POST', '', headers), env });
+      expect(response.status).toBe(409);
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      expect(await response.json()).toMatchObject({ error: { code: 'EVENT_INGEST_IDENTITY_MISMATCH' } });
+    }
+    expect(hop).not.toHaveBeenCalled();
+    expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(0);
+
+    const guest = await events({ request: incoming('POST', '', { [target]: 'anonymous-opt-in' }), env });
+    expect(guest.status).toBe(200);
+    expect(await guest.json()).toMatchObject({ data: { privacyMode: 'anonymous-opt-in', accepted: 1 } });
+    const account = await events({ request: incoming('POST', '', { ...cookieA, [target]: `account:${accountA.id}` }), env });
+    expect(account.status).toBe(200);
+    expect(await account.json()).toMatchObject({ data: { privacyMode: 'authenticated', accepted: 1 } });
+    if (throughEngine) {
+      const forwarded = new Headers(hop.mock.calls[1]?.[1]?.headers);
+      for (const name of [target, 'Cookie', 'X-Sonic-Anon-Id']) expect(forwarded.has(name)).toBe(false);
+      expect(forwarded.has(ENGINE_IDENTITY_HEADER)).toBe(true);
+    }
+    for (const [headers, count] of [[{}, 1], [cookieA, 1], [cookieB, 0]] as const) {
+      const response = await events({ request: incoming('GET', '', headers), env });
+      expect(await response.json()).toMatchObject({ data: { totalEvents: count } });
+    }
+  });
+
   it('refuses a legacy public acknowledgement for an opt-in subject', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ brand: 'Sonic', data: { ok: true, privacyMode: 'public', accepted: 0, ignoredByPrivacy: 1, storageKind: 'none' } }));
     const response = await events({ request: incoming(), env: edge() });
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ error: { code: 'ENGINE_IDENTITY_UNAVAILABLE' } });
+  });
+
+  it('keeps an unscoped Cookie write public if revocation storage recovers before forwarding', async () => {
+    const authority = engine();
+    const get = vi.fn().mockRejectedValueOnce(new Error('revocation storage unavailable'))
+      .mockRejectedValueOnce(new Error('revocation storage unavailable')).mockResolvedValue(null);
+    const env = { ...edge(), SONIC_KEY_REVOCATION_KV: { get, put: vi.fn() } };
+    const session = await createSession(env, { email: 'events-recovery@example.invalid', name: 'Recovery', avatar: '' });
+    const request = incoming('POST', '', { Cookie: `sonic_session=${session.apiKey}`, Origin: 'https://edge.followup.test' });
+    request.headers.delete('X-Sonic-Anon-Id');
+    engineHop(authority);
+
+    const response = await events({ request, env });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: { privacyMode: 'public', accepted: 0, ignoredByPrivacy: 1 } });
+    expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(0);
   });
 
   it('does not turn an unavailable authoritative GET into an empty memory history', async () => {
@@ -155,7 +214,12 @@ describe('Follow-up identity and consent over the actual events hop', () => {
       return (await response.json()).data.totalEvents;
     }));
 
-    for (const headers of subjects) {
+    const seedHeaders = [
+      { 'X-Sonic-Event-Target': 'anonymous-opt-in' },
+      { ...cookieA, 'X-Sonic-Event-Target': `account:${accountA.id}` },
+      { ...cookieB, 'X-Sonic-Event-Target': `account:${accountB.id}` },
+    ];
+    for (const headers of seedHeaders) {
       expect((await events({ request: incoming('POST', '', headers), env })).status).toBe(200);
     }
     expect(await readCounts()).toEqual([1, 1, 1]);
@@ -199,11 +263,12 @@ describe('Follow-up identity and consent over the actual events hop', () => {
     expect(await readCounts()).toEqual([0, 0, 0]);
   });
 
-  it('refuses to forward a checked stored target without a signed identity', async () => {
+  it.each(['POST', 'DELETE'])('refuses to forward a checked stored target without a signed identity (%s)', async (method) => {
     const hop = vi.spyOn(globalThis, 'fetch');
     const env = { ...edge(), SONIC_REQUIRE_ENGINE_IDENTITY: '0', SONIC_ENGINE_IDENTITY_SECRET: '' };
+    const target = method === 'POST' ? 'X-Sonic-Event-Target' : 'X-Sonic-Erasure-Target';
     const response = await events({
-      request: incoming('DELETE', '', { 'X-Sonic-Erasure-Target': 'anonymous-opt-in' }), env,
+      request: incoming(method, '', { [target]: 'anonymous-opt-in' }), env,
     });
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ error: { code: 'ENGINE_IDENTITY_UNAVAILABLE' } });

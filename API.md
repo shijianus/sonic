@@ -250,6 +250,8 @@ async function getRecommendations() {
 
 同源客户端使用会话 Cookie 删除账户画像时，发送 `X-Sonic-Erasure-Target: account:<当前界面的账户 ID>`。访客可使用 `anonymous-opt-in` 并附带原匿名 ID，无画像时可使用 `public`。目标与服务端解析的身份不一致时返回 `409 EVENT_ERASURE_IDENTITY_MISMATCH`，刷新登录状态后再重试。带明确目标的画像删除通过 Pages 转发时使用 Engine 身份签名。
 
+同源客户端通过 POST 写入行为时，使用 `X-Sonic-Event-Target: account:<入队时的账户 ID>`，或使用 `anonymous-opt-in` 并附带匿名 ID。持久写入携带会话 Cookie 时需要此目标。若返回 `409 EVENT_INGEST_IDENTITY_MISMATCH`，客户端应丢弃该批事件，避免在会话切换后重发。带明确目标的写入通过 Pages 转发时使用 Engine 身份签名。显式 API Key 仍可独立认证。
+
 站内热榜按窗口统计已登录且允许个性化的账户播放活动，`window=all` 使用存储保留期内的数据。匿名用户开启个性化后，其活动仍可用于自己的推荐。外部榜单分数通过 `popularity.externalChartScore` 单独返回。
 
 完整算法公式、实体图谱与多实体混合推荐设计请参阅 [`docs/recommend-multi-entity.md`](docs/recommend-multi-entity.md)、[`docs/recommendation/01-audit-and-selection.md`](docs/recommendation/01-audit-and-selection.md) 与 [`docs/recommendation/02-architecture-and-algorithms.md`](docs/recommendation/02-architecture-and-algorithms.md)。

@@ -139,7 +139,10 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     window.dispatchEvent(new Event('pagehide'))
     expect(fetchSpy).toHaveBeenCalledTimes(3)
     const post = fetchSpy.mock.calls[2][1]
-    expect(post?.headers).toMatchObject({ 'X-Sonic-Anon-Id': rec.anonId })
+    expect(post?.headers).toMatchObject({
+      'X-Sonic-Anon-Id': rec.anonId,
+      'X-Sonic-Event-Target': 'anonymous-opt-in',
+    })
     expect(rec.anonId).not.toBe(originalId)
     expect(JSON.parse(String(post?.body)).events.map((event: { track: { id: number } }) => event.track.id)).toEqual([4])
   })
@@ -234,7 +237,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     expect(rec.dislikedCount).toBe(1)
   })
 
-  it('事件批量发送失败后整批回到队首,随下一次批量一起重试', async () => {
+  it.each([502, 409])('事件发送遇到可重试的 HTTP %s 时整批回到队首', async (status) => {
     vi.useFakeTimers()
     try {
       const rec = useRecommendStore()
@@ -245,9 +248,9 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
       vi.spyOn(globalThis, 'fetch').mockImplementation(async (url: any, init?: any) => {
         if (String(url).includes('/api/sonic/events') && init?.method !== 'DELETE') {
           postCalls.push({ url: String(url), body: init?.body })
-          // 第一次 POST 失败(网关 5xx),第二次成功
+          // 网关错误或非身份冲突失败，随后重试。
           return postCalls.length === 1
-            ? new Response('err', { status: 502 })
+            ? Response.json({ brand: 'Sonic', error: { code: 'OTHER_ERROR' } }, { status })
             : new Response('{}', { status: 200 })
         }
         return new Response('{}', { status: 200 })
@@ -269,6 +272,30 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  it('发送账户目标并丢弃服务端判定身份冲突的旧批次', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(Response.json({
+        brand: 'Sonic', error: { code: 'EVENT_INGEST_IDENTITY_MISMATCH' },
+      }, { status: 409 }))
+      .mockResolvedValueOnce(Response.json({ brand: 'Sonic', data: { accepted: 1 } }))
+    const rec = useRecommendStore()
+    const auth = useAuthStore()
+    auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
+    auth.isAuthenticated = true
+
+    rec.recordEvent({ type: 'favorite', track: { id: 1 } })
+    await rec.flushEvents()
+    rec.recordEvent({ type: 'favorite', track: { id: 2 } })
+    await rec.flushEvents()
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    for (const [, init] of fetchSpy.mock.calls) {
+      expect(init).toMatchObject({ keepalive: true, headers: { 'X-Sonic-Event-Target': 'account:user-A' } })
+    }
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body)).events.map((event: { track: { id: number } }) => event.track.id))
+      .toEqual([2])
   })
 
   it('关闭个性化后 recordEvent 完全不产生网络上报', async () => {

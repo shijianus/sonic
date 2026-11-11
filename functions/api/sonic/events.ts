@@ -21,10 +21,12 @@ import {
   normalizeBehaviorEventInput,
   resolveUserIdentity,
   type SonicBehaviorEventInput,
+  type UserIdentityContext,
 } from '../../_lib/sonic/recommend';
 
 const MAX_BODY_BYTES = 64 * 1024;
 const ERASURE_TARGET_HEADER = 'X-Sonic-Erasure-Target';
+const INGEST_TARGET_HEADER = 'X-Sonic-Event-Target';
 // Events are the only anonymous write surface that feeds global popularity.
 // Bound both the network identity (IP) and the claimed subject so a single
 // client cannot amplify the store by replaying large batches.
@@ -100,6 +102,12 @@ const PRIVATE_HEADERS = {
   'Cache-Control': 'private, no-store',
   Vary: 'Authorization, Cookie, X-Sonic-Key, X-CFSolara-Key, X-Sonic-Anon-Id, X-Sonic-Personalization',
 };
+
+function matchesEventTarget(target: string, identity: UserIdentityContext): boolean {
+  return identity.mode === 'authenticated'
+    ? Boolean(identity.userId && target === `account:${identity.userId}`)
+    : target === identity.mode;
+}
 
 function storageUnavailable(start: number, circuitState?: string): Response {
   const response = sonicError('EVENT_STORAGE_UNAVAILABLE', 'Event storage unavailable; retry with the same event IDs', 503, {
@@ -232,11 +240,8 @@ export async function onRequest({
   if (method === 'DELETE') {
     const identity = await resolveUserIdentity(request, env);
     const target = request.headers.get(ERASURE_TARGET_HEADER);
-    const resolvedTarget = identity.mode === 'authenticated'
-      ? identity.userId && `account:${identity.userId}`
-      : identity.mode;
     const needsTarget = identity.mode === 'authenticated' && extractAuthCredentials(request).source === 'cookie';
-    if (target === null ? needsTarget : target !== resolvedTarget) {
+    if (target === null ? needsTarget : !matchesEventTarget(target, identity)) {
       return jsonResponse({
         brand: 'Sonic',
         error: { code: 'EVENT_ERASURE_IDENTITY_MISMATCH', message: 'Refresh your session before retrying recommendation data deletion' },
@@ -314,6 +319,16 @@ export async function onRequest({
     return sonicError('INVALID_EVENT_TYPE', 'No valid event types or actions found in payload', 400);
   }
 
+  const identity = await resolveUserIdentity(request, env);
+  const target = request.headers.get(INGEST_TARGET_HEADER);
+  const needsTarget = identity.mode !== 'public' && extractAuthCredentials(request).source === 'cookie';
+  if (target === null ? needsTarget : !matchesEventTarget(target, identity)) {
+    return jsonResponse({
+      brand: 'Sonic',
+      error: { code: 'EVENT_INGEST_IDENTITY_MISMATCH', message: 'The behavior batch does not match the current session' },
+    }, { status: 409, headers: buildGatewayHeaders(privateHeaders) });
+  }
+
   const quotaNow = Date.now();
   const clientIp = getPublicClientIp(request);
   const rawAnonId = (request.headers.get('x-sonic-anon-id') || '').trim();
@@ -357,6 +372,8 @@ export async function onRequest({
       body: JSON.stringify({ events: validEvents }),
       timeoutMs: config.engineTimeoutMs,
       signal: request.signal,
+      // An unscoped public request must not become a stored write on revalidation.
+      ...(target !== null || identity.mode === 'public' ? { resolvedIdentity: identity } : {}),
     });
     circuitState = engineRes.circuitState;
     if (engineRes.ok && engineRes.data?.brand === 'Sonic' && engineRes.data?.data?.ok === true &&
@@ -381,7 +398,6 @@ export async function onRequest({
     return engineRejected(engineRes, start, circuitState);
   }
 
-  const identity = await resolveUserIdentity(request, env);
   if (identity.personalizationEnabled && identity.subjectKey && getRecommendStore(env).kind !== 'sqlite') {
     return storageUnavailable(start);
   }

@@ -88,9 +88,13 @@ function deliveryFor(store: object): DeliveryState {
   return delivery
 }
 
-function deliveryIdentity(anonId: string): string {
+function currentAccountId(): string | undefined {
   const auth = useAuthStore()
-  return JSON.stringify([anonId, auth.isAuthenticated ? auth.user?.id ?? null : null])
+  return auth.isAuthenticated ? auth.user?.id : undefined
+}
+
+function deliveryIdentity(anonId: string): string {
+  return JSON.stringify([anonId, currentAccountId() ?? null])
 }
 
 function stopFlushTimer(delivery: DeliveryState) {
@@ -259,9 +263,11 @@ export const useRecommendStore = defineStore('recommend', {
       const batch = delivery.pending
       delivery.pending = []
       const headers = this.buildRequestHeaders(false)
-      const write = postSonicEvents(batch, headers).then((ok) => {
+      const accountId = currentAccountId()
+      headers['X-Sonic-Event-Target'] = accountId ? `account:${accountId}` : 'anonymous-opt-in'
+      const write = postSonicEvents(batch, headers).then((result) => {
         // A failed batch can only rejoin the queue it was originally sent from.
-        if (ok || delivery.clearing || !this.personalizationEnabled ||
+        if (result !== 'retry' || delivery.clearing || !this.personalizationEnabled ||
           delivery.generation !== generation || deliveryIdentity(this.anonId) !== identity) return
         const capacity = Math.max(0, MAX_PENDING_EVENTS - delivery.pending.length)
         delivery.pending = [...batch.slice(0, capacity), ...delivery.pending]
@@ -415,8 +421,7 @@ export const useRecommendStore = defineStore('recommend', {
       const delivery = deliveryFor(this)
       if (delivery.clearing) return delivery.clearing
       const headers = this.buildRequestHeaders(false)
-      const auth = useAuthStore()
-      const accountId = auth.isAuthenticated ? auth.user?.id : undefined
+      const accountId = currentAccountId()
       const hasAnonId = ANON_ID_PATTERN.test(this.anonId)
       // An expired account session must not silently delete the guest profile.
       // Guest erasure still needs the old device ID after personalization is off.

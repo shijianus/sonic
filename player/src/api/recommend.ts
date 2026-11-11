@@ -375,8 +375,8 @@ export async function fetchSmartSuggest(
 export async function postSonicEvents(
   events: SonicEventPayload[],
   headers: Record<string, string> = {}
-): Promise<boolean> {
-  if (!events.length) return false
+): Promise<'sent' | 'identity-mismatch' | 'retry'> {
+  if (!events.length) return 'retry'
   try {
     const resp = await fetch('/api/sonic/events', {
       method: 'POST',
@@ -387,9 +387,16 @@ export async function postSonicEvents(
       body: JSON.stringify({ events }),
       keepalive: true,
     })
-    return resp.ok
+    if (resp.ok) return 'sent'
+    if (resp.status === 409) {
+      const result = await resp.json()
+      if (result?.brand === 'Sonic' && result.error?.code === 'EVENT_INGEST_IDENTITY_MISMATCH') {
+        return 'identity-mismatch'
+      }
+    }
+    return 'retry'
   } catch {
-    return false
+    return 'retry'
   }
 }
 
