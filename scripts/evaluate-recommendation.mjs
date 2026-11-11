@@ -1,9 +1,8 @@
 /**
- * CFSolara 智能音乐推荐与混合搜索引擎 —— 离线可复现评估与基准测试脚本
+ * Sonic 智能音乐推荐与混合搜索引擎离线基准
  *
  * 数据集诚实声明：
- *   本脚本基于 CFSolara 规范化曲目库 (Seed Catalog + SQLite FTS5) 与 6 类典型用户画像的
- *   Train/Holdout 留一集切分 (Synthetic Multi-Persona Benchmark) 以及 20 组多语言/简繁/拼音/容错搜索用例，
+ *   本脚本基于种子曲库、6 类合成用户画像的训练和留出集切分，以及 20 组搜索用例，
  *   输出 Precision@10, Recall@10, NDCG@10, Catalog Coverage, Intra-List Diversity (ILD),
  *   Novelty, 搜索 Top-1/Top-5 命中率、零结果兜底率以及 p50/p95 延迟与内存占用。
  */
@@ -14,13 +13,14 @@ import {
   ingestBehaviorEvents,
   getRecommendationsForYou,
   executeSmartSearch,
+  isPlayableTrack,
 } from '../functions/_lib/sonic/recommend/index.ts'
 
 const K = 10
 
 function percentile(sortedArr, p) {
   if (!sortedArr.length) return 0
-  const idx = Math.min(sortedArr.length - 1, Math.floor((p / 100) * sortedArr.length))
+  const idx = Math.max(0, Math.ceil((p / 100) * sortedArr.length) - 1)
   return sortedArr[idx]
 }
 
@@ -62,17 +62,13 @@ function computeIntraListDiversity(tracks) {
 }
 
 async function runEvaluation() {
-  console.log('========================================================================')
-  console.log(' CFSolara 智能音乐推荐与混合搜索引擎 —— 离线评估基准 (Offline Benchmark)')
-  console.log(' [声明] 评估数据来自可复现合成多画像切分基准 (Synthetic Persona Split)，非生产用户日志')
-  console.log('========================================================================\n')
-
   const store = new SqliteRecommendStore(':memory:')
   ensureCatalogSeeded(store)
   const env = { RECOMMEND_STORE: store, SONIC_RECOMMEND_OFFLINE: '1' }
 
   const allTracks = store.listTracks(500)
-  const totalCatalogSize = allTracks.length
+  const eligibleTracks = allTracks.filter((track) => isPlayableTrack(track) && !['demo', 'cover'].includes(track.edition))
+  const eligibleIds = new Set(eligibleTracks.map((track) => track.canonicalTrackId))
 
   // 定义 6 类典型音乐品味画像：训练集交互 + 留出验证集目标风格/歌手判据
   const personas = [
@@ -83,7 +79,7 @@ async function runEvaluation() {
         { type: 'favorite', track: { id: '186016', title: '晴天', artist: '周杰伦', duration: 269 } },
         { type: 'play_complete', track: { id: '185811', title: '七里香', artist: '周杰伦', duration: 299 } },
         { type: 'favorite', track: { id: '108914', title: '江南', artist: '林俊杰', duration: 267 } },
-        { type: 'search_click', query: '华语 R&B', track: { id: '25642126', title: '普通朋友', artist: '陶喆', duration: 255 } },
+        { type: 'search_click', query: '华语 R&B', track: { id: '150432', title: '普通朋友', artist: '陶喆', duration: 255 } },
       ],
       isRelevantHoldout: (t) =>
         ['周杰伦', '林俊杰', '陶喆', '王力宏', '方大同'].includes(t.artist) ||
@@ -95,7 +91,7 @@ async function runEvaluation() {
       trainEvents: [
         { type: 'favorite', track: { id: '65766', title: '富士山下', artist: '陈奕迅', duration: 259 } },
         { type: 'play_complete', track: { id: '347230', title: '海阔天空', artist: 'Beyond', duration: 326 } },
-        { type: 'search_click', query: '粤语金曲', track: { id: '29947420', title: '喜帖街', artist: '谢安琪', duration: 210 } },
+        { type: 'search_click', query: '粤语金曲', track: { id: '188432', title: '吻别', artist: '张学友', duration: 303 } },
       ],
       isRelevantHoldout: (t) =>
         t.language === 'yue' ||
@@ -106,9 +102,9 @@ async function runEvaluation() {
       id: 'anon:eval_rock_indie',
       name: '华语摇滚与独立民谣听众',
       trainEvents: [
-        { type: 'favorite', track: { id: '386844', title: '杀死那个石家庄人', artist: '万能青年旅店', duration: 344 } },
-        { type: 'play_complete', track: { id: '167876', title: '平凡之路', artist: '朴树', duration: 301 } },
-        { type: 'replay', track: { id: '1397345903', title: '大石碎胸口', artist: '万能青年旅店', duration: 416 } },
+        { type: 'favorite', track: { id: '385929', title: '倔强', artist: '五月天', duration: 262 } },
+        { type: 'play_complete', track: { id: '28815250', title: '平凡之路', artist: '朴树', duration: 301 } },
+        { type: 'replay', track: { id: '407679921', title: '大风吹', artist: '草东没有派对', duration: 235 } },
       ],
       isRelevantHoldout: (t) =>
         (t.genres || []).some((g) => ['rock', 'folk', 'indie'].includes(g)) ||
@@ -118,9 +114,9 @@ async function runEvaluation() {
       id: 'anon:eval_western_pop',
       name: '欧美流行与合成器电子听众',
       trainEvents: [
-        { type: 'favorite', track: { id: '19850216', title: 'Love Story', artist: 'Taylor Swift', duration: 235 } },
-        { type: 'play_complete', track: { id: '1406649619', title: 'Blinding Lights', artist: 'The Weeknd', duration: 200 } },
-        { type: 'search_click', query: 'Coldplay', track: { id: '415792222', title: 'Something Just Like This', artist: 'Coldplay', duration: 247 } },
+        { type: 'favorite', track: { id: '1382576173', title: 'Lover', artist: 'Taylor Swift', duration: 221 } },
+        { type: 'play_complete', track: { id: '1403318151', title: 'Blinding Lights', artist: 'The Weeknd', duration: 200 } },
+        { type: 'search_click', query: 'Coldplay', track: { id: '400162138', title: 'Something Just Like This', artist: 'Coldplay', duration: 247 } },
       ],
       isRelevantHoldout: (t) =>
         t.language === 'en' ||
@@ -131,7 +127,7 @@ async function runEvaluation() {
       name: '日音 J-Pop 与二次元原声听众',
       trainEvents: [
         { type: 'favorite', track: { id: '536622304', title: 'Lemon', artist: '米津玄師', duration: 255 } },
-        { type: 'play_complete', track: { id: '1411558694', title: '夜に駆ける', artist: 'YOASOBI', duration: 261 } },
+        { type: 'play_complete', track: { id: '1409311773', title: '夜に駆ける', artist: 'YOASOBI', duration: 261 } },
       ],
       isRelevantHoldout: (t) =>
         t.language === 'ja' || (t.genres || []).includes('j-pop'),
@@ -140,9 +136,9 @@ async function runEvaluation() {
       id: 'anon:eval_ballad_female',
       name: '华语抒情女声与都市慢歌听众',
       trainEvents: [
-        { type: 'favorite', track: { id: '29999202', title: '泡沫', artist: '邓紫棋', duration: 258 } },
+        { type: 'favorite', track: { id: '25642126', title: '泡沫', artist: '邓紫棋', duration: 258 } },
         { type: 'play_complete', track: { id: '287035', title: '遇见', artist: '孙燕姿', duration: 210 } },
-        { type: 'favorite', track: { id: '27955653', title: '匆匆那年', artist: '王菲', duration: 241 } },
+        { type: 'favorite', track: { id: '299992', title: '红豆', artist: '王菲', duration: 256 } },
       ],
       isRelevantHoldout: (t) =>
         ['邓紫棋', '孙燕姿', '王菲', '蔡依林', '张惠妹', '莫文蔚', '梁静茹'].includes(t.artist) ||
@@ -157,6 +153,7 @@ async function runEvaluation() {
   let ndcgSum = 0
   let ildSum = 0
   let noveltySum = 0
+  const personaResults = []
 
   for (const p of personas) {
     const identity = {
@@ -164,39 +161,48 @@ async function runEvaluation() {
       subjectKey: p.id,
       personalizationEnabled: true,
     }
-    await ingestBehaviorEvents(p.trainEvents, identity, env)
-
-    const trainIds = new Set(p.trainEvents.map((e) => String(e.track?.id || '')))
-    const totalRelevantInCatalog = allTracks.filter(
-      (t) => !trainIds.has(String(t.providerTrackId)) && p.isRelevantHoldout(t)
-    ).length
+    const now = Date.now()
+    const trainEvents = p.trainEvents.map((event, index) => ({
+      ...event,
+      eventId: `eval-${p.id}-${index}`,
+      timestamp: now - (p.trainEvents.length - index) * 10_000,
+    }))
+    const ingestion = await ingestBehaviorEvents(trainEvents, identity, env)
+    const trainIds = new Set(store.getUserEvents(p.id, p.trainEvents.length).map((event) => event.canonicalTrackId))
+    const relevantIds = new Set(eligibleTracks
+      .filter((track) => !trainIds.has(track.canonicalTrackId) && p.isRelevantHoldout(track))
+      .map((track) => track.canonicalTrackId))
 
     const t0 = performance.now()
     const rec = await getRecommendationsForYou(
       identity,
-      { count: K, excludeIds: Array.from(trainIds), temperature: 0.2 },
+      { count: K, excludeIds: Array.from(trainIds).filter(Boolean), temperature: 0 },
       env
     )
     recLatencies.push(performance.now() - t0)
 
     const topK = rec.tracks.slice(0, K)
-    topK.forEach((t) => recommendedTrackUnion.add(t.canonicalTrackId))
-
-    const relVector = topK.map((t) => (p.isRelevantHoldout(t) ? 1 : 0))
+    const seenIds = new Set()
+    const relVector = topK.map(({ canonicalTrackId }) => {
+      const hit = !seenIds.has(canonicalTrackId) && relevantIds.has(canonicalTrackId)
+      seenIds.add(canonicalTrackId)
+      if (eligibleIds.has(canonicalTrackId)) recommendedTrackUnion.add(canonicalTrackId)
+      return Number(hit)
+    })
     const hits = relVector.reduce((a, b) => a + b, 0)
     const precision = hits / K
-    const recall = totalRelevantInCatalog > 0 ? hits / Math.min(K, totalRelevantInCatalog) : 0
+    const recall = relevantIds.size ? hits / relevantIds.size : 0
     const dcg = computeDcg(relVector)
     const idealRel = Array.from({ length: K }, (_, i) =>
-      i < Math.min(K, totalRelevantInCatalog) ? 1 : 0
+      i < Math.min(K, relevantIds.size) ? 1 : 0
     )
     const idcg = computeDcg(idealRel)
     const ndcg = idcg > 0 ? dcg / idcg : 0
 
-    // Self-information novelty: -log2(externalPopularity / 100)
+    // The external chart score is already normalized to [0, 1].
     const avgNovelty =
       topK.reduce((acc, item) => {
-        const popProb = Math.max(0.05, Math.min(0.99, item.popularity?.externalChartScore || 0.5))
+        const popProb = Math.max(0.05, Math.min(0.99, item.popularity?.externalChartScore ?? 0.5))
         return acc + -Math.log2(popProb)
       }, 0) / Math.max(1, topK.length)
 
@@ -205,6 +211,15 @@ async function runEvaluation() {
     ndcgSum += ndcg
     ildSum += computeIntraListDiversity(topK)
     noveltySum += avgNovelty
+    personaResults.push({
+      id: p.id,
+      name: p.name,
+      relevantHoldoutCount: relevantIds.size,
+      hitsAtK: hits,
+      passed: ingestion.accepted === trainEvents.length && trainIds.size === trainEvents.length &&
+        !trainIds.has(undefined) && relevantIds.size > 0 && seenIds.size === K &&
+        [...seenIds].every((id) => eligibleIds.has(id) && !trainIds.has(id)),
+    })
   }
 
   // 搜索基准评测 (20 个覆盖简繁/拼音/首字母/别名/拼写容错/精准保护与零结果兜底的查询)
@@ -235,8 +250,10 @@ async function runEvaluation() {
   let top1Hits = 0
   let top5Hits = 0
   let nonEmptyAfterFallback = 0
-  let playableCount = 0
-  let totalReturnedTracks = 0
+  const metadataStreamTypes = { full: 0, trial: 0, unavailable: 0, unknown: 0 }
+  let expectedMatchQueries = 0
+  let expectedFallbackQueries = 0
+  let successfulFallbackQueries = 0
 
   const publicIdentity = { mode: 'public', subjectKey: null, personalizationEnabled: false }
 
@@ -255,17 +272,17 @@ async function runEvaluation() {
     if (effectiveList.length > 0) nonEmptyAfterFallback++
 
     for (const t of effectiveList) {
-      totalReturnedTracks++
-      if (t.streamType !== 'unavailable') playableCount++
+      const type = t.streamType
+      if (type === 'full' || type === 'trial' || type === 'unavailable') metadataStreamTypes[type]++
+      else metadataStreamTypes.unknown++
     }
 
     if (item.expectFallback) {
-      if (res.data.fallbackUsed && (res.data.fallbackTracks || []).length > 0) {
-        top1Hits++
-        top5Hits++
-      }
+      expectedFallbackQueries++
+      if (tracks.length === 0 && res.data.fallbackUsed && res.data.fallbackTracks?.length > 0) successfulFallbackQueries++
       continue
     }
+    expectedMatchQueries++
 
     const matchFn = (t) => {
       if (item.expectTitle && t.title !== item.expectTitle) return false
@@ -284,22 +301,36 @@ async function runEvaluation() {
 
   const nP = personas.length
   const nQ = searchBenchmarkQueries.length
+  const totalReturnedTracks = Object.values(metadataStreamTypes).reduce((sum, count) => sum + count, 0)
+  const checks = {
+    holdoutExcludesTrainingAndHasUniqueCatalogItems: personaResults.every((persona) => persona.passed),
+    everyPersonaFindsAtLeastOneRelevantHoldoutItem: personaResults.every((persona) => persona.hitsAtK > 0),
+    knownQueriesMatchWithinTopFive: top5Hits === expectedMatchQueries,
+    unknownQueriesReceiveFallback: successfulFallbackQueries === expectedFallbackQueries,
+  }
   const report = {
+    schemaVersion: 2,
     datasetType: 'Synthetic Multi-Persona Holdout & Query Benchmark (Offline Reproducible)',
-    catalogSize: totalCatalogSize,
+    catalogSize: allTracks.length,
+    eligibleCatalogSize: eligibleIds.size,
+    checks,
+    personaResults,
     recommendationMetrics: {
       [`Precision@${K}`]: Number((precisionSum / nP).toFixed(4)),
       [`Recall@${K}`]: Number((recallSum / nP).toFixed(4)),
       [`NDCG@${K}`]: Number((ndcgSum / nP).toFixed(4)),
-      CatalogCoverage: Number((recommendedTrackUnion.size / totalCatalogSize).toFixed(4)),
+      CatalogCoverage: Number((recommendedTrackUnion.size / Math.max(1, eligibleIds.size)).toFixed(4)),
       IntraListDiversity_ILD: Number((ildSum / nP).toFixed(4)),
       Novelty_Bits: Number((noveltySum / nP).toFixed(4)),
     },
     searchMetrics: {
-      Top1_HitRate: Number((top1Hits / nQ).toFixed(4)),
-      Top5_HitRate: Number((top5Hits / nQ).toFixed(4)),
+      Top1_HitRate: Number((top1Hits / expectedMatchQueries).toFixed(4)),
+      Top5_HitRate: Number((top5Hits / expectedMatchQueries).toFixed(4)),
+      ExpectedFallbackSuccessRate: Number((successfulFallbackQueries / expectedFallbackQueries).toFixed(4)),
       ZeroResultRate_AfterFallback: Number((1 - nonEmptyAfterFallback / nQ).toFixed(4)),
-      PlayableTrackRatio: Number((playableCount / Math.max(1, totalReturnedTracks)).toFixed(4)),
+      MetadataDeclaredAvailableTrackRatio: Number(((metadataStreamTypes.full + metadataStreamTypes.trial) / Math.max(1, totalReturnedTracks)).toFixed(4)),
+      metadataStreamTypes,
+      livePlaybackVerified: false,
     },
     performanceMetrics: {
       recommendLatency_p50_ms: Number(percentile(recLatencies, 50).toFixed(2)),
@@ -312,6 +343,7 @@ async function runEvaluation() {
 
   console.log(JSON.stringify(report, null, 2))
   store.close()
+  if (Object.values(checks).some((passed) => !passed)) process.exitCode = 1
 }
 
 runEvaluation().catch((err) => {

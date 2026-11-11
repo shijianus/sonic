@@ -8,6 +8,7 @@ import {
   collectReleaseInputs, copyReleaseInputs, createReleaseFileIndex,
   RELEASE_DIRECTORIES, REQUIRED_RELEASE_FILES,
 } from '../scripts/release-inputs.mjs';
+import { assertStagingAcceptance, buildPagesDeploymentTree, parseDeploymentOrigin } from '../scripts/pages-release-lib.mjs';
 
 const repo = resolve(import.meta.dirname, '..');
 const directories: string[] = [];
@@ -58,6 +59,78 @@ function verify(root: string) {
 }
 
 describe('complete, secret-safe release source packages', { timeout: 30_000 }, () => {
+  it('binds Staging evidence to the exact Pages output and requires production checks', () => {
+    const root = fixture();
+    put(root, 'functions/_lib/sonic/compiled-release.ts', 'export const COMPILED_RELEASE = null;');
+    put(root, 'dist/index.html', 'first artifact');
+    const written = runWriter(root, ['--output', 'dist/release.json'], { SONIC_RELEASE_DIRTY: '0' });
+    expect(written.status, written.stderr).toBe(0);
+    const first = buildPagesDeploymentTree(root);
+    directories.push(first.stagingRoot);
+    const identity = { ...first.manifest, pagesArtifactDigest: first.pagesArtifactDigest };
+    expect(readFileSync(join(first.stagingRoot, 'functions/_lib/sonic/compiled-release.ts'), 'utf8')).toContain(first.pagesArtifactDigest);
+    const preview = {
+      ...identity,
+      ok: true, mode: 'staging-live', branch: 'rc-fixture', base: 'https://test.sonic-staging.pages.dev',
+      branchUrl: 'https://rc-fixture.sonic-staging.pages.dev', deploymentId: '01234567-89ab-cdef-0123-456789abcdef',
+      engineStorage: 'sqlite', independentIdentityBindingPresent: true, authenticatedIdentityAssertionLiveVerified: true,
+      checks: Array.from({ length: 12 }, (_, index) => ({ name: `check ${index}`, ok: true })),
+    };
+    expect(() => assertStagingAcceptance(preview, first.manifest, first.pagesArtifactDigest)).not.toThrow();
+    expect(() => assertStagingAcceptance(preview, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/exact release/);
+
+    const stable = { ...preview, branch: 'staging', base: 'https://sonic-staging.pages.dev', branchUrl: 'https://sonic-staging.pages.dev' };
+    expect(() => assertStagingAcceptance(stable, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/oauthLoginAndRevocation/);
+    const evidence = { ...stable, productionChecks: Object.fromEntries([
+      'oauthLoginAndRevocation', 'authorizedMediaPlaybackAndSeek', 'lyricsSync', 'imageAndSqliteRollback',
+    ].map(name => [name, { ok: true, evidence: `record for ${name}` }])) };
+    expect(() => assertStagingAcceptance(evidence, first.manifest, first.pagesArtifactDigest, { production: true })).not.toThrow();
+    expect(() => assertStagingAcceptance({ ...evidence, baseCommit: 'b'.repeat(40) }, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/exact release/);
+
+    put(root, 'dist/index.html', 'modified artifact');
+    const changed = buildPagesDeploymentTree(root);
+    directories.push(changed.stagingRoot);
+    expect(changed.manifest).toEqual(first.manifest);
+    expect(changed.pagesArtifactDigest).not.toBe(first.pagesArtifactDigest);
+    expect(() => assertStagingAcceptance(evidence, changed.manifest, changed.pagesArtifactDigest, { production: true })).toThrow(/exact release/);
+  });
+
+  it.each(['http://sonic.example/', 'https://user:password@sonic.example/', 'https://sonic.example/elsewhere', 'https://sonic.example/?q=1', 'https://sonic.example/#hash'])('rejects a noncanonical production verification target %s', (target) => {
+    expect(() => parseDeploymentOrigin(target)).toThrow(/canonical HTTPS/);
+  });
+
+  it('blocks production deployment before invoking Wrangler when Staging evidence is missing', () => {
+    const root = fixture();
+    put(root, '.gitignore', '/dist/\n');
+    put(root, 'functions/_lib/sonic/compiled-release.ts', 'export const COMPILED_RELEASE = null;');
+    const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+    git('init', '--quiet');
+    git('add', '.');
+    git('-c', 'user.name=Sonic release test', '-c', 'user.email=fixture@example.test', 'commit', '-qm', 'fixture');
+    const manifest = runWriter(root, ['--output', 'dist/release.json'], { SONIC_RELEASE_COMMIT: git('rev-parse', 'HEAD'), SONIC_RELEASE_DIRTY: '0' });
+    expect(manifest.status, manifest.stderr).toBe(0);
+    const scripts = temporary();
+    const marker = join(scripts, 'wrangler-ran');
+    const wrangler = join(scripts, 'wrangler.mjs');
+    put(scripts, 'wrangler.mjs', `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'ran');`);
+    const run = (project: string) => spawnSync(process.execPath, [join(repo, 'scripts/deploy-pages.mjs')], {
+      cwd: root, encoding: 'utf8', env: {
+        ...process.env, CF_PAGES_PROJECT: project, CF_PAGES_BRANCH: 'main', SONIC_DEPLOY_ENV: 'production',
+        SONIC_ENV: 'production', SONIC_ACCESS_MODE: 'invite', SONIC_RUNTIME: '', SONIC_SOURCE_DIGEST: '',
+        SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'netease', SONIC_ENGINE_SECRET: 's'.repeat(48),
+        SONIC_DEPLOY_VERIFY_URL: 'https://production.example.test', SONIC_PRODUCTION_ACCEPTANCE_FILE: join(scripts, 'missing.json'),
+        WRANGLER_CLI: wrangler, ALLOW_DIRTY_DEPLOY: '1', ALLOW_UNVERIFIED_DEPLOY: '1',
+      },
+    });
+    const noProject = run('');
+    expect(noProject.status).toBe(1);
+    expect(noProject.stderr).toContain('CF_PAGES_PROJECT is required');
+    const noEvidence = run('sonic-prod');
+    expect(noEvidence.status).toBe(1);
+    expect(noEvidence.stderr).toContain('Unable to read accepted live Staging evidence');
+    expect(existsSync(marker)).toBe(false);
+  });
+
   it('copies one explicit file set with the Compose, pre-build typecheck, lint, test, CI and runbook inputs', () => {
     const root = fixture();
     const manifest = snapshot(root);

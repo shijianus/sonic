@@ -4,6 +4,7 @@
  */
 import { defineStore } from 'pinia'
 import { songUrlV1 } from '@/api'
+import type { SonicEventPayload } from '@/api/recommend'
 import { Song, PlayMode, AudioStoreState } from '../interface'
 import { useSettingsStore } from './settings'
 import { useToastStore } from './toast'
@@ -12,6 +13,7 @@ import { downloadedMusicDB, localMusicDB } from '@/utils/indexedDB'
 import { musicStreamUrl, songSourceCandidates, songPlaybackSource, songSourcePair, streamSourcePair } from '@/utils/audioUtils'
 import { inspectGatewayHeaders, markStreamFailure, gatewayHealth } from '@/utils/gatewayHealth'
 import { sonicBlogBridge } from '@/utils/sonicBlogBridge'
+import { ListeningCoverage } from '@/utils/listeningCoverage'
 import piniaPersistConfig from '../persist'
 
 /** 全局 Audio 单例（整个应用只创建一个 HTMLAudioElement） */
@@ -20,18 +22,28 @@ let globalAudio: HTMLAudioElement | null = null
 let eventsBound = false
 /** 标记当前播放歌曲是否已触发过下一首预加载，避免重复发起 */
 let hasPreloadedNext = false
-/** 推荐行为追踪：记录当前歌曲是否已上报过起播与 50% 有效播放进度 */
-let playStartedSongId: string | number | null = null
-let progressReportedSongId: string | number | null = null
+interface ListeningSession {
+  songKey: string
+  source: string
+  coverage: ListeningCoverage
+  started: boolean
+  progressReported: boolean
+}
+let listeningSession: ListeningSession | null = null
 
-function emitRecommendPlaybackEvent(payload: any) {
-  import('./recommend')
+let recommendStoreModule: Promise<typeof import('./recommend')> | undefined
+
+function emitRecommendPlaybackEvent(payload: SonicEventPayload) {
+  const modulePromise = (recommendStoreModule ??= import('./recommend'))
+  modulePromise
     .then(({ useRecommendStore }) => {
       try {
         useRecommendStore().recordEvent(payload)
       } catch {}
     })
-    .catch(() => {})
+    .catch(() => {
+      if (recommendStoreModule === modulePromise) recommendStoreModule = undefined
+    })
 }
 
 type PlaybackErrorKind = 'network' | 'source' | 'copyright'
@@ -59,8 +71,14 @@ export const classifyPlaybackError = (error?: MediaError | Error | null): Playba
 let lastPlaybackToastId: number | null = null
 let lastPlaybackToastKey = ''
 let lastPlaybackToastAt = 0
-/** 音质切换期间由 switchQuality 自行处理错误，避免误触发全局播放错误 */
-let switchingQuality = false
+interface QualitySwitch {
+  controller: AbortController
+  song: Song
+  previousSource: string
+  position: number
+  resumePlayback: boolean
+}
+let activeQualitySwitch: QualitySwitch | null = null
 /** 本次页面会话内已重新生成的 Blob URL，避免重复读取 IndexedDB */
 const restoredBlobUrls = new Set<string>()
 /** 播放操作代次：新的切歌/重试会使旧的异步结果失效 */
@@ -68,6 +86,9 @@ let playbackGeneration = 0
 const metadataControllers = new Set<AbortController>()
 const advancePlaybackGeneration = () => {
   playbackGeneration += 1
+  const cancelledQualitySwitch = activeQualitySwitch
+  activeQualitySwitch = null
+  cancelledQualitySwitch?.controller.abort()
   for (const controller of metadataControllers) controller.abort()
   metadataControllers.clear()
   return playbackGeneration
@@ -95,6 +116,23 @@ const pendingUrlRequests = new Map<string, { promise: Promise<string>; generatio
 const songUrlRequestVersions = new Map<string, number>()
 const streamMetadataProbes = new WeakMap<Song, { url: string; generation: number; promise: Promise<void> }>()
 const songPlaybackKey = (song: Song) => JSON.stringify([song.id, song.source || song.platform || song.sources?.[0]?.platform || ''])
+
+function listeningFor(song: Song | null, audio: HTMLAudioElement | null): ListeningSession | null {
+  if (!song || song.isLocal || !audio || !listeningSession) return null
+  if (listeningSession.songKey !== songPlaybackKey(song) || listeningSession.source !== audio.src ||
+      (audio.currentSrc && audio.currentSrc !== listeningSession.source)) return null
+  return listeningSession
+}
+
+function bindListeningSource(song: Song | null, audio: HTMLAudioElement) {
+  if (!song || song.isLocal || !audio.src) {
+    listeningSession = null
+    return
+  }
+  const songKey = songPlaybackKey(song)
+  if (listeningSession?.songKey === songKey) listeningSession.source = audio.src
+  else listeningSession = { songKey, source: audio.src, coverage: new ListeningCoverage(), started: false, progressReported: false }
+}
 /** 仅对已验证来源进行有限次数的重试，绝不猜测跨平台 ID */
 const MAX_SOURCE_RETRIES = 4
 const songSourceAttemptMap = new Map<string, number>()
@@ -238,9 +276,7 @@ export const useAudioStore = defineStore('audio', {
               this.resume()
             }
           } else if (cmd.action === 'PAUSE') {
-            if (!this.audio.audio?.paused) {
-              this.pause()
-            }
+            this.pause()
           }
         })
         // 如果有歌曲的情况下
@@ -259,6 +295,7 @@ export const useAudioStore = defineStore('audio', {
           } else {
             // 仅设置源，不主动 load：避免恢复历史歌曲时自动请求并弹出播放错误
             this.audio.audio.src = (this.audio.currentSong && this.audio.currentSong.url) || ''
+            bindListeningSource(this.audio.currentSong, this.audio.audio)
           }
         }
       }
@@ -358,6 +395,7 @@ export const useAudioStore = defineStore('audio', {
 
       // 播放开始
       audio.addEventListener('play', () => {
+        if (activeQualitySwitch && !activeQualitySwitch.resumePlayback) return
         this.audio.isPlaying = true
         this.audio.isPaused = false
         this.audio.error = null
@@ -389,6 +427,7 @@ export const useAudioStore = defineStore('audio', {
 
       // 播放结束
       audio.addEventListener('ended', () => {
+        if (activeQualitySwitch) return
         this.audio.isPlaying = false
         this.audio._isWaiting = false
         clearStartupWatchdog()
@@ -403,7 +442,7 @@ export const useAudioStore = defineStore('audio', {
       // 可以播放
       audio.addEventListener('canplay', () => {
         clearStartupWatchdog()
-        this.audio.isLoading = false
+        if (!activeQualitySwitch) this.audio.isLoading = false
         this.audio.duration = audio.duration || 0
       })
 
@@ -415,9 +454,10 @@ export const useAudioStore = defineStore('audio', {
 
       // 实际开始播放（缓冲恢复后也会触发）
       audio.addEventListener('playing', () => {
+        if (activeQualitySwitch && !activeQualitySwitch.resumePlayback) return
         clearStartupWatchdog()
         this.audio._isWaiting = false
-        this.audio.isLoading = false
+        if (!activeQualitySwitch) this.audio.isLoading = false
         this.audio.isPlaying = true
         this.audio.isPaused = false
 
@@ -430,8 +470,9 @@ export const useAudioStore = defineStore('audio', {
         })
 
         const s = this.audio.currentSong
-        if (s && !s.isLocal && playStartedSongId !== s.id) {
-          playStartedSongId = s.id
+        const listening = listeningFor(s, audio)
+        if (s && listening && !listening.started && s.streamType !== 'trial') {
+          listening.started = true
           const durSec = Math.round(
             audio.duration || (s.duration ? s.duration / 1000 : 0)
           )
@@ -463,29 +504,27 @@ export const useAudioStore = defineStore('audio', {
         sonicBlogBridge.broadcastTimeUpdate(cur, dur, !audio.paused)
         // 达到 50% 播放进度（或播放满 45 秒）上报一次有效播放进度信号
         const s = this.audio.currentSong
-        if (
-          s &&
-          !s.isLocal &&
-          dur > 20 &&
-          (cur / dur >= 0.5 || cur >= 45) &&
-          progressReportedSongId !== s.id
-        ) {
-          progressReportedSongId = s.id
-          emitRecommendPlaybackEvent({
-            type: 'play_progress',
-            track: {
-              id: s.id,
-              title: s.name,
-              artist: s.artist,
-              album: s.album,
-              duration: Math.round(dur),
-              cover: s.cover,
-              streamType: s.streamType,
-            },
-            playedSeconds: Math.round(cur),
-            durationSeconds: Math.round(dur),
-            progressRatio: Number(Math.min(1, cur / dur).toFixed(2)),
-          })
+        const listening = listeningFor(s, audio)
+        if (s && listening && !listening.progressReported && s.streamType !== 'trial' && Number.isFinite(dur) && dur > 20) {
+          const played = Math.min(dur, listening.coverage.seconds(audio.played))
+          if (played / dur >= 0.5 || played >= 45) {
+            listening.progressReported = true
+            emitRecommendPlaybackEvent({
+              type: 'play_progress',
+              track: {
+                id: s.id,
+                title: s.name,
+                artist: s.artist,
+                album: s.album,
+                duration: Math.round(dur),
+                cover: s.cover,
+                streamType: s.streamType,
+              },
+              playedSeconds: Math.round(played),
+              durationSeconds: Math.round(dur),
+              progressRatio: Number((played / dur).toFixed(2)),
+            })
+          }
         }
         // 主动预判：当播放剩余时间少于 15 秒且非重复触发时，后台静默预解析下一首歌曲地址
         if (dur > 25 && dur - cur < 15 && !hasPreloadedNext) {
@@ -503,10 +542,9 @@ export const useAudioStore = defineStore('audio', {
       // 错误处理（优先自动换源重试，借鉴 YesPlayMusic / UnblockNeteaseMusic 换源兜底机制）
       audio.addEventListener('error', async (e: any) => {
         // 切歌时浏览器会中断上一音源加载并上报 abort，不代表当前歌曲失败
-        if (audio.error?.code === 1 /* MEDIA_ERR_ABORTED */) return
+        if (audio.error?.code === 1 /* MEDIA_ERR_ABORTED */ || activeQualitySwitch) return
         this.audio.isLoading = false
         this.audio.isPlaying = false
-        if (switchingQuality) return
         console.error('Audio error:', e)
 
         const failedSrc = audio.currentSrc || audio.src || ''
@@ -640,6 +678,8 @@ export const useAudioStore = defineStore('audio', {
       const isAtEnd =
         audio.ended || (audio.duration > 0 && audio.currentTime >= audio.duration - 0.1)
 
+      if (isSwitchingSong || isAtEnd) listeningSession = null
+
       // 同一首歌播放结束后重新点击播放，重置到开头从头播放
       if (!isSwitchingSong && isSrcUnchanged && isAtEnd) {
         audio.currentTime = 0
@@ -665,6 +705,7 @@ export const useAudioStore = defineStore('audio', {
               return
             }
           } catch (error) {
+            if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
             console.warn('Resume play failed, triggering fallback reload:', error)
             shouldFallbackReload = true
           }
@@ -676,6 +717,7 @@ export const useAudioStore = defineStore('audio', {
             this.audio.isLoading = true
             if (resumeTime > 0) {
               const restoreProgress = () => {
+                if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
                 try {
                   if (audio.duration && audio.duration > 0) {
                     audio.currentTime = Math.min(resumeTime, audio.duration)
@@ -692,6 +734,7 @@ export const useAudioStore = defineStore('audio', {
             this.audio.error = null
             return
           } catch (reloadErr) {
+            if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
             console.error('Fallback reload and resume error, attempting restart from 0:', reloadErr)
             try {
               audio.currentTime = 0
@@ -701,13 +744,14 @@ export const useAudioStore = defineStore('audio', {
               this.audio.error = null
               return
             } catch (finalErr) {
+              if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
               console.error('Final play attempt error:', finalErr)
               const id = this.audio.currentSong?.id ?? null
               if (id) this.refreshAndReplay()
               return
             }
           } finally {
-            this.audio.isLoading = false
+            if (generation === playbackGeneration) this.audio.isLoading = false
           }
         }
       }
@@ -737,12 +781,11 @@ export const useAudioStore = defineStore('audio', {
         // 切歌时复位进度到开头，强制更新音频源，并重置预加载状态
         if (isSwitchingSong) {
           hasPreloadedNext = false
-          playStartedSongId = null
-          progressReportedSongId = null
           audio.currentTime = 0
           this.audio.currentTime = 0
         }
-        this._loadAudioSrc(this.audio.currentSong.url || '', isSwitchingSong)
+        const replaying = !this.audio.currentSong.isLocal && !listeningSession && audio.played?.length > 0
+        this._loadAudioSrc(this.audio.currentSong.url || '', isSwitchingSong || isAtEnd || replaying)
         this._probeStreamMetadata(this.audio.currentSong)
         await this.audio.audio.play()
         if (generation !== playbackGeneration || this.audio.currentSong?.id !== targetSongId) return
@@ -1049,17 +1092,22 @@ export const useAudioStore = defineStore('audio', {
      * 内部方法：当 URL 变化（或 force=true 强制）时重新加载音频源
      */
     _loadAudioSrc(url: string, force = false) {
-      if (!this.audio.audio) return
-      const currentSrc = this.audio.audio.src
+      const audio = this.audio.audio
+      if (!audio) return
+      const currentSrc = audio.src
       const resolved =
         url && typeof window !== 'undefined' ? new URL(url, window.location.href).href : url
-      const hasError = !!this.audio.audio.error || this.audio.audio.networkState === 3
-      if (force || hasError || (currentSrc !== resolved && this.audio.audio.getAttribute('src') !== url)) {
-        this.audio.audio.src = url
-        this.audio.audio.load()
-        if (!switchingQuality) {
+      const hasError = !!audio.error || audio.networkState === 3
+      if (force || hasError || (currentSrc !== resolved && audio.getAttribute('src') !== url)) {
+        listeningFor(this.audio.currentSong, audio)?.coverage.archive(audio.played)
+        audio.src = url
+        bindListeningSource(this.audio.currentSong, audio)
+        audio.load()
+        if (!activeQualitySwitch) {
           this._armStartupWatchdog(playbackGeneration, this.audio.currentSong?.id ?? null)
         }
+      } else {
+        bindListeningSource(this.audio.currentSong, audio)
       }
     },
 
@@ -1068,7 +1116,7 @@ export const useAudioStore = defineStore('audio', {
      * 必须在有限时间内收敛为可重试的网络错误，避免页面无限加载。
      */
     _armStartupWatchdog(generation: number, songId: string | number | null) {
-      if (switchingQuality) return
+      if (activeQualitySwitch) return
       armStartupWatchdog(() => {
         if (generation !== playbackGeneration) return
         if (this.audio.currentSong?.id !== songId) return
@@ -1089,6 +1137,14 @@ export const useAudioStore = defineStore('audio', {
     // 暂停播放
     pause() {
       if (!this.audio.audio) return
+      if (activeQualitySwitch) {
+        activeQualitySwitch.resumePlayback = false
+        this.audio.audio.pause()
+        this.audio._isWaiting = false
+        this.audio.isPlaying = false
+        this.audio.isPaused = true
+        return
+      }
       // 用户在异步取流/起播期间暂停时，必须让在途的 playSong/refreshAndReplay 失效，
       // 否则迟到的 audio.play() 会在用户已暂停后重新起播。
       if (this.audio.isPlaying || this.audio.isLoading) {
@@ -1104,11 +1160,11 @@ export const useAudioStore = defineStore('audio', {
 
     // 继续播放
     resume() {
-      if (this.audio.audio) {
-        void this.audio.audio.play().catch(() => {
-          // 浏览器自动播放策略或空音源导致的拒绝由 error/pause 事件与 UI 状态兜底，避免未处理 Promise 拒绝
-        })
+      if (activeQualitySwitch) {
+        activeQualitySwitch.resumePlayback = true
+        return
       }
+      if (this.audio.currentSong) void this.playSong(this.audio.currentSong, this.audio.currentIndex)
     },
 
     // 播放/暂停切换（启动播放时会自动获取缺失的URL）
@@ -1138,14 +1194,15 @@ export const useAudioStore = defineStore('audio', {
       // 手动切歌时：仅在播放正常（非缓冲卡顿、非报错、非试听受限）且收听不足 25s 时记录一次用户跳过信号
       // suppressSkipSignal: 播放失败 Toast 的"下一首"入口传入——播放失败不是用户嫌弃歌曲,不得记负反馈
       if (!isAutoEnd && !opts?.suppressSkipSignal && this.audio.currentSong && !this.audio.currentSong.isLocal) {
-        const cur = this.audio.audio?.currentTime || this.audio.currentTime || 0
+        const listening = listeningFor(this.audio.currentSong, this.audio.audio)
+        const played = listening?.coverage.seconds(this.audio.audio?.played) ?? 0
         const dur =
           this.audio.audio?.duration ||
           this.audio.duration ||
           (this.audio.currentSong.duration ? this.audio.currentSong.duration / 1000 : 0)
         if (
-          cur > 0.5 &&
-          cur < 25 &&
+          played > 0.5 &&
+          played < 25 &&
           !this.audio._isWaiting &&
           !this.audio.error &&
           this.audio.currentSong.streamType !== 'trial'
@@ -1161,9 +1218,9 @@ export const useAudioStore = defineStore('audio', {
               duration: dur > 0 ? Math.round(dur) : undefined,
               cover: this.audio.currentSong.cover,
             },
-            playedSeconds: Math.round(cur),
+            playedSeconds: Math.round(played),
             durationSeconds: dur > 0 ? Math.round(dur) : undefined,
-            progressRatio: dur > 0 ? Number((cur / dur).toFixed(2)) : undefined,
+            progressRatio: dur > 0 ? Number(Math.min(1, played / dur).toFixed(2)) : undefined,
           })
         }
       }
@@ -1246,6 +1303,7 @@ export const useAudioStore = defineStore('audio', {
     // 处理歌曲播放结束
     handleSongEnd() {
       const s = this.audio.currentSong
+      const listening = listeningFor(s, this.audio.audio)
       const dur =
         this.audio.audio?.duration ||
         this.audio.duration ||
@@ -1274,7 +1332,8 @@ export const useAudioStore = defineStore('audio', {
         return
       }
 
-      if (s && !s.isLocal) {
+      const played = Math.min(dur, listening?.coverage.seconds(this.audio.audio?.played) ?? 0)
+      if (s && Number.isFinite(dur) && dur > 0 && played / dur >= 0.9) {
         emitRecommendPlaybackEvent({
           type: this.audio.playMode === PlayMode.SINGLE ? 'replay' : 'play_complete',
           track: {
@@ -1286,9 +1345,9 @@ export const useAudioStore = defineStore('audio', {
             cover: s.cover,
             streamType: s.streamType,
           },
-          playedSeconds: dur > 0 ? Math.round(dur) : undefined,
-          durationSeconds: dur > 0 ? Math.round(dur) : undefined,
-          progressRatio: 1,
+          playedSeconds: Math.round(played),
+          durationSeconds: Math.round(dur),
+          progressRatio: Number((played / dur).toFixed(2)),
         })
       }
 
@@ -1354,53 +1413,49 @@ export const useAudioStore = defineStore('audio', {
       }
     },
 
-    /** 等待新音源可播放；error 事件视为切换失败 */
-    _waitForAudioReady(audio: HTMLAudioElement, timeout = 15000): Promise<void> {
+    /** Wait for the requested source and detach its listeners as soon as another operation takes over. */
+    _waitForAudioReady(audio: HTMLAudioElement, url: string, signal: AbortSignal): Promise<void> {
+      const expected = typeof window === 'undefined' ? url : new URL(url, window.location.href).href
       return new Promise<void>((resolve, reject) => {
-        let settled = false
         const cleanup = () => {
-          audio.removeEventListener('loadedmetadata', onReady)
           audio.removeEventListener('canplay', onReady)
           audio.removeEventListener('error', onError)
+          signal.removeEventListener('abort', onAbort)
           clearTimeout(timer)
         }
         const finish = (fn: () => void) => {
-          if (settled) return
-          settled = true
           cleanup()
           fn()
         }
-        const onReady = () => finish(resolve)
-        const onError = () =>
-          finish(() => reject(audio.error || new Error('Audio source unavailable')))
+        const matchesSource = () => !audio.currentSrc || audio.currentSrc === expected
+        const onReady = () => {
+          if (matchesSource() && audio.readyState >= 3) finish(resolve)
+        }
+        const onError = () => {
+          if (matchesSource() && audio.error?.code !== 1) {
+            finish(() => reject(audio.error || new Error('Audio source unavailable')))
+          }
+        }
+        const onAbort = () => finish(() => reject(signal.reason))
         const timer = setTimeout(
           () => finish(() => reject(new Error('Switch quality timeout'))),
-          timeout
+          STARTUP_WATCHDOG_MS
         )
-        audio.addEventListener('loadedmetadata', onReady)
         audio.addEventListener('canplay', onReady)
         audio.addEventListener('error', onError)
+        signal.addEventListener('abort', onAbort, { once: true })
+        if (signal.aborted) onAbort()
       })
     },
 
     /** 切换当前播放歌曲的音质等级；失败回滚旧音源并向上抛出 */
-    async switchQuality(targetLevel: string) {
+    async switchQuality(targetLevel: string): Promise<boolean> {
       const song = this.audio.currentSong
       const audio = this.audio.audio
-      if (!song || !audio) return
-      if (song.isLocal) return
+      if (!song || !audio || song.isLocal) return false
 
-      const currentTime = audio.currentTime || 0
-      const wasPlaying = this.audio.isPlaying
-      const oldUrl = song.url || ''
-      const oldBadge = song.qualityBadge
-      const idx = this.audio.currentIndex
-      const oldPlaylistUrl =
-        idx >= 0 && idx < this.audio.playlist.length ? this.audio.playlist[idx].url : undefined
-      const oldPlaylistBadge =
-        idx >= 0 && idx < this.audio.playlist.length
-          ? this.audio.playlist[idx].qualityBadge
-          : undefined
+      const previous = activeQualitySwitch?.song === song ? activeQualitySwitch : null
+      const oldUrl = previous?.previousSource ?? (song.url || audio.getAttribute('src') || '')
 
       // 查找对应音质配置
       const qualityOpt = song.qualities?.find((q: { level: string }) => q.level === targetLevel)
@@ -1428,51 +1483,83 @@ export const useAudioStore = defineStore('audio', {
         exhigh: 'HQ',
         standard: '标准',
       }
-      const nextBadge = badgeMap[targetLevel] || oldBadge
+      const nextBadge = badgeMap[targetLevel] || song.qualityBadge
 
-      switchingQuality = true
+      const operation: QualitySwitch = {
+        controller: new AbortController(),
+        song,
+        previousSource: oldUrl,
+        position: previous?.position ?? (audio.currentTime || 0),
+        resumePlayback: previous?.resumePlayback ?? this.audio.isPlaying,
+      }
+      const generation = advancePlaybackGeneration()
+      activeQualitySwitch = operation
+      clearStartupWatchdog()
       this.audio.isLoading = true
-      try {
-        this._loadAudioSrc(newUrl, true)
-        await this._waitForAudioReady(audio)
+      const ownsSwitch = () => activeQualitySwitch === operation &&
+        playbackGeneration === generation && this.audio.currentSong === song
+      const signal = operation.controller.signal
+      const loadSource = (url: string) => {
+        this._loadAudioSrc(url, true)
+        return this._waitForAudioReady(audio, url, signal)
+      }
+      const restorePosition = () => {
         try {
-          audio.currentTime = Math.min(currentTime, audio.duration || currentTime)
+          audio.currentTime = Math.min(operation.position, audio.duration || operation.position)
+          this.audio.currentTime = audio.currentTime
         } catch {}
-        if (wasPlaying) {
+      }
+      const resumeIfRequested = async () => {
+        if (!operation.resumePlayback) return
+        try {
           await audio.play()
+        } catch (err) {
+          // A pause can interrupt play() without invalidating the selected quality.
+          if (operation.resumePlayback) throw err
         }
+      }
+      try {
+        await loadSource(newUrl)
+        if (!ownsSwitch()) return false
+        restorePosition()
+        await resumeIfRequested()
+        if (!ownsSwitch()) return false
 
         // 新音源确认可用后才提交状态
         song.url = newUrl
         song.qualityBadge = nextBadge
-        if (idx >= 0 && idx < this.audio.playlist.length) {
-          this.audio.playlist[idx].url = newUrl
-          this.audio.playlist[idx].qualityBadge = nextBadge
+        const queuedSong = this.audio.playlist[this.audio.currentIndex]
+        if (queuedSong && songPlaybackKey(queuedSong) === songPlaybackKey(song)) {
+          queuedSong.url = newUrl
+          queuedSong.qualityBadge = nextBadge
         }
         this.audio.error = null
+        this._probeStreamMetadata(song)
+        return true
       } catch (err) {
-        // 回滚 URL、徽章与音频源，保证 UI 与实际播放状态一致
-        song.url = oldUrl
-        song.qualityBadge = oldBadge
-        if (idx >= 0 && idx < this.audio.playlist.length) {
-          this.audio.playlist[idx].url = oldPlaylistUrl
-          this.audio.playlist[idx].qualityBadge = oldPlaylistBadge
-        }
-        this._loadAudioSrc(oldUrl, true)
-        try {
-          audio.currentTime = currentTime
-        } catch {}
-        if (wasPlaying) {
+        if (!ownsSwitch()) return false
+        if (oldUrl) {
           try {
-            await audio.play()
+            await loadSource(oldUrl)
+            if (!ownsSwitch()) return false
+            restorePosition()
+            await resumeIfRequested()
           } catch {}
+        } else {
+          audio.removeAttribute('src')
+          listeningSession = null
+          audio.load()
         }
+        if (!ownsSwitch()) return false
         this.audio.error = null
         console.error('Switch quality failed:', err)
         throw err
       } finally {
-        switchingQuality = false
-        this.audio.isLoading = false
+        if (activeQualitySwitch === operation) {
+          activeQualitySwitch = null
+          this.audio.isLoading = false
+          this.audio._isWaiting = false
+        }
       }
     },
 
@@ -1505,6 +1592,7 @@ export const useAudioStore = defineStore('audio', {
     // 设置播放进度
     setCurrentTime(time: number) {
       const validTime = Math.max(0, time)
+      if (activeQualitySwitch) activeQualitySwitch.position = validTime
       if (this.audio.audio) {
         try {
           const maxTime = this.audio.duration > 0 ? this.audio.duration : validTime
@@ -1701,6 +1789,7 @@ export const useAudioStore = defineStore('audio', {
     stop() {
       // 停止同样需要让在途的异步起播失效，避免取流完成后自动恢复播放
       advancePlaybackGeneration()
+      listeningSession = null
       clearStartupWatchdog()
       this.audio.isLoading = false
       if (this.audio.audio) {
@@ -1797,6 +1886,7 @@ export const useAudioStore = defineStore('audio', {
     // 销毁音频播放器
     destroy() {
       advancePlaybackGeneration()
+      listeningSession = null
       clearStartupWatchdog()
       if (this.audio.audio) {
         this.audio.audio.pause()

@@ -2,10 +2,10 @@
  * Sonic 智能推荐系统 —— 多实体 (Track / Album / Playlist / MV) 混合 Feed 离线评估基准
  *
  * 评估目标：
- *   1. 验证用户对专辑/MV的交互能通过双向软传播有效提升内部曲目与同歌手实体的召回与命中
- *   2. 评估混合 Feed 中实体类型占比 (Track 55~70%, Album/Playlist 15~25%, MV 10~20%)
+ *   1. 对照有无用户反馈时的关联实体传播分
+ *   2. 评估混合 Feed 的实体分布、重复项与相关性
  *   3. 评估多样性（歌手多样性 ILD 与实体类型香农熵）
- *   4. 监控 SQLite WAL 存储下的在线打分与重排延迟 (p50 / p95)
+ *   4. 测量内存 SQLite 的打分与重排延迟 (p50 / p95)
  */
 import { performance } from 'node:perf_hooks';
 import { SqliteRecommendStore } from '../server/recommend-sqlite.ts';
@@ -13,11 +13,18 @@ import {
   ensureMultiEntityCatalogSeeded,
   ingestBehaviorEvents,
   getMultiEntityRecommendationsForYou,
+  buildMultiEntityPreferenceProfile,
+  computeAlbumEntityId,
+  computeMvEntityId,
 } from '../functions/_lib/sonic/recommend/index.ts';
+
+const FEED_COUNT = 18;
+const FEED_TYPES = ['track', 'album', 'playlist', 'mv'];
+const LATENCY_RUNS_PER_PERSONA = 15;
 
 function percentile(sortedArr, p) {
   if (!sortedArr.length) return 0;
-  const idx = Math.min(sortedArr.length - 1, Math.floor((p / 100) * sortedArr.length));
+  const idx = Math.max(0, Math.ceil((p / 100) * sortedArr.length) - 1);
   return sortedArr[idx];
 }
 
@@ -53,14 +60,81 @@ function computeIntraListDiversity(items) {
   return pairCount > 0 ? distSum / pairCount : 0;
 }
 
+function benchmarkIdentity(name) {
+  return {
+    mode: 'authenticated',
+    subjectKey: `usr:eval_${name}`,
+    personalizationEnabled: true,
+    isAuthenticated: true,
+  };
+}
+
+function readLatencyBudget(args) {
+  if (args.length === 0) return null;
+  const limit = Number(args[1]);
+  if (args.length !== 2 || args[0] !== '--max-p95-ms' || !Number.isFinite(limit) || limit <= 0) {
+    throw new Error('Usage: npm run eval:multi-entity -- [--max-p95-ms <positive number>]');
+  }
+  return limit;
+}
+
+async function measurePropagation(store, env, track, albumId, mvId, unrelatedTrackId) {
+  const playlistId = 'pl_chinese_rnb_classics';
+  const relatedTrack = { type: 'track', id: track.canonicalTrackId };
+  const scenarios = [
+    { name: 'albumToTrack', event: { entityType: 'album', entityId: albumId, type: 'favorite' }, targets: [relatedTrack] },
+    { name: 'playlistToTrack', event: { entityType: 'playlist', entityId: playlistId, type: 'favorite' }, targets: [relatedTrack] },
+    { name: 'mvToTrack', event: { entityType: 'mv', entityId: mvId, type: 'watch_complete' }, targets: [relatedTrack] },
+    { name: 'trackToEntities', event: { type: 'play_complete', track: { canonicalTrackId: track.canonicalTrackId } }, targets: [
+      { type: 'album', id: albumId }, { type: 'playlist', id: playlistId }, { type: 'mv', id: mvId },
+    ] },
+  ];
+
+  const results = [];
+  for (const { name, event, targets } of scenarios) {
+    const identity = benchmarkIdentity(`propagation_${name}`);
+    const timestamp = Date.now();
+    const baseline = buildMultiEntityPreferenceProfile(identity, store, env, timestamp);
+    const ingestion = await ingestBehaviorEvents([{ ...event, timestamp }], identity, env);
+    const measured = buildMultiEntityPreferenceProfile(identity, store, env, timestamp);
+    const scoreFor = (profile, id) => profile.propagatedEntityScores.get(id) ?? 0;
+    const comparisons = targets.map(({ type, id }) => ({
+      type, baselineScore: scoreFor(baseline, id), scoreWithFeedback: scoreFor(measured, id),
+    }));
+    const unrelatedScore = scoreFor(measured, unrelatedTrackId);
+    results.push({
+      name,
+      acceptedEvents: ingestion.accepted,
+      comparisons,
+      unrelatedScore,
+      passed: ingestion.accepted === 1 && unrelatedScore === 0 && comparisons.every(
+        ({ baselineScore, scoreWithFeedback }) => baselineScore === 0 && scoreWithFeedback > baselineScore
+      ),
+    });
+  }
+  return results;
+}
+
 async function runEvaluation() {
-  console.log('========================================================================');
-  console.log(' Sonic 智能推荐系统 —— 多实体混合 Feed 离线基准评估 (Offline Benchmark)');
-  console.log('========================================================================\n');
+  const latencyBudgetMs = readLatencyBudget(process.argv.slice(2));
 
   const store = new SqliteRecommendStore(':memory:');
   ensureMultiEntityCatalogSeeded(store);
   const env = { RECOMMEND_STORE: store, SONIC_RECOMMEND_OFFLINE: '1' };
+
+  // The ordinary seed catalog does not claim verified videos. Add synthetic video
+  // references to this private in-memory fixture only, without querying a provider.
+  const mvFixtures = [['186016', 'eval-qingtian'], ['347230', 'eval-haikuotiankong']];
+  for (const [trackId, fixtureId] of mvFixtures) {
+    const track = store.getTrack(`netease:${trackId}`);
+    if (!track) throw new Error(`Missing MV fixture track: ${trackId}`);
+    store.upsertTrack({ ...track, mvSourceIds: { synthetic: fixtureId } });
+  }
+  const track = store.getTrack('netease:186016');
+  const unrelatedTrack = store.getTrack('netease:347230');
+  const albumId = computeAlbumEntityId(track.cleanAlbum, track.canonicalArtist);
+  const mvId = computeMvEntityId('synthetic', 'eval-qingtian');
+  const propagation = await measurePropagation(store, env, track, albumId, mvId, unrelatedTrack.canonicalTrackId);
 
   const allTracks = store.listTracks(1000);
   const allAlbums = store.listEntities('album', 500);
@@ -70,11 +144,11 @@ async function runEvaluation() {
   // 4 类典型多实体交叉交互画像
   const personas = [
     {
-      id: 'usr:eval_jay_multi',
+      id: 'jay_multi',
       name: '周杰伦专辑与 MV 重度用户',
       events: [
-        { entity_type: 'album', entity_id: allAlbums[0]?.id || 'alb_yehuimei', action: 'favorite' },
-        { entity_type: 'mv', entity_id: allMvs[0]?.id || 'mv_qingtian', action: 'watch_complete' },
+        { entity_type: 'album', entity_id: albumId, action: 'favorite' },
+        { entity_type: 'mv', entity_id: mvId, action: 'watch_complete' },
       ],
       isRelevant: (item) =>
         (item.subtitle || '').includes('周杰伦') ||
@@ -82,7 +156,7 @@ async function runEvaluation() {
         (item.payload?.artist || '') === '周杰伦',
     },
     {
-      id: 'usr:eval_cantopop_multi',
+      id: 'cantopop_multi',
       name: '港乐经典与粤语专辑爱好者',
       events: [
         { entity_type: 'playlist', entity_id: 'pl_cantopop_golden_age', action: 'favorite' },
@@ -92,21 +166,20 @@ async function runEvaluation() {
         ['Beyond', '陈奕迅', '张学友', '张国荣'].some((ar) => (item.subtitle || '').includes(ar) || (item.payload?.artist || '') === ar),
     },
     {
-      id: 'usr:eval_rnb_soul_multi',
+      id: 'rnb_soul_multi',
       name: 'R&B / Soul 主题歌单常听听众',
       events: [
         { entity_type: 'playlist', entity_id: 'pl_chinese_rnb_classics', action: 'open' },
         { entity_type: 'track', entity_id: '150432', action: 'play_complete', track: { title: '普通朋友', artist: '陶喆' } },
       ],
       isRelevant: (item) =>
-        ['陶喆', '周杰伦', '方大同', '林俊杰'].some((ar) => (item.subtitle || '').includes(ar) || (item.payload?.artist || '') === ar) ||
-        (item.genres || []).includes('r&b'),
+        ['陶喆', '周杰伦', '方大同', '林俊杰'].some((ar) => (item.subtitle || '').includes(ar) || (item.payload?.artist || '') === ar),
     },
     {
-      id: 'usr:eval_cold_start',
+      id: 'cold_start',
       name: '冷启动新用户 (零历史，靠热度与探索)',
       events: [],
-      isRelevant: (item) => item.score > 0.4,
+      isRelevant: null,
     },
   ];
 
@@ -116,36 +189,55 @@ async function runEvaluation() {
   let relevantHits = 0;
   let totalHoldoutTrials = 0;
   const ildList = [];
+  const personaResults = [];
 
   for (const p of personas) {
-    const identity = {
-      mode: 'authenticated',
-      subjectKey: p.id,
-      personalizationEnabled: true,
-      isAuthenticated: true,
-    };
-
-    if (p.events.length > 0) {
-      await ingestBehaviorEvents(p.events, identity, env);
-    }
-
-    for (let run = 0; run < 15; run++) {
-      const t0 = performance.now();
-      const res = await getMultiEntityRecommendationsForYou(identity, { count: 18 }, env);
-      const elapsed = performance.now() - t0;
-      latencies.push(elapsed);
-
-      ildList.push(computeIntraListDiversity(res.data));
-
-      for (const item of res.data) {
-        typeCounts[item.type] = (typeCounts[item.type] || 0) + 1;
-        totalRecommendations++;
-        if (p.isRelevant(item)) {
-          relevantHits++;
-        }
+    const identity = benchmarkIdentity(p.id);
+    const ingestion = await ingestBehaviorEvents(p.events, identity, env);
+    const options = { count: FEED_COUNT, temperature: 0 };
+    const feed = await getMultiEntityRecommendationsForYou(identity, options, env);
+    const distribution = feed.meta.distribution;
+    const perTypeCounts = Object.fromEntries(FEED_TYPES.map((type) => [type, 0]));
+    const uniqueItems = new Set();
+    let personaHits = 0;
+    for (const item of feed.data) {
+      perTypeCounts[item.type]++;
+      typeCounts[item.type]++;
+      totalRecommendations++;
+      uniqueItems.add(`${item.type}:${item.id}`);
+      if (p.isRelevant) {
+        if (p.isRelevant(item)) personaHits++;
         totalHoldoutTrials++;
       }
     }
+    relevantHits += personaHits;
+    personaResults.push({
+      id: p.id,
+      acceptedEvents: ingestion.accepted,
+      distribution: perTypeCounts,
+      relevantItemCount: p.isRelevant ? personaHits : null,
+      personalized: feed.meta.personalized,
+      passed: ingestion.accepted === p.events.length && feed.meta.personalized === (p.events.length > 0) &&
+        feed.data.length === FEED_COUNT &&
+        uniqueItems.size === FEED_COUNT && perTypeCounts.track > 0 && perTypeCounts.mv > 0 &&
+        perTypeCounts.album + perTypeCounts.playlist > 0 &&
+        FEED_TYPES.every((type) => distribution?.[type] === perTypeCounts[type]),
+    });
+    ildList.push(computeIntraListDiversity(feed.data));
+
+    for (let run = 0; run < LATENCY_RUNS_PER_PERSONA; run++) {
+      const t0 = performance.now();
+      await getMultiEntityRecommendationsForYou(identity, options, env);
+      latencies.push(performance.now() - t0);
+    }
+  }
+
+  const typeProbes = [];
+  for (const type of FEED_TYPES) {
+    const result = await getMultiEntityRecommendationsForYou(
+      benchmarkIdentity('type_probe'), { count: 1, temperature: 0, allowedTypes: [type] }, env
+    );
+    typeProbes.push({ type, passed: result.data.length === 1 && result.data[0].type === type });
   }
 
   latencies.sort((a, b) => a - b);
@@ -159,10 +251,18 @@ async function runEvaluation() {
   const mvRatio = Number((typeCounts.mv / totalRecommendations).toFixed(4));
   const hitRate = Number((relevantHits / totalHoldoutTrials).toFixed(4));
 
-  const stats = store.getStats();
-
+  const checks = {
+    propagationWithFeedback: propagation.every((scenario) => scenario.passed),
+    mixedFeedDistributionMatchesReturnedItems: personaResults.every((persona) => persona.passed),
+    explicitlyRequestedTypesAreAvailable: typeProbes.every((probe) => probe.passed),
+    ...(latencyBudgetMs === null ? {} : { latencyWithinBudget: p95 <= latencyBudgetMs }),
+  };
   const report = {
+    schemaVersion: 2,
     benchmarkName: 'Sonic Multi-Entity Mixed Feed Benchmark (Reproducible)',
+    checks,
+    personaResults,
+    typeProbes,
     catalogStats: {
       canonicalTracks: allTracks.length,
       albums: allAlbums.length,
@@ -177,19 +277,23 @@ async function runEvaluation() {
       typeShannonEntropy: Number(typeEntropy.toFixed(4)),
     },
     relevanceAndDiversity: {
-      hitRateAt18: hitRate,
+      relevantItemRatioAt18: hitRate,
       intraListDiversity_ILD: Number(avgIld.toFixed(4)),
-      propagationValid: true,
+      propagationValid: checks.propagationWithFeedback,
+      propagation,
     },
     performanceMetrics: {
       p50_latency_ms: Number(p50.toFixed(2)),
       p95_latency_ms: Number(p95.toFixed(2)),
-      p95_latency_target_guard: p95 < 25 ? 'PASS (<25ms)' : p95 < 35 ? 'PASS (<35ms)' : 'FAIL',
+      sampleCount: latencies.length,
+      p95LatencyBudgetMs: latencyBudgetMs,
       processRssMemory_MB: Math.round(process.memoryUsage().rss / (1024 * 1024)),
     },
   };
 
   console.log(JSON.stringify(report, null, 2));
+  store.close();
+  if (Object.values(checks).some((passed) => !passed)) process.exitCode = 1;
 }
 
 runEvaluation().catch((err) => {

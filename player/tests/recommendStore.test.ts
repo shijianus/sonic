@@ -4,6 +4,17 @@ import { setActivePinia, createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { useLibraryStore } from '@/stores/modules/library'
+import { useAuthStore } from '@/stores/modules/auth'
+
+function erasedProfile() {
+  return Response.json({ brand: 'Sonic', data: { cleared: true, storageKind: 'sqlite', removedEvents: 1 } })
+}
+
+function delayedResponse() {
+  let finish!: (value: Response) => void
+  const promise = new Promise<Response>((resolve) => { finish = resolve })
+  return { promise, finish }
+}
 
 describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列', () => {
   beforeEach(() => {
@@ -63,7 +74,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
   it('重置推荐画像会清空 dislikedTracks 并向服务端发送 DELETE /api/sonic/events', async () => {
     const fetchSpy = vi
       .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(new Response(JSON.stringify({ code: 200 }), { status: 200 }))
+      .mockImplementation(async (_url, init) => init?.method === 'DELETE' ? erasedProfile() : Response.json({}))
 
     const rec = useRecommendStore()
     rec.dislikeSong({ id: 999, name: '不喜欢', artist: '某歌手' })
@@ -94,6 +105,120 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     expect(rec.dislikedCount).toBe(1)
   })
 
+  it('清除等待在途上报，丢弃失败的旧批次与卸载时的待发事件', async () => {
+    const previousPost = delayedResponse()
+    const deletion = delayedResponse()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) => {
+      if (init?.method === 'DELETE') return deletion.promise
+      const { events } = JSON.parse(String(init?.body))
+      return events[0].track.id === 1 ? previousPost.promise : Response.json({})
+    })
+    const rec = useRecommendStore()
+    const originalId = rec.ensureAnonId()
+    rec.recordEvent({ type: 'favorite', track: { id: 1 } }, true)
+    rec.recordEvent({ type: 'favorite', track: { id: 2 } })
+
+    const clearing = rec.clearAllRecommendationProfile()
+    const duplicate = rec.clearAllRecommendationProfile()
+    rec.recordEvent({ type: 'favorite', track: { id: 3 } }, true)
+    window.dispatchEvent(new Event('pagehide'))
+    expect(rec.buildRequestHeaders()).toEqual({ 'X-Sonic-Personalization': 'off' })
+    expect(fetchSpy.mock.calls.map(([, init]) => init?.method)).toEqual(['POST'])
+
+    previousPost.finish(new Response(null, { status: 503 }))
+    await vi.waitFor(() => expect(fetchSpy.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'DELETE']))
+    expect(fetchSpy.mock.calls[1][1]?.headers).toMatchObject({ 'X-Sonic-Anon-Id': originalId })
+    deletion.finish(erasedProfile())
+    expect(await clearing).toBe(true)
+    expect(await duplicate).toBe(true)
+
+    rec.recordEvent({ type: 'favorite', track: { id: 4 } })
+    window.dispatchEvent(new Event('pagehide'))
+    expect(fetchSpy).toHaveBeenCalledTimes(3)
+    const post = fetchSpy.mock.calls[2][1]
+    expect(post?.headers).toMatchObject({ 'X-Sonic-Anon-Id': rec.anonId })
+    expect(rec.anonId).not.toBe(originalId)
+    expect(JSON.parse(String(post?.body)).events.map((event: { track: { id: number } }) => event.track.id)).toEqual([4])
+  })
+
+  it('匿名或账号身份变化后不发送旧队列', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}))
+    const rec = useRecommendStore()
+    const auth = useAuthStore()
+    rec.recordEvent({ type: 'favorite', track: { id: 1 } })
+    rec.anonId = 'anon_replacement000001'
+    await rec.flushEvents()
+    expect(fetchSpy).not.toHaveBeenCalled()
+
+    auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
+    auth.isAuthenticated = true
+    rec.recordEvent({ type: 'favorite', track: { id: 2 } })
+    auth.user = null
+    auth.isAuthenticated = false
+    await rec.flushEvents()
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('在途写入长时间无响应时不提交删除，可在写入完成后重试', async () => {
+    vi.useFakeTimers()
+    try {
+      const pendingPost = delayedResponse()
+      const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (_url, init) =>
+        init?.method === 'DELETE' ? erasedProfile() : pendingPost.promise
+      )
+      const rec = useRecommendStore()
+      const originalId = rec.ensureAnonId()
+      rec.recordEvent({ type: 'favorite', track: { id: 1 } }, true)
+      const first = rec.clearAllRecommendationProfile()
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(await first).toBe(false)
+      expect(rec.anonId).toBe(originalId)
+      expect(fetchSpy.mock.calls.map(([, init]) => init?.method)).toEqual(['POST'])
+
+      pendingPost.finish(Response.json({}))
+      expect(await rec.clearAllRecommendationProfile()).toBe(true)
+      expect(fetchSpy.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'DELETE'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('已有账号在关闭个性化后仍可清除服务端画像', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile())
+    const rec = useRecommendStore()
+    const auth = useAuthStore()
+    auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
+    auth.isAuthenticated = true
+    rec.setPersonalizationEnabled(false)
+    expect(rec.anonId).toBe('')
+
+    expect(await rec.clearAllRecommendationProfile()).toBe(true)
+    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({})
+  })
+
+  it('清除账号画像时不发送访客 ID，保留独立的访客画像标识', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile())
+    const rec = useRecommendStore()
+    const guestId = rec.ensureAnonId()
+    const auth = useAuthStore()
+    auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
+    auth.isAuthenticated = true
+
+    expect(await rec.clearAllRecommendationProfile()).toBe(true)
+    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({})
+    expect(rec.anonId).toBe(guestId)
+  })
+
+  it('匿名画像清除需要服务端确认，普通 200 响应不能清除本地身份', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({
+      brand: 'Sonic', data: { cleared: false, storageKind: 'memory', privacyMode: 'public', removedEvents: 0 },
+    }))
+    const rec = useRecommendStore()
+    const originalId = rec.ensureAnonId()
+
+    expect(await rec.clearAllRecommendationProfile()).toBe(false)
+    expect(rec.anonId).toBe(originalId)
+  })
 
   it('事件批量发送失败后整批回到队首,随下一次批量一起重试', async () => {
     vi.useFakeTimers()

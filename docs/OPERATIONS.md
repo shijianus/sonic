@@ -209,7 +209,7 @@ docker compose logs -f sonic-engine
 ### Cloudflare Pages
 
 - 优先在 Cloudflare Dashboard 选择上一个成功部署回滚；
-- 或检出上一个已验证 commit，重新执行 `npm ci && pnpm --dir player install --frozen-lockfile && npm run build && npm run deploy`（`scripts/deploy-pages.mjs` 要求工作区干净，除非显式设置 `ALLOW_DIRTY_DEPLOY=1`）。
+- 若需重发，使用上一个已验证提交的原始 Pages 产物与对应 Staging 验收记录，按发布清单执行生产提升。
 - Pages 与 VPS 引擎的响应契约（如 `X-Sonic-Stream-Type`、`X-Sonic-Circuit`）需协同回滚；不要只回滚一侧。
 
 ### Docker 引擎

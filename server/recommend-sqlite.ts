@@ -29,6 +29,7 @@ import { canMergeCanonicalTracks, mergeCanonicalTracks } from '../functions/_lib
 import { MemoryRecommendStore, normalizeRecommendRetentionDays } from '../functions/_lib/sonic/recommend/memory-store';
 import { upsertTrackMvEntities } from '../functions/_lib/sonic/recommend/entity-store';
 import { recordSqliteMetric, redactSensitiveString } from '../functions/_lib/sonic/observability';
+import { POPULARITY_EVENT_TYPES } from '../functions/_lib/sonic/recommend/event-state';
 
 // Hard ceiling for the shared canonical catalog. Search traffic is persisted
 // into this table, so an unbounded catalog is a disk-exhaustion vector.
@@ -43,6 +44,12 @@ const MAX_USER_ENTITY_FEEDBACK = readPositiveEnvInt('SONIC_RECOMMEND_MAX_FEEDBAC
 // response ingests up to 100 rows), so they get their own budgets (audit P1-1).
 const MAX_ENTITIES = readPositiveEnvInt('SONIC_RECOMMEND_MAX_ENTITIES', 50_000);
 const MAX_ENTITY_RELATIONS = readPositiveEnvInt('SONIC_RECOMMEND_MAX_ENTITY_RELATIONS', 200_000);
+const POPULARITY_EVENTS_PREDICATE = `subject_key GLOB 'usr_*'
+  AND canonical_track_id IS NOT NULL
+  AND event_type IN (${POPULARITY_EVENT_TYPES.map((type) => `'${type}'`).join(', ')})`;
+// Must match the tie-breaking order in compareEventOrder.
+const EVENT_STATE_ORDER = `CASE event_type
+  WHEN 'undislike' THEN 4 WHEN 'unfavorite' THEN 3 WHEN 'dislike' THEN 2 WHEN 'favorite' THEN 1 ELSE 0 END`;
 
 function readPositiveEnvInt(name: string, fallback: number): number {
   const parsed = Number(process.env[name]);
@@ -182,6 +189,9 @@ export class SqliteRecommendStore implements RecommendStore {
         ON behavior_events(subject_key, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_events_time
         ON behavior_events(created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_events_popularity_track_subject
+        ON behavior_events(canonical_track_id, subject_key, created_at, ${EVENT_STATE_ORDER}, event_id)
+        WHERE ${POPULARITY_EVENTS_PREDICATE};
 
       CREATE TABLE IF NOT EXISTS track_cooccurrence (
         track_a TEXT NOT NULL,
@@ -747,6 +757,19 @@ export class SqliteRecommendStore implements RecommendStore {
       .all(sinceMs, Math.min(25000, Math.max(1, limit))) as Array<Record<string, any>>;
 
     return rows.map((r) => this.rowToEvent(r));
+  }
+
+  *iteratePopularityEvents(trackIds: readonly string[], sinceMs: number, untilMs: number): IterableIterator<StoredBehaviorEvent> {
+    if (!trackIds.length) return;
+    const cutoff = Math.max(sinceMs, untilMs - this.retentionDays * 86400_000);
+    const statement = this.db.prepare(`
+      SELECT event_id, subject_key, event_type, canonical_track_id, weight, progress_ratio, created_at
+      FROM behavior_events
+      WHERE canonical_track_id IN (SELECT value FROM json_each(?))
+        AND ${POPULARITY_EVENTS_PREDICATE} AND created_at BETWEEN ? AND ?
+      ORDER BY canonical_track_id, subject_key, created_at, ${EVENT_STATE_ORDER}, event_id
+    `);
+    for (const row of statement.iterate(JSON.stringify(trackIds), cutoff, untilMs)) yield this.rowToEvent(row);
   }
 
   incrementCooccurrence(trackA: string, trackB: string, delta: number, source?: RecommendContributionSource): void {

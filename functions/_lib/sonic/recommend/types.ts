@@ -134,7 +134,7 @@ export interface SonicBehaviorEventInput {
 
 export interface StoredBehaviorEvent {
   eventId: string;
-  subjectKey: string; // 'usr:<hash>' or 'anon:<id>'
+  subjectKey: string; // Server-assigned 'usr_<hash>' or 'anon_<hash>'
   type: SonicEventType;
   canonicalTrackId?: string;
   trackRef?: string; // Unresolved provider:id reference; not a global catalog identity
@@ -443,6 +443,8 @@ export interface RecommendStore {
   getUserEvents(subjectKey: string, limit?: number, sinceMs?: number): StoredBehaviorEvent[];
   clearUserEvents(subjectKey: string): number;
   getAllRecentEvents(sinceMs: number, limit?: number): StoredBehaviorEvent[];
+  /** Global chart inputs grouped by track and subject, chronological within each group. */
+  iteratePopularityEvents(trackIds: readonly string[], sinceMs: number, untilMs: number): Iterable<StoredBehaviorEvent>;
   incrementCooccurrence(trackA: string, trackB: string, delta: number, source?: RecommendContributionSource): void;
   getCooccurringTracks(trackId: string, limit?: number): Array<{ canonicalTrackId: string; weight: number }>;
   recordSearchQuery(normQuery: string, displayQuery: string, clicked?: boolean, source?: RecommendContributionSource): void;

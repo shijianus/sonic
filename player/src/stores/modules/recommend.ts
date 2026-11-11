@@ -6,11 +6,12 @@
  *   - 负向反馈 (`dislikedTracks` — 减少类似推荐)
  *   - 非阻塞异步行为事件批量上报 (`play_start`, `play_progress`, `play_complete`, `skip`, `replay`, `favorite`, `dislike`, `search`, `search_click`)
  */
-import { defineStore } from 'pinia'
+import { defineStore, getActivePinia } from 'pinia'
 import piniaPersistConfig from '../persist'
 import type { Song } from '../interface'
 import { useLibraryStore } from './library'
 import { useAudioStore } from './audio'
+import { useAuthStore } from './auth'
 import { useToastStore } from './toast'
 import {
   deleteSonicEvents,
@@ -34,6 +35,8 @@ interface RecommendStoreState {
   anonId: string
   dislikedTracks: DislikedTrackEntry[]
 }
+
+const ANON_ID_PATTERN = /^anon_[a-zA-Z0-9_-]{8,64}$/
 
 function generateAnonId(): string {
   const bytes = new Uint8Array(12)
@@ -62,8 +65,58 @@ function encodeContextBase64Url(obj: Record<string, unknown>): string {
   }
 }
 
-let pendingQueue: SonicEventPayload[] = []
-let flushTimer: ReturnType<typeof setTimeout> | null = null
+const MAX_PENDING_EVENTS = 40
+const DRAIN_TIMEOUT_MS = 15_000
+
+interface DeliveryState {
+  generation: number
+  pending: SonicEventPayload[]
+  identity: string | null
+  timer: ReturnType<typeof setTimeout> | null
+  writes: Set<Promise<void>>
+  clearing: Promise<boolean> | null
+}
+
+const deliveries = new WeakMap<object, DeliveryState>()
+
+function deliveryFor(store: object): DeliveryState {
+  let delivery = deliveries.get(store)
+  if (!delivery) {
+    delivery = { generation: 0, pending: [], identity: null, timer: null, writes: new Set(), clearing: null }
+    deliveries.set(store, delivery)
+  }
+  return delivery
+}
+
+function deliveryIdentity(anonId: string): string {
+  const auth = useAuthStore()
+  return JSON.stringify([anonId, auth.isAuthenticated ? auth.user?.id ?? null : null])
+}
+
+function stopFlushTimer(delivery: DeliveryState) {
+  if (delivery.timer !== null) clearTimeout(delivery.timer)
+  delivery.timer = null
+}
+
+function discardPending(delivery: DeliveryState) {
+  stopFlushTimer(delivery)
+  delivery.generation++
+  delivery.pending = []
+  delivery.identity = null
+}
+
+async function waitForWrites(writes: Set<Promise<void>>): Promise<boolean> {
+  if (!writes.size) return true
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.all(writes).then(() => true),
+      new Promise<false>((resolve) => { timer = setTimeout(() => resolve(false), DRAIN_TIMEOUT_MS) }),
+    ])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+  }
+}
 
 export const useRecommendStore = defineStore('recommend', {
   state: (): RecommendStoreState => ({
@@ -80,14 +133,14 @@ export const useRecommendStore = defineStore('recommend', {
   actions: {
     ensureAnonId(): string {
       if (!this.personalizationEnabled) return ''
-      if (!this.anonId || !/^anon_[a-zA-Z0-9_-]{8,64}$/.test(this.anonId)) {
+      if (!ANON_ID_PATTERN.test(this.anonId)) {
         this.anonId = generateAnonId()
       }
       return this.anonId
     },
 
     buildRequestHeaders(includeContext = true): Record<string, string> {
-      if (!this.personalizationEnabled) {
+      if (!this.personalizationEnabled || deliveries.get(this)?.clearing) {
         return {
           'X-Sonic-Personalization': 'off',
         }
@@ -161,48 +214,63 @@ export const useRecommendStore = defineStore('recommend', {
     },
 
     recordEvent(payload: SonicEventPayload, immediate = false) {
-      if (!this.personalizationEnabled) return
+      const delivery = deliveryFor(this)
+      if (!this.personalizationEnabled || delivery.clearing) return
+      const identity = deliveryIdentity(this.ensureAnonId())
+      if (delivery.identity !== identity) {
+        discardPending(delivery)
+        delivery.identity = identity
+      }
       const evId =
         payload.eventId ||
         `fe_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-      pendingQueue.push({
+      delivery.pending.push({
         ...payload,
         eventId: evId,
         timestamp: payload.timestamp || Date.now(),
       })
-      if (pendingQueue.length > 40) {
-        pendingQueue = pendingQueue.slice(-40)
+      if (delivery.pending.length > MAX_PENDING_EVENTS) {
+        delivery.pending.shift()
       }
 
       if (immediate) {
-        this.flushEvents()
+        void this.flushEvents()
         return
       }
-      if (!flushTimer) {
-        flushTimer = setTimeout(() => {
-          flushTimer = null
-          this.flushEvents()
+      if (!delivery.timer) {
+        delivery.timer = setTimeout(() => {
+          delivery.timer = null
+          void this.flushEvents()
         }, 1200)
       }
     },
 
     async flushEvents() {
-      if (flushTimer) {
-        clearTimeout(flushTimer)
-        flushTimer = null
-      }
-      if (!this.personalizationEnabled || pendingQueue.length === 0) {
-        pendingQueue = []
+      const delivery = deliveries.get(this)
+      if (!delivery) return
+      stopFlushTimer(delivery)
+      if (delivery.clearing || delivery.pending.length === 0) return
+      const identity = deliveryIdentity(this.anonId)
+      if (!this.personalizationEnabled || delivery.identity !== identity) {
+        discardPending(delivery)
         return
       }
-      const batch = [...pendingQueue]
-      pendingQueue = []
+      const generation = delivery.generation
+      const batch = delivery.pending
+      delivery.pending = []
       const headers = this.buildRequestHeaders(false)
-      const ok = await postSonicEvents(batch, headers)
-      if (!ok) {
-        // 发送失败(断网/网关 5xx):把整批按原顺序放回队首,等下次上报重试
-        const capacity = Math.max(0, 40 - pendingQueue.length)
-        pendingQueue = [...batch.slice(0, capacity), ...pendingQueue]
+      const write = postSonicEvents(batch, headers).then((ok) => {
+        // A failed batch can only rejoin the queue it was originally sent from.
+        if (ok || delivery.clearing || !this.personalizationEnabled ||
+          delivery.generation !== generation || deliveryIdentity(this.anonId) !== identity) return
+        const capacity = Math.max(0, MAX_PENDING_EVENTS - delivery.pending.length)
+        delivery.pending = [...batch.slice(0, capacity), ...delivery.pending]
+      })
+      delivery.writes.add(write)
+      try {
+        await write
+      } finally {
+        delivery.writes.delete(write)
       }
     },
 
@@ -337,25 +405,46 @@ export const useRecommendStore = defineStore('recommend', {
     setPersonalizationEnabled(enabled: boolean) {
       this.personalizationEnabled = enabled
       if (!enabled) {
-        pendingQueue = []
+        discardPending(deliveryFor(this))
       } else {
         this.ensureAnonId()
       }
     },
 
     async clearAllRecommendationProfile(): Promise<boolean> {
-      pendingQueue = []
+      const delivery = deliveryFor(this)
+      if (delivery.clearing) return delivery.clearing
       const headers = this.buildRequestHeaders(false)
-      // 若之前关闭了个性化但存在旧 anonId，也一并带上删除服务端残留记录
-      if (this.anonId && !headers['X-Sonic-Anon-Id']) {
+      const auth = useAuthStore()
+      const hasAccount = Boolean(auth.isAuthenticated && auth.user?.id)
+      const hasAnonId = ANON_ID_PATTERN.test(this.anonId)
+      // An expired account session must not silently delete the guest profile.
+      // Guest erasure still needs the old device ID after personalization is off.
+      if (hasAccount) {
+        delete headers['X-Sonic-Anon-Id']
+      } else if (hasAnonId) {
         headers['X-Sonic-Anon-Id'] = this.anonId
-        delete headers['X-Sonic-Personalization']
       }
-      const ok = await deleteSonicEvents(headers)
-      if (!ok) return false
-      this.dislikedTracks = []
-      this.anonId = this.personalizationEnabled ? generateAnonId() : ''
-      return true
+      const expectStoredProfile = hasAccount || hasAnonId
+      if (expectStoredProfile) delete headers['X-Sonic-Personalization']
+      const identity = deliveryIdentity(this.anonId)
+      discardPending(delivery)
+      // Drain all writes from this tab before DELETE. No new events can be
+      // queued during erasure, including via pagehide or a failed batch retry.
+      const clearing = waitForWrites(delivery.writes).then(async (drained) => {
+        if (!drained || deliveryIdentity(this.anonId) !== identity) return false
+        const ok = await deleteSonicEvents(headers, expectStoredProfile)
+        if (!ok || deliveryIdentity(this.anonId) !== identity) return false
+        this.dislikedTracks = []
+        if (!hasAccount) this.anonId = this.personalizationEnabled ? generateAnonId() : ''
+        return true
+      })
+      delivery.clearing = clearing
+      try {
+        return await clearing
+      } finally {
+        delivery.clearing = null
+      }
     },
   },
 
@@ -371,16 +460,8 @@ export const useRecommendStore = defineStore('recommend', {
 // postSonicEvents 使用 fetch keepalive,页面关闭后浏览器仍会完成发送。
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   const flushPendingOnHide = () => {
-    try {
-      if (pendingQueue.length === 0) return
-      const store = useRecommendStore()
-      if (!store.personalizationEnabled) return
-      const batch = [...pendingQueue]
-      pendingQueue = []
-      postSonicEvents(batch, store.buildRequestHeaders(false))
-    } catch {
-      // pinia 尚未安装(测试/SSR)时静默跳过
-    }
+    const pinia = getActivePinia()
+    if (pinia) void useRecommendStore(pinia).flushEvents()
   }
   window.addEventListener('pagehide', flushPendingOnHide)
   document.addEventListener('visibilitychange', () => {

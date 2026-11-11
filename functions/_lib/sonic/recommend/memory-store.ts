@@ -22,7 +22,7 @@ import {
   toSimplifiedChinese,
 } from './text-norm';
 import { canMergeCanonicalTracks, mergeCanonicalTracks } from './track-canonical';
-import { compareEventOrder, subjectEventKey } from './event-state';
+import { compareEventOrder, comparePopularityEventOrder, isPopularityEvent, subjectEventKey } from './event-state';
 import { upsertTrackMvEntities } from './entity-store';
 
 const MAX_TRACKS = 6000;
@@ -335,6 +335,14 @@ export class MemoryRecommendStore implements RecommendStore {
   getAllRecentEvents(sinceMs: number, limit = 10000): StoredBehaviorEvent[] {
     return this.events.filter((e) => e.createdAt >= sinceMs)
       .sort((a, b) => compareEventOrder(b, a)).slice(0, Math.min(25000, Math.max(1, limit)));
+  }
+
+  iteratePopularityEvents(trackIds: readonly string[], sinceMs: number, untilMs: number): Iterable<StoredBehaviorEvent> {
+    const candidates = new Set(trackIds);
+    const cutoff = Math.max(sinceMs, untilMs - this.retentionDays * DAY_MS);
+    return this.events.filter((event) => event.canonicalTrackId !== undefined && candidates.has(event.canonicalTrackId) &&
+      event.createdAt >= cutoff && event.createdAt <= untilMs && isPopularityEvent(event))
+      .sort(comparePopularityEventOrder);
   }
 
   private contributionEvent(source: RecommendContributionSource): StoredBehaviorEvent | undefined {

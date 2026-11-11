@@ -363,6 +363,7 @@ export interface ReleaseMetadata {
   buildTime?: string;
   releaseId?: string;
   sourceDigest?: string;
+  pagesArtifactDigest?: string;
   dirty: boolean;
 }
 
@@ -384,6 +385,7 @@ export function getReleaseMetadata(env?: AppEnv): ReleaseMetadata {
   const buildTime = String(compiled ? compiled.buildTime || '' : e.SONIC_BUILD_TIME || procEnv.SONIC_BUILD_TIME || '').trim();
   const releaseId = String(compiled ? compiled.releaseId || '' : e.SONIC_RELEASE_ID || procEnv.SONIC_RELEASE_ID || '').trim();
   const sourceDigest = String(compiled ? compiled.sourceDigest || '' : e.SONIC_SOURCE_DIGEST || procEnv.SONIC_SOURCE_DIGEST || '').trim();
+  const pagesArtifactDigest = compiled?.pagesArtifactDigest;
   return {
     version: '2.2.0',
     releaseCommit: /^[a-f0-9]{7,40}$/i.test(rawCommit) ? rawCommit : 'unknown',
@@ -391,6 +393,7 @@ export function getReleaseMetadata(env?: AppEnv): ReleaseMetadata {
     ...(buildTime && Number.isFinite(Date.parse(buildTime)) ? { buildTime } : {}),
     ...(releaseId && /^[a-z0-9][a-z0-9._-]{0,127}$/i.test(releaseId) ? { releaseId } : {}),
     ...(/^[a-f0-9]{64}$/i.test(sourceDigest) ? { sourceDigest } : {}),
+    ...(pagesArtifactDigest && /^[a-f0-9]{64}$/.test(pagesArtifactDigest) ? { pagesArtifactDigest } : {}),
     dirty: compiled ? compiled.dirty === true : isEnvEnabled(e.SONIC_RELEASE_DIRTY ?? procEnv.SONIC_RELEASE_DIRTY, false),
   };
 }

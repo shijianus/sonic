@@ -133,6 +133,8 @@
   - 支持标准 HTTP `Range: bytes=start-end` 请求头，完美支持快进、拖动缓冲与零流量音质探测（`Range: bytes=0-0`）；
   - 自动注入 `Access-Control-Allow-Origin: *` 与 `Access-Control-Expose-Headers: Content-Range, Accept-Ranges`。
 
+直接转发获准的媒体 URL 时，请使用 `/api/sonic/forward?type=audio&url=...`。`type=video` 使用相同媒体策略。未指定类型的转发只接受文本和位图，音视频或通用二进制响应返回 `415`。`/api/music/stream`、媒体转发和旧版酷我 `/proxy?target=...` 共用每客户端 4 路并发预算。达到上限时返回 `429 STREAM_CONCURRENCY_LIMIT`，并带 `Retry-After`。`HEAD` 请求不占用流预算。
+
 ### 3. 高精度多协议逐字歌词 (`GET /api/sonic/lyrics/nexus` & `GET /api/lyric`)
 - **端点**：
   - `/api/sonic/lyrics/nexus`（推荐，全网高精度聚合主入口）
@@ -245,6 +247,8 @@ async function getRecommendations() {
 | `GET` | `/api/sonic/recommend/discover` | 风格流派与温度控制探索雷达 | `genre`, `language`, `temperature=0.1~1.5`, `count` |
 | `GET` | `/api/sonic/search/smart` | 智能混合搜索与自动补全建议 | `q`, `mode=search\|suggest`, `page`, `count`, `personalize=0\|1` |
 | `POST / DELETE / GET` | `/api/sonic/events` | 行为反馈上报与一键清除推荐画像（支持单曲及专辑/歌单/MV实体级反馈与双向软传播） | 请求体 `{ events: [...] }`；支持 `entity_type` (`track\|album\|playlist\|mv`)、`action` (`favorite\|play_complete\|watch_complete\|open\|add_to_playlist\|skip\|dislike`)；支持 `X-Sonic-Personalization: off` 隐私关闭 |
+
+站内热榜按窗口统计已登录且允许个性化的账户播放活动，`window=all` 使用存储保留期内的数据。匿名用户开启个性化后，其活动仍可用于自己的推荐。外部榜单分数通过 `popularity.externalChartScore` 单独返回。
 
 完整算法公式、实体图谱与多实体混合推荐设计请参阅 [`docs/recommend-multi-entity.md`](docs/recommend-multi-entity.md)、[`docs/recommendation/01-audit-and-selection.md`](docs/recommendation/01-audit-and-selection.md) 与 [`docs/recommendation/02-architecture-and-algorithms.md`](docs/recommendation/02-architecture-and-algorithms.md)。
 

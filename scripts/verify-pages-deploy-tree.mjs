@@ -6,7 +6,7 @@ let stagingRoot
 try {
   const deployment = buildPagesDeploymentTree(process.cwd())
   stagingRoot = deployment.stagingRoot
-  const { manifest } = deployment
+  const { manifest, pagesArtifactDigest } = deployment
   const compiled = readFileSync(join(stagingRoot, 'functions/_lib/sonic/compiled-release.ts'), 'utf8')
   const match = compiled.match(/export const COMPILED_RELEASE\s*=\s*(\{[\s\S]*\});\s*$/)
   if (!match) throw new Error('compiled release identity is missing or malformed')
@@ -22,6 +22,7 @@ try {
     releaseId: manifest.releaseId,
     buildTime: manifest.buildTime,
     dirty: manifest.dirty,
+    pagesArtifactDigest,
   })) {
     if (compiledIdentity[key] !== value) {
       throw new Error(`compiled release identity mismatch for ${key}: expected ${JSON.stringify(value)}, got ${JSON.stringify(compiledIdentity[key])}`)
@@ -34,6 +35,7 @@ try {
     stagingRoot,
     releaseId: manifest.releaseId,
     sourceDigest: manifest.sourceDigest,
+    pagesArtifactDigest,
     compiledRelease: true,
   }))
 } catch (error) {

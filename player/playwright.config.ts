@@ -8,7 +8,7 @@ const BASE_URL = `http://127.0.0.1:${PORT}`
  *
  * 测试对象：`player/dist` 构建产物 + `e2e/mock-server.mjs` 提供的确定性网关 Mock。
  * 不使用真实 CDN、真实 OAuth、真实上游音源；音频为本地生成的 WAV。
- * 本地可用系统 Chrome：E2E_CHANNEL=chrome；CI 安装 Playwright Chromium 时不设置该变量。
+ * 本地可用 E2E_CHANNEL=chrome 或 E2E_CHROMIUM_EXECUTABLE 指定 Chromium。
  */
 export default defineConfig({
   testDir: './e2e/specs',
@@ -30,10 +30,13 @@ export default defineConfig({
     // 既贴近无障碍场景，也让竞态用例的时序可复现。
     reducedMotion: 'reduce',
     trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
+    screenshot: process.env.E2E_CAPTURE_SCREENSHOTS === '1' ? 'on' : 'only-on-failure',
     video: 'off',
     launchOptions: {
       args: ['--autoplay-policy=no-user-gesture-required', '--mute-audio'],
+      ...(process.env.E2E_CHROMIUM_EXECUTABLE
+        ? { executablePath: process.env.E2E_CHROMIUM_EXECUTABLE }
+        : {}),
     },
     ...(process.env.E2E_CHANNEL ? { channel: process.env.E2E_CHANNEL } : {}),
   },

@@ -27,6 +27,17 @@ const remember = (response: Response) => { responses.push(response); return resp
 const audio = (headers: HeadersInit = {}) => new Response('audio', {
   headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'public, max-age=600', ...Object.fromEntries(new Headers(headers)) },
 });
+const MEDIA_ROUTES = [
+  { handle: stream, path: `/api/music/stream?url=${encodeURIComponent(MEDIA)}` },
+  { handle: forward, path: `/api/sonic/forward?type=audio&url=${encodeURIComponent(MEDIA)}` },
+  { handle: proxy, path: `/proxy?target=${encodeURIComponent('https://sycdn.kuwo.cn/a.mp3')}` },
+];
+
+function mediaRequest(path: string, init?: RequestInit): Request {
+  const headers = new Headers(init?.headers);
+  headers.set('CF-Connecting-IP', '198.51.100.19');
+  return request(path, { ...init, headers });
+}
 
 beforeEach(() => {
   resetRateLimitsForTest();
@@ -119,11 +130,11 @@ describe('public beta: signed URLs across redirects', () => {
     expect(JSON.stringify([...response.headers])).not.toContain('secret');
     expect(await response.text()).toBe('audio');
   });
-  it.each([stream, forward])('never public-caches a final signed hop', async (handler) => {
+  it.each(MEDIA_ROUTES.slice(0, 2))('never public-caches a final signed hop on $path', async ({ handle, path }) => {
     vi.stubGlobal('fetch', vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: '/a.mp3?%64is_k=private-signature' } }))
       .mockResolvedValueOnce(audio()));
-    const r = remember(await handler({ request: request(`/api/music/stream?url=${encodeURIComponent(MEDIA)}`), env: {} }));
+    const r = remember(await handle({ request: request(path), env: {} }));
     expect(r.status).toBe(200);
     expect(r.headers.get('Cache-Control')).toBe('private, no-store');
     expect(r.headers.get('Location')).toBeNull();
@@ -162,6 +173,122 @@ describe('public beta: signed URLs across redirects', () => {
       await Promise.resolve();
       expect(canceled).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+describe('public beta: shared media client budget and forward capabilities', () => {
+  it('limits all media entry points together and keeps HEAD and covers available', async () => {
+    const canceled = vi.fn();
+    const upstream = vi.fn(async (target: string, init?: RequestInit) => {
+      if (new URL(target).pathname.endsWith('.jpg')) {
+        return new Response('cover', { headers: { 'Content-Type': 'image/jpeg' } });
+      }
+      const body = init?.method === 'HEAD' ? null : new ReadableStream({ cancel: canceled });
+      return new Response(body, { headers: { 'Content-Type': 'audio/mpeg' } });
+    });
+    vi.stubGlobal('fetch', upstream);
+
+    const controller = new AbortController();
+    const open = async (route: typeof MEDIA_ROUTES[number], init?: RequestInit) =>
+      remember(await route.handle({ request: mediaRequest(route.path, init), env: {} }));
+    const responses = await Promise.all([
+      open(MEDIA_ROUTES[0], { signal: controller.signal }),
+      open(MEDIA_ROUTES[1]),
+      open(MEDIA_ROUTES[2]),
+      open(MEDIA_ROUTES[2]),
+    ]);
+    expect(responses.map(response => response.status)).toEqual([200, 200, 200, 200]);
+
+    for (const route of MEDIA_ROUTES) {
+      const denied = await open(route);
+      expect(denied.status).toBe(429);
+      expect(denied.headers.get('Retry-After')).toBe('5');
+      expect((await denied.json()).error.code).toBe('STREAM_CONCURRENCY_LIMIT');
+    }
+    expect(upstream).toHaveBeenCalledTimes(4);
+
+    for (const route of MEDIA_ROUTES) {
+      const head = await open(route, { method: 'HEAD' });
+      expect(head.status).toBe(200);
+      expect(head.body).toBeNull();
+    }
+    const cover = remember(await forward({
+      request: mediaRequest(`/api/sonic/forward?type=cover&url=${encodeURIComponent('https://p1.music.126.net/a.jpg')}`),
+      env: {},
+    }));
+    expect(await cover.text()).toBe('cover');
+
+    await responses[1].body!.cancel();
+    expect(canceled).toHaveBeenCalledTimes(1);
+    expect((await open(MEDIA_ROUTES[0])).status).toBe(200);
+    controller.abort();
+    expect(canceled).toHaveBeenCalledTimes(2);
+    expect((await open(MEDIA_ROUTES[2])).status).toBe(200);
+  });
+
+  it.each([
+    ['', 'audio/mpeg'],
+    ['', 'application/octet-stream'],
+    ['', null],
+    ['cover', 'video/mp4'],
+    ['catalog', 'audio/mpeg'],
+    ['lyrics', 'binary/octet-stream'],
+    ['audio', 'application/json'],
+  ])('rejects a mismatched forward type %s and MIME %s', async (type, mime) => {
+    const canceled = vi.fn();
+    vi.stubGlobal('fetch', async () => new Response(new ReadableStream({ cancel: canceled }), {
+      headers: mime ? { 'Content-Type': mime } : undefined,
+    }));
+    const path = `/api/sonic/forward?type=${type}&url=${encodeURIComponent('https://sycdn.kuwo.cn/a.mp3')}`;
+    const result = await forward({ request: mediaRequest(path), env: {} });
+    expect(result.status).toBe(415);
+    expect((await result.json()).error.code).toBe('UNSUPPORTED_CONTENT_TYPE');
+    expect(canceled).toHaveBeenCalledOnce();
+  });
+
+  it('keeps byte-range responses from typed media with a generic CDN MIME', async () => {
+    const upstream = vi.fn(async (_url: string, _init?: RequestInit) => new Response('part', {
+      status: 206,
+      headers: { 'Content-Type': 'application/octet-stream', 'Content-Range': 'bytes 0-3/20' },
+    }));
+    vi.stubGlobal('fetch', upstream);
+    const url = `https://vod.126.net/sample.mp4`;
+    const result = remember(await forward({
+      request: mediaRequest(`/api/sonic/forward?type=video&url=${encodeURIComponent(url)}`, {
+        headers: { Range: 'bytes=0-3' },
+      }),
+      env: {},
+    }));
+    expect(result.status).toBe(206);
+    expect(result.headers.get('Content-Range')).toBe('bytes 0-3/20');
+    expect(await result.text()).toBe('part');
+    expect(upstream).toHaveBeenCalledWith(url, expect.objectContaining({
+      headers: expect.any(Headers),
+    }));
+    expect(new Headers(upstream.mock.calls[0][1]?.headers).get('Range')).toBe('bytes=0-3');
+  });
+
+  it('releases the slot after complete, body failure and upstream rejection', async () => {
+    const upstream = vi.fn()
+      .mockResolvedValueOnce(audio())
+      .mockResolvedValueOnce(new Response('unavailable', { status: 404 }))
+      .mockRejectedValueOnce(new Error('provider unavailable'));
+    let fail!: (error: Error) => void;
+    const failingBody = new ReadableStream({ start(controller) { fail = error => controller.error(error); } });
+    upstream.mockResolvedValueOnce(new Response(failingBody, { headers: { 'Content-Type': 'audio/mpeg' } }));
+    upstream.mockImplementation(async () => audio());
+    vi.stubGlobal('fetch', upstream);
+    const route = MEDIA_ROUTES[1];
+    const open = async () => remember(await route.handle({ request: mediaRequest(route.path), env: {} }));
+    expect(await (await open()).text()).toBe('audio');
+    expect((await open()).status).toBe(404);
+    expect((await open()).status).toBe(502);
+    const interrupted = await open();
+    fail(new Error('interrupted stream'));
+    await expect(interrupted.text()).rejects.toThrow('interrupted stream');
+
+    const replacements = await Promise.all(Array.from({ length: 4 }, () => open()));
+    expect(replacements.map(response => response.status)).toEqual([200, 200, 200, 200]);
   });
 });
 

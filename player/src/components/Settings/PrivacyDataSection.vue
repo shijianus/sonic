@@ -53,6 +53,10 @@ const clearAllLocalData = async () => {
   isClearing.value = true
   try {
     const recommendOk = await recommendStore.clearAllRecommendationProfile()
+    if (!recommendOk) {
+      toastStore.show({ message: t('components.settings.privacyClearFailed'), type: 'error' })
+      return
+    }
     let localStorageOk = true
     let musicDatabaseOk = true
     try {
@@ -66,7 +70,7 @@ const clearAllLocalData = async () => {
     } catch {
       musicDatabaseOk = false
     }
-    const ok = recommendOk && localStorageOk && musicDatabaseOk
+    const ok = localStorageOk && musicDatabaseOk
     toastStore.show({
       message: ok ? t('components.settings.privacyCleared') : t('components.settings.privacyClearFailed'),
       type: ok ? 'success' : 'error',
