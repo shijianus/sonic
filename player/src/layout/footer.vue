@@ -539,17 +539,22 @@ const handleQualityMenuKeydown = (e: KeyboardEvent) => {
   }
 }
 
+let pendingQualitySelection: symbol | undefined
+
 const selectQuality = async (level: string) => {
   const target = availableQualities.value.find((q) => q.level === level)
   if (target && !target.isAvailable) return
-  if (level === currentQualityLevel.value) {
+  if (level === currentQualityLevel.value && !pendingQualitySelection) {
     closeQualityMenuAndRestoreFocus()
     return
   }
 
+  const selection = Symbol()
+  pendingQualitySelection = selection
   try {
-    await audioStore.switchQuality(level)
+    if (!(await audioStore.switchQuality(level)) || pendingQualitySelection !== selection) return
   } catch {
+    if (pendingQualitySelection !== selection) return
     // 失败时保持菜单打开，徽章由 store 回滚，并给出明确错误反馈
     toastStore.show({
       message: t('player.qualitySwitchFailed'),
@@ -557,6 +562,8 @@ const selectQuality = async (level: string) => {
       duration: 4000,
     })
     return
+  } finally {
+    if (pendingQualitySelection === selection) pendingQualitySelection = undefined
   }
 
   closeQualityMenuAndRestoreFocus()

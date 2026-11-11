@@ -8,7 +8,8 @@ import { searchNexus } from '../../_lib/sonic/nexus-search';
 import { jsonResponse } from '../../_lib/http';
 import { sonicLinesToLrc, sonicLinesToTtml } from '../../_lib/sonic/utils';
 import { SONIC_UA } from '../../_lib/sonic/config';
-import { getAllowedMediaDomains } from '../../_lib/sonic/licensing';
+import { getAllowedMediaDomains, type ContentCapability } from '../../_lib/sonic/licensing';
+import { isMediaContentType, withMediaStreamLimit } from '../../_lib/sonic/media-concurrency';
 import { recordLicensingBlockMetric, redactSensitiveString } from '../../_lib/sonic/observability';
 import {
   checkEngineAccess,
@@ -31,16 +32,16 @@ const FORWARDABLE_TEXTUAL_TYPES = new Set([
   'application/ttml+xml',
   'application/ttml',
   'application/lrc',
-  'application/octet-stream',
-  'binary/octet-stream',
 ]);
 
-function isForwardableAssetType(contentType: string | null): boolean {
+function isForwardableAssetType(contentType: string | null, capability?: ContentCapability): boolean {
+  if (capability === 'audio') return isMediaContentType(contentType);
   const value = (contentType || '').split(';')[0].trim().toLowerCase();
-  if (!value) return true;
-  if (value.startsWith('audio/') || value.startsWith('video/')) return true;
-  if (value.startsWith('image/')) return value !== 'image/svg+xml' && value !== 'image/svg';
-  return FORWARDABLE_TEXTUAL_TYPES.has(value);
+  const isRaster = value.startsWith('image/') && value !== 'image/svg+xml' && value !== 'image/svg';
+  if (capability === 'cover') return isRaster;
+  if (capability === 'catalog') return value === 'application/json' || value === 'text/plain';
+  if (capability === 'lyrics') return FORWARDABLE_TEXTUAL_TYPES.has(value);
+  return isRaster || FORWARDABLE_TEXTUAL_TYPES.has(value);
 }
 
 export async function onRequest({ request, env, waitUntil }: any): Promise<Response> {
@@ -58,13 +59,19 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
 
   const url = new URL(request.url);
-  const type = (url.searchParams.get('type') || '').toLowerCase();
+  const type = (url.searchParams.get('type') || '').trim().toLowerCase();
   const targetUrl = url.searchParams.get('url') || url.searchParams.get('target');
 
   // Case 1: External URL Proxy / Forwarding (e.g. lyrics URL, audio stream, covers)
   if (targetUrl) {
+    const capability = type === 'video' ? 'audio' :
+      type === 'audio' || type === 'cover' || type === 'lyrics' || type === 'catalog' ? type : undefined;
+    const respond = () => forwardAsset(targetUrl, capability);
+    return capability === 'audio' ? withMediaStreamLimit(request, env, respond) : respond();
+  }
+
+  async function forwardAsset(target: string, capability?: ContentCapability): Promise<Response> {
     try {
-      const capability = type === 'audio' || type === 'cover' || type === 'lyrics' || type === 'catalog' ? type : undefined;
       const allowedDomains = getAllowedMediaDomains(env, capability);
       if (allowedDomains.length === 0) {
         recordLicensingBlockMetric('forward-url');
@@ -76,7 +83,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
         );
       }
 
-      const valResult = validateSafeUrl(targetUrl, {
+      const valResult = validateSafeUrl(target, {
         allowHttp: false,
         allowedDomains,
       });
@@ -110,14 +117,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
       const range = request.headers.get('Range');
       if (range) forwardHeaders.set('Range', range);
 
-      const forwardMaxBytes =
-        type === 'audio'
-          ? 128 * 1024 * 1024
-          : type === 'cover'
-            ? 16 * 1024 * 1024
-            : type === 'lyrics' || type === 'catalog'
-              ? 8 * 1024 * 1024
-              : 32 * 1024 * 1024;
+      const forwardMaxBytes = (capability === 'audio' ? 128 : capability === 'cover' ? 16 : 8) * 1024 * 1024;
       const upstreamResp = await safeFetch(
         valResult.url,
         {
@@ -134,7 +134,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
           includeMetadata: true,
           // Audio forwards share the media pool so slow streams cannot starve
           // cover/JSON proxying (audit P1-3).
-          pool: type === 'audio' ? 'media' : 'json',
+          pool: capability === 'audio' ? 'media' : 'json',
         },
       );
 
@@ -153,11 +153,11 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
 
       // Relay only asset-safe headers: upstream Set-Cookie must never be planted on the Sonic
       // origin, and Content-Encoding must not be forwarded for an already-decoded body.
-      if (!isForwardableAssetType(upstreamResp.headers.get('content-type'))) {
+      if (!isForwardableAssetType(upstreamResp.headers.get('content-type'), capability)) {
         upstreamResp.body?.cancel().catch(() => {});
         return sonicError(
           'UNSUPPORTED_CONTENT_TYPE',
-          'Upstream returned a document-capable content type and was not relayed',
+          'Upstream content type does not match the requested asset type. Use type=audio for media.',
           415,
           { provider: 'forward' },
         );
@@ -185,6 +185,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
         headers: responseHeaders,
       });
     } catch (err: any) {
+      request.signal.throwIfAborted();
       if (isSafeFetchCapacityError(err)) {
         const busy = sonicError('UPSTREAM_BUSY', 'Upstream capacity is temporarily exhausted', 503, {
           provider: 'forward',

@@ -38,7 +38,7 @@ import {
   toCanonicalTrack,
 } from './track-canonical';
 import { getRecommendStore } from './memory-store';
-import { computeCatalogPopularity, exponentialTimeDecay } from './popularity';
+import { computeStorePopularity, exponentialTimeDecay } from './popularity';
 import { ensureCatalogSeeded } from './seed-catalog';
 import { normalizeBehaviorEventInput, resolveEventEntity, resolveEventTrack } from './entity-store';
 import { collectUserPreferenceSignals } from './event-state';
@@ -748,8 +748,7 @@ export async function getRecommendationsForYou(
   }
 
   const allTracks = store.listTracks(1200);
-  const recentEvents = store.getAllRecentEvents(nowMs - 30 * DAY_MS, 8000);
-  const popMap = computeCatalogPopularity(allTracks, recentEvents, { window: '7d', nowMs });
+  const popMap = computeStorePopularity(store, allTracks, { window: '7d', nowMs });
 
   // Reference anchor tracks based on mode
   const anchorTracks: CanonicalTrack[] = [];
@@ -1043,11 +1042,7 @@ export async function getTrendingRecommendations(
   }
 
   const allTracks = store.listTracks(1500);
-  const events = store.getAllRecentEvents(
-    window === 'all' ? nowMs - 180 * DAY_MS : nowMs - 14 * DAY_MS,
-    15000,
-  );
-  const popMap = computeCatalogPopularity(allTracks, events, { window, nowMs });
+  const popMap = computeStorePopularity(store, allTracks, { window, nowMs });
   const profile = wantPersonalized ? buildUserPreferenceProfile(identity, store, nowMs) : null;
 
   let activeTracksWithPlays = 0;
@@ -1168,7 +1163,7 @@ export async function getTrendingRecommendations(
     genre: genreFilter || null,
     personalized: Boolean(profile && (profile.hasPlayHistory || profile.hasSearchHistory)),
     metricsSeparationNote:
-      'strictly_separated: popularity.internalScore measures verified CFSolara listening events only; popularity.externalChartScore reflects upstream chart reference; scoreSource explicitly tags each item.',
+      'strictly_separated: popularity.internalScore uses signed-in listener activity only; popularity.externalChartScore reflects upstream chart reference; scoreSource explicitly tags each item.',
     stationStats: {
       activeTracksWithPlays,
       totalCatalogTracks: allTracks.length,
@@ -1257,7 +1252,7 @@ export async function getSimilarRecommendations(
   }
 
   const allTracks = store.listTracks(1200);
-  const popMap = computeCatalogPopularity(allTracks, store.getAllRecentEvents(Date.now() - 30 * DAY_MS, 5000));
+  const popMap = computeStorePopularity(store, allTracks);
 
   const candidates: ScoredCandidate[] = [];
   for (const track of allTracks) {
@@ -1355,7 +1350,7 @@ export async function getDiscoverRecommendations(
   }
 
   const allTracks = store.listTracks(1200);
-  const popMap = computeCatalogPopularity(allTracks, store.getAllRecentEvents(Date.now() - 30 * DAY_MS, 5000));
+  const popMap = computeStorePopularity(store, allTracks);
 
   const candidates: ScoredCandidate[] = [];
   for (const track of allTracks) {

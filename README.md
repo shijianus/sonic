@@ -238,6 +238,27 @@ curl --fail-with-body \
 
 引擎能服务根 `dist/` 的 SPA；只有执行 `build:engine` 不会生成前端。静态页面能打开，也不表示页面中的 API 已通过服务认证。
 
+### VPS 裸机部署（私有 Engine）
+
+从目标提交的干净工作树按锁文件安装依赖。更新版本时同时构建前端和 Engine，再执行隔离验收：
+
+```bash
+npm ci
+pnpm --dir player install --frozen-lockfile
+npm run build
+npm run build:engine
+node --experimental-sqlite scripts/verify-built-release.mjs
+```
+
+准备一个不纳入 Git 的服务环境文件。明确设置 `SONIC_ENV=staging|production`、`SONIC_ACCESS_MODE=open|invite`、`SONIC_CONTENT_POLICY=strict-allowlist` 和已审核的 `SONIC_ALLOWED_SOURCES`。为 `SONIC_RECOMMEND_DB_PATH` 使用绝对持久路径；如配置账号或邀请库，使用不同路径。邀请模式要求 `SONIC_ACCESS_DB_PATH`。三组服务、身份签名和 API Key 密钥分别使用独立的值。
+
+```bash
+node --env-file=/path/to/sonic-engine.env scripts/start-bare-metal-engine.mjs --check
+node --env-file=/path/to/sonic-engine.env scripts/start-bare-metal-engine.mjs
+```
+
+启动器校验源文件和构建清单，加载该版本的发布标识，并只监听 `127.0.0.1`。用服务管理器运行时，把第二条命令配置为启动命令。通过受信网关连接 Engine；真实浏览器播放、OAuth 和 API Key 撤销须通过配置了相应凭据及撤销存储的网关验收。
+
 ## 测试与质量检查
 
 ### 类型与 lint
@@ -314,15 +335,19 @@ npm run build:engine   # 生成 dist-server/index.mjs
 
 ### Cloudflare Pages
 
-完成依赖安装、环境配置和发布门禁后，才运行真实部署：
+从干净提交构建一次，保留同一份 `dist/` 供预览、Staging 和生产提升使用：
 
 ```bash
-npm run deploy
+npm run build
+node scripts/prepare-pages-preview.mjs --deploy
+node scripts/verify-staging-live.mjs > "$SONIC_STAGING_ACCEPTANCE_FILE"
+node scripts/prepare-pages-preview.mjs --promote-staging --deploy
+node scripts/verify-staging-live.mjs --stable > "$SONIC_PRODUCTION_ACCEPTANCE_FILE"
 ```
 
-该命令会构建并执行 `wrangler pages deploy dist`；默认项目 **`cfsolara`**、目标分支 **`main`**，可通过 `CF_PAGES_PROJECT` / `CF_PAGES_BRANCH` 覆盖。RC 验证应显式选择预览目标，不要把当前 Git 分支当作脚本自动采用的部署分支。
+在仓库外保存验收文件，并在稳定 Staging 的记录中补齐[发布清单](docs/release/RELEASE-CHECKLIST.md#pages-生产提升)要求的实测证据。设置生产项目、分支和环境后运行 `node scripts/deploy-pages.mjs`。脚本校验发布提交、源码摘要与 Pages 产物摘要，并在部署后从线上读取发布身份和安全配置。`npm run deploy` 会先重新构建，只有构建产物与已验收产物完全一致时才会继续。
 
-部署脚本默认拒绝 dirty working tree。`ALLOW_DIRTY_DEPLOY=1` 是显式绕过，不建议用于常规发布。Pages 项目、Secret、KV、`RATE_LIMITER`、OAuth 回调、Tunnel/DNS 均需另行配置，仓库没有自动创建这些资源的流程。
+Pages 项目、Secret、KV、`RATE_LIMITER`、OAuth 回调和 Tunnel/DNS 需在目标环境配置。
 
 ### Docker Compose
 

@@ -7,10 +7,11 @@
 import type {
   CanonicalTrack,
   ComputedPopularity,
+  RecommendStore,
   StoredBehaviorEvent,
   TrendingWindow,
 } from './types';
-import { foldPreferenceSignals } from './event-state';
+import { comparePopularityEventOrder, foldPreferenceSignals } from './event-state';
 
 const HOUR_MS = 3600 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -45,43 +46,49 @@ export function compressUserRepeatPlays(rawWeightedPlays: number): number {
   return 1 + 0.5 * Math.log(rawWeightedPlays);
 }
 
-interface RawTrackAccumulator {
-  userDecayedPlaysWindow: Map<string, number>;
-  userPlays24h: Map<string, number>;
-  userPlays7d: Map<string, number>;
-  uniqueUsersWindow: Set<string>;
-  uniqueUsers24h: Set<string>;
-  uniqueUsers7d: Set<string>;
+interface TrackTotals {
+  effectivePlays: number;
+  effective24h: number;
+  effective7d: number;
+  uniqueListeners: number;
   playStarts: number;
   playCompletes: number;
-  favoritesUsers: Set<string>;
-  unfavoritesUsers: Set<string>;
-  dislikeUsers: Set<string>;
-  undislikeUsers: Set<string>;
-  lastPlayedAt: number;
+  favorites: number;
+  dislikes: number;
 }
 
-function getOrCreateAcc(map: Map<string, RawTrackAccumulator>, trackId: string): RawTrackAccumulator {
-  let acc = map.get(trackId);
-  if (!acc) {
-    acc = {
-      userDecayedPlaysWindow: new Map(),
-      userPlays24h: new Map(),
-      userPlays7d: new Map(),
-      uniqueUsersWindow: new Set(),
-      uniqueUsers24h: new Set(),
-      uniqueUsers7d: new Set(),
-      playStarts: 0,
-      playCompletes: 0,
-      favoritesUsers: new Set(),
-      unfavoritesUsers: new Set(),
-      dislikeUsers: new Set(),
-      undislikeUsers: new Set(),
-      lastPlayedAt: 0,
-    };
-    map.set(trackId, acc);
+interface ListenerTotals {
+  decayedPlays: number;
+  plays24h: number;
+  plays7d: number;
+  listened: boolean;
+  state: 'favorite' | 'dislike' | null;
+}
+
+function windowCutoff(window: TrendingWindow, nowMs: number): number {
+  switch (window) {
+    case '24h': return nowMs - DAY_MS;
+    case '7d':
+    case 'surging': return nowMs - 7 * DAY_MS;
+    case 'new': return nowMs - 14 * DAY_MS;
+    default: return 0; // All retained events.
   }
-  return acc;
+}
+
+export function computeStorePopularity(
+  store: RecommendStore,
+  tracks: CanonicalTrack[],
+  options?: PopularityComputeOptions,
+): Map<string, ComputedPopularity> {
+  const window = options?.window ?? '7d';
+  const nowMs = options?.nowMs ?? Date.now();
+  // The 24h chart still uses the preceding six days to compute velocity.
+  const sinceMs = Math.min(windowCutoff(window, nowMs), nowMs - 7 * DAY_MS);
+  return scoreOrderedPopularity(
+    tracks,
+    store.iteratePopularityEvents(tracks.map((track) => track.canonicalTrackId), sinceMs, nowMs),
+    { ...options, window, nowMs },
+  );
 }
 
 export function computeCatalogPopularity(
@@ -89,176 +96,126 @@ export function computeCatalogPopularity(
   events: StoredBehaviorEvent[],
   options?: PopularityComputeOptions,
 ): Map<string, ComputedPopularity> {
-  const window: TrendingWindow = options?.window || '7d';
+  const trackIds = new Set(tracks.map((track) => track.canonicalTrackId));
+  const ordered = foldPreferenceSignals(events.map((event) => ({
+    ...event, entityType: 'track', entityId: event.canonicalTrackId || event.trackRef,
+  }))).filter((event) => trackIds.has(event.canonicalTrackId || '')).sort(comparePopularityEventOrder);
+  return scoreOrderedPopularity(tracks, ordered, options);
+}
+
+function scoreOrderedPopularity(
+  tracks: CanonicalTrack[],
+  events: Iterable<StoredBehaviorEvent>,
+  options?: PopularityComputeOptions,
+): Map<string, ComputedPopularity> {
+  const window = options?.window ?? '7d';
   const nowMs = options?.nowMs ?? Date.now();
   const kPrior = options?.confidencePriorK ?? 5;
-
-  const halfLifeMs =
-    window === '24h' || window === 'surging'
-      ? 12 * HOUR_MS
-      : window === '7d' || window === 'new'
-        ? 72 * HOUR_MS
-        : 30 * DAY_MS;
-
-  const windowCutoffMs =
-    window === '24h'
-      ? nowMs - DAY_MS
-      : window === '7d' || window === 'surging'
-        ? nowMs - 7 * DAY_MS
-        : window === 'new'
-          ? nowMs - 14 * DAY_MS
-          : 0;
-
+  const halfLifeMs = window === '24h' || window === 'surging' ? 12 * HOUR_MS
+    : window === 'all' ? 30 * DAY_MS : 72 * HOUR_MS;
+  const cutoff = windowCutoff(window, nowMs);
   const cutoff24h = nowMs - DAY_MS;
   const cutoff7d = nowMs - 7 * DAY_MS;
 
-  const accMap = new Map<string, RawTrackAccumulator>();
+  const totalsByTrack = new Map<string, TrackTotals>();
+  let trackId: string | undefined;
+  let subjectKey: string | undefined;
+  let totals: TrackTotals | undefined;
+  let listener: ListenerTotals | undefined;
+  const finishListener = () => {
+    if (!totals || !listener) return;
+    totals.effectivePlays += compressUserRepeatPlays(listener.decayedPlays);
+    totals.effective24h += compressUserRepeatPlays(listener.plays24h);
+    totals.effective7d += compressUserRepeatPlays(listener.plays7d);
+    if (listener.listened) totals.uniqueListeners++;
+    if (listener.state === 'favorite') totals.favorites++;
+    if (listener.state === 'dislike') totals.dislikes++;
+  };
 
-  // Undo semantics and retries are identical to personalized/mixed profiles.
-  for (const ev of foldPreferenceSignals(events.map((e) => ({ ...e, entityType: 'track', entityId: e.canonicalTrackId || e.trackRef })))) {
-    const tid = ev.canonicalTrackId;
-    if (!tid || !ev.subjectKey) continue;
-    const acc = getOrCreateAcc(accMap, tid);
-    const ageMs = Math.max(0, nowMs - ev.createdAt);
-    const inWindow = ev.createdAt >= windowCutoffMs;
-    const in24h = ev.createdAt >= cutoff24h;
-    const in7d = ev.createdAt >= cutoff7d;
-
-    if (ev.type === 'play_start') {
-      if (inWindow) acc.playStarts += 1;
-      // A start by itself is small (0.25) until progress/complete arrives, preventing instant-skip spam
-      const decay = exponentialTimeDecay(ageMs, halfLifeMs);
-      if (inWindow) {
-        acc.userDecayedPlaysWindow.set(
-          ev.subjectKey,
-          (acc.userDecayedPlaysWindow.get(ev.subjectKey) || 0) + 0.25 * decay,
-        );
+  // SQLite supplies grouped rows through its partial index, so this keeps
+  // only one account's running totals rather than materializing all events.
+  for (const event of events) {
+    if (!event.canonicalTrackId || !event.subjectKey || event.createdAt > nowMs) continue;
+    if (event.canonicalTrackId !== trackId || event.subjectKey !== subjectKey) {
+      finishListener();
+      if (event.canonicalTrackId !== trackId) {
+        trackId = event.canonicalTrackId;
+        totals = {
+          effectivePlays: 0, effective24h: 0, effective7d: 0, uniqueListeners: 0,
+          playStarts: 0, playCompletes: 0, favorites: 0, dislikes: 0,
+        };
+        totalsByTrack.set(trackId, totals);
       }
-      if (ev.createdAt > acc.lastPlayedAt) acc.lastPlayedAt = ev.createdAt;
-    } else if (ev.type === 'play_progress') {
-      const ratio = ev.progressRatio ?? 0.5;
-      if (ratio >= 0.45) {
-        const decay = exponentialTimeDecay(ageMs, halfLifeMs);
+      subjectKey = event.subjectKey;
+      listener = { decayedPlays: 0, plays24h: 0, plays7d: 0, listened: false, state: null };
+    }
+    if (!totals || !listener) continue;
+
+    const inWindow = event.createdAt >= cutoff;
+    const ageMs = nowMs - event.createdAt;
+    switch (event.type) {
+      case 'play_start':
         if (inWindow) {
-          acc.uniqueUsersWindow.add(ev.subjectKey);
-          acc.userDecayedPlaysWindow.set(
-            ev.subjectKey,
-            (acc.userDecayedPlaysWindow.get(ev.subjectKey) || 0) + 0.55 * decay,
-          );
+          totals.playStarts++;
+          listener.decayedPlays += 0.25 * exponentialTimeDecay(ageMs, halfLifeMs);
         }
-        if (in24h) {
-          acc.uniqueUsers24h.add(ev.subjectKey);
-          acc.userPlays24h.set(ev.subjectKey, (acc.userPlays24h.get(ev.subjectKey) || 0) + 0.55);
+        break;
+      case 'play_progress':
+      case 'play_complete':
+      case 'replay': {
+        if (event.type === 'play_progress' && (event.progressRatio ?? 0.5) < 0.45) break;
+        const weight = event.type === 'replay' ? 1.25 : event.type === 'play_complete' ? 1 : 0.55;
+        if (inWindow) {
+          if (event.type !== 'play_progress') totals.playCompletes++;
+          listener.listened = true;
+          listener.decayedPlays += weight * exponentialTimeDecay(ageMs, halfLifeMs);
         }
-        if (in7d) {
-          acc.uniqueUsers7d.add(ev.subjectKey);
-          acc.userPlays7d.set(ev.subjectKey, (acc.userPlays7d.get(ev.subjectKey) || 0) + 0.55);
-        }
-        if (ev.createdAt > acc.lastPlayedAt) acc.lastPlayedAt = ev.createdAt;
+        if (event.createdAt >= cutoff24h) listener.plays24h += weight;
+        if (event.createdAt >= cutoff7d) listener.plays7d += weight;
+        break;
       }
-    } else if (ev.type === 'play_complete' || ev.type === 'replay') {
-      const mult = ev.type === 'replay' ? 1.25 : 1.0;
-      const decay = exponentialTimeDecay(ageMs, halfLifeMs);
-      if (inWindow) {
-        acc.playCompletes += 1;
-        if (acc.playStarts < acc.playCompletes) acc.playStarts = acc.playCompletes;
-        acc.uniqueUsersWindow.add(ev.subjectKey);
-        acc.userDecayedPlaysWindow.set(
-          ev.subjectKey,
-          (acc.userDecayedPlaysWindow.get(ev.subjectKey) || 0) + mult * decay,
-        );
-      }
-      if (in24h) {
-        acc.uniqueUsers24h.add(ev.subjectKey);
-        acc.userPlays24h.set(ev.subjectKey, (acc.userPlays24h.get(ev.subjectKey) || 0) + mult);
-      }
-      if (in7d) {
-        acc.uniqueUsers7d.add(ev.subjectKey);
-        acc.userPlays7d.set(ev.subjectKey, (acc.userPlays7d.get(ev.subjectKey) || 0) + mult);
-      }
-      if (ev.createdAt > acc.lastPlayedAt) acc.lastPlayedAt = ev.createdAt;
-    } else if (ev.type === 'favorite') {
-      acc.favoritesUsers.add(ev.subjectKey);
-      acc.unfavoritesUsers.delete(ev.subjectKey);
-      if (inWindow) acc.uniqueUsersWindow.add(ev.subjectKey);
-    } else if (ev.type === 'unfavorite') {
-      acc.unfavoritesUsers.add(ev.subjectKey);
-    } else if (ev.type === 'dislike') {
-      acc.dislikeUsers.add(ev.subjectKey);
-      acc.undislikeUsers.delete(ev.subjectKey);
-    } else if (ev.type === 'undislike') {
-      acc.undislikeUsers.add(ev.subjectKey);
+      case 'favorite':
+      case 'dislike':
+        if (inWindow) listener.state = event.type;
+        break;
+      case 'unfavorite':
+        if (inWindow && listener.state === 'favorite') listener.state = null;
+        break;
+      case 'undislike':
+        if (inWindow && listener.state === 'dislike') listener.state = null;
+        break;
     }
   }
+  finishListener();
 
-  // First pass: compute capped effective plays & maxima for log normalization
-  interface IntermediateStats {
+  const intermediate = new Map<string, {
     effectivePlays: number;
-    effective24h: number;
-    effective7d: number;
     uniqueListeners: number;
     completionRateSmoothed: number;
     favoriteRateSmoothed: number;
     velocityScore: number;
     netDislikes: number;
-  }
-
-  const intermediate = new Map<string, IntermediateStats>();
+  }>();
   let maxEffectivePlays = 1;
   let maxUniqueListeners = 1;
-
-  for (const [tid, acc] of accMap.entries()) {
-    let effectivePlays = 0;
-    for (const rawVal of acc.userDecayedPlaysWindow.values()) {
-      effectivePlays += compressUserRepeatPlays(rawVal);
-    }
-
-    let effective24h = 0;
-    for (const rawVal of acc.userPlays24h.values()) {
-      effective24h += compressUserRepeatPlays(rawVal);
-    }
-
-    let effective7d = 0;
-    for (const rawVal of acc.userPlays7d.values()) {
-      effective7d += compressUserRepeatPlays(rawVal);
-    }
-
-    const netFavs = Math.max(0, acc.favoritesUsers.size - acc.unfavoritesUsers.size);
-    const netDislikes = Math.max(0, acc.dislikeUsers.size - acc.undislikeUsers.size);
-    const uniqueListeners = acc.uniqueUsersWindow.size;
-
-    // Bayesian-smoothed completion rate (prior mean = 0.62, strength = 4)
-    const starts = Math.max(acc.playStarts, acc.playCompletes);
-    const completionRateSmoothed =
-      starts > 0 ? (acc.playCompletes + 4 * 0.62) / (starts + 4) : 0.62;
-
-    // Favorite score combining Wilson lower bound and Bayesian smoothing
-    const listenerDenom = Math.max(uniqueListeners, netFavs, 1);
-    const wilsonFav = wilsonLowerBound(netFavs, listenerDenom);
-    const bayesFav = (netFavs + 5 * 0.12) / (listenerDenom + 5);
-    const favoriteRateSmoothed = uniqueListeners > 0 || netFavs > 0 ? 0.6 * wilsonFav + 0.4 * bayesFav : 0;
-
-    // 24h vs previous 6-day daily average velocity (Laplace-smoothed beta = 1.2)
+  for (const [tid, track] of totalsByTrack) {
+    const { effectivePlays, effective24h, effective7d, uniqueListeners } = track;
+    const starts = Math.max(track.playStarts, track.playCompletes);
+    const completionRateSmoothed = starts > 0 ? (track.playCompletes + 4 * 0.62) / (starts + 4) : 0.62;
+    const listenerDenom = Math.max(uniqueListeners, track.favorites, 1);
+    const wilsonFav = wilsonLowerBound(track.favorites, listenerDenom);
+    const bayesFav = (track.favorites + 5 * 0.12) / (listenerDenom + 5);
+    const favoriteRateSmoothed = uniqueListeners > 0 || track.favorites > 0 ? 0.6 * wilsonFav + 0.4 * bayesFav : 0;
     const prev6dDailyAvg = Math.max(0, effective7d - effective24h) / 6;
     const rawVelocityRatio = (effective24h + 1.2) / (prev6dDailyAvg + 1.2);
-    const velocityScore =
-      effective24h > 0
-        ? Math.max(0, Math.min(1, 1 - Math.exp(-0.55 * Math.max(0, rawVelocityRatio - 0.85))))
-        : 0;
+    const velocityScore = effective24h > 0
+      ? Math.max(0, Math.min(1, 1 - Math.exp(-0.55 * Math.max(0, rawVelocityRatio - 0.85))))
+      : 0;
 
-    if (effectivePlays > maxEffectivePlays) maxEffectivePlays = effectivePlays;
-    if (uniqueListeners > maxUniqueListeners) maxUniqueListeners = uniqueListeners;
-
-    intermediate.set(tid, {
-      effectivePlays,
-      effective24h,
-      effective7d,
-      uniqueListeners,
-      completionRateSmoothed,
-      favoriteRateSmoothed,
-      velocityScore,
-      netDislikes,
-    });
+    maxEffectivePlays = Math.max(maxEffectivePlays, effectivePlays);
+    maxUniqueListeners = Math.max(maxUniqueListeners, uniqueListeners);
+    intermediate.set(tid, { effectivePlays, uniqueListeners, completionRateSmoothed,
+      favoriteRateSmoothed, velocityScore, netDislikes: track.dislikes });
   }
 
   // Second pass: assemble final ComputedPopularity for all requested tracks

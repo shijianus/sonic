@@ -1,6 +1,7 @@
 import { getUniversalLyrics, searchTracks } from "./_lib/music";
 import { getSonicConfig } from "./_lib/sonic/config";
 import { isSourceEnabledByPolicy } from "./_lib/sonic/licensing";
+import { isMediaContentType, withMediaStreamLimit } from "./_lib/sonic/media-concurrency";
 import { recordLicensingBlockMetric, redactSensitiveString } from "./_lib/sonic/observability";
 import {
   buildRateLimitErrorResponse,
@@ -10,6 +11,7 @@ import {
   safeFetch,
   validateSafeUrl,
   hasSensitiveMediaQuery,
+  isSafeFetchCapacityError,
 } from "./_lib/sonic/security";
 import type { AppEnv } from "./_lib/types";
 
@@ -124,6 +126,7 @@ async function proxyKuwoAudio(targetUrl: string, request: Request, env?: AppEnv)
     timeoutMs: 15000,
     maxBytes: 256 * 1024 * 1024,
     includeMetadata: true,
+    pool: 'media',
   });
 
   if (!upstream.ok && upstream.status !== 206) {
@@ -141,15 +144,9 @@ async function proxyKuwoAudio(targetUrl: string, request: Request, env?: AppEnv)
     });
   }
 
-  const upstreamType = (upstream.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-  if (
-    upstreamType &&
-    !upstreamType.startsWith('audio/') &&
-    upstreamType !== 'application/octet-stream' &&
-    upstreamType !== 'binary/octet-stream'
-  ) {
+  if (!isMediaContentType(upstream.headers.get('content-type'), false)) {
     upstream.body?.cancel().catch(() => {});
-    throw new Error(`Unexpected upstream content type: ${upstreamType}`);
+    return new Response('Unexpected upstream media content type', { status: 415, headers: createCorsHeaders() });
   }
   const headers = createCorsHeaders(upstream.headers);
   headers.set('X-Content-Type-Options', 'nosniff');
@@ -358,8 +355,14 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
 
   if (target) {
     try {
-      return await proxyKuwoAudio(target, request, env);
+      return await withMediaStreamLimit(request, env, () => proxyKuwoAudio(target, request, env));
     } catch (error: any) {
+      request.signal.throwIfAborted();
+      if (isSafeFetchCapacityError(error)) {
+        const headers = createCorsHeaders();
+        headers.set('Retry-After', '1');
+        return new Response('Upstream capacity is temporarily exhausted', { status: 503, headers });
+      }
       console.warn('[Sonic Proxy] Kuwo audio proxy rejected or failed:', redactSensitiveString(String(error?.message || error)));
       return new Response("Upstream fetch rejected", {
         status: 502,

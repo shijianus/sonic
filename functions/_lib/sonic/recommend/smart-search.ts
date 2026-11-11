@@ -29,7 +29,7 @@ import {
   toCanonicalTrack,
 } from './track-canonical';
 import { getRecommendStore } from './memory-store';
-import { computeCatalogPopularity } from './popularity';
+import { computeStorePopularity } from './popularity';
 import { ensureCatalogSeeded } from './seed-catalog';
 import { buildUserPreferenceProfile, getRecommendationsForYou } from './engine';
 import { indexTracksInMeilisearch, isMeilisearchEnabled, searchMeilisearchIds } from './external-adapters';
@@ -395,10 +395,7 @@ export async function executeSmartSearch(
   const allowPersonalize = options.personalize !== false && identity.personalizationEnabled;
   const profile = allowPersonalize ? buildUserPreferenceProfile(identity, store) : null;
   const hasProfileHistory = Boolean(profile && (profile.hasPlayHistory || profile.hasSearchHistory || profile.likedTrackIds.size > 0));
-  const popMap = computeCatalogPopularity(
-    mergedPool,
-    store.getAllRecentEvents(Date.now() - 30 * 24 * 3600 * 1000, 5000),
-  );
+  const popMap = computeStorePopularity(store, mergedPool);
 
   let personalizedApplied = false;
   const ranked: Array<{

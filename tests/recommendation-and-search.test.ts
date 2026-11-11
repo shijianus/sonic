@@ -19,6 +19,7 @@ import {
   resetMemoryRecommendStoreForTest,
   ensureCatalogSeeded,
   computeCatalogPopularity,
+  computeStorePopularity,
   computeEventCredibilityWeight,
   ingestBehaviorEvents,
   getRecommendationsForYou,
@@ -280,6 +281,43 @@ describe('CFSolara 智能音乐推荐与混合搜索引擎全链路测试', () =
         popMap.get(trackStale.canonicalTrackId)!.internalScore
       )
     })
+
+    it.each(['memory', 'sqlite'] as const)('热榜按窗口统计已登录听众，%s 存储不被无关事件或轮换匿名 ID 干扰', async (kind) => {
+      const chartStore = kind === 'sqlite' ? new SqliteRecommendStore(':memory:') : new MemoryRecommendStore()
+      if (chartStore instanceof SqliteRecommendStore) httpStore = chartStore
+      ensureCatalogSeeded(chartStore)
+      const track = chartStore.getTrack('netease:186016')!
+      const now = Date.now()
+      const day = 86400_000
+      const id = track.canonicalTrackId
+      const play = { canonicalTrackId: id, type: 'play_complete' as const, weight: 2.5 }
+
+      chartStore.recordEvent({ ...play, eventId: 'six-day-listener', subjectKey: 'usr_six', createdAt: now - 6 * day })
+      chartStore.recordEvent({ ...play, eventId: 'twenty-day-listener', subjectKey: 'usr_twenty', createdAt: now - 20 * day })
+      chartStore.recordEvent({ ...play, eventId: 'outside-retention', subjectKey: 'usr_expired', createdAt: now - 100 * day })
+      chartStore.recordEvent({ ...play, type: 'favorite', eventId: 'favorite-only', subjectKey: 'usr_favorite', createdAt: now - 1 })
+
+      for (let i = 0; i < 15_001; i++) {
+        chartStore.recordEvent({ ...play, eventId: `irrelevant_${i}`, subjectKey: 'usr_search', type: 'search_click', createdAt: now - 1 })
+      }
+      for (let i = 0; i < 20; i++) {
+        chartStore.recordEvent({ ...play, eventId: `anon_play_${i}`, subjectKey: `anon_rotated_${i}`, createdAt: now - 1 })
+      }
+
+      const getPopularity = (window: '24h' | '7d' | 'all') => computeStorePopularity(chartStore, [track], { window, nowMs: now }).get(id)!
+      expect(getPopularity('24h')).toMatchObject({ uniqueListeners: 0, internalScore: 0 })
+      expect(getPopularity('7d').uniqueListeners).toBe(1)
+      expect(getPopularity('all').uniqueListeners).toBe(2)
+      expect(chartStore.getUserEvents('anon_rotated_0')).toHaveLength(1)
+
+      const publicIdentity: UserIdentityContext = { mode: 'public', subjectKey: null, personalizationEnabled: false, isAuthenticated: false }
+      const trend = await getTrendingRecommendations(publicIdentity, { window: '7d' }, { ...env, RECOMMEND_STORE: chartStore })
+      expect(trend.stationStats.activeTracksWithPlays).toBe(1)
+
+      expect(chartStore.clearUserEvents('usr_six')).toBe(1)
+      expect(getPopularity('7d').uniqueListeners).toBe(0)
+      expect(getPopularity('all').uniqueListeners).toBe(1)
+    }, 20_000)
   })
 
   describe('4. 反馈信号可信度、网络卡顿/试听保护、不喜欢过滤与多样性控制', () => {

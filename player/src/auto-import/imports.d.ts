@@ -14,6 +14,7 @@ declare global {
   const DownloadedMusicDB: typeof import('../utils/indexedDB').DownloadedMusicDB
   const EffectScope: typeof import('vue').EffectScope
   const GUARD_OFF_CACHE_TTL_MS: typeof import('../utils/streamGuard').GUARD_OFF_CACHE_TTL_MS
+  const ListeningCoverage: typeof import('../utils/listeningCoverage').ListeningCoverage
   const LocalMusicDB: typeof import('../utils/indexedDB').LocalMusicDB
   const QUALITY_LEVELS: typeof import('../utils/qualityProbe').QUALITY_LEVELS
   const acceptHMRUpdate: typeof import('pinia').acceptHMRUpdate
@@ -242,6 +243,9 @@ declare global {
   // @ts-ignore
   export type { LocalMusicDB, DownloadedMusicDB, LocalMusic, DownloadedSong } from '../utils/indexedDB'
   import('../utils/indexedDB')
+  // @ts-ignore
+  export type { ListeningCoverage } from '../utils/listeningCoverage'
+  import('../utils/listeningCoverage')
   // @ts-ignore
   export type { LyricWord } from '../utils/lyricsWordSync'
   import('../utils/lyricsWordSync')

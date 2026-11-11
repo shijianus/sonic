@@ -124,6 +124,20 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 - [ ] 记录上一可回滚版本 SHA 与构建产物位置。
 - [ ] 确认 Tunnel/DNS 变更窗口与回滚负责人。
 
+### Pages 生产提升
+
+1. 在独立预览部署并运行 `verify-staging-live.mjs`，将输出存到仓库外，用 `SONIC_STAGING_ACCEPTANCE_FILE` 指定该记录。用 `prepare-pages-preview.mjs --promote-staging --deploy` 将同一份 `dist/` 提升到稳定 Staging。
+2. 在稳定 Staging 运行 `verify-staging-live.mjs --stable`，将输出存到 `SONIC_PRODUCTION_ACCEPTANCE_FILE` 指定的仓库外路径。保留输出字段，并在 `productionChecks` 下为以下四项分别填写 `{ "ok": true, "evidence": "受控验收记录的位置" }`。记录应对应本次发布的 `baseCommit`、`sourceDigest` 和 `pagesArtifactDigest`。
+
+   | 字段 | 验收 |
+   | --- | --- |
+   | `oauthLoginAndRevocation` | 真实 OAuth 登录、退出与撤销 |
+   | `authorizedMediaPlaybackAndSeek` | 获准音源起播、拖动和 `Range 206/416` |
+   | `lyricsSync` | 歌词随播放及拖动同步 |
+   | `imageAndSqliteRollback` | 恢复上一镜像和对应 SQLite 快照并核对数据 |
+
+3. 显式设置 `CF_PAGES_PROJECT`、`CF_PAGES_BRANCH`、`SONIC_DEPLOY_VERIFY_URL`（生产 HTTPS origin）和上面的生产环境设置。保留原 `dist/`，运行 `node scripts/deploy-pages.mjs`。脚本会在上线前校验接受记录，在上线后检查实际身份、访问模式、内容白名单、分布式限流和匿名鉴权。如果上线后校验失败，按回滚手册恢复上一版本。
+
 ## E. 部署后冒烟（真实 HTTP）
 
 - [ ] `GET /` 200，静态资源 200。

@@ -295,7 +295,11 @@ npm test
 ```bash
 npm run eval:multi-entity
 ```
-该脚本在 SQLite WAL 内存实例上模拟 4 类典型多实体交叉画像，输出打分命中率、多样性香农熵、配额占比与 P95 延迟（目标验证 < 25ms）。
+脚本使用内存 SQLite、合成画像与视频标识，输出 JSON。传播门禁对比同一画像收到反馈前后的关联实体分数，并验证无关曲目得分不变。脚本也检查混合列表的类型分布、去重与类型过滤。任一检查失败时返回非零退出码。
+
+P95 默认只记录。可在专用环境显式检查预算，例如 `npm run eval:multi-entity -- --max-p95-ms 25`。离线报告不验证生产流量、上游视频可用性或实际起播。
+
+在独立 runner 上，`SONIC_RECOMMEND_HTTP_LATENCY_GUARD=1 npm run test:recommend` 还会对 100 次本地路由调用强制检查 P50 < 20 ms 和 P95 < 35 ms。
 
 ### 3. 命令行调用验证混合 Feed 接口
 ```bash

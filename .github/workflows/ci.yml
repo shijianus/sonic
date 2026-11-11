@@ -7,6 +7,7 @@ on:
       - 'security/**'
       - 'rc/**'
       - 'work/**'
+      - 'codex/**'
   pull_request:
   workflow_dispatch:
 
@@ -20,7 +21,7 @@ concurrency:
 jobs:
   quality:
     name: Typecheck, lint, tests and build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       # Node 22 exposes node:sqlite behind this flag on older 22.x releases; newer
@@ -72,6 +73,11 @@ jobs:
       - name: Recommendation and smart-search tests
         run: npm run test:recommend
 
+      - name: Recommendation quality fixtures
+        run: |
+          npm run eval:recommend
+          npm run eval:multi-entity
+
       - name: Observability and alerting self-check
         run: npm run test:observability
 
@@ -92,6 +98,8 @@ jobs:
       - name: Isolated mixed workload and local alert delivery
         run: |
           npm run build:engine
+          node --test tests/bare-metal-engine.test.mjs
+          node --experimental-sqlite scripts/verify-built-release.mjs
           npm run test:load
 
       - name: Root production dependency audit
@@ -115,7 +123,7 @@ jobs:
   docker:
     name: Docker build and runtime smoke test
     needs: quality
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -175,50 +183,64 @@ jobs:
           IDENTITY_SECRET: ci_identity_secret_at_least_32_characters_long_ok
         run: |
           set -euo pipefail
-          cleanup() { docker rm -f sonic-ci >/dev/null 2>&1 || true; }
+          cleanup() {
+            local status=$?
+            if ((status != 0)); then
+              docker inspect --format '{{json .State}}' sonic-ci || true
+              docker logs sonic-ci || true
+            fi
+            docker rm -f sonic-ci >/dev/null 2>&1 || true
+          }
           trap cleanup EXIT
-          # The project owner directly authorized the commercial/community
-          # sources; smoke-test the production profile end to end.
-          docker run -d --name sonic-ci --stop-timeout 75 \
+          docker run -d --init --name sonic-ci --stop-timeout 75 \
             -e SONIC_ENGINE_SECRET="$ENGINE_SECRET" \
             -e SONIC_SECRET="$AUTH_SECRET" \
             -e SONIC_ENGINE_IDENTITY_SECRET="$IDENTITY_SECRET" \
             -e SONIC_RUNTIME=linux-engine \
             -e SONIC_ENV=production \
+            -e SONIC_ACCESS_MODE=open \
             -e SONIC_REQUIRE_RELEASE_METADATA=1 \
             -e SONIC_CONTENT_POLICY=strict-allowlist \
             -e SONIC_ALLOWED_SOURCES=netease,qq,kugou,kuwo,amll,lrclib \
-            -p 18080:8080 \
+            -p 127.0.0.1:18080:8080 \
             sonic-ci:${{ github.sha }}
-          for i in $(seq 1 30); do
-            if curl -fsS -o /dev/null \
-              -H "X-Sonic-Engine-Key: $ENGINE_SECRET" \
-              http://127.0.0.1:18080/api/sonic/engine/health; then
-              break
-            fi
-            sleep 1
-          done
-          curl -fsS -D /tmp/sonic-health.headers -o /tmp/sonic-health.json \
-            -H "X-Sonic-Engine-Key: $ENGINE_SECRET" \
-            http://127.0.0.1:18080/api/sonic/engine/health
-          curl -fsS http://127.0.0.1:18080/release.json > /tmp/sonic-frontend-release.json
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import assert from 'node:assert/strict';
-          const expected = JSON.parse(fs.readFileSync('dist/release.json', 'utf8'));
-          const frontend = JSON.parse(fs.readFileSync('/tmp/sonic-frontend-release.json', 'utf8'));
-          const health = JSON.parse(fs.readFileSync('/tmp/sonic-health.json', 'utf8'));
-          assert.equal(health.ok, true);
-          assert.equal(health.release.releaseCommit, expected.baseCommit);
-          for (const name of ['releaseId', 'sourceDigest', 'buildTime', 'dirty']) assert.equal(health.release[name], expected[name]);
-          assert.deepEqual(frontend, expected);
-          assert.match(fs.readFileSync('/tmp/sonic-health.headers', 'utf8').toLowerCase(), `x-sonic-release: ${expected.releaseId.toLowerCase()}`);
-          NODE
-          status=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:18080/api/sonic/engine/health)
-          test "$status" = "401"
+          SONIC_ENGINE_SECRET="$ENGINE_SECRET" node scripts/verify-engine-smoke.mjs 18080
           docker stop --time 75 sonic-ci >/dev/null
           test "$(docker inspect --format '{{.State.ExitCode}}' sonic-ci)" = "0"
           docker logs sonic-ci
+
+      - name: Validate first-party WAV Range behavior on the same image
+        env:
+          ENGINE_SECRET: ci_engine_secret_at_least_32_characters_long
+          AUTH_SECRET: ci_auth_secret_at_least_32_characters_long_ok
+          IDENTITY_SECRET: ci_identity_secret_at_least_32_characters_long_ok
+        run: |
+          set -euo pipefail
+          cleanup() {
+            local status=$?
+            if ((status != 0)); then
+              docker inspect --format '{{json .State}}' sonic-ci-media || true
+              docker logs sonic-ci-media || true
+            fi
+            docker rm -f sonic-ci-media >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+          docker run -d --init --name sonic-ci-media --stop-timeout 75 \
+            -e SONIC_ENGINE_SECRET="$ENGINE_SECRET" \
+            -e SONIC_SECRET="$AUTH_SECRET" \
+            -e SONIC_ENGINE_IDENTITY_SECRET="$IDENTITY_SECRET" \
+            -e SONIC_RUNTIME=linux-engine \
+            -e SONIC_ENV=staging \
+            -e SONIC_ACCESS_MODE=open \
+            -e SONIC_REQUIRE_RELEASE_METADATA=1 \
+            -e SONIC_CONTENT_POLICY=strict-allowlist \
+            -e SONIC_ENABLE_SYNTHETIC_TEST_SOURCE=1 \
+            -e SONIC_ALLOWED_SOURCES=synthetic \
+            -p 127.0.0.1:18080:8080 \
+            sonic-ci:${{ github.sha }}
+          SONIC_ENGINE_SECRET="$ENGINE_SECRET" node scripts/verify-engine-smoke.mjs 18080 staging
+          docker stop --time 75 sonic-ci-media >/dev/null
+          test "$(docker inspect --format '{{.State.ExitCode}}' sonic-ci-media)" = "0"
 
       - name: Verify backup, offline recovery and data persistence across graceful container recreation
         env:
@@ -230,6 +252,11 @@ jobs:
           NAME="sonic-ci-persist"
           VOLUME="sonic-ci-data-${{ github.run_id }}"
           cleanup() {
+            local status=$?
+            if ((status != 0)); then
+              docker inspect --format '{{json .State}}' "$NAME" || true
+              docker logs "$NAME" || true
+            fi
             docker rm -f "$NAME" >/dev/null 2>&1 || true
             docker volume rm "$VOLUME" >/dev/null 2>&1 || true
           }
@@ -237,7 +264,7 @@ jobs:
 
           wait_ready() {
             for i in $(seq 1 30); do
-              if curl -fsS -o /tmp/sonic-health.json \
+              if curl -fsS --connect-timeout 2 --max-time 3 -o /tmp/sonic-health.json \
                 -H "X-Sonic-Engine-Key: $ENGINE_SECRET" \
                 http://127.0.0.1:18081/api/sonic/engine/health \
                 && grep -q '"ok":true' /tmp/sonic-health.json; then
@@ -250,17 +277,18 @@ jobs:
           }
 
           docker volume create "$VOLUME" >/dev/null
-          docker run -d --name "$NAME" --stop-timeout 75 \
+          docker run -d --init --name "$NAME" --stop-timeout 75 \
             -e SONIC_ENGINE_SECRET="$ENGINE_SECRET" \
             -e SONIC_SECRET="$AUTH_SECRET" \
             -e SONIC_ENGINE_IDENTITY_SECRET="$IDENTITY_SECRET" \
             -e SONIC_RUNTIME=linux-engine \
             -e SONIC_ENV=production \
+            -e SONIC_ACCESS_MODE=open \
             -e SONIC_REQUIRE_RELEASE_METADATA=1 \
             -e SONIC_CONTENT_POLICY=strict-allowlist \
             -e SONIC_ALLOWED_SOURCES=netease,qq,kugou,kuwo,amll,lrclib \
             -v "$VOLUME":/app/data \
-            -p 18081:8080 \
+            -p 127.0.0.1:18081:8080 \
             sonic-ci:${{ github.sha }}
           wait_ready
           grep -q '"storageKind":"sqlite"' /tmp/sonic-health.json
@@ -297,17 +325,18 @@ jobs:
             --experimental-sqlite scripts/restore-recommend-db.mjs \
             /app/data/ci-backup.sqlite /app/data/sonic-recommend.sqlite --offline > /tmp/sonic-restore.json
           node --input-type=module -e 'import fs from "node:fs"; import assert from "node:assert/strict"; const r=JSON.parse(fs.readFileSync("/tmp/sonic-restore.json","utf8")); assert.equal(r.ok,true); assert.equal(r.events,1); assert.ok(r.preRestoreSafetyCopy);'
-          docker run -d --name "$NAME" --stop-timeout 75 \
+          docker run -d --init --name "$NAME" --stop-timeout 75 \
             -e SONIC_ENGINE_SECRET="$ENGINE_SECRET" \
             -e SONIC_SECRET="$AUTH_SECRET" \
             -e SONIC_ENGINE_IDENTITY_SECRET="$IDENTITY_SECRET" \
             -e SONIC_RUNTIME=linux-engine \
             -e SONIC_ENV=production \
+            -e SONIC_ACCESS_MODE=open \
             -e SONIC_REQUIRE_RELEASE_METADATA=1 \
             -e SONIC_CONTENT_POLICY=strict-allowlist \
             -e SONIC_ALLOWED_SOURCES=netease,qq,kugou,kuwo,amll,lrclib \
             -v "$VOLUME":/app/data \
-            -p 18081:8080 \
+            -p 127.0.0.1:18081:8080 \
             sonic-ci:${{ github.sha }}
           wait_ready
           grep -q '"eventCount":1' /tmp/sonic-health.json
@@ -316,7 +345,7 @@ jobs:
   browser-e2e:
     name: Browser E2E (mocked gateway, real media element)
     needs: quality
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -341,8 +370,11 @@ jobs:
       - name: Build frontend for E2E
         run: pnpm --dir player build
 
-      - name: Install Playwright Chromium
-        run: pnpm --dir player exec playwright install --with-deps chromium
+      - name: Install Chromium system dependencies
+        run: pnpm --dir player exec playwright install-deps chromium
+
+      - name: Install the lockfile's Playwright Chromium
+        run: pnpm --dir player exec playwright install chromium --only-shell
 
       # e2e/mock-server.mjs 提供确定性 /api Mock 与本地生成的 20s WAV；
       # 本作业验证前端行为，不代表真实 CDN/OAuth/上游音源已验收。

@@ -10,6 +10,25 @@ export function subjectEventKey(subject: string, id: string): string {
 const STATE_ACTIONS = new Set(['favorite', 'unfavorite', 'dislike', 'undislike']);
 const ACTION_ORDER: Record<string, number> = { favorite: 1, dislike: 2, unfavorite: 3, undislike: 4 };
 
+export const POPULARITY_EVENT_TYPES = [
+  'play_start', 'play_progress', 'play_complete', 'replay',
+  'favorite', 'unfavorite', 'dislike', 'undislike',
+] as const satisfies readonly SonicEventType[];
+
+export function isPopularityEvent(event: StoredBehaviorEvent): boolean {
+  // Anonymous device IDs are client-selected and can still personalize an
+  // individual's feed, but do not count as accounts on the global chart.
+  return event.subjectKey.startsWith('usr_') && (POPULARITY_EVENT_TYPES as readonly SonicEventType[]).includes(event.type);
+}
+
+export function comparePopularityEventOrder(a: StoredBehaviorEvent, b: StoredBehaviorEvent): number {
+  const trackA = a.canonicalTrackId || '';
+  const trackB = b.canonicalTrackId || '';
+  if (trackA !== trackB) return trackA < trackB ? -1 : 1;
+  if (a.subjectKey !== b.subjectKey) return a.subjectKey < b.subjectKey ? -1 : 1;
+  return compareEventOrder(a, b);
+}
+
 export function compareEventOrder(
   a: { createdAt: number; type?: string; action?: string; eventId?: string; feedbackId?: string },
   b: { createdAt: number; type?: string; action?: string; eventId?: string; feedbackId?: string },

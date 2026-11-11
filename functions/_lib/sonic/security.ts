@@ -1648,15 +1648,7 @@ export function acquireStreamSlot(ip: string): boolean {
   if (!ip || ip === 'unknown') return true;
   const current = activeStreamsPerIp.get(ip) || 0;
   if (current >= MAX_STREAMS_PER_IP) return false;
-  if (!activeStreamsPerIp.has(ip) && activeStreamsPerIp.size >= MAX_STREAM_IP_ENTRIES) {
-    for (const [key, value] of activeStreamsPerIp) {
-      if (value <= 0) activeStreamsPerIp.delete(key);
-    }
-    if (activeStreamsPerIp.size >= MAX_STREAM_IP_ENTRIES) {
-      const oldest = activeStreamsPerIp.keys().next().value;
-      if (oldest) activeStreamsPerIp.delete(oldest);
-    }
-  }
+  if (!current && activeStreamsPerIp.size >= MAX_STREAM_IP_ENTRIES) return false;
   activeStreamsPerIp.set(ip, current + 1);
   return true;
 }

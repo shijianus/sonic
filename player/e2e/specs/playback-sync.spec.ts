@@ -21,7 +21,9 @@ test('音频、歌词与播放器展示在同一曲目内同步推进，切歌�
   await expect(lyrics).toContainText('Test Song One line 1')
   await dialog.getByRole('button', { name: 'Pause', exact: true }).click()
   await expectPaused(page)
-  await page.waitForTimeout(600)
+  await expect.poll(async () => lyrics.locator('.lyric-line.current').evaluate(line =>
+    Number(getComputedStyle(line).opacity)
+  )).toBeGreaterThan(0.5)
 
   const sync = await page.evaluate(() => {
     const audio = document.querySelector<HTMLAudioElement>('#audioPlayer')
@@ -32,13 +34,11 @@ test('音频、歌词与播放器展示在同一曲目内同步推进，切歌�
     lines.forEach((line, index) => {
       if (Number(line.dataset.time || 0) <= time + 0.25) expectedIndex = index
     })
-    const opacity = currentIndex >= 0 ? getComputedStyle(lines[currentIndex]).opacity : '0'
-    return { currentIndex, expectedIndex, time, currentText: lines[currentIndex]?.textContent || '', opacity }
+    return { currentIndex, expectedIndex, currentText: lines[currentIndex]?.textContent || '' }
   })
   expect(sync.currentIndex).toBeGreaterThanOrEqual(1)
   expect(Math.abs(sync.currentIndex - sync.expectedIndex)).toBeLessThanOrEqual(1)
   expect(sync.currentText.replace(/\s+/g, ' ')).toContain('Test Song One line')
-  expect(Number(sync.opacity)).toBeGreaterThan(0.5)
 
   if (process.env.SONIC_EVIDENCE_DIR) {
     await page.screenshot({ path: `${process.env.SONIC_EVIDENCE_DIR}/${testInfo.project.name}-playback-lyrics-sync.png` })

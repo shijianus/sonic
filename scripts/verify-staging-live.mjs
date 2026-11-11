@@ -223,7 +223,8 @@ async function verifyAccess(base, secrets, manifest) {
   response = await request(invitation);
   ensure(response.status === 302 && response.headers.get('location') === '/', 'STAGING_INVITATION_REDIRECT_FAILED');
   const cookie = response.headers.get('set-cookie') || '';
-  ensure(cookie.startsWith('sonic_staging_access=') && /;\s*HttpOnly/i.test(cookie) && /;\s*Secure/i.test(cookie) && /;\s*SameSite=Lax/i.test(cookie), 'STAGING_INVITATION_COOKIE_INVALID');
+  const correctCookieName = cookie.startsWith('__Host-sonic_staging_access=') || (!manifest && cookie.startsWith('sonic_staging_access='));
+  ensure(correctCookieName && /;\s*Path=\/(?:;|$)/i.test(cookie) && !/;\s*Domain=/i.test(cookie) && /;\s*HttpOnly/i.test(cookie) && /;\s*Secure/i.test(cookie) && /;\s*SameSite=Lax/i.test(cookie), 'STAGING_INVITATION_COOKIE_INVALID');
   ensure(response.headers.get('referrer-policy') === 'no-referrer' && /no-store/.test(response.headers.get('cache-control') || ''), 'STAGING_INVITATION_PRIVACY_FAILED');
   await discard(response);
   response = await request(`${base}/`, { headers: { Cookie: cookie.split(';', 1)[0] } });
@@ -277,6 +278,8 @@ async function verifyRelease(base, engine, headers, secrets, manifest) {
   ensure(response.status === 200 && response.headers.get('x-sonic-release') === manifest.releaseId, 'EDGE_HEALTH_OR_RELEASE_HEADER_FAILED');
   const edgeHealth = await json(response);
   ensure(edgeHealth.runtime === 'cf-pages' && releaseMatches(edgeHealth.release, manifest), 'EDGE_RELEASE_IDENTITY_MISMATCH');
+  const pagesArtifactDigest = edgeHealth.release?.pagesArtifactDigest;
+  ensure(/^[a-f0-9]{64}$/.test(pagesArtifactDigest || ''), 'EDGE_PAGES_ARTIFACT_DIGEST_MISSING');
   const engineHealth = await health(engine, secrets);
   ensure(releaseMatches(engineHealth.release, manifest), 'ENGINE_RELEASE_IDENTITY_MISMATCH');
   ensure(engineHealth.readiness?.identity?.ok === true && engineHealth.readiness.identity.configured === true && engineHealth.readiness.identity.required === true, 'ENGINE_IDENTITY_NOT_READY');
@@ -284,6 +287,7 @@ async function verifyRelease(base, engine, headers, secrets, manifest) {
   response = await request(`${engine}/release.json`, { headers: { 'X-Sonic-Engine-Key': secrets.SONIC_ENGINE_SECRET } });
   ensure(response.status === 200 && frontendMatches(await json(response), manifest), 'ENGINE_FRONTEND_MANIFEST_MISMATCH');
   passed('preview headers, frontend manifest, compiled Edge identity and durable Engine identity match');
+  return pagesArtifactDigest;
 }
 async function verifySearchAndMedia(base, headers, manifest) {
   let response = await request(`${base}/api/music/search?q=Sonic&source=synthetic&count=5`, { headers });
@@ -506,7 +510,7 @@ async function main() {
     validateManifest(manifest);
     const target = await selectDeployment(project.apiPath, manifest, values.url, Boolean(values.stable));
     const headers = await verifyAccess(target.base, secrets, manifest);
-    await verifyRelease(target.base, project.metadata.engineUrl, headers, secrets, manifest);
+    const pagesArtifactDigest = await verifyRelease(target.base, project.metadata.engineUrl, headers, secrets, manifest);
     await verifySearchAndMedia(target.base, headers, manifest);
     ensure(project.metadata.independentIdentityBindingPresent && secrets.SONIC_ENGINE_IDENTITY_SECRET, 'INDEPENDENT_IDENTITY_NOT_DEPLOYED');
     await verifyEvents(target.base, project.metadata.engineUrl, headers, secrets);
@@ -519,7 +523,7 @@ async function main() {
       process.once('SIGINT', stop);
       process.once('SIGTERM', stop);
     } else {
-      console.log(JSON.stringify({ ok: true, mode: 'staging-live', ...target, releaseId: manifest.releaseId, sourceDigest: manifest.sourceDigest, engineStorage: 'sqlite', independentIdentityBindingPresent: project.metadata.independentIdentityBindingPresent, authenticatedIdentityAssertionLiveVerified: true, oauthLoginVerified: false, authenticationLimitation: 'An ephemeral signed staging subject verifies the real identity hop; the external OAuth provider login is not exercised', checks }, null, 2));
+      console.log(JSON.stringify({ ok: true, mode: 'staging-live', ...target, ...manifest, pagesArtifactDigest, engineStorage: 'sqlite', independentIdentityBindingPresent: project.metadata.independentIdentityBindingPresent, authenticatedIdentityAssertionLiveVerified: true, oauthLoginVerified: false, authenticationLimitation: 'An ephemeral signed staging subject verifies the real identity hop; the external OAuth provider login is not exercised', checks }, null, 2));
     }
   } finally {
     for (const key of Object.keys(secrets)) secrets[key] = '';
