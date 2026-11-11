@@ -1,4 +1,4 @@
-import { fetchWithRuntimeBudget } from '../local-engine';
+import { fetchProviderUrl } from '../native-protocols';
 // Sonic Provider — LRCLIB (lrclib.net)
 // Community-driven synced LRC lyrics with instrumental detection & search
 
@@ -52,10 +52,9 @@ export const lrclibProvider: SonicProviderAdapter = {
         url = `${baseUrl}/api/search?q=${encodeURIComponent(q)}`;
       }
 
-      const resp = await fetchWithRuntimeBudget(url, {
+      const resp = await fetchProviderUrl(url, {
         headers: { 'User-Agent': SONIC_UA },
-        signal: signal,
-      }, { timeoutMs: config.timeoutMs });
+      }, config.timeoutMs, signal);
       if (!resp.ok) return null;
       const json = (await resp.json()) as any;
 
@@ -207,10 +206,9 @@ export const lrclibProvider: SonicProviderAdapter = {
 
     try {
       const url = `${baseUrl}/api/search?q=${encodeURIComponent(query)}`;
-      const resp = await fetchWithRuntimeBudget(url, {
+      const resp = await fetchProviderUrl(url, {
         headers: { 'User-Agent': SONIC_UA },
-        signal: signal,
-      }, { timeoutMs: config.timeoutMs });
+      }, config.timeoutMs, signal);
       if (!resp.ok) return [];
       const items = (await resp.json()) as LrclibTrackItem[];
       if (!Array.isArray(items)) return [];

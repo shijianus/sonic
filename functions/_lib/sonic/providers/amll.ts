@@ -1,4 +1,4 @@
-import { fetchWithRuntimeBudget } from '../local-engine';
+import { fetchProviderUrl } from '../native-protocols';
 // Sonic Provider — AMLL TTML (api.amll.dev)
 // High-precision Timed Text Markup Language Word-Level Lyrics
 
@@ -76,10 +76,9 @@ export async function fetchAmllByIds(
 
   try {
     const url = `${baseUrl}/v1/lyrics/get?${queryParts.join('&')}`;
-    const resp = await fetchWithRuntimeBudget(url, {
+    const resp = await fetchProviderUrl(url, {
       headers: { 'User-Agent': SONIC_UA, Accept: 'application/json' },
-      signal: signal,
-    }, { timeoutMs: 6000 });
+    }, 6000, signal);
     if (!resp.ok) return null;
     const json = (await resp.json()) as AmllGetResponse;
     const rawTtml = json.data?.lyrics || json.data?.ttml;
@@ -120,10 +119,9 @@ export async function fetchAmllBySearch(
 
   try {
     const searchUrl = `${baseUrl}/v1/lyrics/search?q=${encodeURIComponent(query)}&pageSize=5`;
-    const searchResp = await fetchWithRuntimeBudget(searchUrl, {
+    const searchResp = await fetchProviderUrl(searchUrl, {
       headers: { 'User-Agent': SONIC_UA, Accept: 'application/json' },
-      signal: signal,
-    }, { timeoutMs: 6000 });
+    }, 6000, signal);
     if (!searchResp.ok) return null;
     const searchJson = (await searchResp.json()) as AmllSearchResponse;
     const results = Array.isArray(searchJson.data)
@@ -165,10 +163,9 @@ export async function fetchAmllBySearch(
 
     const getParam = best.id ? `id=${best.id}` : `filename=${encodeURIComponent(best.filename)}`;
     const getUrl = `${baseUrl}/v1/lyrics/get?${getParam}`;
-    const getResp = await fetchWithRuntimeBudget(getUrl, {
+    const getResp = await fetchProviderUrl(getUrl, {
       headers: { 'User-Agent': SONIC_UA, Accept: 'application/json' },
-      signal: signal,
-    }, { timeoutMs: 6000 });
+    }, 6000, signal);
     if (!getResp.ok) return null;
     const getJson = (await getResp.json()) as AmllGetResponse;
     const rawTtml = getJson.data?.lyrics || getJson.data?.ttml;

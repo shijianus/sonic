@@ -7,12 +7,19 @@ import type { AppEnv } from '../../types';
 import { isEnvEnabled } from '../config';
 import type { CanonicalTrack, SonicEventType } from './types';
 
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
+}
+
 function cleanBaseUrl(raw?: string): string {
   const s = (raw || '').trim().replace(/\/+$/, '');
   if (!s) return '';
   try {
     const u = new URL(s);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+    // A remote collaborative-filtering/search service receives the API key and
+    // catalog data: plain HTTP is only acceptable for loopback deployments.
+    if (u.protocol !== 'https:' && !isLoopbackHost(u.hostname)) return '';
     return u.toString().replace(/\/+$/, '');
   } catch {
     return '';
@@ -47,6 +54,7 @@ export async function syncTrackToGorse(track: CanonicalTrack, env?: AppEnv): Pro
 
   try {
     const resp = await fetch(`${baseUrl}/api/item`, {
+      redirect: 'error',
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -179,7 +187,7 @@ export async function fetchGorseRecommendations(
   try {
     const resp = await fetch(
       `${baseUrl}/api/recommend/${encodeURIComponent(subjectKey)}?n=${Math.min(50, Math.max(1, count))}`,
-      { headers, signal: AbortSignal.timeout(1200) },
+      { headers, signal: AbortSignal.timeout(1200), redirect: 'error' },
     );
     if (!resp.ok) return [];
     const data = await resp.json();
@@ -207,7 +215,7 @@ export async function fetchGorseNeighbors(
   try {
     const resp = await fetch(
       `${baseUrl}/api/item/${encodeURIComponent(canonicalTrackId)}/neighbors?n=${Math.min(40, Math.max(1, count))}`,
-      { headers, signal: AbortSignal.timeout(1200) },
+      { headers, signal: AbortSignal.timeout(1200), redirect: 'error' },
     );
     if (!resp.ok) return [];
     const data = await resp.json();
@@ -253,6 +261,7 @@ export async function indexTracksInMeilisearch(tracks: CanonicalTrack[], env?: A
       externalPopularity: t.externalPopularity,
     }));
     const resp = await fetch(`${baseUrl}/indexes/${encodeURIComponent(indexName)}/documents`, {
+      redirect: 'error',
       method: 'POST',
       headers,
       body: JSON.stringify(docs),
@@ -275,6 +284,7 @@ export async function searchMeilisearchIds(query: string, limit = 25, env?: AppE
 
   try {
     const resp = await fetch(`${baseUrl}/indexes/${encodeURIComponent(indexName)}/search`, {
+      redirect: 'error',
       method: 'POST',
       headers,
       body: JSON.stringify({ q: query, limit }),

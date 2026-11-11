@@ -170,7 +170,9 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
     };
     const key = JSON.stringify([String(input), init.method || 'GET', pairs(init.headers), init.body || '']);
     const result = await withSonicJsonSingleFlight(key, async (signal) => {
-      const response = await fetchWithRuntimeBudget(input, { ...init, signal: undefined }, { timeoutMs: cfg.timeoutMs, signals: [signal] });
+      // Catalog calls carry a provider cookie. Never follow a provider-controlled
+      // redirect here; the fixed API endpoints answer directly.
+      const response = await fetchWithRuntimeBudget(input, { ...init, redirect: 'error', signal: undefined }, { timeoutMs: cfg.timeoutMs, signals: [signal] });
       return { body: await readBoundedResponseText(response, maxJsonBytes), status: response.status, statusText: response.statusText, headers: pairs(response.headers) };
     }, request.signal);
     return new Response([204, 205, 304].includes(result.status) ? null : result.body, { status: result.status, statusText: result.statusText, headers: result.headers });
@@ -222,9 +224,20 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       timeoutMs: cfg.engineTimeoutMs,
     });
     if (engineRes.ok && engineRes.data) {
+      const engineCache = String(engineRes.cacheControl || '').trim();
+      const engineCacheLower = engineCache.toLowerCase();
+      // Never synthesize a public policy for an engine payload. Only relay an
+      // explicitly public directive; private/no-store (and a missing directive)
+      // stay private so signed or identity-bound data cannot enter shared caches.
+      const cacheControl =
+        engineCacheLower.startsWith('public') &&
+        !engineCacheLower.includes('private') &&
+        !engineCacheLower.includes('no-store')
+          ? engineCache
+          : 'private, no-store';
       return jsonResponse(engineRes.data, {
         headers: {
-          'Cache-Control': 'public, max-age=1800',
+          'Cache-Control': cacheControl,
           'X-Sonic-Provider': 'local-engine',
         },
       });
@@ -829,7 +842,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           brand: 'Sonic',
           data: { id: Number(id), url: streamUrl, r: parseInt(r, 10) || 1080 },
         },
-        { headers: { 'Cache-Control': 'public, max-age=7200' } },
+        // The upstream MV URL is a signed bearer URL; never let a shared cache retain it.
+        { headers: { 'Cache-Control': 'private, no-store' } },
       );
     } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 503, brand: 'Sonic', data: { id: Number(id), url: '' }, error: { code: 'MV_STREAM_UNAVAILABLE', message: 'MV source is temporarily unavailable' } }, { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '3' } });

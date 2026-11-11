@@ -16,8 +16,8 @@ import type { AppEnv } from "./_lib/types";
 const MAX_DIMENSION = 96;
 const TARGET_SAMPLE_COUNT = 2400;
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-const MAX_IMAGE_PIXELS = 16_000_000;
-const MAX_IMAGE_SIDE = 12_000;
+const MAX_IMAGE_PIXELS = 4_000_000;
+const MAX_IMAGE_SIDE = 6_000;
 
 type SupportedFormat = "jpeg" | "jpg" | "pjpeg";
 
@@ -468,7 +468,10 @@ function handleOptions(): Response {
     headers: {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET,OPTIONS",
-      "Access-Control-Allow-Headers": "*",
+      // "*" would let any page probe server-to-server credential headers; the
+      // browser-facing allowlist matches the gateway's (audit P1-5).
+      "Access-Control-Allow-Headers":
+        "Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, Range",
       "Access-Control-Max-Age": "86400",
     },
   });
@@ -535,9 +538,12 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
   const targetSensitive = hasSensitiveMediaQuery(target);
 
   const cache = typeof caches !== "undefined" ? (caches as any).default : null;
-  const cacheKeyUrl = new URL(request.url);
-  cacheKeyUrl.searchParams.set('_sonic_palette_cache_v', '2');
-  const cacheKey = new Request(cacheKeyUrl.toString(), { method: 'GET' });
+  // Cache identity is ONLY the image parameter (plus a format version): every
+  // other query param is attacker-controlled and would mint unlimited entries.
+  const cacheKeyUrl = new URL("https://sonic-cache.internal/palette");
+  cacheKeyUrl.searchParams.set("image", target.toString());
+  cacheKeyUrl.searchParams.set("_v", "3");
+  const cacheKey = new Request(cacheKeyUrl.toString(), { method: "GET" });
   if (cache && !targetSensitive) {
     const cachedResponse = await cache.match(cacheKey);
     if (cachedResponse) {
@@ -649,7 +655,7 @@ export async function onRequest({ request, env }: { request: Request; env?: AppE
     return response;
   } catch (error) {
     if (error instanceof ImagePixelBudgetError) {
-      return new Response(JSON.stringify({ error: "Image exceeds the 16MP analysis limit" }), {
+      return new Response(JSON.stringify({ error: "Image exceeds the 4MP analysis limit" }), {
         status: 413,
         headers: createJsonHeaders(413),
       });

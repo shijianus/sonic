@@ -7,7 +7,7 @@ import { jsonResponse, handleOptions } from '../../../_lib/http';
 import { getSonicConfig } from '../../../_lib/sonic/config';
 import { getSonicCachedJson, putSonicCachedJson } from '../../../_lib/sonic/cache';
 import { callLocalEngineJson } from '../../../_lib/sonic/local-engine';
-import { buildGatewayHeaders, guardGatewayRequest, sonicError } from '../../../_lib/sonic/route-helpers';
+import { buildGatewayHeaders, clampQueryParam, guardGatewayRequest, sonicError } from '../../../_lib/sonic/route-helpers';
 import {
   buildPrivacySafeCacheHeaders,
   getTrendingRecommendations,
@@ -37,7 +37,7 @@ export async function onRequest({
   const windowRaw = (url.searchParams.get('window') || '7d').trim().toLowerCase();
   const validWindows = new Set(['24h', '7d', 'all', 'surging', 'new']);
   const window = (validWindows.has(windowRaw) ? windowRaw : '7d') as TrendingWindow;
-  const genre = url.searchParams.get('genre')?.trim() || undefined;
+  const genre = clampQueryParam(url.searchParams.get('genre'), 64);
   const count = Math.min(50, Math.max(1, parseInt(url.searchParams.get('count') || '20', 10) || 20));
   const personalizedParam = url.searchParams.get('personalized') === '1' || url.searchParams.get('personalized') === 'true';
   const nocache = url.searchParams.has('nocache') || url.searchParams.has('_t');
@@ -144,7 +144,7 @@ export async function onRequest({
       ),
     });
   } catch (err: any) {
-    return sonicError('TRENDING_ERROR', err?.message || 'Failed to compute trending tracks', 500, {
+    return sonicError('TRENDING_ERROR', 'Failed to compute trending tracks', 500, {
       provider: 'recommend-trending',
       latencyMs: Date.now() - start,
       degraded,

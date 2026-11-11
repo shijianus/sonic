@@ -100,7 +100,6 @@ export async function onRequest({
         syncedAt: profile?.updatedAt || null,
         meta: {
           latencyMs: Date.now() - start,
-          subjectKey: accountSubject,
           storageKind: store.kind,
         },
       },

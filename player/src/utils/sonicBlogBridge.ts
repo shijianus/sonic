@@ -73,6 +73,34 @@ const PRIMARY_CHANNEL = 'sonic_pocket_linkage'
 const SECONDARY_CHANNEL = 'shijianus_sonic_bridge'
 const STORAGE_SYNC_KEY = 'sonic_pocket_sync_event'
 const STORAGE_COMMAND_KEY = 'sonic_pocket_command_event'
+// First-party blog origin. Additional origins must be listed explicitly in
+// VITE_SONIC_BRIDGE_ORIGINS; there is deliberately no wildcard.
+const DEFAULT_BRIDGE_ORIGINS = ['https://blog.shijianus.com']
+
+function normalizeBridgeOrigin(raw: string): string | null {
+  try {
+    const url = new URL(raw.trim())
+    if (url.username || url.password) return null
+    const local = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+    if (url.protocol !== 'https:' && !(url.protocol === 'http:' && local)) return null
+    return url.origin
+  } catch {
+    return null
+  }
+}
+
+function readConfiguredBridgeOrigins(): string[] {
+  const procEnv = (globalThis as any).process?.env
+  const raw = String(
+    (import.meta as any).env?.VITE_SONIC_BRIDGE_ORIGINS ||
+    procEnv?.VITE_SONIC_BRIDGE_ORIGINS ||
+    ''
+  )
+  return raw
+    .split(',')
+    .map(normalizeBridgeOrigin)
+    .filter((value): value is string => Boolean(value))
+}
 
 type CommandHandler = (cmd: PocketCommandMessage) => void
 
@@ -85,10 +113,20 @@ class SonicBlogBridgeManager {
   private lastPlayback: SonicPocketPlayback | null = null
   private lastLyrics: SonicPocketLyrics | null = null
   private lastTimeBroadcast = 0
+  private allowedOrigins = new Set<string>()
+  private peerOrigins = new Set<string>()
+  private warnedOrigins = new Set<string>()
 
   public init() {
     if (this.initialized || typeof window === 'undefined') return
     this.initialized = true
+
+    const selfOrigin = normalizeBridgeOrigin(window.location.href)
+    this.allowedOrigins = new Set([
+      ...(selfOrigin ? [selfOrigin] : []),
+      ...DEFAULT_BRIDGE_ORIGINS,
+      ...readConfiguredBridgeOrigins(),
+    ])
 
     // 1. 初始化 BroadcastChannel
     try {
@@ -104,11 +142,11 @@ class SonicBlogBridgeManager {
       console.warn('[SonicBridge] BroadcastChannel init error:', e)
     }
 
-    // 2. 监听 postMessage（适用于同页 iframe 或跨窗口嵌套）
+    // 2. 监听 postMessage（仅接受白名单 origin 的跨窗口指令）
     window.addEventListener('message', (e) => {
-      if (e.data && typeof e.data === 'object' && e.data.source === 'shijianus-music-pocket') {
-        this.handleIncomingCommand(e.data as PocketCommandMessage)
-      }
+      if (!e.data || typeof e.data !== 'object' || e.data.source !== 'shijianus-music-pocket') return
+      if (!this.acceptPeerOrigin(e.origin)) return
+      this.handleIncomingCommand(e.data as PocketCommandMessage)
     })
 
     // 3. 监听 localStorage 事件（跨标签页同源存储兜底）
@@ -178,6 +216,28 @@ class SonicBlogBridgeManager {
     }
   }
 
+  private acceptPeerOrigin(origin: string): boolean {
+    if (!origin || origin === 'null') return false
+    if (this.allowedOrigins.has(origin) || origin === window.location.origin) {
+      this.peerOrigins.add(origin)
+      return true
+    }
+    if (!this.warnedOrigins.has(origin)) {
+      this.warnedOrigins.add(origin)
+      console.warn('[SonicBridge] Ignored command from unauthorized origin:', origin)
+    }
+    return false
+  }
+
+  private postToWindow(target: Window, msg: SonicPocketMessage): void {
+    const origins = new Set<string>([...this.allowedOrigins, ...this.peerOrigins])
+    for (const origin of origins) {
+      try {
+        target.postMessage(msg, origin)
+      } catch {}
+    }
+  }
+
   /**
    * 向全渠道分发 Sonic 消息（BroadcastChannel + postMessage + localStorage + CustomEvent）
    */
@@ -191,17 +251,17 @@ class SonicBlogBridgeManager {
       } catch {}
     }
 
-    // 2. window.postMessage 广播（给 opener, parent 及下属 frames）
+    // 2. window.postMessage 广播（只向白名单 origin 发送，绝不使用 '*'）
     try {
       if (window.opener && window.opener !== window) {
-        window.opener.postMessage(msg, '*')
+        this.postToWindow(window.opener, msg)
       }
       if (window.parent && window.parent !== window) {
-        window.parent.postMessage(msg, '*')
+        this.postToWindow(window.parent, msg)
       }
       for (let i = 0; i < window.frames.length; i++) {
         try {
-          window.frames[i].postMessage(msg, '*')
+          this.postToWindow(window.frames[i], msg)
         } catch {}
       }
     } catch {}

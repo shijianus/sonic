@@ -53,7 +53,10 @@ function handleOptions(): Response {
     headers: {
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Methods": "GET,HEAD,OPTIONS",
-      "Access-Control-Allow-Headers": "*",
+      // "*" would let any page probe server-to-server credential headers; the
+      // browser-facing allowlist matches the gateway's (audit P1-5).
+      "Access-Control-Allow-Headers":
+        "Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, Range",
       "Access-Control-Max-Age": "86400",
     },
   });

@@ -68,7 +68,8 @@ describe('invite endpoint body limits', () => {
     });
     const response = await onRequest({ request, env });
     expect(response.status).toBe(200);
-    expect(response.headers.get('set-cookie')).toContain('sonic_access=');
+    // Secure origins write the __Host- prefixed cookie (audit P1-6).
+    expect(response.headers.get('set-cookie')).toContain('__Host-sonic_access=');
   });
 
   it('rejects configured invite codes shorter than 16 characters', async () => {

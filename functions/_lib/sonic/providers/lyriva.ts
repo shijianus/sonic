@@ -1,4 +1,4 @@
-import { fetchWithRuntimeBudget } from '../local-engine';
+import { fetchProviderUrl } from '../native-protocols';
 // Sonic Provider — Lyriva (https://lyriva.xyz / https://api.lyriva.xyz)
 // Unified lyrics infrastructure with word-level & line-level sync
 
@@ -52,13 +52,12 @@ export const lyrivaProvider: SonicProviderAdapter = {
       }
 
       const timeoutSignal = signal;
-      const resp = await fetchWithRuntimeBudget(url.toString(), {
+      const resp = await fetchProviderUrl(url.toString(), {
         headers: {
           'User-Agent': SONIC_UA,
           Accept: 'application/json',
         },
-        signal: timeoutSignal,
-      }, { timeoutMs: config.timeoutMs });
+      }, config.timeoutMs, timeoutSignal);
 
       if (!resp.ok) {
         return null;

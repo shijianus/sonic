@@ -44,7 +44,9 @@ async function readInviteCode(request: Request): Promise<InviteCodeResult> {
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
   if (request.method !== 'POST') return errorResponse('Method not allowed', 405);
-  const rl = await evaluateGatewayRateLimit(request, env, 'access-invite');
+  // Anonymous visitors must be able to redeem an invite even with
+  // SONIC_REQUIRE_AUTH=1; the anonymous bucket still rate-limits them (P1-8).
+  const rl = await evaluateGatewayRateLimit(request, env, 'access-invite', { allowAnonymous: true });
   if (!rl.allowed) return buildRateLimitErrorResponse(rl);
   if (getAccessMode(env) !== 'invite') {
     return jsonResponse(

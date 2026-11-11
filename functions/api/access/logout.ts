@@ -17,10 +17,24 @@ const NO_STORE_HEADERS = {
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
   if (request.method !== 'POST') return errorResponse('Method not allowed', 405);
-  if (!isSameOriginRequest(request)) return errorResponse('Cross-site access logout rejected', 403);
+  if (!isSameOriginRequest(request, true)) return errorResponse('Cross-site access logout rejected', 403);
 
-  await revokeAccessSession(request, env);
+  const revocation = await revokeAccessSession(request, env);
   const headers = new Headers(NO_STORE_HEADERS);
-  headers.append('Set-Cookie', buildClearAccessSessionCookie(new URL(request.url)));
-  return jsonResponse({ brand: 'Sonic', ok: true, access: getAccessMode(env) === 'open' }, { headers });
+  for (const cookie of buildClearAccessSessionCookie(new URL(request.url))) headers.append('Set-Cookie', cookie);
+  return jsonResponse(
+    {
+      brand: 'Sonic',
+      ok: true,
+      access: getAccessMode(env) === 'open',
+      // Clearing the browser cookie always happens; only a durable repository
+      // can invalidate a captured token. Report the honest state instead of
+      // implying server-side revocation when it is stateless.
+      revoked: revocation.revoked,
+      serverRevoked: revocation.revoked,
+      revocationDurable: revocation.durable,
+      ...(revocation.durable && !revocation.revoked ? { revocationWarning: '服务端撤销失败，已签发的访问令牌可能仍然有效' } : {}),
+    },
+    { headers },
+  );
 }

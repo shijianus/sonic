@@ -155,7 +155,8 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
     expect(userCall?.headers?.get('authorization')).toBe('Bearer provider_access_token_123456');
 
     const cookies = setCookies(res);
-    const sessionCookie = cookies.find((c) => c.startsWith('sonic_session='));
+    // Secure origins write the __Host- prefixed name (audit P1-6).
+    const sessionCookie = cookies.find((c) => c.startsWith('__Host-sonic_session=') || c.startsWith('sonic_session='));
     expect(sessionCookie).toBeTruthy();
     expect(sessionCookie).toContain('HttpOnly');
     expect(sessionCookie).toContain('Secure');
@@ -163,10 +164,10 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
     expect(cookies.some((c) => c.startsWith('sonic_oauth_state=;'))).toBe(true);
     expect(cookies.some((c) => c.startsWith('sonic_oauth_verifier=;'))).toBe(true);
 
-    const token = sessionCookie!.split(';')[0].slice('sonic_session='.length);
+    const token = sessionCookie!.split(';')[0].split('=').slice(1).join('=');
     const auth = await verifyAuth(
       new Request('https://sonic.example.com/api/auth/user', {
-        headers: { Cookie: `sonic_session=${token}` },
+        headers: { Cookie: sessionCookie!.split(';')[0] },
       }),
       env() as any,
     );
@@ -224,7 +225,7 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
     });
     expect(res.status).toBe(400);
     const cookies = setCookies(res);
-    expect(cookies.some((c) => c.startsWith('sonic_session='))).toBe(false);
+    expect(cookies.some((c) => c.startsWith('__Host-sonic_session=') || c.startsWith('sonic_session='))).toBe(false);
     expect(cookies.some((c) => c.startsWith('sonic_oauth_state=;'))).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -253,7 +254,7 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
     });
     expect(res.status).toBe(500);
     expect((await res.json()).error.code).toBe('OAUTH_EXCHANGE_FAILED');
-    expect(setCookies(res).some((c) => c.startsWith('sonic_session='))).toBe(false);
+    expect(setCookies(res).some((c) => c.startsWith('__Host-sonic_session=') || c.startsWith('sonic_session='))).toBe(false);
   });
 });
 
@@ -267,7 +268,7 @@ describe('Session-backed API key management', () => {
       ].join('; ')),
       env: env() as any,
     });
-    const cookie = setCookies(res).find((c) => c.startsWith('sonic_session='))!;
+    const cookie = setCookies(res).find((c) => c.startsWith('__Host-sonic_session=') || c.startsWith('sonic_session='))!;
     return cookie.split(';')[0];
   }
 
@@ -284,10 +285,22 @@ describe('Session-backed API key management', () => {
     expect(userJson.user.email).toBe('alice@example.com');
     expect(userJson.user.apiKey).toBeUndefined();
 
+    // A cookie-only GET returns metadata only: key material requires an explicit
+    // header credential so a same-origin XSS cannot export the bearer key (P2-3).
     const keyRes = await handleAuthKey({ request: req(), env: env() as any });
     expect(keyRes.status).toBe(200);
     const keyJson = await keyRes.json();
-    expect(keyJson.apiKey).toMatch(/^sonic_live_v2\./);
+    expect(keyJson.keyMaterial).toBe(false);
+    expect(keyJson.apiKey).toBeUndefined();
+
+    const headerKeyRes = await handleAuthKey({
+      request: new Request('https://sonic.example.com/api/auth/key', {
+        headers: { Cookie: cookie, 'X-Sonic-Key': cookie.split('=')[1] },
+      }),
+      env: env() as any,
+    });
+    expect(headerKeyRes.status).toBe(200);
+    expect(((await headerKeyRes.json()) as any).apiKey).toMatch(/^sonic_live_v2\./);
   });
 
   it('requires an explicit header credential to re-issue a key (cookie alone is insufficient)', async () => {
@@ -302,14 +315,9 @@ describe('Session-backed API key management', () => {
     expect(cookieOnly.status).toBe(403);
     expect((await cookieOnly.json()).error.code).toBe('REAUTH_REQUIRED');
 
-    const key = (await (
-      await handleAuthKey({
-        request: new Request('https://sonic.example.com/api/auth/key', {
-          headers: { Cookie: cookie },
-        }),
-        env: env() as any,
-      })
-    ).json()).apiKey;
+    // The session cookie value itself is the bearer key; the metadata-only GET
+    // no longer hands it back to a cookie session (P2-3).
+    const key = cookie.split(';')[0].split('=').slice(1).join('=');
 
     const withHeader = await handleAuthKey({
       request: new Request('https://sonic.example.com/api/auth/key', {
@@ -322,7 +330,7 @@ describe('Session-backed API key management', () => {
     const reissued = await withHeader.json();
     expect(reissued.apiKey).toMatch(/^sonic_live_v2\./);
     expect(reissued.apiKey).not.toBe(key);
-    expect(setCookies(withHeader).some((c) => c.startsWith('sonic_session='))).toBe(true);
+    expect(setCookies(withHeader).some((c) => c.startsWith('__Host-sonic_session=') || c.startsWith('sonic_session='))).toBe(true);
   });
 
   it('logout clears the HttpOnly session cookie', async () => {
@@ -330,12 +338,14 @@ describe('Session-backed API key management', () => {
     const res = await handleAuthLogout({
       request: new Request('https://sonic.example.com/api/auth/logout', {
         method: 'POST',
-        headers: { Cookie: cookie },
+        headers: { Cookie: cookie, Origin: 'https://sonic.example.com' },
       }),
       env: env() as any,
     });
     expect(res.status).toBe(200);
     const cookies = setCookies(res);
+    // Logout clears both the __Host- and the legacy name.
+    expect(cookies.some((c) => c.startsWith('__Host-sonic_session=;'))).toBe(true);
     expect(cookies.some((c) => c.startsWith('sonic_session=;'))).toBe(true);
     expect(cookies.some((c) => c.includes('Max-Age=0'))).toBe(true);
   });

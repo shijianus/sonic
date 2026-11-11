@@ -5,7 +5,7 @@ import type { AppEnv } from '../../../_lib/types';
 import { jsonResponse, handleOptions } from '../../../_lib/http';
 import { getSonicConfig } from '../../../_lib/sonic/config';
 import { callLocalEngineJson } from '../../../_lib/sonic/local-engine';
-import { buildGatewayHeaders, guardGatewayRequest, sonicError } from '../../../_lib/sonic/route-helpers';
+import { buildGatewayHeaders, clampQueryParam, guardGatewayRequest, sonicError } from '../../../_lib/sonic/route-helpers';
 import {
   buildPrivacySafeCacheHeaders,
   getSimilarRecommendations,
@@ -29,11 +29,11 @@ export async function onRequest({
   if (guardResp) return guardResp;
 
   const url = new URL(request.url);
-  const trackId = url.searchParams.get('trackId')?.trim() || url.searchParams.get('id')?.trim() || undefined;
-  const title = url.searchParams.get('title')?.trim() || url.searchParams.get('name')?.trim() || undefined;
-  const artist = url.searchParams.get('artist')?.trim() || undefined;
-  const album = url.searchParams.get('album')?.trim() || undefined;
-  const genre = url.searchParams.get('genre')?.trim() || undefined;
+  const trackId = clampQueryParam(url.searchParams.get('trackId') || url.searchParams.get('id'), 128);
+  const title = clampQueryParam(url.searchParams.get('title') || url.searchParams.get('name'));
+  const artist = clampQueryParam(url.searchParams.get('artist'));
+  const album = clampQueryParam(url.searchParams.get('album'));
+  const genre = clampQueryParam(url.searchParams.get('genre'), 64);
   const count = Math.min(40, Math.max(1, parseInt(url.searchParams.get('count') || '12', 10) || 12));
   const includeSameArtist = url.searchParams.get('includeSameArtist') !== '0';
 
@@ -113,7 +113,7 @@ export async function onRequest({
       },
     );
   } catch (err: any) {
-    return sonicError('SIMILAR_ERROR', err?.message || 'Failed to compute similar tracks', 500, {
+    return sonicError('SIMILAR_ERROR', 'Failed to compute similar tracks', 500, {
       provider: 'recommend-similar',
       latencyMs: Date.now() - start,
       degraded,

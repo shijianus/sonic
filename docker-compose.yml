@@ -10,10 +10,22 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    # VIP unblock is hard-disabled at the sidecar (audit P0-2). Never pass
+    # SONIC_ENABLE_UNBLOCK through here: the engine cannot override the sidecar's
+    # own ENABLE_UNBLOCK, so a stray operator variable would become a content-
+    # compliance bypass. Deployment checks must `docker inspect` this value.
     environment:
       PORT: "3000"
       HOST: "0.0.0.0"
-      ENABLE_UNBLOCK: "${SONIC_ENABLE_UNBLOCK:-false}"
+      ENABLE_UNBLOCK: "false"
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     networks:
       - sonic-internal
 
@@ -79,6 +91,14 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    mem_limit: 1g
+    cpus: 2.0
+    pids_limit: 256
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
     volumes:
       - sonic-data:/app/data
     ports:

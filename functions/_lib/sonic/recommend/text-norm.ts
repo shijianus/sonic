@@ -884,8 +884,9 @@ export function expandQueryAliases(rawQuery: string): {
   if (trimmed) expanded.add(trimmed);
   if (simplified && simplified !== trimmed) expanded.add(simplified);
 
-  // Check exact pinyin query rewrite
-  if (PINYIN_QUERY_REWRITES[compact]) {
+  // Check exact pinyin query rewrite. Use an own-property check so inputs such
+  // as `constructor` cannot resolve to Object.prototype values.
+  if (Object.prototype.hasOwnProperty.call(PINYIN_QUERY_REWRITES, compact)) {
     expanded.add(PINYIN_QUERY_REWRITES[compact]);
   }
 

@@ -33,6 +33,10 @@ if (dirtyEntries && !allowDirty) {
   console.error(dirtyEntries)
   process.exit(1)
 }
+if (dirtyEntries && allowDirty) {
+  console.warn('[deploy] ⚠ ALLOW_DIRTY_DEPLOY=1: deploying with uncommitted changes')
+  console.warn(dirtyEntries)
+}
 
 let deployment
 try {
@@ -108,8 +112,15 @@ if (verifyUrl && !String(process.env.SONIC_ENGINE_SECRET || '').trim()) {
 const wranglerCli = process.env.WRANGLER_CLI
 const wranglerBin = process.env.WRANGLER_BIN || 'npx'
 const command = wranglerCli ? process.execPath : wranglerBin
+// wrangler is pinned in devDependencies. --no-install prevents a deploy from
+// silently fetching a different router/runtime version at release time.
+const wranglerPrefix = wranglerCli
+  ? [wranglerCli]
+  : wranglerBin === 'npx'
+    ? ['--no-install', 'wrangler']
+    : [];
 const args = [
-  ...(wranglerCli ? [wranglerCli] : ['wrangler']),
+  ...wranglerPrefix,
   'pages',
   'deploy',
   'dist',
@@ -150,7 +161,7 @@ try {
       process.exit(1)
     }
   } else {
-    console.warn('[deploy] post-deploy verification skipped (ALLOW_UNVERIFIED_DEPLOY=1)')
+    console.warn('[deploy] ⚠ ALLOW_UNVERIFIED_DEPLOY=1: post-deploy verification skipped')
   }
 } finally {
   rmSync(stagingRoot, { recursive: true, force: true })

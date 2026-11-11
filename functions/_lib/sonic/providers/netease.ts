@@ -28,11 +28,14 @@ async function fetchNeteaseLyricWithLocalFirst(songId: string, env?: AppEnv, sig
     try {
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (env?.NETEASE_COOKIE) headers.Cookie = String(env.NETEASE_COOKIE).trim();
+      // The NCM sidecar is a trusted internal hop, but it must never redirect
+      // us anywhere: NETEASE_COOKIE rides on this request (audit P1-2).
       const res = await fetchWithRuntimeBudget(
         `${cfg.ncmApiUrl}/lyric/new?id=${encodeURIComponent(songId)}&realIP=${encodeURIComponent(cfg.realIp)}`,
-        { headers, signal: signal }, { timeoutMs: cfg.timeoutMs });
+        { headers, signal: signal, redirect: 'error' }, { timeoutMs: cfg.timeoutMs });
       if (res.ok) {
-        const json = (await res.json()) as any;
+        const { readBoundedProviderJson } = await import('../provider-fetch');
+        const json = (await readBoundedProviderJson(res)) as any;
         if (json?.yrc?.lyric && isValidLyric(json.yrc.lyric)) return json.yrc.lyric;
         if (json?.lrc?.lyric && isValidLyric(json.lrc.lyric)) return json.lrc.lyric;
       }

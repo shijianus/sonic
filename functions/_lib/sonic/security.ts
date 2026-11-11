@@ -44,9 +44,10 @@ export function hasValidEngineSecret(request: Request, env?: AppEnv): boolean {
   const configured = env?.SONIC_ENGINE_SECRET ? String(env.SONIC_ENGINE_SECRET).trim() : '';
   if (!configured || configured.length < 32) return false;
   const headerKey = request.headers.get('X-Sonic-Engine-Key')?.trim() || '';
-  if (headerKey && timingSafeEqualStr(headerKey, configured)) {
-    return true;
-  }
+  if (!headerKey) return false;
+  if (timingSafeEqualStr(headerKey, configured)) return true;
+  const previous = (env as any)?.SONIC_ENGINE_SECRET_PREV ? String((env as any).SONIC_ENGINE_SECRET_PREV).trim() : '';
+  if (previous && previous.length >= 32 && timingSafeEqualStr(headerKey, previous)) return true;
   return false;
 }
 
@@ -54,8 +55,28 @@ export function normalizeEnginePathname(pathname: string): string {
   return pathname.replace(/\/+$/, '') || '/';
 }
 
+/**
+ * Path used for authorization decisions.
+ *
+ * Cloudflare Pages matches Functions routes case-insensitively (its generated
+ * router compiles `path-to-regexp` without `sensitive`), so every security check
+ * must make the same decision for `/api/...`, `/API/...` and encoded variants.
+ * Never use the raw pathname for an allow/deny decision.
+ */
+export function canonicalPolicyPath(input: string | Request): string {
+  const raw = typeof input === 'string' ? input : new URL(input.url).pathname;
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    // Keep the raw value when it is not valid percent-encoding; it cannot match
+    // a canonical route and therefore fails closed against the /api prefix.
+  }
+  return decoded.replace(/\/+$/, '').toLowerCase() || '/';
+}
+
 export function requiresEngineAuth(request: Request, env?: AppEnv): boolean {
-  const pathname = normalizeEnginePathname(new URL(request.url).pathname);
+  const pathname = canonicalPolicyPath(request);
   const isEngineSurface =
     pathname === '/api' ||
     pathname.startsWith('/api/') ||
@@ -121,6 +142,44 @@ export function checkEngineAccess(request: Request, env?: AppEnv): Response | nu
 }
 
 export const SONIC_STAGING_COOKIE = 'sonic_staging_access';
+// __Host- prefix (audit P1-6): the prefixed name is written on secure origins and
+// both names are read during the migration window.
+export const SONIC_STAGING_COOKIE_HOST_PREFIXED = `__Host-${SONIC_STAGING_COOKIE}`;
+
+// Staging-token brute-force guard (audit P2-14). The staging gate runs BEFORE
+// the gateway rate limiter, so invalid token attempts need their own small
+// per-IP budget: 10 failures per minute, success resets the counter.
+const STAGING_FAILURE_WINDOW_MS = 60_000;
+const STAGING_FAILURE_LIMIT = 10;
+const stagingFailures = new Map<string, { count: number; resetAt: number }>();
+
+function recordStagingTokenFailure(ip: string): { blocked: boolean; retryAfterSec: number } {
+  const now = Date.now();
+  let bucket = stagingFailures.get(ip);
+  if (!bucket || now >= bucket.resetAt) {
+    if (stagingFailures.size >= 2048) {
+      for (const [key, value] of stagingFailures) {
+        if (now >= value.resetAt) stagingFailures.delete(key);
+      }
+      while (stagingFailures.size >= 2048) {
+        const oldest = stagingFailures.keys().next().value;
+        if (!oldest) break;
+        stagingFailures.delete(oldest);
+      }
+    }
+    bucket = { count: 0, resetAt: now + STAGING_FAILURE_WINDOW_MS };
+    stagingFailures.set(ip, bucket);
+  }
+  bucket.count += 1;
+  return {
+    blocked: bucket.count > STAGING_FAILURE_LIMIT,
+    retryAfterSec: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)),
+  };
+}
+
+export function resetStagingFailureLimiterForTest(): void {
+  stagingFailures.clear();
+}
 
 /**
  * Controlled Staging / Preview Access Gate.
@@ -157,13 +216,17 @@ export function checkStagingAccessGate(request: Request, env?: AppEnv): Response
     return null;
   }
 
+  const clientIp = getPublicClientIp(request);
+
   const headerToken = request.headers.get('X-Sonic-Staging-Token')?.trim() || '';
   if (headerToken && timingSafeEqualStr(headerToken, rawToken)) {
+    stagingFailures.delete(clientIp);
     return null;
   }
 
-  const cookieToken = readCookie(request, SONIC_STAGING_COOKIE) || '';
+  const cookieToken = (readCookie(request, SONIC_STAGING_COOKIE_HOST_PREFIXED) ?? readCookie(request, SONIC_STAGING_COOKIE)) || '';
   if (cookieToken && timingSafeEqualStr(cookieToken, rawToken)) {
+    stagingFailures.delete(clientIp);
     return null;
   }
 
@@ -171,18 +234,49 @@ export function checkStagingAccessGate(request: Request, env?: AppEnv): Response
   const url = new URL(request.url);
   const queryToken = url.searchParams.get('staging_token')?.trim() || '';
   if (queryToken && (request.method === 'GET' || request.method === 'HEAD') && timingSafeEqualStr(queryToken, rawToken)) {
+    stagingFailures.delete(clientIp);
     url.searchParams.delete('staging_token');
-    const secure = shouldUseSecureCookie(url) ? '; Secure' : '';
+    const secure = shouldUseSecureCookie(url);
+    const secureAttr = secure ? '; Secure' : '';
+    const cookieName = secure ? SONIC_STAGING_COOKIE_HOST_PREFIXED : SONIC_STAGING_COOKIE;
+    // Collapse leading slashes so a path such as `//evil.example` cannot turn the
+    // bootstrap redirect into a protocol-relative cross-origin redirect.
+    const safePath = `/${url.pathname.replace(/^\/+/, '')}`;
     return new Response(null, {
       status: 302,
       headers: {
-        Location: url.pathname + (url.search || ''),
-        'Set-Cookie': `${SONIC_STAGING_COOKIE}=${encodeURIComponent(rawToken)}; HttpOnly${secure}; SameSite=Lax; Path=/; Max-Age=86400`,
+        Location: safePath + (url.search || ''),
+        // Secure origins write the __Host- name; the legacy name keeps working
+        // as a read fallback during the migration window.
+        'Set-Cookie': `${cookieName}=${encodeURIComponent(rawToken)}; HttpOnly${secureAttr}; SameSite=Lax; Path=/; Max-Age=86400`,
         'Cache-Control': 'no-store',
         'Referrer-Policy': 'no-referrer',
         'X-Robots-Tag': 'noindex, nofollow, noarchive',
       },
     });
+  }
+
+  // Failed header/cookie/query attempts draw from the dedicated per-IP budget
+  // before the 401 goes out; exhausted budgets get an explicit 429 (P2-14).
+  const failure = recordStagingTokenFailure(clientIp);
+  if (failure.blocked) {
+    return jsonResponse(
+      {
+        brand: 'Sonic',
+        error: {
+          code: 'STAGING_TOKEN_RATE_LIMITED',
+          message: 'Too many invalid staging token attempts; retry later',
+        },
+      },
+      {
+        status: 429,
+        headers: {
+          'Cache-Control': 'no-store',
+          'Retry-After': String(failure.retryAfterSec),
+          'X-Robots-Tag': 'noindex, nofollow, noarchive',
+        },
+      },
+    );
   }
 
   return jsonResponse(
@@ -276,7 +370,7 @@ export function extractClientIp(request: Request, env?: AppEnv): string {
     : getPublicClientIp(request);
 }
 
-export function isSameOriginRequest(request: Request): boolean {
+export function isSameOriginRequest(request: Request, strict = false): boolean {
   let expectedOrigin = '';
   try {
     expectedOrigin = new URL(request.url).origin;
@@ -295,6 +389,9 @@ export function isSameOriginRequest(request: Request): boolean {
   }
   const fetchSite = request.headers.get('sec-fetch-site');
   if (fetchSite) return fetchSite === 'same-origin' || fetchSite === 'none';
+  // In strict mode (cookie-authenticated writes), missing browser headers
+  // means we cannot verify origin — reject defensively.
+  if (strict) return false;
   // Non-browser clients that manually attach a Cookie and a custom method are allowed;
   // browsers attach Origin/Referer/Sec-Fetch-Site to unsafe requests.
   return true;
@@ -357,6 +454,7 @@ export async function evaluateGatewayRateLimit(
   request: Request,
   env?: AppEnv,
   scope = 'api',
+  options?: { allowAnonymous?: boolean },
 ): Promise<RateLimitDecision> {
   const now = Date.now();
   const windowMs = 60_000;
@@ -386,7 +484,11 @@ export async function evaluateGatewayRateLimit(
         Math.max(1, parseInt(String(env?.SONIC_RATE_LIMIT_AUTH_RPM || '600'), 10) || 600),
       );
       subject = `user:${sha256Hex(authResult.user.email.toLowerCase()).slice(0, 32)}`;
-    } else if (isEnvEnabled(env?.SONIC_REQUIRE_AUTH, false)) {
+    } else if (isEnvEnabled(env?.SONIC_REQUIRE_AUTH, false) && !options?.allowAnonymous) {
+      // Access lifecycle endpoints (invite redeem / session bootstrap / logout)
+      // must stay reachable by anonymous visitors even when SONIC_REQUIRE_AUTH=1,
+      // otherwise invite mode cannot ever be entered (audit P1-8). They still go
+      // through the normal anonymous rate-limit bucket below.
       recordRateLimitMetric({
         allowed: false,
         backend: 'auth-gate',
@@ -780,6 +882,11 @@ export function buildRateLimitErrorResponse(decision: RateLimitDecision): Respon
 
 export function resetRateLimitsForTest(): void {
   rateBuckets.clear();
+  activeStreamsPerIp.clear();
+}
+
+export function resetStreamSlotsForTest(): void {
+  activeStreamsPerIp.clear();
 }
 
 export function getRateLimitBucketCountForTest(): number {
@@ -1072,11 +1179,21 @@ export interface SafeFetchResponse extends Response {
 }
 
 let safeFetchHostResolver: SafeFetchHostResolver | null = null;
-let activeUpstreamFetches = 0;
-let activeUpstreamBodies = 0;
 
-const MAX_CONCURRENT_UPSTREAM_FETCHES = 64;
-const MAX_ACTIVE_UPSTREAM_BODIES = 64;
+// Two independent upstream pools (audit P1-3). Long-lived slow audio streams
+// previously shared 64 slots with cover/JSON proxies, so 64 slow streams could
+// 503 every non-streaming request. Media keeps the larger share; JSON stays
+// responsive regardless of streaming load.
+export type SafeFetchPool = 'media' | 'json';
+
+const SAFE_FETCH_POOL_LIMITS: Record<SafeFetchPool, { fetches: number; bodies: number }> = {
+  media: { fetches: 48, bodies: 48 },
+  json: { fetches: 16, bodies: 16 },
+};
+
+const activeUpstreamFetches: Record<SafeFetchPool, number> = { media: 0, json: 0 };
+const activeUpstreamBodies: Record<SafeFetchPool, number> = { media: 0, json: 0 };
+
 const DEFAULT_MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
 
 const SENSITIVE_MEDIA_QUERY_NAMES = new Set([
@@ -1164,8 +1281,18 @@ export function setSafeFetchHostResolver(resolver: SafeFetchHostResolver | null)
 
 export function resetSafeFetchStateForTest(): void {
   safeFetchHostResolver = null;
-  activeUpstreamFetches = 0;
-  activeUpstreamBodies = 0;
+  activeUpstreamFetches.media = 0;
+  activeUpstreamFetches.json = 0;
+  activeUpstreamBodies.media = 0;
+  activeUpstreamBodies.json = 0;
+}
+
+/** Test hook: current per-pool occupancy, never leaks secret state. */
+export function getSafeFetchPoolStatsForTest(): { fetches: Record<SafeFetchPool, number>; bodies: Record<SafeFetchPool, number> } {
+  return {
+    fetches: { ...activeUpstreamFetches },
+    bodies: { ...activeUpstreamBodies },
+  };
 }
 
 export class SafeFetchCapacityError extends Error {
@@ -1358,6 +1485,8 @@ export async function safeFetch(
     maxBytes?: number;
     bodyIdleTimeoutMs?: number;
     includeMetadata?: boolean;
+    /** Pool selection: long-lived audio streams use 'media' so they cannot starve JSON/cover proxies. */
+    pool?: SafeFetchPool;
   },
 ): Promise<SafeFetchResponse> {
   const maxRedirects = Math.max(0, options?.maxRedirects ?? 3);
@@ -1365,14 +1494,16 @@ export async function safeFetch(
   const maxBytes = options?.maxBytes ?? DEFAULT_MAX_RESPONSE_BYTES;
   const bodyIdleTimeoutMs = Math.max(10, options?.bodyIdleTimeoutMs ?? 30000);
   const deadline = Date.now() + timeoutMs;
+  const pool: SafeFetchPool = options?.pool === 'media' ? 'media' : 'json';
+  const poolLimits = SAFE_FETCH_POOL_LIMITS[pool];
   let currentUrl = typeof targetUrl === 'string' ? targetUrl : targetUrl.toString();
   let redirectsRemaining = maxRedirects;
   let sensitive = hasSensitiveMediaQuery(currentUrl);
 
-  if (activeUpstreamFetches >= MAX_CONCURRENT_UPSTREAM_FETCHES) {
+  if (activeUpstreamFetches[pool] >= poolLimits.fetches) {
     throw new SafeFetchCapacityError('UPSTREAM_CONCURRENCY');
   }
-  activeUpstreamFetches += 1;
+  activeUpstreamFetches[pool] += 1;
 
   try {
     while (true) {
@@ -1477,11 +1608,11 @@ export async function safeFetch(
           ? attachSafeFetchMetadata(finalResp, finalTarget, finalSensitive)
           : finalResp;
       }
-      if (activeUpstreamBodies >= MAX_ACTIVE_UPSTREAM_BODIES) {
+      if (activeUpstreamBodies[pool] >= poolLimits.bodies) {
         finalResp.body.cancel().catch(() => {});
         throw new SafeFetchCapacityError('UPSTREAM_BODY_CONCURRENCY');
       }
-      activeUpstreamBodies += 1;
+      activeUpstreamBodies[pool] += 1;
       let wrapped: Response;
       try {
         wrapped = enforceResponseSize(
@@ -1490,11 +1621,11 @@ export async function safeFetch(
           bodyIdleTimeoutMs,
           init?.signal ?? undefined,
           () => {
-            activeUpstreamBodies = Math.max(0, activeUpstreamBodies - 1);
+            activeUpstreamBodies[pool] = Math.max(0, activeUpstreamBodies[pool] - 1);
           },
         );
       } catch (error) {
-        activeUpstreamBodies = Math.max(0, activeUpstreamBodies - 1);
+        activeUpstreamBodies[pool] = Math.max(0, activeUpstreamBodies[pool] - 1);
         throw error;
       }
       return options?.includeMetadata
@@ -1502,6 +1633,41 @@ export async function safeFetch(
         : (wrapped as SafeFetchResponse);
     }
   } finally {
-    activeUpstreamFetches = Math.max(0, activeUpstreamFetches - 1);
+    activeUpstreamFetches[pool] = Math.max(0, activeUpstreamFetches[pool] - 1);
   }
+}
+
+// Per-IP concurrent media stream cap (audit P1-3). 64 slow streams from one IP
+// must not be able to hold every media pool slot; a handful of concurrent
+// streams per client is far above any legitimate player's needs.
+const MAX_STREAMS_PER_IP = 4;
+const MAX_STREAM_IP_ENTRIES = 4096;
+const activeStreamsPerIp = new Map<string, number>();
+
+export function acquireStreamSlot(ip: string): boolean {
+  if (!ip || ip === 'unknown') return true;
+  const current = activeStreamsPerIp.get(ip) || 0;
+  if (current >= MAX_STREAMS_PER_IP) return false;
+  if (!activeStreamsPerIp.has(ip) && activeStreamsPerIp.size >= MAX_STREAM_IP_ENTRIES) {
+    for (const [key, value] of activeStreamsPerIp) {
+      if (value <= 0) activeStreamsPerIp.delete(key);
+    }
+    if (activeStreamsPerIp.size >= MAX_STREAM_IP_ENTRIES) {
+      const oldest = activeStreamsPerIp.keys().next().value;
+      if (oldest) activeStreamsPerIp.delete(oldest);
+    }
+  }
+  activeStreamsPerIp.set(ip, current + 1);
+  return true;
+}
+
+export function releaseStreamSlot(ip: string): void {
+  if (!ip || ip === 'unknown') return;
+  const current = activeStreamsPerIp.get(ip) || 0;
+  if (current <= 1) activeStreamsPerIp.delete(ip);
+  else activeStreamsPerIp.set(ip, current - 1);
+}
+
+export function getStreamSlotLimit(): number {
+  return MAX_STREAMS_PER_IP;
 }

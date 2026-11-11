@@ -121,6 +121,29 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     }
   }
 
+  // GET must never hand the long-lived key material to an ambient Cookie
+  // session: a single same-origin XSS would otherwise export a 30-day bearer
+  // key and bypass HttpOnly. Only an explicit header credential (proof of
+  // possession) may re-read the key; cookie sessions get metadata only (P2-3).
+  if (auth.source !== 'header') {
+    return jsonResponse(
+      {
+        brand: 'Sonic',
+        ok: true,
+        keyMaterial: false,
+        expiresAt: auth.user.expiresAt,
+        usage: {
+          rateLimit: 'Authenticated tier: SONIC_RATE_LIMIT_AUTH_RPM (default 600 requests/minute)',
+          allowedSources: ['netease', 'kuwo', 'qq'],
+          allowedBitrates: ['128', '192', '320', 'flac'],
+        },
+        instructions:
+          '出于安全考虑，Cookie 会话不再返回密钥原文。请携带 X-Sonic-Key / Authorization 请求头（或重新登录）获取；外部专案在请求头中使用 X-Sonic-Key: <your_api_key> 即可调用 epocanvas sonic 全量音乐 API。',
+      },
+      { headers: PRIVATE_HEADERS },
+    );
+  }
+
   return jsonResponse(
     {
       ok: true,

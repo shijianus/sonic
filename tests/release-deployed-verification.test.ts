@@ -33,19 +33,33 @@ function fixture() {
 }
 
 async function serve(manifest: Record<string, unknown>, dirty: boolean) {
+  const engineSecret = 's'.repeat(48);
   const server = http.createServer((request, response) => {
     if (request.url?.startsWith('/release.json')) {
       response.writeHead(200, { 'content-type': 'application/json', 'x-sonic-release': String(manifest.releaseId) });
       response.end(JSON.stringify(manifest));
       return;
     }
-    if (request.url === '/api/sonic/engine/health') {
+    // The Pages router is case-insensitive; mimic that so the verifier's
+    // negative probes exercise the real policy shape.
+    const pathname = (request.url || '/').split('?')[0].replace(/\/+$/, '').toLowerCase();
+    if (pathname === '/api/sonic/engine/health') {
+      if (request.headers['x-sonic-engine-key'] !== engineSecret) {
+        response.writeHead(401, { 'content-type': 'application/json' });
+        response.end(JSON.stringify({ brand: 'Sonic', error: { code: 'ENGINE_UNAUTHORIZED' } }));
+        return;
+      }
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({
         ok: true,
         release: { releaseId: manifest.releaseId, dirty },
-        readiness: { contentPolicy: { ok: true }, access: { ok: true } },
+        readiness: { contentPolicy: { ok: true }, access: { ok: true, mode: 'invite' } },
       }));
+      return;
+    }
+    if (pathname === '/api/sonic/recommend/trending') {
+      response.writeHead(401, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ brand: 'Sonic', error: { code: 'ACCESS_REQUIRED' } }));
       return;
     }
     response.writeHead(404);

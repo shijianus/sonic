@@ -639,6 +639,11 @@ async function enrichStoreWithLiveQuery(
   explicitGenres?: string[],
 ): Promise<void> {
   if (!query || isEnvOfflineForRecommend(env)) return;
+  // Only canonical, recognized genre ids may be attached to shared catalog
+  // records. Client-supplied free text must never become global metadata.
+  const safeExplicitGenres = explicitGenres && explicitGenres.length > 0
+    ? Array.from(new Set(explicitGenres.flatMap((genre) => extractQueryGenres(genre).genres))).slice(0, 6)
+    : undefined;
   try {
     const res = await searchNexus(
       query,
@@ -655,7 +660,7 @@ async function enrichStoreWithLiveQuery(
       if (hasNegative) return;
       if (!t.platformId && !t.id) return;
 
-      const ct = toCanonicalTrack(t, { rank: idx, explicitGenres });
+      const ct = toCanonicalTrack(t, { rank: idx, explicitGenres: safeExplicitGenres });
       if (ct) canonicals.push(ct);
     });
     if (canonicals.length > 0) {

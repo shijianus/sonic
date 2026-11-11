@@ -23,6 +23,18 @@ function cleanParam(value: string | null | undefined, maxLen: number): string | 
   return trimmed ? trimmed.slice(0, maxLen) : undefined;
 }
 
+/**
+ * Bounds a free-text query parameter before it reaches regexes, upstream
+ * searches or shared cache keys. Defaults to 200 characters.
+ */
+export function clampQueryParam(
+  value: string | null | undefined,
+  maxLen = 200,
+): string | undefined {
+  const bounded = Math.max(1, Math.min(1024, Math.floor(maxLen) || 200));
+  return cleanParam(value, bounded);
+}
+
 export function parseLyricsParams(url: URL): SonicQueryParams {
   const title = cleanParam(url.searchParams.get('title') || url.searchParams.get('name'), MAX_LYRICS_FIELD_LEN);
   const artist = cleanParam(url.searchParams.get('artist') || url.searchParams.get('singer'), MAX_LYRICS_FIELD_LEN);
@@ -80,7 +92,7 @@ export function buildGatewayHeaders(extra: Record<string, string> = {}, degraded
   const headers: Record<string, string> = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, HEAD, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Engine-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, Range',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Sonic-Key, X-CFSolara-Key, X-Api-Key, X-Sonic-Anon-Id, X-Sonic-Personalization, X-Sonic-Context, Range',
     'Access-Control-Expose-Headers': 'Content-Range, Content-Length, Accept-Ranges, X-Sonic-Cache, X-Sonic-Provider, X-Sonic-Degraded, X-Sonic-Circuit, X-Sonic-Stream-Trial, X-Sonic-Release, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Backend, X-RateLimit-Degraded',
     'X-Content-Type-Options': 'nosniff',
     'Content-Security-Policy': "default-src 'none'; frame-ancestors 'none'; sandbox",
@@ -129,7 +141,7 @@ export async function guardGatewayRequest(request: Request, env: any, scope: str
   const method = request.method.toUpperCase();
   if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
     const credentials = extractAuthCredentials(request);
-    if (credentials.source === 'cookie' && !isSameOriginRequest(request)) {
+    if (credentials.source === 'cookie' && !isSameOriginRequest(request, true)) {
       return sonicError('CSRF_REJECTED', 'Cross-site cookie-authenticated write request rejected', 403);
     }
   }
@@ -454,11 +466,11 @@ export async function handleSingleProviderLyricsRequest(
   } catch (err: any) {
     request.signal.throwIfAborted();
     const latencyMs = Date.now() - startTime;
-    return sonicError('PROVIDER_ERROR', err?.message || `Failed to fetch lyrics from ${p}`, 502, {
+    return sonicError('PROVIDER_ERROR', redactSensitiveString(err?.message || `Failed to fetch lyrics from ${p}`), 502, {
       provider: p,
       latencyMs,
       ...(degraded ? { degraded: true, degradedReason, circuitState } : {}),
-      attempts: [...attemptsPrefix, { provider: p, ok: false, ms: latencyMs, error: err?.message }],
+      attempts: [...attemptsPrefix, { provider: p, ok: false, ms: latencyMs, error: redactSensitiveString(err?.message) }],
     });
   } finally {
     budget.dispose();
@@ -569,7 +581,7 @@ export async function handleNexusSearchRequest(
   } catch (err: any) {
     request.signal.throwIfAborted();
     const latencyMs = Date.now() - startTime;
-    return sonicError('SEARCH_ERROR', err?.message || 'Nexus search failed', 502, {
+    return sonicError('SEARCH_ERROR', redactSensitiveString(err?.message || 'Nexus search failed'), 502, {
       provider: 'nexus',
       latencyMs,
     });
@@ -759,11 +771,11 @@ export async function handleSingleProviderSearchRequest(
   } catch (err: any) {
     request.signal.throwIfAborted();
     const latencyMs = Date.now() - startTime;
-    return sonicError('PROVIDER_SEARCH_ERROR', err?.message || `Search failed on ${p}`, 502, {
+    return sonicError('PROVIDER_SEARCH_ERROR', redactSensitiveString(err?.message || `Search failed on ${p}`), 502, {
       provider: p,
       latencyMs,
       ...(degraded ? { degraded: true, degradedReason, circuitState } : {}),
-      attempts: [...attemptsPrefix, { provider: p, ok: false, ms: latencyMs, error: err?.message }],
+      attempts: [...attemptsPrefix, { provider: p, ok: false, ms: latencyMs, error: redactSensitiveString(err?.message) }],
     });
   } finally {
     budget.dispose();

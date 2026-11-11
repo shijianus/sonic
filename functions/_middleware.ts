@@ -9,7 +9,7 @@ import {
   recordHttpRequestMetric,
   redactSensitiveString,
 } from './_lib/sonic/observability';
-import { checkStagingAccessGate } from './_lib/sonic/security';
+import { checkStagingAccessGate, canonicalPolicyPath } from './_lib/sonic/security';
 import { getAccessMode, requireAccess } from './_lib/sonic/access';
 import { getContentPolicyReadiness } from './_lib/sonic/licensing';
 import type { AppEnv } from './_lib/types';
@@ -70,7 +70,8 @@ export async function onRequest(context: {
   const releaseReadiness = getReleaseReadiness(env);
   // Health must remain reachable so an operator can see why a deployment is
   // failing closed. The handler reports contentPolicy/release details itself.
-  const isHealthEndpoint = pathname === '/api/sonic/engine/health';
+  // Route matching is case-insensitive on Pages, so use the canonical path.
+  const isHealthEndpoint = canonicalPolicyPath(request) === '/api/sonic/engine/health';
   if (!isHealthEndpoint && !contentPolicy.ok) {
     return finalizeResponse(jsonResponse(
       {

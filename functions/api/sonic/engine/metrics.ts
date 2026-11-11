@@ -11,14 +11,46 @@ import {
   redactSensitiveString,
   triggerSonicAlert,
 } from '../../../_lib/sonic/observability';
-import { checkEngineAccess, getRateLimitConfigStatus } from '../../../_lib/sonic/security';
+import { checkEngineAccess, getRateLimitConfigStatus, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from '../../../_lib/sonic/security';
 import type { AppEnv } from '../../../_lib/types';
+
+const TEST_ALERT_WINDOW_MS = 3_600_000;
+const TEST_ALERT_MAX_PER_WINDOW = 5;
+const testAlertBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function isTestAlertAllowed(ip: string): boolean {
+  const now = Date.now();
+  let bucket = testAlertBuckets.get(ip);
+  if (!bucket || now >= bucket.resetAt) {
+    bucket = { count: 0, resetAt: now + TEST_ALERT_WINDOW_MS };
+    if (testAlertBuckets.size >= 256) {
+      for (const [k, v] of testAlertBuckets) {
+        if (now >= v.resetAt) testAlertBuckets.delete(k);
+      }
+      // All entries may still be active: hard-evict the oldest so the map
+      // can never grow past its bound (audit P2-13).
+      while (testAlertBuckets.size >= 256) {
+        const oldest = testAlertBuckets.keys().next().value;
+        if (!oldest) break;
+        testAlertBuckets.delete(oldest);
+      }
+    }
+    testAlertBuckets.set(ip, bucket);
+  }
+  bucket.count += 1;
+  return bucket.count <= TEST_ALERT_MAX_PER_WINDOW;
+}
 
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
 
   const denied = checkEngineAccess(request, env);
   if (denied) return denied;
+
+  // POST test-alert can fire an external webhook, so it must never be an
+  // unbounded authenticated action.
+  const rateLimit = await evaluateGatewayRateLimit(request, env, 'engine-metrics');
+  if (!rateLimit.allowed) return buildRateLimitErrorResponse(rateLimit);
 
   const url = new URL(request.url);
 
@@ -36,6 +68,19 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     }
 
     const customNote = redactSensitiveString(url.searchParams.get('note') || '');
+
+    const callerIp = request.headers.get('CF-Connecting-IP') || 'unknown';
+    if (!isTestAlertAllowed(callerIp)) {
+      return jsonResponse(
+        {
+          brand: 'Sonic',
+          ok: false,
+          error: { code: 'TEST_ALERT_RATE_LIMITED', message: `Test-alert is limited to ${TEST_ALERT_MAX_PER_WINDOW} calls per hour` },
+        },
+        { status: 429, headers: { 'Cache-Control': 'no-store', 'Retry-After': '3600' } },
+      );
+    }
+
     const summary = customNote
       ? `Operator alert verification self-check: ${customNote}`
       : 'Operator-initiated Sonic alert verification self-check';

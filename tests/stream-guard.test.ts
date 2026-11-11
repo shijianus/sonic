@@ -55,6 +55,7 @@ async function createValidAnonSession(env: AppEnv, ip?: string) {
 describe("Stream Guard Phase 1: Playback Ticket & Access Control", () => {
   beforeEach(() => {
     clearPlaybackGrantsForTest();
+    resetRateLimitsForTest();
   });
   describe("1. Ticket Issuance & Cryptographic Verification", () => {
     it("issues and verifies a valid HMAC-SHA256 playback ticket", async () => {

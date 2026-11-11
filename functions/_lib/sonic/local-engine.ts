@@ -23,7 +23,10 @@ interface EndpointCircuit {
 }
 
 const circuits = new Map<string, EndpointCircuit>();
-const INSTANT_TRIP_HTTP_STATUSES = new Set([502, 521, 522, 523, 524, 530]);
+// Only Cloudflare-origin/tunnel failures prove the engine is unreachable. An
+// application-level 502 (for example a provider error inside the engine) must
+// not trip the shared breaker on a single client-triggered request.
+const INSTANT_TRIP_HTTP_STATUSES = new Set([521, 522, 523, 524, 530]);
 
 function getOrCreateCircuit(engineBaseUrl: string): EndpointCircuit {
   const key = engineBaseUrl.toLowerCase();
@@ -273,6 +276,8 @@ export interface LocalEngineCallResult<T> {
   circuitState: CircuitState;
   error?: string;
   errorCode?: string;
+  /** Sanitized upstream Cache-Control, used by callers that relay engine payloads. */
+  cacheControl?: string;
 }
 
 function buildEngineHeaders(secret?: string, request?: Request, clientIp?: string): Record<string, string> {
@@ -383,16 +388,23 @@ export async function callLocalEngineJson<T = any>(
           (forwardedIdentity.subjectKey && data?.data?.ignoredByPrivacy > 0)) throw new EngineIdentityError();
     }
     const authRejected = response.status === 401 || response.status === 403;
-    completeCircuit(c, lease, authRejected ? 'failure' : 'success', authRejected ? `Engine auth rejected (${response.status})` : '', threshold);
+    // 4xx is a definitive answer from a reachable engine (access gate, policy
+    // denial, invalid parameters), not an outage. Treating it as a breaker
+    // failure previously let an anonymous request to a public 401 endpoint
+    // degrade every engine-backed feature for all users.
+    completeCircuit(c, lease, response.status < 500 ? 'success' : 'failure', authRejected ? `Engine auth rejected (${response.status})` : '', threshold);
     return {
       ok: response.ok, data, status: response.status, latencyMs: Date.now() - start,
       skippedByCircuit: false, circuitState: c.state,
+      ...(response.headers.get('cache-control') ? { cacheControl: String(response.headers.get('cache-control')) } : {}),
       ...(response.ok ? {} : { error: data?.error?.message || data?.error || `Engine HTTP ${response.status}` }),
     };
   } catch (error: any) {
     const cancelled = clientCancelled();
     const message = cancelled ? 'Engine request cancelled' : error?.name === 'TimeoutError' ? `Engine timeout (${timeoutMs}ms)` : error?.message || 'Engine network error';
-    completeCircuit(c, lease, cancelled ? 'cancelled' : 'failure', message, threshold);
+    // A missing/invalid identity assertion is a configuration failure, not
+    // evidence that the engine is down; it must not poison the shared breaker.
+    completeCircuit(c, lease, cancelled || error instanceof EngineIdentityError ? 'cancelled' : 'failure', message, threshold);
     return {
       ok: false, latencyMs: Date.now() - start, skippedByCircuit: false, circuitState: c.state, error: message,
       ...(error instanceof EngineIdentityError ? { status: 503, errorCode: error.code } : {}),
@@ -442,7 +454,7 @@ export async function callLocalEngineStream(
         if (bodyStarted) recordStreamBodyMetric(outcome, 'engine');
         if (outcome === 'cancelled' || clientCancelled()) completeCircuit(c, lease, 'cancelled');
         else if (outcome === 'error' || outcome === 'timeout') completeCircuit(c, lease, 'failure', error?.message || 'Engine response body failed', threshold);
-        else if (status > 0 && status < 500) completeCircuit(c, lease, status === 401 || status === 403 ? 'failure' : 'success', `Engine HTTP ${status}`, threshold);
+        else if (status > 0 && status < 500) completeCircuit(c, lease, 'success', `Engine HTTP ${status}`, threshold);
       },
     });
     status = response.status;
@@ -453,7 +465,7 @@ export async function callLocalEngineStream(
       return { ok: false, status, latencyMs: Date.now() - start, skippedByCircuit: false, circuitState: c.state, error };
     }
     // A HEAD/empty response has no body lifecycle to wait for.
-    if (!response.body) completeCircuit(c, lease, response.status === 401 || response.status === 403 ? 'failure' : 'success', `Engine HTTP ${status}`, threshold);
+    if (!response.body) completeCircuit(c, lease, response.status < 500 ? 'success' : 'failure', `Engine HTTP ${status}`, threshold);
     return { ok: true, response, status, latencyMs: Date.now() - start, skippedByCircuit: false, circuitState: c.state };
   } catch (error: any) {
     const cancelled = clientCancelled();

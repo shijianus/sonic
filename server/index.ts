@@ -301,6 +301,19 @@ async function dispatchFunctionRoute(request: Request, env: AppEnv): Promise<Res
     return handleSonicRadarAlbum({ request, env });
   }
   if (pathname === '/api/sonic/events') {
+    // Write-path disk gate (audit P0-1): a full disk must refuse new anonymous
+    // event rows instead of letting the flood fill the volume until SQLite dies.
+    if (request.method === 'POST') {
+      const minFreeMb = Number(env.SONIC_MIN_FREE_DISK_MB || '64') || 64;
+      const disk = probeDiskHealth(env.SONIC_RECOMMEND_DB_PATH, minFreeMb, serverRecommendStore);
+      if (!disk.ok) {
+        return new Response(JSON.stringify({
+          brand: 'Sonic',
+          error: { code: 'EVENT_STORAGE_BUDGET_EXCEEDED', message: 'Event storage budget exhausted; ingestion temporarily refused' },
+          meta: { degraded: true, retryable: false, provider: 'sonic-events' },
+        }), { status: 507, headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'private, no-store', 'Retry-After': '600' } });
+      }
+    }
     return handleSonicEvents({ request, env, waitUntil });
   }
   if (pathname === '/api/sonic/search/smart') {
@@ -638,6 +651,18 @@ if (isMain) {
     const contentPolicy = getContentPolicyReadiness(process.env as AppEnv);
     if (!contentPolicy.ok) {
       throw new Error(`Content policy is not deployment-ready: ${contentPolicy.reason || 'misconfigured'}`);
+    }
+    // Content-compliance fail-fast (audit P0-2): PROHIBITED source switches are
+    // force-disabled in code, but an operator setting them to 1 must not get a
+    // silent "looks fine" deployment — especially the NCM sidecar unblock path,
+    // which the engine cannot override from here.
+    const prohibitedSwitches = ['SONIC_ENABLE_UNBLOCK', 'SONIC_ENABLE_GDSTUDIO', 'SONIC_ENABLE_LYRIVA'];
+    const enabledProhibited = prohibitedSwitches.filter((name) =>
+      ['1', 'true', 'yes', 'on'].includes(String(process.env[name] || '').trim().toLowerCase()));
+    if (String(process.env.SONIC_ENV || '').trim().toLowerCase() === 'production' && enabledProhibited.length > 0) {
+      throw new Error(
+        `PROHIBITED content source switches are enabled in production: ${enabledProhibited.join(', ')}; set them to 0 and redeploy`,
+      );
     }
     withRecommendStartupLock(process.env.SONIC_RECOMMEND_DB_PATH, () => getOrInitServerRecommendStore());
   } catch (err: any) {

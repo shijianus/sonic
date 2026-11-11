@@ -5,7 +5,7 @@ import type { AppEnv } from '../../../_lib/types';
 import { jsonResponse, handleOptions } from '../../../_lib/http';
 import { getSonicConfig } from '../../../_lib/sonic/config';
 import { callLocalEngineJson } from '../../../_lib/sonic/local-engine';
-import { buildGatewayHeaders, guardGatewayRequest, sonicError } from '../../../_lib/sonic/route-helpers';
+import { buildGatewayHeaders, clampQueryParam, guardGatewayRequest, sonicError } from '../../../_lib/sonic/route-helpers';
 import {
   buildPrivacySafeCacheHeaders,
   getDiscoverRecommendations,
@@ -30,9 +30,9 @@ export async function onRequest({
 
   const start = Date.now();
   const url = new URL(request.url);
-  const genre = url.searchParams.get('genre')?.trim() || undefined;
-  const language = url.searchParams.get('language')?.trim() || undefined;
-  const mood = url.searchParams.get('mood')?.trim() || undefined;
+  const genre = clampQueryParam(url.searchParams.get('genre'), 64);
+  const language = clampQueryParam(url.searchParams.get('language'), 32);
+  const mood = clampQueryParam(url.searchParams.get('mood'), 64);
   const count = Math.min(40, Math.max(1, parseInt(url.searchParams.get('count') || '16', 10) || 16));
   const tempParsed = parseFloat(url.searchParams.get('temperature') || '0.55');
   const temperature = Number.isFinite(tempParsed) ? tempParsed : 0.55;
@@ -106,7 +106,7 @@ export async function onRequest({
       },
     );
   } catch (err: any) {
-    return sonicError('DISCOVER_ERROR', err?.message || 'Failed to compute discovery tracks', 500, {
+    return sonicError('DISCOVER_ERROR', 'Failed to compute discovery tracks', 500, {
       provider: 'recommend-discover',
       latencyMs: Date.now() - start,
       degraded,

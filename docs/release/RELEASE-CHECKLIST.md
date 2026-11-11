@@ -81,6 +81,8 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 | B7 | Engine 不依赖 Host 认证 | PASS | 本地伪造 Host 仍 401 |
 | B8 | 限流/配额全局一致 | PARTIAL | 无 Cloudflare 原生 `RATE_LIMITER` 时为近似限流 |
 | B9 | 凭证/密钥未入库 | PASS（本轮范围） | 未提交真实密钥；测试用临时值已清理 |
+| B10 | 路径大小写不能绕过访问/引擎门禁 | PASS（本轮新增） | `canonicalPolicyPath` 覆盖 `requireAccess`/`requiresEngineAuth`；回归用例含 `/API/...` 变体 |
+| B11 | 匿名请求不可投毒全局熔断 | PASS（本轮新增） | 4xx 不再计失败；502 不再立即跳闸；身份配置错误不计熔断 |
 
 ## C. 真实环境硬门禁
 
@@ -115,6 +117,8 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 - [ ] 确认 `SONIC_ENABLE_UNBLOCK=0`、`SONIC_ENABLE_GDSTUDIO=0`、`SONIC_ENABLE_LYRIVA=0`。
 - [ ] 仅启用已授权音源；未授权源不可达。
 - [ ] 内测访问控制生效（Access/Basic Auth/IP 白名单），`robots`/响应头禁止索引。
+- [ ] 若启用 Shijianus-Blog 随身听桥接，构建时必须设置 `VITE_SONIC_BRIDGE_ORIGINS=https://<blog-origin>`；未设置时跨站桥接按安全默认拒绝（只允许同源）。
+- [ ] 公测前确认事件写入配额生效（每 IP 4,000/min、每匿名 subject 600/min，超出 429）。
 - [ ] OAuth 未验收时隐藏登录入口，关闭需身份的写操作。
 - [ ] 备份当前 SQLite，记录备份路径与校验结果。
 - [ ] 记录上一可回滚版本 SHA 与构建产物位置。
@@ -124,6 +128,7 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 
 - [ ] `GET /` 200，静态资源 200。
 - [ ] 引擎健康：无 Key 401，带 Key 200；伪造 Host 仍 401。
+- [ ] **路径大小写：`/api/sonic/engine/health`、`/API/sonic/engine/health`、`/Api/Sonic/Engine/Health` 无 Key 均须 401；invite 模式下 `/api/...` 与 `/API/...` 推荐接口均须 401（Pages 路由大小写不敏感）。**
 - [ ] 搜索：真实关键词返回结果，403/429/断网有明确错误态。
 - [ ] 播放：真实授权曲目可播放，Range/206 与 Seek 正常。
 - [ ] 歌词：逐字/普通/无歌词降级均正常。

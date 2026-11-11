@@ -29,6 +29,10 @@ const MAX_TRACKS = 6000;
 const MAX_EVENTS = 25000;
 const MAX_COOCCURRENCE_ANCHORS = 3000;
 const MAX_QUERIES = 2000;
+// Public mv/* responses ingest entities on every hit; without a ceiling an
+// attacker could grow the Edge isolate's memory by varying offsets/IDs (P1-1).
+const DEFAULT_MAX_ENTITIES = 50_000;
+const DEFAULT_MAX_ENTITY_RELATIONS = 200_000;
 const DAY_MS = 24 * 3600 * 1000;
 
 export function normalizeRecommendRetentionDays(value: unknown): number {
@@ -50,11 +54,15 @@ export class MemoryRecommendStore implements RecommendStore {
   private queryContributions = new Map<string, { norm: string; display: string; count: number; createdAt: number }>();
   private cooccurrenceContributions = new Map<string, { createdAt: number; edges: Map<string, { a: string; b: string; weight: number }> }>();
   private retentionDays: number;
+  private maxEntities: number;
+  private maxEntityRelations: number;
   private writeCounter = 0;
   private lastRetentionAt = Date.now();
 
-  constructor(retentionDays: number | string = 90) {
+  constructor(retentionDays: number | string = 90, caps?: { entities?: number; entityRelations?: number }) {
     this.retentionDays = normalizeRecommendRetentionDays(retentionDays);
+    this.maxEntities = Math.max(1, Math.floor(caps?.entities ?? DEFAULT_MAX_ENTITIES));
+    this.maxEntityRelations = Math.max(1, Math.floor(caps?.entityRelations ?? DEFAULT_MAX_ENTITY_RELATIONS));
   }
 
   setRetentionDays(retentionDays: number | string): void {
@@ -453,6 +461,10 @@ export class MemoryRecommendStore implements RecommendStore {
   upsertEntity(entity: SonicEntity): void {
     if (!entity?.id || !entity?.type) return;
     this.beforeWrite();
+    if (!this.entities.has(entity.id) && this.entities.size >= this.maxEntities) {
+      const oldestKey = this.entities.keys().next().value;
+      if (oldestKey) this.entities.delete(oldestKey);
+    }
     this.entities.set(entity.id, entity);
   }
 
@@ -476,6 +488,10 @@ export class MemoryRecommendStore implements RecommendStore {
     if (!rel?.parentId || !rel?.childId) return;
     this.beforeWrite();
     const relationId = rel.relationId || `${rel.parentId}:::${rel.childId}:::${rel.relationType}`;
+    if (!this.entityRelations.has(relationId) && this.entityRelations.size >= this.maxEntityRelations) {
+      const oldestKey = this.entityRelations.keys().next().value;
+      if (oldestKey) this.entityRelations.delete(oldestKey);
+    }
     this.entityRelations.set(relationId, { ...rel, relationId });
   }
 

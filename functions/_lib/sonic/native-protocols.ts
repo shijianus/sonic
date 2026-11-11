@@ -5,23 +5,43 @@
 import type { AppEnv, SongItem } from '../types';
 import type { SonicAttempt, SonicSearchTrack } from './types';
 import { getSonicConfig } from './config';
-import { getAllowedMediaDomains, isSourceEnabledByPolicy } from './licensing';
+import { getAllowedMediaDomains, computeContentPolicyEpoch, isSourceEnabledByPolicy } from './licensing';
 import { buildNeteaseEapiParams, buildNeteaseLinuxApiParams } from './crypto';
 import { normalizeArtistString, normalizeText, normalizeCjkText, calcLevenshteinSimilarity } from './utils';
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
 import { safeFetch } from './security';
 import { callLocalEngineJson, getLocalEngineCircuitSnapshot, createRuntimeAbortBudget, fetchWithRuntimeBudget, type CircuitState } from './local-engine';
+import { redactSensitiveString } from './observability';
 import { getSyntheticTrackSpec, getSyntheticWavTotalBytes } from './synthetic-media';
+import {
+  fetchProviderUrl,
+  fetchProviderDirect,
+  isAllowedProviderHost,
+  readBoundedProviderJson,
+} from './provider-fetch';
+
+// Re-exported from the dependency-free provider boundary so existing importers
+// (and the provider adapters) keep a single canonical entry point.
+export { fetchProviderUrl, fetchProviderDirect, isAllowedProviderHost, readBoundedProviderJson };
 
 const DESKTOP_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 const MOBILE_UA =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.5 Mobile/15E148 Safari/604.1';
 
-// A caller's signal supplements, rather than replaces, the provider's deadline.
 async function nativeFetch(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = 8000, signal?: AbortSignal): Promise<Response> {
   signal?.throwIfAborted();
-  const response = await fetchWithRuntimeBudget(input, init, { timeoutMs, signals: [signal] });
+  const target = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+  let url: URL;
+  try {
+    url = new URL(target);
+  } catch {
+    throw new Error('Invalid provider URL');
+  }
+  const response =
+    url.protocol === 'https:' && isAllowedProviderHost(url.hostname)
+      ? await fetchProviderUrl(input, init, timeoutMs, signal)
+      : await fetchWithRuntimeBudget(input, { ...init, redirect: 'error' }, { timeoutMs, signals: [signal] });
   if (!response.ok) void response.body?.cancel().catch(() => {});
   return response;
 }
@@ -75,9 +95,10 @@ export async function callNeteaseLinuxApi(
     body: `eparams=${eparams}`,
   }, cfg.timeoutMs, signal);
   if (!resp.ok) {
+    void resp.body?.cancel().catch(() => {});
     throw new Error(`NetEase linuxapi HTTP ${resp.status}`);
   }
-  return resp.json();
+  return readBoundedProviderJson(resp);
 }
 
 export async function callNeteaseEapi(
@@ -115,9 +136,10 @@ export async function callNeteaseEapi(
     body: `params=${params}`,
   }, cfg.timeoutMs, signal);
   if (!resp.ok) {
+    void resp.body?.cancel().catch(() => {});
     throw new Error(`NetEase eapi HTTP ${resp.status}`);
   }
-  return resp.json();
+  return readBoundedProviderJson(resp);
 }
 
 function mapNeteaseSongToSonicTrack(item: any): SonicSearchTrack {
@@ -884,11 +906,14 @@ export interface StreamCacheIdentityInput {
   artist?: string;
   allowTrial?: boolean;
   durationSec?: number;
+  policyEpoch?: string;
 }
 
 /**
  * JSON tuple encoding keeps user-controlled separators (`:`, `=`) inside their
- * own field instead of letting them alias another field boundary.
+ * own field instead of letting them alias another field boundary. The content
+ * policy epoch is part of the key: disabling a source (or flipping any licensing
+ * flag) must not leave the previous resolution playable from cache.
  */
 export function buildStreamCacheIdentifier(input: StreamCacheIdentityInput): string {
   return JSON.stringify([
@@ -900,6 +925,7 @@ export function buildStreamCacheIdentifier(input: StreamCacheIdentityInput): str
     normalizeText(input.artist || ''),
     input.allowTrial === false ? 0 : 1,
     Number(input.durationSec) || 0,
+    String(input.policyEpoch || ''),
   ]);
 }
 
@@ -926,6 +952,7 @@ async function resolvePlayableStreamWithinBudget(
   const quality = String(opts.quality || '320').toLowerCase();
   const nominalBr = quality === '128' ? 128 : quality === 'flac' ? 800 : 320;
   const allowTrial = opts.allowTrial !== false;
+  const policyEpoch = computeContentPolicyEpoch(env);
   const cacheId = buildStreamCacheIdentifier({
     source: cleanSource,
     id: cleanId,
@@ -934,10 +961,14 @@ async function resolvePlayableStreamWithinBudget(
     artist: opts.artist,
     allowTrial,
     durationSec: opts.durationSec,
+    policyEpoch,
   });
+  // A cached resolution must never outrank the current licensing policy: a hit
+  // for a source disabled after the entry was stored is discarded on sight.
+  const cacheHitAllowedByPolicy = isSourceEnabledByPolicy(cleanSource, env);
 
   // 1. Fresh cache check (8 minutes — well within signed CDN token TTL)
-  if (!opts.nocache) {
+  if (!opts.nocache && cacheHitAllowedByPolicy) {
     const cached = await getSonicCachedJson<ResolvedStreamInfo>('stream-url-v1', cacheId, env);
     if (cached && cached.value?.url) {
       return {
@@ -1006,7 +1037,9 @@ async function resolvePlayableStreamWithinBudget(
       });
 
       // A playback retry must not silently replay the failed signed URL from stale cache.
-      const staleHit = opts.nocache ? null : await getSonicCachedJson<ResolvedStreamInfo>('stream-url-v1', cacheId, env, { allowStale: true });
+      const staleHit = opts.nocache || !cacheHitAllowedByPolicy
+        ? null
+        : await getSonicCachedJson<ResolvedStreamInfo>('stream-url-v1', cacheId, env, { allowStale: true });
       if (staleHit?.value?.url) {
         return {
           ...staleHit.value,
@@ -1228,7 +1261,7 @@ async function resolvePlayableStreamWithinBudget(
       }
     } catch (err: any) {
       signal?.throwIfAborted();
-      attempts.push({ provider: pLabel, via: viaLabel(env), ok: false, ms: Date.now() - pStart, error: err?.message || 'Native stream error' });
+      attempts.push({ provider: pLabel, via: viaLabel(env), ok: false, ms: Date.now() - pStart, error: redactSensitiveString(err?.message || 'Native stream error') });
     }
   }
 
@@ -1298,7 +1331,7 @@ async function resolvePlayableStreamWithinBudget(
       }
     } catch (err: any) {
       signal?.throwIfAborted();
-      attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: err?.message });
+      attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: redactSensitiveString(err?.message) });
     }
   }
 
@@ -1377,7 +1410,7 @@ async function resolvePlayableStreamWithinBudget(
         attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: 'No verified free full-length match' });
       } catch (err: any) {
         signal?.throwIfAborted();
-        attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: err?.message });
+        attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: redactSensitiveString(err?.message) });
       }
     }
 
@@ -1433,7 +1466,7 @@ async function resolvePlayableStreamWithinBudget(
         attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: 'No verified free full-length match' });
       } catch (err: any) {
         signal?.throwIfAborted();
-        attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: err?.message });
+        attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: redactSensitiveString(err?.message) });
       }
     }
 
@@ -1484,7 +1517,7 @@ async function resolvePlayableStreamWithinBudget(
         attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: 'No verified full-length free stream' });
       } catch (err: any) {
         signal?.throwIfAborted();
-        attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: err?.message });
+        attempts.push({ provider: label, via: viaLabel(env, 'free-match'), ok: false, ms: Date.now() - sStart, error: redactSensitiveString(err?.message) });
       }
     }
   }
@@ -1656,7 +1689,7 @@ async function resolvePlayableStreamWithinBudget(
       attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: 'External source did not return a playable stream' });
     } catch (err: any) {
       signal?.throwIfAborted();
-      attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: err?.message });
+      attempts.push({ provider: 'gdstudio', via: 'external-source', ok: false, ms: Date.now() - gdStart, error: redactSensitiveString(err?.message) });
     }
   }
 

@@ -13,6 +13,7 @@ declare global {
   const DEFAULT_QUALITY_CHOICES: typeof import('../stores/modules/download').DEFAULT_QUALITY_CHOICES
   const DownloadedMusicDB: typeof import('../utils/indexedDB').DownloadedMusicDB
   const EffectScope: typeof import('vue').EffectScope
+  const GUARD_OFF_CACHE_TTL_MS: typeof import('../utils/streamGuard').GUARD_OFF_CACHE_TTL_MS
   const LocalMusicDB: typeof import('../utils/indexedDB').LocalMusicDB
   const QUALITY_LEVELS: typeof import('../utils/qualityProbe').QUALITY_LEVELS
   const acceptHMRUpdate: typeof import('pinia').acceptHMRUpdate
@@ -62,6 +63,7 @@ declare global {
   const getArtistAvatarUrl: typeof import('../utils/imageUrl').getArtistAvatarUrl
   const getAudioMetadata: typeof import('../utils/audioUtils').getAudioMetadata
   const getBrowserLang: typeof import('../utils/index').getBrowserLang
+  const getCachedGuardMode: typeof import('../utils/streamGuard').getCachedGuardMode
   const getCachedProbeResult: typeof import('../utils/qualityProbe').getCachedProbeResult
   const getColorPalette: typeof import('../utils/colorExtractor').getColorPalette
   const getCurrentInstance: typeof import('vue').getCurrentInstance
@@ -94,6 +96,8 @@ declare global {
   const isRef: typeof import('vue').isRef
   const isShallow: typeof import('vue').isShallow
   const isSupportedAudioFormat: typeof import('../utils/audioUtils').isSupportedAudioFormat
+  const isTicketExpired: typeof import('../utils/streamGuard').isTicketExpired
+  const isTicketOrGrantError: typeof import('../utils/streamGuard').isTicketOrGrantError
   const localMusicDB: typeof import('../utils/indexedDB').localMusicDB
   const mapActions: typeof import('pinia').mapActions
   const mapGetters: typeof import('pinia').mapGetters
@@ -141,6 +145,7 @@ declare global {
   const safeStorage: typeof import('../utils/safeStorage').default
   const saveLocalMVComment: typeof import('../utils/localCommentDB').saveLocalMVComment
   const setActivePinia: typeof import('pinia').setActivePinia
+  const setCachedGuardMode: typeof import('../utils/streamGuard').setCachedGuardMode
   const setMapStoreSuffix: typeof import('pinia').setMapStoreSuffix
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
@@ -151,6 +156,7 @@ declare global {
   const sonicBlogBridge: typeof import('../utils/sonicBlogBridge').sonicBlogBridge
   const storeToRefs: typeof import('pinia').storeToRefs
   const streamSourcePair: typeof import('../utils/audioUtils').streamSourcePair
+  const stripTicketFromUrl: typeof import('../utils/streamGuard').stripTicketFromUrl
   const syncWordElements: typeof import('../utils/lyricsWordSync').syncWordElements
   const testSongs: typeof import('../utils/testSongs').testSongs
   const toRaw: typeof import('vue').toRaw
