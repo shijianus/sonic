@@ -74,17 +74,33 @@ async function expectCompleteText(locator: Locator, text: string) {
   await expect(locator).toHaveText(text)
   const layout = await locator.evaluate(el => {
     const style = getComputedStyle(el)
-    return { width: el.clientWidth, scrollWidth: el.scrollWidth, height: el.clientHeight, scrollHeight: el.scrollHeight, whiteSpace: style.whiteSpace, textOverflow: style.textOverflow, lineClamp: style.webkitLineClamp, lineHeight: parseFloat(style.lineHeight) }
+    const range = document.createRange()
+    range.selectNodeContents(el)
+    const textBounds = range.getBoundingClientRect()
+    const verticalClippers: string[] = []
+    // Font metrics can extend past an overflow-visible line box. Check the
+    // rendered text against the ancestors whose scrollports can clip it.
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      if (getComputedStyle(node).overflowY === 'visible') continue
+      const top = node.getBoundingClientRect().top + node.clientTop
+      const bottom = top + node.clientHeight
+      if (textBounds.top < top - 1 || textBounds.bottom > bottom + 1) {
+        verticalClippers.push(`${node.tagName}.${node.className}`)
+      }
+    }
+    return { width: el.clientWidth, scrollWidth: el.scrollWidth, height: el.clientHeight, verticalClippers, whiteSpace: style.whiteSpace, textOverflow: style.textOverflow, lineClamp: style.webkitLineClamp, lineHeight: parseFloat(style.lineHeight) }
   })
   expect(layout.whiteSpace).not.toBe('nowrap')
   expect(layout.textOverflow).not.toBe('ellipsis')
   expect(['none', '']).toContain(layout.lineClamp)
   expect(layout.scrollWidth).toBeLessThanOrEqual(layout.width + 1)
-  expect(layout.scrollHeight).toBeLessThanOrEqual(layout.height + 1)
+  expect(layout.verticalClippers).toEqual([])
   expect(layout.height).toBeGreaterThan(layout.lineHeight * 1.5)
 }
 
 test('desktop long title and artist wrap in rows and expanded player without horizontal overflow', async ({ page }, testInfo) => {
+  // This case captures three full-page screenshots and checks every control in the drawer.
+  testInfo.setTimeout(90_000)
   const title = '完整曲名 Long title with every word visible — extended live recording from the Sonic acoustic concert, final movement'
   const artist = 'Sonic Acoustic Orchestra / International Guest Ensemble / 完整演出者名称 / ALongUnbrokenArtistIdentifierThatMustWrapWithoutOverflow'
   await page.route('**/api/sonic/search/smart?**', route => route.fulfill({ json: { data: { tracks: [{ ...track, title, artist }], total: 1, suggestions: [] } } }))
