@@ -110,6 +110,8 @@ for (const width of [360, 390]) {
     })
 
     test('expanded cover and lyrics views show complete long titles and artists without horizontal overflow', async ({ page }, testInfo) => {
+      // Four screenshots and real playback interactions share this case's budget.
+      testInfo.setTimeout(90_000)
       const title = '完整曲名 Long title with every word visible — extended acoustic concert final movement'
       const artist = 'Sonic Acoustic Orchestra / 国际合作演出者 / ALongUnbrokenArtistIdentifierThatMustWrapWithoutOverflow'
       await page.route('**/api/sonic/search/nexus?**', route => route.fulfill({ json: { data: { tracks: [{ platformId: '9002', title, artist, duration: 20000, streamUrl: '/api/music/stream?id=9002' }], total: 1 } } }))
@@ -163,7 +165,9 @@ for (const width of [360, 390]) {
       await expectPaused(page)
       await controls.getByRole('button', { name: 'Play', exact: true }).click()
       await expectPlaying(page)
-      await titleNode.click()
+      await titleNode.scrollIntoViewIfNeeded({ timeout: 10_000 })
+      await expect(titleNode).toBeInViewport()
+      await titleNode.click({ timeout: 10_000 })
       await expect(album).toBeHidden()
       const lyricsTitle = dialog.getByRole('heading', { name: title, exact: true }).filter({ visible: true })
       await expectCompleteText(lyricsTitle, title)
