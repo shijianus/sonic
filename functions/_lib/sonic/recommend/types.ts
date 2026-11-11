@@ -441,7 +441,9 @@ export interface RecommendStore {
   searchLocalTracks(query: string, limit?: number): CanonicalTrack[];
   recordEvent(event: StoredBehaviorEvent): { inserted: boolean; deduplicated: boolean };
   getUserEvents(subjectKey: string, limit?: number, sinceMs?: number): StoredBehaviorEvent[];
-  clearUserEvents(subjectKey: string): number;
+  clearUserEvents(subjectKey: string, eventEpoch?: string): number;
+  getEventEpoch?(subjectKey: string): string | null;
+  withEventEpoch?<T>(subjectKey: string, expected: string | null, write: () => T): T;
   getAllRecentEvents(sinceMs: number, limit?: number): StoredBehaviorEvent[];
   /** Global chart inputs grouped by track and subject, chronological within each group. */
   iteratePopularityEvents(trackIds: readonly string[], sinceMs: number, untilMs: number): Iterable<StoredBehaviorEvent>;

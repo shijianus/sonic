@@ -252,6 +252,10 @@ async function getRecommendations() {
 
 同源客户端通过 POST 写入行为时，使用 `X-Sonic-Event-Target: account:<入队时的账户 ID>`，或使用 `anonymous-opt-in` 并附带匿名 ID。持久写入携带会话 Cookie 时需要此目标。若返回 `409 EVENT_INGEST_IDENTITY_MISMATCH`，客户端应丢弃该批事件，避免在会话切换后重发。带明确目标的写入通过 Pages 转发时使用 Engine 身份签名。显式 API Key 仍可独立认证。
 
+画像清除成功后，SQLite 在同一事务更新该画像的 `eventEpoch`。GET 和成功的 DELETE 返回当前标记，没有清除标记且未发生匿名标记轮换时 GET 返回 `null`。POST 请求体可携带 `{ events, eventEpoch }`，标记应与事件入队时的画像版本绑定。收到 `409 EVENT_EPOCH_MISMATCH` 时，丢弃旧批次和同代待发事件，仅对后续新事件使用响应的当前标记。公开模式保持零写入。现有 API Key 调用可以用同一身份 GET 获取标记，标记为 `null` 时可省略。
+
+达到 `SONIC_RECOMMEND_MAX_ANON_ERASURE_ROWS`（默认 250,000）后，下一次需要新增匿名清除标记的请求在同一事务轮换匿名标记并继续清除。其他访客的旧批次需要丢弃，已存事件和账户标记不受匿名轮换影响。生产发布需让 Pages 和 Engine 同步支持 `eventEpoch`。回滚时需保留对标记的验证，恢复清除前的数据库快照会恢复该快照中的旧数据与标记。
+
 站内热榜按窗口统计已登录且允许个性化的账户播放活动，`window=all` 使用存储保留期内的数据。匿名用户开启个性化后，其活动仍可用于自己的推荐。外部榜单分数通过 `popularity.externalChartScore` 单独返回。
 
 完整算法公式、实体图谱与多实体混合推荐设计请参阅 [`docs/recommend-multi-entity.md`](docs/recommend-multi-entity.md)、[`docs/recommendation/01-audit-and-selection.md`](docs/recommendation/01-audit-and-selection.md) 与 [`docs/recommendation/02-architecture-and-algorithms.md`](docs/recommendation/02-architecture-and-algorithms.md)。

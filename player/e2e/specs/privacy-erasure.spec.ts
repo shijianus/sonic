@@ -1,6 +1,8 @@
 import { test, expect } from '../fixtures'
 import type { Page } from '@playwright/test'
 
+const eventEpoch = 'a'.repeat(32)
+
 test('an erasure identity conflict preserves the anonymous profile ID for retry', async ({ page }, testInfo) => {
   const anonId = 'anon_erasure_browser_001'
   const deletes: Array<{ anonId: string | undefined; target: string | undefined }> = []
@@ -17,7 +19,7 @@ test('an erasure identity conflict preserves the anonymous profile ID for retry'
       await route.fulfill({ status: 409, json: { brand: 'Sonic', error: { code: 'EVENT_ERASURE_IDENTITY_MISMATCH' } } })
     } else {
       await route.fulfill({ json: {
-        brand: 'Sonic', data: { privacyMode: 'anonymous-opt-in', cleared: true, storageKind: 'sqlite', removedEvents: 1 },
+        brand: 'Sonic', data: { privacyMode: 'anonymous-opt-in', cleared: true, storageKind: 'sqlite', removedEvents: 1, eventEpoch },
       } })
     }
   })
@@ -35,6 +37,38 @@ test('an erasure identity conflict preserves the anonymous profile ID for retry'
   await expect(page.getByText('Recommendation profile and disliked tracks cleared')).toBeVisible()
   const expected = { anonId, target: 'anonymous-opt-in' }
   expect(deletes).toEqual([expected, expected])
+})
+
+test('account erasure applies the returned epoch to subsequent behavior events', async ({ page }) => {
+  await page.route('**/api/auth/user', route => route.fulfill({ json: {
+    ok: true, user: { id: 'erasure-account', name: 'Erasure Test', email: 'erasure@example.invalid' },
+  } }))
+  await page.route('**/api/sonic/events', route => {
+    if (route.request().method() === 'DELETE') {
+      return route.fulfill({ json: {
+        brand: 'Sonic', data: { privacyMode: 'authenticated', cleared: true, storageKind: 'sqlite', removedEvents: 0, eventEpoch },
+      } })
+    }
+    return route.fulfill({ json: { brand: 'Sonic', data: { accepted: 1 } } })
+  })
+
+  await page.goto('/#/settings')
+  await expect(page.getByRole('button', { name: 'Account menu' })).toContainText('Erasure Test')
+  await page.getByRole('button', { name: 'Reset Recommendation Profile & Dislikes' }).click()
+  await expect(page.getByText('Recommendation profile and disliked tracks cleared')).toBeVisible()
+
+  const post = page.waitForRequest(request =>
+    request.method() === 'POST' && new URL(request.url()).pathname === '/api/sonic/events'
+  )
+  const search = page.getByTestId('nav-search-input')
+  await search.fill('post-erasure-search')
+  await search.press('Enter')
+  const request = await post
+  expect(request.headers()['x-sonic-event-target']).toBe('account:erasure-account')
+  expect(request.postDataJSON()).toMatchObject({
+    eventEpoch,
+    events: [{ type: 'search', query: 'post-erasure-search' }],
+  })
 })
 
 const musicDbName = 'SonicMusicPlayerDB'

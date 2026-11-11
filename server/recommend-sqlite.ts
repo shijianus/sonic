@@ -3,6 +3,7 @@
 // Falls back to `MemoryRecommendStore` only in development/tests or with an explicit opt-in;
 // production startup fails closed instead of pretending persistence works.
 
+import { createHmac, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -30,6 +31,7 @@ import { MemoryRecommendStore, normalizeRecommendRetentionDays } from '../functi
 import { upsertTrackMvEntities } from '../functions/_lib/sonic/recommend/entity-store';
 import { recordSqliteMetric, redactSensitiveString } from '../functions/_lib/sonic/observability';
 import { POPULARITY_EVENT_TYPES } from '../functions/_lib/sonic/recommend/event-state';
+import { EventEpochMismatchError } from '../functions/_lib/sonic/recommend/event-epoch';
 
 // Hard ceiling for the shared canonical catalog. Search traffic is persisted
 // into this table, so an unbounded catalog is a disk-exhaustion vector.
@@ -67,6 +69,7 @@ export class SqliteRecommendStore implements RecommendStore {
   private lastDiskCheckAt = 0;
   private lastDiskCheckOk = true;
   private anonEventRetentionDays: number;
+  private readonly maxAnonEventEpochRows = Math.max(1, readPositiveEnvInt('SONIC_RECOMMEND_MAX_ANON_ERASURE_ROWS', 250_000));
 
   constructor(public readonly dbPath: string = ':memory:', retentionDays: number | string = process.env.SONIC_RECOMMEND_RETENTION_DAYS || 90) {
     this.retentionDays = normalizeRecommendRetentionDays(retentionDays);
@@ -189,6 +192,21 @@ export class SqliteRecommendStore implements RecommendStore {
         ON behavior_events(subject_key, created_at DESC);
       CREATE INDEX IF NOT EXISTS idx_events_time
         ON behavior_events(created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS recommendation_event_epochs (
+        subject_key TEXT PRIMARY KEY,
+        event_epoch TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS recommendation_anon_epoch_state (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        seed TEXT,
+        override_count INTEGER NOT NULL CHECK (override_count >= 0)
+      );
+      INSERT OR IGNORE INTO recommendation_anon_epoch_state (singleton, seed, override_count)
+        SELECT 1, NULL, (SELECT COUNT(*) FROM recommendation_event_epochs WHERE subject_key GLOB 'anon_*')
+        WHERE NOT EXISTS (SELECT 1 FROM recommendation_anon_epoch_state WHERE singleton = 1);
+
       CREATE INDEX IF NOT EXISTS idx_events_popularity_track_subject
         ON behavior_events(canonical_track_id, subject_key, created_at, ${EVENT_STATE_ORDER}, event_id)
         WHERE ${POPULARITY_EVENTS_PREDICATE};
@@ -723,7 +741,53 @@ export class SqliteRecommendStore implements RecommendStore {
     return rows.map((r) => this.rowToEvent(r));
   }
 
-  clearUserEvents(subjectKey: string): number {
+  private getSubjectEventEpoch(subjectKey: string): string | null {
+    const row = this.db.prepare('SELECT event_epoch FROM recommendation_event_epochs WHERE subject_key = ?')
+      .get(subjectKey) as { event_epoch: string } | undefined;
+    return row?.event_epoch ?? null;
+  }
+
+  getEventEpoch(subjectKey: string): string | null {
+    const override = this.getSubjectEventEpoch(subjectKey);
+    if (override !== null || !subjectKey.startsWith('anon_')) return override;
+    const { seed } = this.db.prepare('SELECT seed FROM recommendation_anon_epoch_state WHERE singleton = 1')
+      .get() as { seed: string | null };
+    return seed === null ? null : createHmac('sha256', seed).update(subjectKey).digest('hex').slice(0, 32);
+  }
+
+  private setEventEpoch(subjectKey: string, eventEpoch: string): void {
+    if (subjectKey.startsWith('anon_') && this.getSubjectEventEpoch(subjectKey) === null) {
+      const { override_count } = this.db.prepare('SELECT override_count FROM recommendation_anon_epoch_state WHERE singleton = 1')
+        .get() as { override_count: number };
+      if (override_count >= this.maxAnonEventEpochRows) {
+        // Fence old anonymous batches before reclaiming overrides in this transaction.
+        this.db.prepare("DELETE FROM recommendation_event_epochs WHERE subject_key GLOB 'anon_*'").run();
+        this.db.prepare('UPDATE recommendation_anon_epoch_state SET seed = ?, override_count = 1 WHERE singleton = 1')
+          .run(randomBytes(32).toString('hex'));
+      } else {
+        this.db.prepare('UPDATE recommendation_anon_epoch_state SET override_count = override_count + 1 WHERE singleton = 1').run();
+      }
+    }
+    this.db.prepare(`INSERT INTO recommendation_event_epochs (subject_key, event_epoch) VALUES (?, ?)
+      ON CONFLICT(subject_key) DO UPDATE SET event_epoch = excluded.event_epoch`).run(subjectKey, eventEpoch);
+  }
+
+  withEventEpoch<T>(subjectKey: string, expected: string | null, write: () => T): T {
+    // Serialize the generation check and writes against clearUserEvents across connections.
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const current = this.getEventEpoch(subjectKey);
+      if (current !== expected) throw new EventEpochMismatchError(current);
+      const result = write();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      try { this.db.exec('ROLLBACK'); } catch {}
+      throw error;
+    }
+  }
+
+  clearUserEvents(subjectKey: string, eventEpoch?: string): number {
     if (!subjectKey) return 0;
     this.db.exec('BEGIN IMMEDIATE');
     try {
@@ -736,10 +800,11 @@ export class SqliteRecommendStore implements RecommendStore {
       this.db.prepare(`DELETE FROM behavior_events WHERE subject_key = ?`).run(subjectKey);
       this.db.prepare(`DELETE FROM user_entity_feedback WHERE subject_key = ?`).run(subjectKey);
       this.db.prepare(`DELETE FROM user_radar_profiles WHERE subject_key = ?`).run(subjectKey);
+      if (eventEpoch) this.setEventEpoch(subjectKey, eventEpoch);
       this.db.exec('COMMIT');
       return Number(count.cnt);
     } catch (error) {
-      this.db.exec('ROLLBACK');
+      try { this.db.exec('ROLLBACK'); } catch {}
       throw error;
     }
   }

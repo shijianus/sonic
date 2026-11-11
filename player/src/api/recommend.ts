@@ -372,11 +372,21 @@ export async function fetchSmartSuggest(
   return Array.isArray(json?.data?.suggestions) ? json.data.suggestions : []
 }
 
+type StoredEventPrivacyMode = 'authenticated' | 'anonymous-opt-in'
+type SonicEventPostResult =
+  | { status: 'sent' | 'identity-mismatch' | 'retry' }
+  | { status: 'epoch-mismatch'; eventEpoch?: string | null }
+
+function isEventEpoch(value: unknown): value is string {
+  return typeof value === 'string' && /^[a-f0-9]{32}$/.test(value)
+}
+
 export async function postSonicEvents(
   events: SonicEventPayload[],
-  headers: Record<string, string> = {}
-): Promise<'sent' | 'identity-mismatch' | 'retry'> {
-  if (!events.length) return 'retry'
+  headers: Record<string, string>,
+  { expectedMode, eventEpoch }: { expectedMode: StoredEventPrivacyMode; eventEpoch?: string }
+): Promise<SonicEventPostResult> {
+  if (!events.length) return { status: 'retry' }
   try {
     const resp = await fetch('/api/sonic/events', {
       method: 'POST',
@@ -384,42 +394,51 @@ export async function postSonicEvents(
         'Content-Type': 'application/json',
         ...headers,
       },
-      body: JSON.stringify({ events }),
+      body: JSON.stringify({ events, eventEpoch }),
       keepalive: true,
     })
-    if (resp.ok) return 'sent'
+    if (resp.ok) return { status: 'sent' }
     if (resp.status === 409) {
       const result = await resp.json()
-      if (result?.brand === 'Sonic' && result.error?.code === 'EVENT_INGEST_IDENTITY_MISMATCH') {
-        return 'identity-mismatch'
+      if (result?.brand === 'Sonic') {
+        if (result.error?.code === 'EVENT_INGEST_IDENTITY_MISMATCH') return { status: 'identity-mismatch' }
+        if (result.error?.code === 'EVENT_EPOCH_MISMATCH') {
+          const epoch = result.data?.eventEpoch
+          return result.data?.privacyMode === expectedMode && (epoch === null || isEventEpoch(epoch))
+            ? { status: 'epoch-mismatch', eventEpoch: epoch }
+            : { status: 'epoch-mismatch' }
+        }
       }
     }
-    return 'retry'
+    return { status: 'retry' }
   } catch {
-    return 'retry'
+    return { status: 'retry' }
   }
 }
 
 export async function deleteSonicEvents(
   headers: Record<string, string>,
-  expectedMode: 'authenticated' | 'anonymous-opt-in' | 'public'
-): Promise<boolean> {
+  expectedMode: StoredEventPrivacyMode | 'public'
+): Promise<{ eventEpoch: string | null } | null> {
   try {
     const resp = await fetch('/api/sonic/events', {
       method: 'DELETE',
       headers,
     })
-    if (!resp.ok) return false
+    if (!resp.ok) return null
     const result = await resp.json()
-    if (result?.brand !== 'Sonic') return false
+    if (result?.brand !== 'Sonic') return null
     const data = result.data
-    if (data?.privacyMode !== expectedMode) return false
-    if (!Number.isSafeInteger(data?.removedEvents) || data.removedEvents < 0) return false
-    return expectedMode === 'public'
-      ? data.cleared === false && data.removedEvents === 0
-      : data.cleared === true && data.storageKind === 'sqlite'
+    if (data?.privacyMode !== expectedMode) return null
+    if (!Number.isSafeInteger(data.removedEvents) || data.removedEvents < 0) return null
+    if (expectedMode === 'public') {
+      return data.cleared === false && data.removedEvents === 0 ? { eventEpoch: null } : null
+    }
+    return data.cleared === true && data.storageKind === 'sqlite' && isEventEpoch(data.eventEpoch)
+      ? { eventEpoch: data.eventEpoch }
+      : null
   } catch {
-    return false
+    return null
   }
 }
 

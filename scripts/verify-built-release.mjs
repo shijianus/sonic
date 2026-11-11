@@ -87,10 +87,10 @@ async function stop() {
   await exited;
   if (child === current) child = undefined;
 }
-async function postEvent(identity, eventId) {
+async function postEvent(identity, eventId, eventEpoch) {
   const response = await request('/api/sonic/events', {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Sonic-Anon-Id': identity },
-    body: JSON.stringify({ events: [{ type: 'search', query: 'release-persistence-check', eventId }] }),
+    body: JSON.stringify({ events: [{ type: 'search', query: 'release-persistence-check', eventId }], eventEpoch }),
   });
   assert.equal(response.status, 200);
   return response.json();
@@ -148,12 +148,28 @@ try {
   const persisted = await profile.json();
   assert.equal(persisted.data.totalEvents, 1);
   check('events survive process restart');
+  const heldBody = JSON.stringify({ events: [{ type: 'search', query: 'before-erasure', eventId: 'release_held_event' }] });
   const cleared = await request('/api/sonic/events', { method: 'DELETE' });
   assert.equal(cleared.status, 200);
-  assert.equal((await cleared.json()).data.cleared, true);
+  const erasure = (await cleared.json()).data;
+  assert.equal(erasure.cleared, true);
+  assert.match(erasure.eventEpoch, /^[0-9a-f]{32}$/);
   const empty = await request('/api/sonic/events');
   assert.equal((await empty.json()).data.totalEvents, 0);
   check('authoritative DELETE removes only the current subject');
+  await stop();
+  await start();
+  const held = await request('/api/sonic/events', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: heldBody,
+  });
+  assert.equal(held.status, 409);
+  const rejection = await held.json();
+  assert.equal(rejection.error.code, 'EVENT_EPOCH_MISMATCH');
+  assert.equal(rejection.data.eventEpoch, erasure.eventEpoch);
+  assert.equal((await (await request('/api/sonic/events')).json()).data.totalEvents, 0);
+  const fresh = await postEvent('anon_release_http_a_20261102', 'release_post_erase_event', erasure.eventEpoch);
+  assert.equal(fresh.data.accepted, 1);
+  check('erasure marker survives restart and fences held writes over HTTP');
   await stop();
   const recovered = new DatabaseSync(dbPath);
   recovered.exec('PRAGMA wal_checkpoint(TRUNCATE)');

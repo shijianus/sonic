@@ -130,6 +130,7 @@ export async function ingestBehaviorEvents(
   inputs: SonicBehaviorEventInput[],
   identity: UserIdentityContext,
   env?: AppEnv,
+  eventEpoch: string | null = null,
 ): Promise<{
   accepted: number;
   deduplicated: number;
@@ -148,10 +149,25 @@ export async function ingestBehaviorEvents(
     };
   }
 
+  const subjectKey = identity.subjectKey;
+  const afterCommit: Array<() => void> = [];
+  const write = () => recordBehaviorEvents(inputs, subjectKey, store, env, afterCommit);
+  const result = store.withEventEpoch ? store.withEventEpoch(subjectKey, eventEpoch, write) : write();
+  for (const sync of afterCommit) sync();
+  return result;
+}
+
+function recordBehaviorEvents(
+  inputs: SonicBehaviorEventInput[],
+  subjectKey: string,
+  store: RecommendStore,
+  env: AppEnv | undefined,
+  afterCommit: Array<() => void>,
+) {
   let accepted = 0;
   let deduplicated = 0;
   const now = Date.now();
-  const recentEvents = store.getUserEvents(identity.subjectKey, 12, now - HOUR_MS);
+  const recentEvents = store.getUserEvents(subjectKey, 12, now - HOUR_MS);
   const recentPositiveTracks = recentEvents
     .filter((e) => e.canonicalTrackId && e.weight >= 1.0)
     .map((e) => e.canonicalTrackId!)
@@ -181,7 +197,7 @@ export async function ingestBehaviorEvents(
     // the VIDEO id, not an audio id; never create a second song event from it.
     if (entity && store.recordEntityFeedback) {
       const result = store.recordEntityFeedback({
-        feedbackId: eventId, subjectKey: identity.subjectKey, entityType,
+        feedbackId: eventId, subjectKey, entityType,
         entityId: entity.entityId, action: rawEv.type as any, weight,
         progress: rawEv.progress ?? rawEv.progressRatio, context: rawEv.context, createdAt: ts,
       });
@@ -193,7 +209,7 @@ export async function ingestBehaviorEvents(
 
     const inferredQueryGenres = cleanQuery ? extractQueryGenres(cleanQuery).genres : [];
     const res = store.recordEvent({
-      eventId, subjectKey: identity.subjectKey, type: rawEv.type,
+      eventId, subjectKey, type: rawEv.type,
       canonicalTrackId: canonicalTrack?.canonicalTrackId, trackRef,
       artistKey: canonicalTrack?.canonicalArtist, language: canonicalTrack?.language,
       genres: canonicalTrack?.genres?.length ? canonicalTrack.genres : inferredQueryGenres.length ? inferredQueryGenres : undefined,
@@ -209,14 +225,14 @@ export async function ingestBehaviorEvents(
     // aggregate queries or co-occurrence. State toggles are folded, not plays.
     if (cleanQuery && (rawEv.type === 'search' || rawEv.type === 'search_click')) {
       store.recordSearchQuery(compactNormalize(cleanQuery), cleanQuery, rawEv.type === 'search_click', {
-        subjectKey: identity.subjectKey, eventId,
+        subjectKey, eventId,
       });
     }
     if (canonicalTrack && weight >= 1.1 && !['favorite', 'unfavorite', 'dislike', 'undislike'].includes(rawEv.type)) {
       const curId = canonicalTrack.canonicalTrackId;
       for (const prevId of recentPositiveTracks) {
         if (prevId !== curId) store.incrementCooccurrence(prevId, curId, Math.min(2.5, weight * 0.5), {
-          subjectKey: identity.subjectKey, eventId,
+          subjectKey, eventId,
         });
       }
       if (!recentPositiveTracks.includes(curId)) {
@@ -225,8 +241,10 @@ export async function ingestBehaviorEvents(
       }
     }
     if (canonicalTrack && isGorseEnabled(env)) {
-      syncTrackToGorse(canonicalTrack, env).catch(() => {});
-      syncFeedbackToGorse(identity.subjectKey, canonicalTrack.canonicalTrackId, rawEv.type, ts, env).catch(() => {});
+      afterCommit.push(() => {
+        syncTrackToGorse(canonicalTrack, env).catch(() => {});
+        syncFeedbackToGorse(subjectKey, canonicalTrack.canonicalTrackId, rawEv.type, ts, env).catch(() => {});
+      });
     }
   }
 
@@ -1431,6 +1449,7 @@ export interface RecommendationErasureResult {
   removedEvents: number;
   storageKind: string;
   localCleared: boolean;
+  eventEpoch?: string;
   aggregateScope: 'subject-attributed-only';
   legacyAggregates: 'retained-until-expiry';
   external: { gorse: 'not-configured' | 'pending' | 'deleted' | 'failed'; retryable: boolean };
@@ -1447,7 +1466,9 @@ export function clearUserRecommendationData(identity: UserIdentityContext, env?:
     external: { gorse: externalConfigured ? 'pending' : 'not-configured', retryable: externalConfigured },
   };
   if (!identity.subjectKey) return result;
-  result.removedEvents = store.clearUserEvents(identity.subjectKey);
+  const eventEpoch = store.kind === 'sqlite' ? crypto.randomUUID().replace(/-/g, '') : undefined;
+  result.removedEvents = store.clearUserEvents(identity.subjectKey, eventEpoch);
+  if (eventEpoch) result.eventEpoch = eventEpoch;
   result.localCleared = true;
   result.cleared = !externalConfigured;
   return result;

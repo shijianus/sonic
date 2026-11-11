@@ -6,8 +6,21 @@ import { useRecommendStore } from '@/stores/modules/recommend'
 import { useLibraryStore } from '@/stores/modules/library'
 import { useAuthStore } from '@/stores/modules/auth'
 
+const erasedEventEpoch = 'a'.repeat(32)
+
 function erasedProfile(privacyMode = 'anonymous-opt-in') {
-  return Response.json({ brand: 'Sonic', data: { privacyMode, cleared: true, storageKind: 'sqlite', removedEvents: 1 } })
+  return Response.json({
+    brand: 'Sonic',
+    data: { privacyMode, cleared: true, storageKind: 'sqlite', removedEvents: 1, eventEpoch: erasedEventEpoch },
+  })
+}
+
+function epochMismatch(eventEpoch: unknown, privacyMode = 'anonymous-opt-in') {
+  return Response.json({
+    brand: 'Sonic',
+    error: { code: 'EVENT_EPOCH_MISMATCH' },
+    data: { eventEpoch, privacyMode },
+  }, { status: 409 })
 }
 
 function delayedResponse() {
@@ -144,6 +157,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
       'X-Sonic-Event-Target': 'anonymous-opt-in',
     })
     expect(rec.anonId).not.toBe(originalId)
+    expect(JSON.parse(String(post?.body))).not.toHaveProperty('eventEpoch')
     expect(JSON.parse(String(post?.body)).events.map((event: { track: { id: number } }) => event.track.id)).toEqual([4])
   })
 
@@ -190,7 +204,9 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
   })
 
   it('已有账号在关闭个性化后仍可清除服务端画像', async () => {
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile('authenticated'))
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(erasedProfile('authenticated'))
+      .mockResolvedValue(Response.json({}))
     const rec = useRecommendStore()
     const auth = useAuthStore()
     auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
@@ -200,6 +216,15 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
 
     expect(await rec.clearAllRecommendationProfile()).toBe(true)
     expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({ 'X-Sonic-Erasure-Target': 'account:user-A' })
+    rec.setPersonalizationEnabled(true)
+    rec.recordEvent({ type: 'favorite', track: { id: 1 } })
+    await rec.flushEvents()
+    expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))).toMatchObject({ eventEpoch: erasedEventEpoch })
+
+    auth.user = { id: 'user-B', email: 'b@example.test', name: 'B' }
+    rec.recordEvent({ type: 'favorite', track: { id: 2 } })
+    await rec.flushEvents()
+    expect(JSON.parse(String(fetchSpy.mock.calls[2][1]?.body))).not.toHaveProperty('eventEpoch')
   })
 
   it('清除账号画像时不发送访客 ID，保留独立的访客画像标识', async () => {
@@ -296,6 +321,57 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     }
     expect(JSON.parse(String(fetchSpy.mock.calls[1][1]?.body)).events.map((event: { track: { id: number } }) => event.track.id))
       .toEqual([2])
+  })
+
+  it('画像已清除时丢弃待发与失败的旧上报，仅为新上报采用新代次', async () => {
+    const conflict = delayedResponse()
+    const previousPost = delayedResponse()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockReturnValueOnce(conflict.promise)
+      .mockReturnValueOnce(previousPost.promise)
+      .mockResolvedValueOnce(Response.json({}))
+    const rec = useRecommendStore()
+
+    rec.recordEvent({ type: 'favorite', track: { id: 1 } })
+    const first = rec.flushEvents()
+    rec.recordEvent({ type: 'favorite', track: { id: 2 } })
+    const second = rec.flushEvents()
+    rec.recordEvent({ type: 'favorite', track: { id: 3 } })
+
+    conflict.finish(epochMismatch(erasedEventEpoch))
+    await first
+    rec.recordEvent({ type: 'favorite', track: { id: 4 } })
+    previousPost.finish(new Response(null, { status: 503 }))
+    await second
+    await rec.flushEvents()
+
+    const bodies = fetchSpy.mock.calls.map(([, init]) => JSON.parse(String(init?.body)))
+    expect(bodies).toHaveLength(3)
+    expect(bodies[0]).not.toHaveProperty('eventEpoch')
+    expect(bodies[1]).not.toHaveProperty('eventEpoch')
+    expect(bodies[2]).toMatchObject({
+      eventEpoch: erasedEventEpoch,
+      events: [{ type: 'favorite', track: { id: 4 } }],
+    })
+  })
+
+  it.each([
+    [erasedEventEpoch, 'authenticated'],
+    ['invalid-marker', 'anonymous-opt-in'],
+  ])('拒绝采用其他身份或无效的画像代次', async (eventEpoch, mode) => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(epochMismatch(eventEpoch, mode))
+      .mockResolvedValueOnce(Response.json({}))
+    const rec = useRecommendStore()
+
+    rec.recordEvent({ type: 'favorite', track: { id: 1 } })
+    await rec.flushEvents()
+    rec.recordEvent({ type: 'favorite', track: { id: 2 } })
+    await rec.flushEvents()
+
+    const body = JSON.parse(String(fetchSpy.mock.calls[1][1]?.body))
+    expect(body).not.toHaveProperty('eventEpoch')
+    expect(body.events).toMatchObject([{ type: 'favorite', track: { id: 2 } }])
   })
 
   it('关闭个性化后 recordEvent 完全不产生网络上报', async () => {

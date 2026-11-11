@@ -72,6 +72,7 @@ interface DeliveryState {
   generation: number
   pending: SonicEventPayload[]
   identity: string | null
+  eventEpoch: { subject: string; value: string } | null
   timer: ReturnType<typeof setTimeout> | null
   writes: Set<Promise<void>>
   clearing: Promise<boolean> | null
@@ -82,7 +83,7 @@ const deliveries = new WeakMap<object, DeliveryState>()
 function deliveryFor(store: object): DeliveryState {
   let delivery = deliveries.get(store)
   if (!delivery) {
-    delivery = { generation: 0, pending: [], identity: null, timer: null, writes: new Set(), clearing: null }
+    delivery = { generation: 0, pending: [], identity: null, eventEpoch: null, timer: null, writes: new Set(), clearing: null }
     deliveries.set(store, delivery)
   }
   return delivery
@@ -264,11 +265,23 @@ export const useRecommendStore = defineStore('recommend', {
       delivery.pending = []
       const headers = this.buildRequestHeaders(false)
       const accountId = currentAccountId()
-      headers['X-Sonic-Event-Target'] = accountId ? `account:${accountId}` : 'anonymous-opt-in'
-      const write = postSonicEvents(batch, headers).then((result) => {
-        // A failed batch can only rejoin the queue it was originally sent from.
-        if (result !== 'retry' || delivery.clearing || !this.personalizationEnabled ||
+      const expectedMode = accountId ? 'authenticated' : 'anonymous-opt-in'
+      const target = accountId ? `account:${accountId}` : 'anonymous-opt-in'
+      const subject = accountId ? target : this.anonId
+      const eventEpoch = delivery.eventEpoch?.subject === subject ? delivery.eventEpoch.value : undefined
+      headers['X-Sonic-Event-Target'] = target
+      const write = postSonicEvents(batch, headers, { expectedMode, eventEpoch }).then((result) => {
+        if (delivery.clearing || !this.personalizationEnabled ||
           delivery.generation !== generation || deliveryIdentity(this.anonId) !== identity) return
+        if (result.status === 'epoch-mismatch') {
+          // Discard unsent events and invalidate other writes from before the erasure.
+          discardPending(delivery)
+          if (result.eventEpoch !== undefined) {
+            delivery.eventEpoch = result.eventEpoch === null ? null : { subject, value: result.eventEpoch }
+          }
+          return
+        }
+        if (result.status !== 'retry') return
         const capacity = Math.max(0, MAX_PENDING_EVENTS - delivery.pending.length)
         delivery.pending = [...batch.slice(0, capacity), ...delivery.pending]
       })
@@ -439,10 +452,15 @@ export const useRecommendStore = defineStore('recommend', {
       // queued during erasure, including via pagehide or a failed batch retry.
       const clearing = waitForWrites(delivery.writes).then(async (drained) => {
         if (!drained || deliveryIdentity(this.anonId) !== identity) return false
-        const ok = await deleteSonicEvents(headers, mode)
-        if (!ok || deliveryIdentity(this.anonId) !== identity) return false
+        const result = await deleteSonicEvents(headers, mode)
+        if (!result || deliveryIdentity(this.anonId) !== identity) return false
         this.dislikedTracks = []
-        if (!accountId) this.anonId = this.personalizationEnabled ? generateAnonId() : ''
+        if (accountId && result.eventEpoch) {
+          delivery.eventEpoch = { subject: `account:${accountId}`, value: result.eventEpoch }
+        } else if (!accountId) {
+          if (delivery.eventEpoch?.subject === this.anonId) delivery.eventEpoch = null
+          this.anonId = this.personalizationEnabled ? generateAnonId() : ''
+        }
         return true
       })
       delivery.clearing = clearing

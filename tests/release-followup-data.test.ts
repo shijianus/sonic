@@ -3,12 +3,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { onRequest as eventsHttp } from '../functions/api/sonic/events';
+import type { AppEnv } from '../functions/_lib/types';
+import { resetLocalEngineCircuitForTest } from '../functions/_lib/sonic/local-engine';
 import { MemoryRecommendStore } from '../functions/_lib/sonic/recommend/memory-store';
 import { SqliteRecommendStore, createServerRecommendStore } from '../server/recommend-sqlite';
 import {
   clearUserRecommendationData, clearUserRecommendationDataAndExternal, ingestBehaviorEvents,
 } from '../functions/_lib/sonic/recommend/engine';
 import { deleteGorseUserData, syncFeedbackToGorse } from '../functions/_lib/sonic/recommend/external-adapters';
+import { resolveUserIdentity } from '../functions/_lib/sonic/recommend/identity';
 import { ensureCatalogSeeded } from '../functions/_lib/sonic/recommend/seed-catalog';
 import { executeSmartSearch } from '../functions/_lib/sonic/recommend/smart-search';
 import type { RecommendStore, SonicEntity, StoredBehaviorEvent, UserIdentityContext } from '../functions/_lib/sonic/recommend/types';
@@ -34,6 +38,84 @@ const publicIdentity: UserIdentityContext = {
   mode: 'public', subjectKey: null, personalizationEnabled: false, isAuthenticated: false,
 };
 const envFor = (store: RecommendStore) => ({ RECOMMEND_STORE: store, SONIC_RECOMMEND_OFFLINE: '1' });
+
+it('rolls over a full anonymous epoch budget without accepting old activity or changing account epochs', async () => {
+  vi.stubEnv('SONIC_RECOMMEND_MAX_ANON_ERASURE_ROWS', '1');
+  const file = tempDb();
+  let store = sqlite(file);
+  const guestA = 'anon_epoch_budget_a';
+  const guestB = 'anon_epoch_budget_b';
+  const guestC = 'anon_epoch_budget_c';
+  const accountEpoch = 'a'.repeat(32);
+  store.clearUserEvents('usr_epoch_budget', accountEpoch);
+  const send = (request: Request) => eventsHttp({ request, env: envFor(store) });
+  const read = async (guest: string) => {
+    const response = await send(eventRequest('GET', guest));
+    expect(response.status).toBe(200);
+    return (await response.json()).data;
+  };
+  const clear = async (guest: string, removedEvents: number) => {
+    const response = await send(eventRequest('DELETE', guest));
+    expect(response.status).toBe(200);
+    const { data } = await response.json();
+    expect(data).toMatchObject({ cleared: true, removedEvents, eventEpoch: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    return data.eventEpoch as string;
+  };
+  const batch = [{ type: 'search', query: 'epoch capacity', eventId: 'epoch_budget_event' }];
+  const firstA = await clear(guestA, 0);
+  const refreshedA = await clear(guestA, 0);
+  expect(refreshedA).not.toBe(firstA);
+  expect((await read(guestB)).eventEpoch).toBeNull();
+  expect((await send(eventRequest('POST', guestB, { events: batch }))).status).toBe(200);
+  const oldA = eventRequest('POST', guestA, { events: batch, eventEpoch: refreshedA });
+  const unmarkedC = eventRequest('POST', guestC, { events: batch });
+
+  const db = new DatabaseSync(file);
+  try {
+    db.exec("CREATE TRIGGER block_epoch_insert BEFORE INSERT ON recommendation_event_epochs BEGIN SELECT RAISE(ABORT, 'epoch insert blocked'); END");
+    expect((await send(eventRequest('DELETE', guestB))).status).toBe(503);
+    expect((await read(guestA)).eventEpoch).toBe(refreshedA);
+    expect(await read(guestB)).toMatchObject({ eventEpoch: null, totalEvents: 1 });
+  } finally {
+    db.exec('DROP TRIGGER IF EXISTS block_epoch_insert');
+    db.close();
+  }
+
+  const overrideB = await clear(guestB, 1);
+  const derivedA = (await read(guestA)).eventEpoch;
+  const derivedC = (await read(guestC)).eventEpoch;
+  for (const derived of [derivedA, derivedC]) expect(derived).toMatch(/^[0-9a-f]{32}$/);
+  expect(new Set([refreshedA, overrideB, derivedA, derivedC]).size).toBe(4);
+  expect(await clear(guestB, 0)).not.toBe(overrideB);
+  expect((await read(guestA)).eventEpoch).toBe(derivedA);
+  expect((await read(guestC)).eventEpoch).toBe(derivedC);
+
+  store.close();
+  store = sqlite(file);
+  expect((await read(guestA)).eventEpoch).toBe(derivedA);
+  expect((await read(guestC)).eventEpoch).toBe(derivedC);
+  expect(store.getEventEpoch('usr_epoch_budget')).toBe(accountEpoch);
+  expect(store.getEventEpoch('usr_untouched')).toBeNull();
+  for (const [incoming, expected] of [[oldA, derivedA], [unmarkedC, derivedC]] as const) {
+    const rejected = await send(incoming);
+    expect(rejected.status).toBe(409);
+    expect(await rejected.json()).toMatchObject({
+      error: { code: 'EVENT_EPOCH_MISMATCH' },
+      data: { eventEpoch: expected, privacyMode: 'anonymous-opt-in' },
+    });
+  }
+  expect(store.getStats().eventCount).toBe(0);
+  const fresh = await send(eventRequest('POST', guestA, { events: batch, eventEpoch: derivedA }));
+  expect(fresh.status).toBe(200);
+  expect(await fresh.json()).toMatchObject({ data: { accepted: 1 } });
+});
+function eventRequest(method: 'GET' | 'POST' | 'DELETE', guestId: string, body?: unknown): Request {
+  return new Request('https://edge.erasure.test/api/sonic/events', {
+    method,
+    headers: { 'Content-Type': 'application/json', 'X-Sonic-Anon-Id': guestId },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
 const event = (id: string, subject = 'anon:data_A', createdAt = NOW): StoredBehaviorEvent => ({
   eventId: id, subjectKey: subject, type: 'search', query: 'private query', weight: 0.3, createdAt,
 });
@@ -50,8 +132,94 @@ const entity = (): SonicEntity => ({
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  resetLocalEngineCircuitForTest();
   for (const store of stores.splice(0)) store.close();
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
+});
+
+describe('durable event epoch after erasure', () => {
+  const guestA = 'anon_epoch_subject_a';
+  const guestB = 'anon_epoch_subject_b';
+
+  it.each(['local SQLite', 'signed Engine hop'])('blocks old event batches and accepts new activity (%s)', async (runtime) => {
+    const file = tempDb();
+    let store = sqlite(file);
+    store.upsertEntity(entity());
+    const shared: AppEnv = {
+      SONIC_ENV: 'test',
+      SONIC_RATE_LIMIT_ANON_RPM: '10000',
+      SONIC_ENGINE_SECRET: 'epoch-service-key-at-least-32-characters',
+      SONIC_ENGINE_IDENTITY_SECRET: 'epoch-identity-key-at-least-32-characters',
+      SONIC_REQUIRE_ENGINE_IDENTITY: '1',
+    };
+    const throughEngine = runtime === 'signed Engine hop';
+    const edgeEnv: AppEnv = { ...shared, SONIC_LOCAL_ENGINE_URL: 'https://engine.erasure.test' };
+    if (throughEngine) {
+      vi.spyOn(globalThis, 'fetch').mockImplementation((url, init) => eventsHttp({
+        request: new Request(String(url), init),
+        env: { ...shared, ...envFor(store), SONIC_RUNTIME: 'linux-engine' },
+      }));
+    }
+    const send = (incoming: Request) => eventsHttp({
+      request: incoming, env: throughEngine ? edgeEnv : { ...shared, ...envFor(store) },
+    });
+    const batch = [
+      { type: 'search', query: 'stale private search', eventId: 'epoch_search' },
+      { type: 'open', entityType: 'album', entityId: 'alb_test', eventId: 'epoch_album', timestamp: Date.now() + 30_000 },
+    ];
+    const heldBeforeFirstClear = eventRequest('POST', guestA, { events: batch });
+    const before = await send(eventRequest('GET', guestA));
+    expect(before.status).toBe(200);
+    expect(await before.json()).toMatchObject({ data: { eventEpoch: null, totalEvents: 0 } });
+    expect((await send(eventRequest('POST', guestB, { events: [batch[0]] }))).status).toBe(200);
+
+    const cleared = await send(eventRequest('DELETE', guestA));
+    expect(cleared.status).toBe(200);
+    const first = await cleared.json();
+    expect(first.data).toMatchObject({ cleared: true, removedEvents: 0, eventEpoch: expect.stringMatching(/^[0-9a-f]{32}$/) });
+
+    store.close();
+    store = sqlite(file);
+    const reopened = await send(eventRequest('GET', guestA));
+    expect(await reopened.json()).toMatchObject({ data: { eventEpoch: first.data.eventEpoch, totalEvents: 0 } });
+    const assertConflict = async (incoming: Request, eventEpoch: string) => {
+      const conflict = await send(incoming);
+      expect(conflict.status).toBe(409);
+      expect(conflict.headers.get('cache-control')).toContain('no-store');
+      expect(await conflict.json()).toMatchObject({
+        brand: 'Sonic',
+        error: { code: 'EVENT_EPOCH_MISMATCH' },
+        data: { eventEpoch, privacyMode: 'anonymous-opt-in' },
+      });
+      const profile = await send(eventRequest('GET', guestA));
+      expect(await profile.json()).toMatchObject({ data: { eventEpoch, totalEvents: 0 } });
+      expect(store.getStats().eventCount).toBe(1);
+    };
+    await assertConflict(heldBeforeFirstClear, first.data.eventEpoch);
+
+    const current = await send(eventRequest('POST', guestA, { events: batch, eventEpoch: first.data.eventEpoch }));
+    expect(current.status).toBe(200);
+    expect(await current.json()).toMatchObject({ data: { accepted: 2 } });
+    const heldBeforeSecondClear = eventRequest('POST', guestA, { events: batch, eventEpoch: first.data.eventEpoch });
+    const clearedAgain = await send(eventRequest('DELETE', guestA));
+    expect(clearedAgain.status).toBe(200);
+    const second = await clearedAgain.json();
+    expect(second.data).toMatchObject({ cleared: true, removedEvents: 2, eventEpoch: expect.stringMatching(/^[0-9a-f]{32}$/) });
+    expect(second.data.eventEpoch).not.toBe(first.data.eventEpoch);
+    await assertConflict(heldBeforeSecondClear, second.data.eventEpoch);
+
+    const fresh = await send(eventRequest('POST', guestA, { events: batch, eventEpoch: second.data.eventEpoch }));
+    expect(fresh.status).toBe(200);
+    expect(await fresh.json()).toMatchObject({ data: { accepted: 2 } });
+    const other = await send(eventRequest('GET', guestB));
+    expect(await other.json()).toMatchObject({ data: { totalEvents: 1, eventEpoch: null } });
+    const optedOut = eventRequest('GET', guestA);
+    optedOut.headers.set('X-Sonic-Personalization', 'off');
+    const publicProfile = await send(optedOut);
+    const publicData = (await publicProfile.json()).data;
+    expect(publicData).toMatchObject({ privacyMode: 'public', totalEvents: 0 });
+    expect(publicData.eventEpoch).not.toBe(second.data.eventEpoch);
+  });
 });
 
 describe('configured SQLite retention', () => {
@@ -276,24 +444,33 @@ describe('transactional erasure and physical SQLite scope', () => {
     vi.spyOn(Date, 'now').mockReturnValue(NOW);
     const file = tempDb();
     const store = sqlite(file);
-    addRows(store, 'A', NOW);
-    const source = { subjectKey: 'A', eventId: 'track_event' };
+    const guestId = 'anon_erasure_rollback';
+    const env = envFor(store);
+    const who = await resolveUserIdentity(eventRequest('GET', guestId), env);
+    const subject = who.subjectKey!;
+    addRows(store, subject, NOW);
+    const source = { subjectKey: subject, eventId: 'track_event' };
     store.recordSearchQuery('sensitive', 'private text', false, source);
     store.incrementCooccurrence('a', 'b', 2, source);
-    store.saveUserRadarProfile('A', '{"private":true}');
+    store.saveUserRadarProfile(subject, '{"private":true}');
     const db = new DatabaseSync(file);
     try {
       db.exec("CREATE TRIGGER block_erasure BEFORE DELETE ON user_radar_profiles BEGIN SELECT RAISE(ABORT, 'erase blocked'); END");
-      await expect(clearUserRecommendationDataAndExternal(identity('A'), envFor(store))).rejects.toThrow(/erase blocked/);
-      expect(store.getUserEvents('A')).toHaveLength(1);
-      expect(store.getUserEntityFeedbacks('A')).toHaveLength(1);
+      await expect(clearUserRecommendationDataAndExternal(who, env)).rejects.toThrow(/erase blocked/);
+      const afterFailure = await eventsHttp({ request: eventRequest('GET', guestId), env });
+      expect(afterFailure.status).toBe(200);
+      expect(await afterFailure.json()).toMatchObject({ data: { eventEpoch: null } });
+      expect(store.getUserEvents(subject)).toHaveLength(1);
+      expect(store.getUserEntityFeedbacks(subject)).toHaveLength(1);
       expect(store.getTopSearchQueries('')).toEqual([{ query: 'private text', count: 1 }]);
       expect(store.getCooccurringTracks('a')).toHaveLength(1);
-      expect(store.getUserRadarProfile('A')).not.toBeNull();
+      expect(store.getUserRadarProfile(subject)).not.toBeNull();
       db.exec('DROP TRIGGER block_erasure');
-      expect((await clearUserRecommendationDataAndExternal(identity('A'), envFor(store))).cleared).toBe(true);
+      expect((await clearUserRecommendationDataAndExternal(who, env)).cleared).toBe(true);
+      const afterRetry = await eventsHttp({ request: eventRequest('GET', guestId), env });
+      expect(await afterRetry.json()).toMatchObject({ data: { eventEpoch: expect.stringMatching(/^[0-9a-f]{32}$/) } });
       for (const table of ['behavior_events', 'user_entity_feedback', 'user_radar_profiles', 'search_query_contributions', 'cooccurrence_contributions']) {
-        expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE subject_key = ?`).get('A')).toEqual({ count: 0 });
+        expect(db.prepare(`SELECT COUNT(*) AS count FROM ${table} WHERE subject_key = ?`).get(subject)).toEqual({ count: 0 });
       }
       store.close();
       const reopened = sqlite(file);

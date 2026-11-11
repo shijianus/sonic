@@ -12,6 +12,7 @@ import { callLocalEngineJson } from '../../_lib/sonic/local-engine';
 import { buildGatewayHeaders, guardGatewayRequest, readBoundedRequestBody, sonicError } from '../../_lib/sonic/route-helpers';
 import { getPublicClientIp } from '../../_lib/sonic/security';
 import { sha256Hex } from '../../_lib/sonic/crypto';
+import { EventEpochMismatchError, isEventEpoch } from '../../_lib/sonic/recommend/event-epoch';
 import {
   buildUserPreferenceProfile,
   clearUserRecommendationData,
@@ -200,8 +201,10 @@ export async function onRequest({
     const store = getRecommendStore(env);
     if (identity.subjectKey && store.kind !== 'sqlite') return storageUnavailable(start);
     let profile: ReturnType<typeof buildUserPreferenceProfile>;
+    let eventEpoch: string | null | undefined;
     try {
       profile = buildUserPreferenceProfile(identity, store);
+      if (identity.subjectKey) eventEpoch = store.getEventEpoch?.(identity.subjectKey) ?? null;
     } catch {
       return storageUnavailable(start);
     }
@@ -210,6 +213,7 @@ export async function onRequest({
         brand: 'Sonic',
         data: {
           privacyMode: identity.mode,
+          eventEpoch,
           personalizationEnabled: identity.personalizationEnabled,
           totalEvents: profile.totalEvents,
           likedCount: profile.likedTrackIds.size,
@@ -258,7 +262,7 @@ export async function onRequest({
           Number.isSafeInteger(erasure.removedEvents) && erasure.removedEvents >= 0 &&
           (identity.mode === 'public'
             ? erasure.cleared === false && erasure.removedEvents === 0
-            : erasure.cleared === true && erasure.storageKind === 'sqlite')) {
+            : erasure.cleared === true && erasure.storageKind === 'sqlite' && isEventEpoch(erasure.eventEpoch))) {
         // Authority's result/count, never an Edge OR-success. Clear stale local
         // read-fallback data only after the durable deletion is acknowledged.
         try { clearUserRecommendationData(identity, env); } catch {}
@@ -294,6 +298,14 @@ export async function onRequest({
     parsed = rawText ? JSON.parse(rawText) : {};
   } catch {
     return sonicError('INVALID_JSON', 'Request body must be valid JSON', 400);
+  }
+  const suppliedEpoch: unknown = parsed?.eventEpoch ?? null;
+  let eventEpoch: string | null = null;
+  if (suppliedEpoch !== null) {
+    if (!isEventEpoch(suppliedEpoch)) {
+      return sonicError('INVALID_EVENT_EPOCH', 'eventEpoch must be a current recommendation event marker', 400);
+    }
+    eventEpoch = suppliedEpoch;
   }
 
   const rawEvents: any[] = Array.isArray(parsed)
@@ -369,7 +381,7 @@ export async function onRequest({
     const engineRes = await callLocalEngineJson<any>('/api/sonic/events', env, {
       request,
       method: 'POST',
-      body: JSON.stringify({ events: validEvents }),
+      body: JSON.stringify({ events: validEvents, ...(eventEpoch === null ? {} : { eventEpoch }) }),
       timeoutMs: config.engineTimeoutMs,
       signal: request.signal,
       // An unscoped public request must not become a stored write on revalidation.
@@ -398,13 +410,21 @@ export async function onRequest({
     return engineRejected(engineRes, start, circuitState);
   }
 
-  if (identity.personalizationEnabled && identity.subjectKey && getRecommendStore(env).kind !== 'sqlite') {
-    return storageUnavailable(start);
+  if (identity.personalizationEnabled && identity.subjectKey) {
+    const store = getRecommendStore(env);
+    if (store.kind !== 'sqlite' || !store.withEventEpoch) return storageUnavailable(start);
   }
   let result: Awaited<ReturnType<typeof ingestBehaviorEvents>>;
   try {
-    result = await ingestBehaviorEvents(validEvents, identity, env);
+    result = await ingestBehaviorEvents(validEvents, identity, env, eventEpoch);
   } catch (err: any) {
+    if (err instanceof EventEpochMismatchError) {
+      return jsonResponse({
+        brand: 'Sonic',
+        error: { code: 'EVENT_EPOCH_MISMATCH', message: err.message },
+        data: { eventEpoch: err.eventEpoch, privacyMode: identity.mode },
+      }, { status: 409, headers: buildGatewayHeaders(privateHeaders) });
+    }
     if (err?.code === 'RECOMMEND_STORE_BUDGET_EXCEEDED') return storageBudgetExceeded(start);
     return storageUnavailable(start);
   }
