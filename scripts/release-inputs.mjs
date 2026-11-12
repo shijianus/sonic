@@ -34,6 +34,7 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
   'scripts/theme-lint-baseline.json', 'scripts/generate-sbom.mjs',
   'scripts/test-sonic-gateway.mjs', 'scripts/test-auth-compatibility.mjs',
   'scripts/test-cover-gateway.mjs', 'scripts/test-local-engine-and-degradation.mjs',
+  'scripts/test-fixtures/provider-fetch.mjs', 'scripts/test-fixtures/sonic-gateway.mjs',
   'scripts/verify-observability-and-alerts.mjs',
   'scripts/evaluate-recommendation.mjs', 'scripts/evaluate-multi-entity.mjs',
   'scripts/selftest-multi-entity-http.mjs', 'scripts/verify-mixed-load.mjs',

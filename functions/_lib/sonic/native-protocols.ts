@@ -6,7 +6,7 @@ import type { AppEnv, SongItem } from '../types';
 import type { SonicAttempt, SonicSearchTrack } from './types';
 import { getSonicConfig } from './config';
 import { getAllowedMediaDomains, computeContentPolicyEpoch, isSourceEnabledByPolicy } from './licensing';
-import { buildNeteaseEapiParams, buildNeteaseLinuxApiParams } from './crypto';
+import { buildNeteaseEapiParams, buildNeteaseLinuxApiParams, buildNeteaseWeapiParams } from './crypto';
 import { normalizeArtistString, normalizeText, normalizeCjkText, calcLevenshteinSimilarity } from './utils';
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
 import { safeFetch } from './security';
@@ -140,6 +140,30 @@ export async function callNeteaseEapi(
     throw new Error(`NetEase eapi HTTP ${resp.status}`);
   }
   return readBoundedProviderJson(resp);
+}
+
+export async function fetchNeteaseRegionalTopSongs(areaId: number, env?: AppEnv, signal?: AbortSignal): Promise<unknown> {
+  const cfg = getSonicConfig(env);
+  // Match the pinned NCM sidecar 4.41.1 top_song module's WEAPI contract.
+  const envelope = await buildNeteaseWeapiParams({ areaId, total: true, e_r: false, csrf_token: '' });
+  const response = await fetchWithRuntimeBudget('https://music.163.com/weapi/v1/discovery/new/songs', {
+    method: 'POST',
+    // A redirect could discard the form body and silently remove the region.
+    redirect: 'error',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': DESKTOP_UA,
+      Referer: 'https://music.163.com/',
+      'X-Real-IP': cfg.realIp,
+      Cookie: 'os=pc; appver=2.9.7;',
+    },
+    body: new URLSearchParams(envelope).toString(),
+  }, { timeoutMs: cfg.timeoutMs, signals: [signal] });
+  if (!response.ok) {
+    void response.body?.cancel().catch(() => {});
+    throw new Error(`NetEase WEAPI top songs HTTP ${response.status}`);
+  }
+  return readBoundedProviderJson(response);
 }
 
 function mapNeteaseSongToSonicTrack(item: any): SonicSearchTrack {

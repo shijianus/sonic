@@ -43,7 +43,9 @@ export const kugouProvider: SonicProviderAdapter = {
         signal: options?.signal,
       });
 
-      if (!uResult || !uResult.lines || uResult.lines.length === 0) return null;
+      // The universal engine may return another provider's fallback. Only the
+      // Nexus resolver should choose cross-provider results for a Kugou miss.
+      if (uResult.source !== 'kugou' || uResult.lines.length === 0) return null;
 
       const isReal = uResult.syncType === 'word';
       for (const line of uResult.lines) {

@@ -315,9 +315,10 @@ export async function handleSingleProviderLyricsRequest(
   sortedQuery.delete('_t');
   sortedQuery.sort();
   const cacheIdentifier = `${p}:${sortedQuery.toString()}`;
+  const cacheNamespace = p === 'kugou' ? 'lyrics-prov-v5' : 'lyrics-prov-v4';
 
   if (!params.nocache) {
-    const hit = await getSonicCachedJson<any>('lyrics-prov-v4', cacheIdentifier, env);
+    const hit = await getSonicCachedJson<any>(cacheNamespace, cacheIdentifier, env);
     if (hit?.value) {
       const body = { ...hit.value, meta: { ...hit.value.meta, cached: true, cacheLevel: hit.cacheLevel } };
       return jsonResponse(body, {
@@ -357,7 +358,7 @@ export async function handleSingleProviderLyricsRequest(
         ],
       };
       if (!params.nocache && body.data.level !== 'none') {
-        await putSonicCachedJson('lyrics-prov-v4', cacheIdentifier, body, 86400, 604800, env, waitUntil);
+        await putSonicCachedJson(cacheNamespace, cacheIdentifier, body, 86400, 604800, env, waitUntil);
       }
       return jsonResponse(body, {
         status: 200,
@@ -447,7 +448,7 @@ export async function handleSingleProviderLyricsRequest(
     };
 
     if (!params.nocache && result.data.level !== 'none') {
-      await putSonicCachedJson('lyrics-prov-v4', cacheIdentifier, response, 86400, 604800, env, waitUntil);
+      await putSonicCachedJson(cacheNamespace, cacheIdentifier, response, 86400, 604800, env, waitUntil);
     }
 
     return jsonResponse(response, {

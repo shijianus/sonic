@@ -28,6 +28,7 @@ import { onRequest as handleApiCatchAll } from '../functions/api/[[path]]';
 import { onRequest as handleSonicForward } from '../functions/api/sonic/forward';
 import { createSession } from '../functions/_lib/auth';
 import { createSonicServer } from '../server/index';
+import { withProviderFixtures } from './test-fixtures/provider-fetch.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -312,14 +313,22 @@ async function runTests() {
       const jsonStale = await resStale.json();
       assert(resStale.status === 200 && jsonStale.data.tracks.length === 1, 'Cached search result served immediately during outage');
 
-      // Step 5d: Stream endpoint returns clean 404 STREAM_NOT_FOUND (never halts or 503s on Cloudflare)
-      const streamRes = await handleMusicStream({
-        request: new Request('https://sonic.epocanvas.tech/api/music/stream?id=999999999999&source=kuwo'),
-        env: cfEnv,
+      // Step 5d: A Kuwo region prompt is unavailable while the Engine is down.
+      const fetchLoopback = globalThis.fetch;
+      await withProviderFixtures((url, init) => {
+        if (url.origin === cfEnv.SONIC_LOCAL_ENGINE_URL) return fetchLoopback(url, init);
+        if (url.href === 'http://antiserver.kuwo.cn/anti.s?type=convert_url&rid=999999999999&format=mp3&response=url') {
+          return new Response('https://www.kuwo.cn/nf/resource/fixture.mp3');
+        }
+      }, async () => {
+        const streamRes = await handleMusicStream({
+          request: new Request('https://sonic.epocanvas.tech/api/music/stream?id=999999999999&source=kuwo'),
+          env: cfEnv,
+        });
+        const streamJson = await streamRes.json();
+        assert(streamRes.status === 404, `Unresolvable stream returns 404 (got ${streamRes.status})`);
+        assert(streamJson.error?.code === 'STREAM_NOT_FOUND', 'Unresolvable stream returns machine-readable STREAM_NOT_FOUND');
       });
-      const streamJson = await streamRes.json();
-      assert(streamRes.status === 404, `Unresolvable stream returns 404 (got ${streamRes.status})`);
-      assert(streamJson.error?.code === 'STREAM_NOT_FOUND', 'Unresolvable stream returns machine-readable STREAM_NOT_FOUND');
 
       // Step 5e: Cooldown elapses -> HALF_OPEN probe -> recovers to CLOSED
       await new Promise((r) => setTimeout(r, 180));

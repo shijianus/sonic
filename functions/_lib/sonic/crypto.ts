@@ -1,6 +1,6 @@
-// Sonic Gateway — Pure TypeScript Cryptographic Primitives (Zero Node/Worker Native Dependencies)
+// Sonic Gateway — Portable Cryptographic Primitives (Zero Package Dependencies)
 // Works identically in Cloudflare Pages Functions (Workers V8) and Linux Node.js 22+.
-// Provides RFC 1321 MD5, FIPS 197 AES-128-ECB (PKCS#7), and NetEase linuxapi / eapi packet builders.
+// Provides RFC 1321 MD5, FIPS 197 AES-128-ECB (PKCS#7), and NetEase protocol packet builders.
 
 const encoder = new TextEncoder();
 
@@ -247,6 +247,40 @@ export function aes128EcbEncryptHex(plaintext: string | Uint8Array, key: string 
 
 const NETEASE_LINUXAPI_KEY = 'rFgB&h#%2?^eDg:Q';
 const NETEASE_EAPI_KEY = 'e82ckenh8dichen8';
+
+// Public WEAPI transport parameters from the pinned NCM sidecar 4.41.1 util/crypto.js.
+const NETEASE_WEAPI_IV = encoder.encode('0102030405060708');
+const NETEASE_WEAPI_PRESET_KEY = '0CoJUm6Qyw8W8jud';
+const NETEASE_WEAPI_KEY_ALPHABET = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+const NETEASE_WEAPI_MODULUS = BigInt('0x' +
+  'e0b509f6259df8642dbc35662901477df22677ec152b5ff68ace615bb7b725152' +
+  'b3ab17a876aea8a5aa76d2e417629ec4ee341f56135fccf695280104e0312ecbda' +
+  '92557c93870114af6c9d05c4f7f0c3685b7a46bee255932575cce10b424d813cf' +
+  'e4875d3e82047b97ddef52741d546b8e289dc6935b3ece0462db0a22b8e7');
+
+async function aesCbcBase64(text: string, rawKey: string): Promise<string> {
+  const key = await crypto.subtle.importKey('raw', encoder.encode(rawKey), 'AES-CBC', false, ['encrypt']);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-CBC', iv: NETEASE_WEAPI_IV }, key, encoder.encode(text));
+  return btoa(String.fromCharCode(...new Uint8Array(ciphertext)));
+}
+
+export async function buildNeteaseWeapiParams(payload: Record<string, unknown>): Promise<{ params: string; encSecKey: string }> {
+  let key = '';
+  while (key.length < 16) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    // Reject the last eight values so every character has the same probability.
+    key += Array.from(bytes).filter(byte => byte < 248).map(byte => NETEASE_WEAPI_KEY_ALPHABET[byte % 62]).join('');
+  }
+  const secret = key.slice(0, 16);
+  const reversed = BigInt(`0x${bytesToHex(encoder.encode([...secret].reverse().join('')))}`);
+  // The protocol's raw RSA public exponent is 65537 (2^16 + 1).
+  let power = reversed;
+  for (let i = 0; i < 16; i++) power = power * power % NETEASE_WEAPI_MODULUS;
+  return {
+    params: await aesCbcBase64(await aesCbcBase64(JSON.stringify(payload), NETEASE_WEAPI_PRESET_KEY), secret),
+    encSecKey: (power * reversed % NETEASE_WEAPI_MODULUS).toString(16).padStart(256, '0'),
+  };
+}
 
 export function buildNeteaseLinuxApiParams(payload: Record<string, any>): string {
   return aes128EcbEncryptHex(JSON.stringify(payload), NETEASE_LINUXAPI_KEY, true);

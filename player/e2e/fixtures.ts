@@ -5,17 +5,28 @@ import { test as base, expect, type Page } from '@playwright/test'
  * 单个用例允许出现预期的 console.warn/console.error（例如上游 403），
  * 但任何未捕获的页面异常都视为失败。
  */
-export const test = base.extend<{ pageErrors: string[] }>({
+export const test = base.extend<{ pageErrors: string[]; appLanguage: 'en' | 'zh' }>({
+  appLanguage: ['en', { option: true }],
+  context: async ({ context, baseURL }, use) => {
+    if (!baseURL) throw new Error('E2E requires a local mock server base URL')
+    const mockOrigin = new URL(baseURL).origin
+    // Keep browser traffic on the mock server. Individual tests can fulfil their own fixtures.
+    await context.route(
+      url => (url.protocol === 'http:' || url.protocol === 'https:') && url.origin !== mockOrigin,
+      route => route.abort('blockedbyclient')
+    )
+    await use(context)
+  },
   // 应用默认 UI 语言是中文（main.ts 的显式产品默认），E2E 统一固定为英文，
   // 保证断言文本稳定且可读；这与语言切换功能本身无关。
-  page: async ({ page }, use) => {
-    await page.addInitScript(() => {
+  page: async ({ page, appLanguage }, use) => {
+    await page.addInitScript(lang => {
       try {
-        window.localStorage.setItem('global', JSON.stringify({ lang: 'en' }))
+        window.localStorage.setItem('global', JSON.stringify({ lang }))
       } catch {
         /* about:blank 等场景忽略 */
       }
-    })
+    }, appLanguage)
     await use(page)
   },
   pageErrors: async ({ page }, use) => {

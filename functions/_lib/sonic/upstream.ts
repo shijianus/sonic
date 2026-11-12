@@ -8,7 +8,7 @@ import { getSonicConfig, SONIC_UA } from './config';
 import { callLocalEngineJson, CHART_UPSTREAM_UNAVAILABLE, createRuntimeAbortBudget, fetchWithRuntimeBudget } from './local-engine';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from './security';
 import { recordLicensingBlockMetric } from './observability';
-import { callNeteaseLinuxApi as nativeLinuxApi, callNeteaseEapi as nativeEapi } from './native-protocols';
+import { callNeteaseLinuxApi as nativeLinuxApi, callNeteaseEapi as nativeEapi, fetchNeteaseRegionalTopSongs } from './native-protocols';
 import { getSonicCachedJson, putSonicCachedJson, withSonicJsonSingleFlight } from './cache';
 import { getRecommendStore } from './recommend/memory-store';
 import { ingestVerifiedMvCatalog } from './recommend/entity-store';
@@ -102,6 +102,19 @@ function chartCatalogUnavailable(): Response {
     { code: 503, brand: 'Sonic', error: { code: CHART_UPSTREAM_UNAVAILABLE, message: 'Chart catalog is temporarily unavailable' } },
     { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '3' } },
   );
+}
+
+function topSongsResponse(entries: unknown[], fromSidecar = false): Response {
+  const songs = entries.map((song: any) => ({
+    ...song,
+    duration: song.duration || (song.dt ? Math.floor(song.dt / 1000) : 0),
+    dt: song.dt || (song.duration ? song.duration * 1000 : 0),
+  }));
+  return jsonResponse({ code: 200, brand: 'Sonic', data: desensitizeData(songs) }, {
+    headers: fromSidecar
+      ? { 'Cache-Control': 'public, max-age=1800', 'X-Sonic-Provider': 'local-netease' }
+      : { 'Cache-Control': 'public, max-age=3600' },
+  });
 }
 
 /**
@@ -242,10 +255,20 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
     );
   }
 
+  const topSongType = normEndpoint === 'top/song' ? (url.searchParams.get('type')?.trim() || '0') : '0';
+  if (!['0', '7', '96', '8', '16'].includes(topSongType)) {
+    return jsonResponse(
+      { code: 400, brand: 'Sonic', error: { code: 'INVALID_CHART_REGION', message: 'Invalid new-song region' } },
+      { status: 400, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
+  const regionalTopSongs = topSongType !== '0';
+
   // Primary Hop (when running on Cloudflare Pages): forward commercial catalog queries to Linux Local Engine
   let degradedHeader = false;
   if (cfg.enableLocalEngine) {
-    const engineRes = await callLocalEngineJson<any>(`/api/${normEndpoint}${url.search}`, env, {
+    const query = regionalTopSongs ? `?type=${topSongType}` : url.search;
+    const engineRes = await callLocalEngineJson<any>(`/api/${normEndpoint}${query}`, env, {
       request,
       timeoutMs: cfg.engineTimeoutMs,
     });
@@ -300,9 +323,9 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
     'related/playlist',
     'search/suggest',
   ]);
-  if (cfg.ncmApiUrl && ncmDirectEndpoints.has(normEndpoint)) {
+  if (cfg.ncmApiUrl && (regionalTopSongs || ncmDirectEndpoints.has(normEndpoint))) {
     try {
-      const qs = new URLSearchParams(url.searchParams);
+      const qs = regionalTopSongs ? new URLSearchParams({ type: topSongType }) : new URLSearchParams(url.searchParams);
       qs.set('realIP', cfg.realIp);
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (env?.NETEASE_COOKIE) headers.Cookie = String(env.NETEASE_COOKIE).trim();
@@ -312,8 +335,10 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       });
       if (ncmResp.ok) {
         const ncmData = await ncmResp.json();
+        const chartEntries = chartField && chartCatalogList(ncmData, chartField);
+        if (regionalTopSongs && chartEntries) return topSongsResponse(chartEntries, true);
         const usable = chartField
-          ? chartCatalogList(ncmData, chartField)
+          ? chartEntries
           : ncmData && (ncmData.code === 200 || ncmData.songs || ncmData.playlist || ncmData.data);
         if (usable) {
           return jsonResponse(desensitizeData({ brand: 'Sonic', ...ncmData }), {
@@ -468,21 +493,22 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
   // 3. Top Songs / New Songs
   if (normEndpoint === 'top/song' || normEndpoint === 'personalized/newsong') {
     try {
+      if (regionalTopSongs) {
+        const regional = await withSonicJsonSingleFlight(
+          JSON.stringify(['weapi-top-song', topSongType, cfg.realIp]),
+          signal => fetchNeteaseRegionalTopSongs(Number(topSongType), env, signal),
+          request.signal,
+        );
+        const entries = chartCatalogList(regional, 'data');
+        return entries ? topSongsResponse(entries) : chartCatalogUnavailable();
+      }
       const resp = await timedFetch('https://music.163.com/api/v1/discovery/new/songs', {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
       if (!resp.ok) return chartCatalogUnavailable();
       const entries = chartCatalogList(await resp.json(), 'data');
       if (!entries) return chartCatalogUnavailable();
-      const songs = entries.map((s: any) => ({
-        ...s,
-        duration: s.duration || (s.dt ? Math.floor(s.dt / 1000) : 0),
-        dt: s.dt || (s.duration ? s.duration * 1000 : 0),
-      }));
-      return jsonResponse(
-        { code: 200, brand: 'Sonic', data: desensitizeData(songs) },
-        { headers: { 'Cache-Control': 'public, max-age=3600' } },
-      );
+      return topSongsResponse(entries);
     } catch { request.signal.throwIfAborted(); }
     return chartCatalogUnavailable();
   }

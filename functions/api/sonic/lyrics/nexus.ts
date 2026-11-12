@@ -11,6 +11,8 @@ import { getSonicCachedJson, putSonicCachedJson } from '../../../_lib/sonic/cach
 import { redactSensitiveString } from '../../../_lib/sonic/observability';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from '../../../_lib/sonic/security';
 
+const LYRICS_CACHE_NAMESPACE = 'lyrics-nexus-v7';
+
 export async function handleNexusLyricsRequest(
   request: Request,
   env: AppEnv,
@@ -46,7 +48,7 @@ export async function handleNexusLyricsRequest(
   const cacheIdentifier = sortedQuery.toString();
 
   if (!params.nocache) {
-    const hit = await getSonicCachedJson<SonicLyricsResponse>('lyrics-nexus-v6', cacheIdentifier, env);
+    const hit = await getSonicCachedJson<SonicLyricsResponse>(LYRICS_CACHE_NAMESPACE, cacheIdentifier, env);
     if (hit?.value) {
       const body: SonicLyricsResponse = {
         ...hit.value,
@@ -74,7 +76,7 @@ export async function handleNexusLyricsRequest(
     const latencyMs = Date.now() - startTime;
 
     if (result.degraded && result.data.level === 'none' && !params.nocache) {
-      const staleHit = await getSonicCachedJson<SonicLyricsResponse>('lyrics-nexus-v6', cacheIdentifier, env, { allowStale: true });
+      const staleHit = await getSonicCachedJson<SonicLyricsResponse>(LYRICS_CACHE_NAMESPACE, cacheIdentifier, env, { allowStale: true });
       if (staleHit?.value) {
         const staleBody: SonicLyricsResponse = {
           ...staleHit.value,
@@ -119,7 +121,7 @@ export async function handleNexusLyricsRequest(
     };
 
     if (result.data.level !== 'none' && !params.nocache) {
-      await putSonicCachedJson('lyrics-nexus-v6', cacheIdentifier, response, 86400, 604800, env, waitUntil);
+      await putSonicCachedJson(LYRICS_CACHE_NAMESPACE, cacheIdentifier, response, 86400, 604800, env, waitUntil);
     }
 
     return jsonResponse(response, {

@@ -14,35 +14,32 @@ const props = withDefaults(defineProps<{ inert?: boolean }>(), { inert: false })
 const emit = defineEmits(['show-player'])
 const route = useRoute()
 
-const normalizePath = (path?: string) => {
-  const raw = String(path || '').split('?')[0].split('#')[0]
-  return raw || '/'
+const tabForPath = (path?: string | null) => {
+  const target = path?.split(/[?#]/, 1)[0]
+  if (!target) return
+  return items.find(it =>
+    it.to === '/' ? target === '/' : target === it.to || target.startsWith(`${it.to}/`)
+  )?.to
 }
 
-const tabForPath = (path: string) => {
-  const target = normalizePath(path)
-  const matched = items.find(it =>
-    it.to === '/' ? target === '/' : target === it.to || target.startsWith(`${it.to}/`)
-  )
-  return matched?.to || ''
-}
+const isRecentPath = (path?: string | null) =>
+  /^\/(recent|my-music|likes|downloads|local-music)([/?#]|$)/.test(path ?? '')
 
 // 详情页没有独立 Tab：先看来源 query，再看浏览器返回目标，
 // 最后按业务归属回退（我的音乐下的详情归“我的”，其余详情归首页）。
 const activeTab = computed(() => {
-  const current = normalizePath(route.path)
+  const current = route.path
   const direct = tabForPath(current)
   if (direct) return direct
 
-  const from = typeof route.query.from === 'string' ? route.query.from : ''
-  if (from && tabForPath(from)) return tabForPath(from)
+  const from = typeof route.query.from === 'string' ? route.query.from : undefined
+  const back = (window.history.state as { back?: string | null } | null)?.back
+  const origin = tabForPath(from) ?? tabForPath(back)
+  if (origin) return origin
 
-  const back = normalizePath((window.history.state as { back?: string } | null)?.back)
-  if (back && tabForPath(back)) return tabForPath(back)
-
-  if (/^\/(recent|my-music|likes|downloads|local-music)(\/|$)/.test(current)) return '/recent'
+  if (isRecentPath(current)) return '/recent'
   if (/^\/(playlist|song|album|artist|mv-list|mv-player|charts|artists|new-albums)(\/|$)/.test(current)) {
-    return '/'
+    return isRecentPath(back) ? '/recent' : '/'
   }
   return ''
 })

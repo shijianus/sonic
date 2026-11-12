@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { getEventListeners } from 'node:events';
+import { createDecipheriv } from 'node:crypto';
 import type { AddressInfo } from 'node:net';
 import { toWebRequest } from '../server/request-adapter';
 import { createSonicServer, drainSonicServer, shutdownSonicServer, withRecommendStartupLock } from '../server/index';
@@ -395,6 +396,84 @@ describe.each([
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('retry-after')).toBe('3');
     expect(await response.json()).toMatchObject({ code: 503, error: { code: 'CHART_UPSTREAM_UNAVAILABLE' } });
+  });
+});
+
+describe('new-song regions', () => {
+  const providerUrl = 'https://music.163.com/weapi/v1/discovery/new/songs';
+  const defaultUrl = 'https://music.163.com/api/v1/discovery/new/songs';
+  const sidecarEnv = { SONIC_NCM_API_URL: 'http://ncm:3000', SONIC_REAL_IP: '203.0.113.10' };
+  const request = (search: string, env = {}, endpoint = 'top/song') => {
+    const url = new URL(`https://sonic.test/api/${endpoint}${search}`);
+    return handleUpstreamEndpoint(endpoint, url, new Request(url), { SONIC_ENV: 'test', SONIC_ENABLE_LOCAL_ENGINE: '0', ...env });
+  };
+
+  it.each([7, 96, 8, 16])('encodes region %i in the direct WEAPI request', async (areaId) => {
+    vi.spyOn(crypto, 'getRandomValues').mockImplementation(array => {
+      if (array instanceof Uint8Array) array.set(Array.from({ length: 16 }, (_, i) => i));
+      return array;
+    });
+    const fetchMock = vi.fn(async (_input: string, _init: RequestInit) => Response.json({ data: [{ id: areaId, dt: 180000 }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await request(`?type=${areaId}`);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: [{ id: areaId, dt: 180000, duration: 180 }] });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [input, init] = fetchMock.mock.calls[0];
+    expect(input).toBe(providerUrl);
+    expect(init).toMatchObject({ method: 'POST', redirect: 'error' });
+    const body = new URLSearchParams(String(init.body));
+    // RSA_NO_PADDING output for the reversed fixture key and sidecar 4.41.1's public key.
+    expect(body.get('encSecKey')).toBe('d15a1683c992095d0c234c19966605c5c5964911268bbeda8cb8d08d834913e59d53b32358903a121b5fca784c1f5ae44951fd02524df58ecc98e52cc7cf8689b42c2e93ddf05b0592512d87f5960467e2f086c018849d76014d323500e30f13ef4cafbb0cf5a66731a3f1776c75ca35d0062dac70a3e33245afabcf47938487');
+    const decrypt = (ciphertext: string, key: string) => {
+      const decipher = createDecipheriv('aes-128-cbc', key, '0102030405060708');
+      return Buffer.concat([decipher.update(ciphertext, 'base64'), decipher.final()]).toString();
+    };
+    const firstLayer = decrypt(body.get('params')!, 'abcdefghijklmnop');
+    expect(JSON.parse(decrypt(firstLayer, '0CoJUm6Qyw8W8jud'))).toEqual({ areaId, total: true, e_r: false, csrf_token: '' });
+  });
+
+  it('preserves the region and excludes caller-provided transport options on the sidecar hop', async () => {
+    const fetchMock = vi.fn(async (_input: string) => Response.json({ code: 200, data: [{ id: 8, duration: 180 }] }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await request('?type=8&type=16&domain=https%3A%2F%2Funtrusted.test&crypto=api', sidecarEnv);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('X-Sonic-Provider')).toBe('local-netease');
+    expect(await response.json()).toMatchObject({ data: [{ id: 8, dt: 180000, duration: 180 }] });
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith('http://ncm:3000/top/song?type=8&realIP=203.0.113.10', expect.anything());
+  });
+
+  it('returns retryable failure when both regional transports fail without substituting default songs', async () => {
+    const fetchMock = vi.fn(async (_input: string) => Response.json({}, { status: 503 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await request('?type=16', sidecarEnv);
+    expect(response.status).toBe(503);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(await response.json()).toMatchObject({ error: { code: 'CHART_UPSTREAM_UNAVAILABLE' } });
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      'http://ncm:3000/top/song?type=16&realIP=203.0.113.10',
+      providerUrl,
+    ]);
+  });
+
+  it('preserves default and personalized requests without invoking a regional transport', async () => {
+    const fetchMock = vi.fn(async (_input: string) => Response.json({ data: [] }));
+    vi.stubGlobal('fetch', fetchMock);
+    for (const [query, endpoint] of [['', 'top/song'], ['?type=0', 'top/song'], ['?type=96', 'personalized/newsong']]) {
+      const response = await request(query, sidecarEnv, endpoint);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ data: [] });
+    }
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([defaultUrl, defaultUrl, defaultUrl]);
+  });
+
+  it('rejects unsupported region values without requesting any upstream', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await request('?type=7invalid', sidecarEnv);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: { code: 'INVALID_CHART_REGION' } });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

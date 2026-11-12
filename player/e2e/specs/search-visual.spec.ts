@@ -1,4 +1,6 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../fixtures'
+
+test.use({ appLanguage: 'zh' })
 
 test.describe('搜索与风格探索雷达视觉与交互核验', () => {
   test('桌面端：多维度分组颜色区分、相斥替换、雷达图标极简对齐、音频稳定播放、搜索提交', async ({ page }) => {

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -6,7 +6,7 @@ const root = process.cwd();
 const headersFile = readFileSync(join(root, 'public/_headers'), 'utf8');
 const csp = /Content-Security-Policy:\s*(.+)/i.exec(headersFile)?.[1]?.trim();
 
-test('the deployed CSP allows the built app without violations', async ({ page }) => {
+test('the deployed CSP allows the built app without violations', async ({ page, baseURL }) => {
   expect(csp).toBeTruthy();
   expect(csp).not.toMatch(/script-src[^;]*'unsafe-inline'/);
   expect(csp).toMatch(/object-src 'none'/);
@@ -25,12 +25,13 @@ test('the deployed CSP allows the built app without violations', async ({ page }
   // The mock server does not apply Cloudflare Pages `_headers`; inject the exact
   // shipped CSP onto the document response so the browser enforces the
   // production policy. Static assets inherit the document CSP.
-  await page.route('**/*', async (route) => {
+  const mockOrigin = new URL(baseURL!).origin;
+  await page.route(url => url.origin === mockOrigin, async (route) => {
     if (route.request().resourceType() !== 'document') {
-      await route.continue();
+      await route.fallback();
       return;
     }
-    const response = await route.fetch();
+    const response = await route.fetch({ maxRedirects: 0 });
     await route.fulfill({
       response,
       headers: { ...response.headers(), 'content-security-policy': csp! },

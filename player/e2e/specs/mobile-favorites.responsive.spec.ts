@@ -1,5 +1,26 @@
 import { expect, expectPlaying, horizontalOverflow, test } from '../fixtures'
 
+test('mobile favorites deep link selects Recent and restores the tab after history navigation', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 })
+  const activeTab = page.locator('nav a[aria-current="page"]')
+  const favoritesHeading = page.getByRole('heading', { name: 'My Favorites' })
+
+  await page.goto('/#/likes')
+  await expect(favoritesHeading).toBeVisible()
+  await expect(activeTab).toHaveText('Recent')
+
+  await page.reload()
+  await expect(activeTab).toHaveText('Recent')
+  await page.getByRole('navigation').getByRole('link', { name: 'Search' }).click()
+  await expect(activeTab).toHaveText('Search')
+
+  await page.goBack()
+  await expect(favoritesHeading).toBeVisible()
+  await expect(activeTab).toHaveText('Recent')
+  await page.goForward()
+  await expect(activeTab).toHaveText('Search')
+})
+
 test('mobile playlist and MV favorites are visible, openable and removable without liked songs', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/#/playlist/123')
@@ -14,9 +35,11 @@ test('mobile playlist and MV favorites are visible, openable and removable witho
 
   await page.goto('/#/recent')
   const favorites = page.getByRole('link', { name: /^My Favorites/ })
+  const activeTab = page.locator('nav a[aria-current="page"]')
   await expect(favorites).toHaveText(/My Favorites\s*2/)
   await favorites.click()
   await expect(page.getByRole('heading', { name: 'My Favorites' })).toBeVisible()
+  await expect(activeTab).toHaveText('Recent')
   const playlist = page.getByRole('link', { name: 'E2E Playlist', exact: true })
   const mv = page.getByRole('link', { name: '起风了', exact: true })
   for (const link of [playlist, mv]) await expect(link).toBeVisible()
@@ -25,10 +48,12 @@ test('mobile playlist and MV favorites are visible, openable and removable witho
   await page.reload()
   await playlist.click()
   await expect(page).toHaveURL(/#\/playlist\/123$/)
+  await expect(activeTab).toHaveText('Recent')
   await expect(page.getByRole('button', { name: 'Unfavorite', exact: true })).toBeVisible()
   await page.goBack()
   await mv.click()
   await expect(page).toHaveURL(/#\/mv-player\/10880673$/)
+  await expect(activeTab).toHaveText('Recent')
   await expect(mvLike).toHaveAttribute('aria-pressed', 'true')
   await page.goBack()
 

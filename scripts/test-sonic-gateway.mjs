@@ -3,6 +3,8 @@ import { handleNexusLyricsRequest } from '../functions/api/sonic/lyrics/nexus';
 import { handleSingleProviderLyricsRequest } from '../functions/_lib/sonic/route-helpers';
 import { handleNexusSearchRequest, handleSingleProviderSearchRequest } from '../functions/_lib/sonic/route-helpers';
 import { handleUpstreamEndpoint } from '../functions/_lib/sonic/upstream';
+import { withProviderFixtures } from './test-fixtures/provider-fetch.mjs';
+import { respondToSonicGatewayProvider } from './test-fixtures/sonic-gateway.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -18,7 +20,7 @@ function assert(condition, message) {
 }
 
 async function runTests() {
-  console.log('=== Running Sonic Gateway Test Suite ===\n');
+  console.log('=== Running Sonic Gateway Test Suite (local provider fixtures) ===\n');
 
   // Test 1: Lyrics Nexus with platform + platformId
   console.log('1. Testing GET /api/sonic/lyrics/nexus (with platformId)');
@@ -34,6 +36,7 @@ async function runTests() {
     assert(Array.isArray(json.meta.attempts), 'Meta.attempts is an array');
     assert(typeof json.meta.latencyMs === 'number', `LatencyMs is number (${json.meta.latencyMs}ms)`);
     assert(json.meta.attempts.some(a => a.provider === 'netease'), 'Netease attempt recorded');
+    assert(json.data.syncedLyrics.some(line => line.text === 'A local verse begins'), 'NetEase fixture lyrics are decoded');
   }
 
   // Test 2: Lyrics Nexus with Title only (no platformId)
@@ -46,6 +49,14 @@ async function runTests() {
     assert(res.status === 200, `Status is 200 (got ${res.status})`);
     assert(json.brand === 'Sonic', `Brand is Sonic`);
     assert(Array.isArray(json.meta.attempts), `Meta.attempts recorded (${json.meta.attempts.length} attempts)`);
+    assert(json.data.syncedLyrics.some(line => line.text === 'A local verse begins'), 'Title-only search returns the fixture lyrics');
+    assert(json.data.provider === 'lrclib' && json.meta.provider === 'lrclib' && res.headers.get('X-Sonic-Provider') === 'lrclib', 'Nexus credits LRCLIB in data, metadata and headers');
+    assert(json.meta.attempts.some(a => a.provider === 'kugou' && !a.ok) && json.meta.attempts.some(a => a.provider === 'lrclib' && a.ok), 'Attempt history records the Kugou miss and LRCLIB success');
+
+    const kugouReq = new Request('http://localhost/api/sonic/lyrics/kugou?title=Shape%20of%20You&artist=Ed%20Sheeran&nocache=1');
+    const kugouRes = await handleSingleProviderLyricsRequest('kugou', kugouReq, {});
+    const kugou = await kugouRes.json();
+    assert(kugouRes.status === 200 && kugou.data.provider === 'kugou' && kugou.data.level === 'none', 'Kugou-only requests return a miss when Kugou has no lyrics');
   }
 
   // Test 3: Lyrics Apple / YTMusic disabled handling (501 + message)
@@ -88,6 +99,7 @@ async function runTests() {
     assert(json.brand === 'Sonic', `Brand is Sonic`);
     assert(json.data && Array.isArray(json.data.tracks), `Tracks array returned (${json.data?.tracks?.length} tracks)`);
     assert(Array.isArray(json.meta.attempts), `Meta.attempts logged (${json.meta?.attempts?.length} attempts)`);
+    assert(json.data.tracks.length === 1, 'The three matching provider results are merged');
 
     if (json.data.tracks.length > 0) {
       const t = json.data.tracks[0];
@@ -96,6 +108,7 @@ async function runTests() {
       assert(t.platform !== undefined, `Track has platform: "${t.platform}"`);
       assert(t.platformId !== undefined, `Track has platformId: "${t.platformId}"`);
       assert(Array.isArray(t.sources), `Track has sources[]: ${JSON.stringify(t.sources)}`);
+      assert(['netease', 'qq', 'kugou'].every(platform => t.sources.some(source => source.platform === platform)), 'Merged track retains all three provider sources');
     }
   }
 
@@ -113,16 +126,16 @@ async function runTests() {
     assert(Array.isArray(json.data.tracks) && json.data.tracks.length === 0, `Disabled GDStudio returns 0 tracks`);
   }
 
-  // Test 7: Timeout & Upstream isolation
-  console.log('\n7. Testing Upstream Timeout Isolation (1ms timeout)');
+  // Test 7: Timeout & Upstream isolation at the minimum runtime budget.
+  console.log('\n7. Testing Upstream Timeout Isolation (500ms timeout)');
   {
     const req = new Request('http://localhost/api/sonic/search/nexus?q=%E5%91%A8%E6%9D%B0%E4%BC%A6&nocache=1');
-    const res = await handleNexusSearchRequest(req, { SONIC_TIMEOUT_MS: '1' });
+    const res = await handleNexusSearchRequest(req, { SONIC_TIMEOUT_MS: '500' });
     const json = await res.json();
 
     assert(res.status === 200, `Search returns 200 despite timeouts (got ${res.status})`);
     assert(json.brand === 'Sonic', `Brand is Sonic`);
-    assert(Array.isArray(json.meta.attempts), `Attempts logged with timeout errors`);
+    assert(json.meta.attempts.length === 3 && json.meta.attempts.every(a => !a.ok && /timed out|timeout/i.test(a.error)), 'All three upstream timeouts are recorded');
   }
 
   // Test 8: QQ Desktop Search returns tracks
@@ -137,8 +150,8 @@ async function runTests() {
     assert(json.data && Array.isArray(json.data.tracks) && json.data.tracks.length > 0, `QQ returned ${json.data?.tracks?.length} tracks`);
   }
 
-  // Test 9: Native NetEase & Kugou Single Provider Search + Default Third-Party Exclusion
-  console.log('\n9. Testing Native NetEase/Kugou Search & meta.attempts Provenance');
+  // Test 9: Native NetEase Single Provider Search + Default Third-Party Exclusion
+  console.log('\n9. Testing Native NetEase Search & meta.attempts Provenance');
   {
     const neReq = new Request('http://localhost/api/sonic/search/netease?q=%E8%B5%B7%E9%A3%8E%E4%BA%86&count=3&nocache=1');
     const neRes = await handleSingleProviderSearchRequest('netease', neReq, {});
@@ -165,6 +178,7 @@ async function runTests() {
 
     assert(res.status === 200, `Status is 200, NOT 404 (got ${res.status})`);
     assert(json.brand === 'Sonic', `Brand is Sonic`);
+    assert(json.data.tracks[0]?.platformId === '801', 'Kuwo fixture result is decoded');
   }
 
   // Test 11: Musixmatch False-Positive Prevention for Gibberish Lyrics
@@ -250,6 +264,7 @@ async function runTests() {
     const dataTracksP2 = await resTracksP2.json();
     assert(resTracksP2.status === 200, `Playlist track/all page 2 returns 200`);
     assert(Array.isArray(dataTracksP2.songs) && dataTracksP2.songs.length === 5, `Playlist track/all page 2 contains 5 songs`);
+    assert(dataTracksP2.songs[0]?.id === dataTracks.songs[5]?.id, 'Playlist paging advances by the requested offset');
   }
 
   // 14. Testing Playlist Comments and Similar Playlists
@@ -330,11 +345,11 @@ async function runTests() {
   console.log(`========================================\n`);
 
   if (failed > 0) {
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
-runTests().catch(err => {
+withProviderFixtures(respondToSonicGatewayProvider, runTests).catch(err => {
   console.error('Fatal test error:', err);
   process.exit(1);
 });
