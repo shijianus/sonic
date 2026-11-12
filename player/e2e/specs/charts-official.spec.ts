@@ -22,9 +22,14 @@ test('desktop official charts: 25 entries stay inside their slot and tabs remain
   await page.goto('/#/charts')
   await page.getByRole('button', { name: 'Official Charts' }).click()
 
-  const buttons = page.locator('.official-filter-scroll button')
+  const scroller = page.getByRole('group', { name: 'Official charts:', exact: true })
+  const buttons = scroller.getByRole('button')
   await expect(buttons).toHaveCount(25)
   await expect(buttons.nth(24)).toContainText('第25个榜单名称完整展示测试')
+  await page.keyboard.press('Tab')
+  await expect(scroller).toBeFocused()
+  await page.keyboard.press('End')
+  await expect.poll(() => scroller.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
 
   const geometry = await page.evaluate(() => {
     const scroller = document.querySelector('.official-filter-scroll') as HTMLElement | null
@@ -60,7 +65,7 @@ test('desktop official charts: 25 entries stay inside their slot and tabs remain
 
   // This click used to be intercepted by the overflowing official row.
   await page.getByRole('button', { name: 'Trending', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Trending', exact: true })).toHaveClass(/bg-sky-500/)
+  await expect(page.getByRole('button', { name: 'Trending', exact: true })).toHaveAttribute('aria-pressed', 'true')
   expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
 
   const heights: number[] = []
@@ -73,7 +78,7 @@ test('desktop official charts: 25 entries stay inside their slot and tabs remain
 
   await page.getByRole('button', { name: 'Official Charts' }).click()
   await buttons.nth(24).click()
-  await expect(buttons.nth(24)).toHaveClass(/bg-sky-500/)
+  await expect(buttons.nth(24)).toHaveAttribute('aria-pressed', 'true')
 
   if (process.env.SONIC_EVIDENCE_DIR) {
     await page.screenshot({ path: `${process.env.SONIC_EVIDENCE_DIR}/${testInfo.project.name}-charts-official-fixed.png` })

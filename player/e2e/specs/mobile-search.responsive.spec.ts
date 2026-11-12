@@ -1,5 +1,36 @@
 import { test, expect, expectPaused, expectPlaying, getAudio, horizontalOverflow } from '../fixtures'
 
+test('mobile search and Style Radar expose full-size, localized controls', async ({ page }) => {
+  await page.goto('/#/search?q=sonic')
+  const main = page.getByRole('main')
+  const search = main.getByRole('button', { name: 'Search', exact: true })
+  const clear = main.getByRole('button', { name: 'Clear', exact: true })
+  const input = main.getByRole('textbox', { name: 'Search', exact: true })
+  const radar = main.locator('.style-radar-section')
+  const refresh = radar.getByRole('button', { name: 'Refresh', exact: true })
+  const playAll = radar.getByRole('button', { name: 'Play All', exact: true })
+
+  for (const control of [search, clear, refresh, playAll]) {
+    await expect(control).toBeVisible()
+    const box = await control.boundingBox()
+    expect(box?.height).toBeGreaterThanOrEqual(44)
+    expect(box?.width).toBeGreaterThanOrEqual(44)
+  }
+
+  await expect(refresh).toBeEnabled()
+  const refreshed = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/api/sonic/recommend/discover' && response.ok()
+  )
+  await refresh.tap()
+  await refreshed
+  await clear.tap()
+  await expect(input).toHaveValue('')
+  await input.fill('sonic')
+  await search.tap()
+  await expect(main.getByTestId('search-song-results').getByTestId('song-row-9001')).toBeVisible()
+  expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
+})
+
 // These run in the mobile Chromium project; routes are deterministic local fixtures.
 for (const width of [360, 390]) {
   test.describe(`移动搜索错误反馈 ${width}px`, () => {

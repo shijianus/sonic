@@ -282,7 +282,7 @@ export default {
       footerLyricsLimit: '歌詞言語は最大2つまで選択できます',
       footerLyricsAtLeastOne: 'フッター歌詞をオフにしました：歌詞言語を最低1つ選択してください',
       privacyTitle: 'プライバシーとローカルデータ',
-      privacyDesc: '以下のデータはブラウザ内にのみ保存され、サーバーへ送信されません。',
+      privacyDesc: 'ここに表示されている設定とメディアデータはブラウザに保存されます。',
       privacyLocalStorageTitle: 'ブラウザのローカルストレージ',
       privacyLocalStorageDesc: 'テーマ、言語、検索履歴、お気に入り、再生設定、最近の再生履歴。',
       privacyIndexedDbTitle: 'ブラウザデータベース（IndexedDB）',
@@ -650,6 +650,8 @@ export default {
     playCount: '{count} 回再生',
   },
   artists: {
+    genre: 'ジャンル',
+    results: '検索結果',
     type: 'タイプ',
     area: '地域',
     initial: '頭文字',
@@ -803,7 +805,7 @@ export default {
     },
     privacy: {
       personalizationTitle: 'スマート検索＆パーソナライズ推薦',
-      personalizationDesc: '匿名デバイスIDと再生完了・お気に入り・検索クリック信号に基づいて推薦を最適化します。オフにすると完全パブリックモードになります。',
+      personalizationDesc: 'オンにすると、再生・お気に入り・検索結果のクリックを送信し、おすすめに反映します。イベントはアカウントまたは匿名の端末 ID に関連付けられます。オフにすると送信を停止します。',
       autoDjTitle: '自動連続ラジオ (Auto DJ)',
       autoDjDesc: 'プレイリストの最後の曲が終了した際、似たスタイルの曲を自動的に追加して再生します',
       clearRecommendProfile: '推薦プロファイルと非表示設定をリセット',

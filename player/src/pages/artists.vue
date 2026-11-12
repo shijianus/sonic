@@ -11,6 +11,7 @@ import { formatCoverUrl } from '@/utils/imageUrl'
 import InfiniteScroll from '@/components/Ui/InfiniteScroll.vue'
 import PageSkeleton from '@/components/PageSkeleton.vue'
 import LazyImage from '@/components/Ui/LazyImage.vue'
+import FilterRow from '@/components/Ui/FilterRow.vue'
 
 const { t } = useI18n()
 
@@ -51,46 +52,51 @@ const searchState = reactive({
   albumTotal: 0,
 })
 
-// 选项配置
-const typeOptions = [
-  { key: -1, labelKey: 'artists.types.all' },
-  { key: 1, labelKey: 'artists.types.male' },
-  { key: 2, labelKey: 'artists.types.female' },
-  { key: 3, labelKey: 'artists.types.band' },
-]
+const typeOptions = computed(() => [
+  { key: -1, label: t('artists.types.all') },
+  { key: 1, label: t('artists.types.male') },
+  { key: 2, label: t('artists.types.female') },
+  { key: 3, label: t('artists.types.band') },
+])
 
-const areaOptions = [
-  { key: -1, labelKey: 'artists.areas.all' },
-  { key: 7, labelKey: 'artists.areas.zh' },
-  { key: 96, labelKey: 'artists.areas.ea' },
-  { key: 8, labelKey: 'artists.areas.jp' },
-  { key: 16, labelKey: 'artists.areas.kr' },
-  { key: 0, labelKey: 'artists.areas.other' },
-]
+const areaOptions = computed(() => [
+  { key: -1, label: t('artists.areas.all') },
+  { key: 7, label: t('artists.areas.zh') },
+  { key: 96, label: t('artists.areas.ea') },
+  { key: 8, label: t('artists.areas.jp') },
+  { key: 16, label: t('artists.areas.kr') },
+  { key: 0, label: t('artists.areas.other') },
+])
 
-const initialOptions = [
-  { key: '', labelKey: 'artists.initials.hot' },
-  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(c => ({ key: c, labelKey: c })),
-  { key: '0', labelKey: '#' },
-]
+const initialOptions = computed(() => [
+  { key: '', label: t('artists.initials.hot') },
+  ...Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZ', letter => ({ key: letter, label: letter })),
+  { key: '0', label: '#' },
+])
 
-const sortOptions = [
-  { key: 'hot', labelKey: 'artists.sortOptions.hot' },
-  { key: 'songs', labelKey: 'artists.sortOptions.songs' },
-  { key: 'albums', labelKey: 'artists.sortOptions.albums' },
-]
+const sortOptions = computed(() => [
+  { key: 'hot', label: t('artists.sortOptions.hot') },
+  { key: 'songs', label: t('artists.sortOptions.songs') },
+  { key: 'albums', label: t('artists.sortOptions.albums') },
+] as const)
 
-const styleOptions = [
-  { key: '', labelKey: 'artists.styles.all' },
-  { key: 'pop', labelKey: 'artists.styles.pop' },
-  { key: 'rock', labelKey: 'artists.styles.rock' },
-  { key: 'folk', labelKey: 'artists.styles.folk' },
-  { key: 'hiphop', labelKey: 'artists.styles.hiphop' },
-  { key: 'electronic', labelKey: 'artists.styles.electronic' },
-  { key: 'gufeng', labelKey: 'artists.styles.gufeng' },
-  { key: 'rnb', labelKey: 'artists.styles.rnb' },
-  { key: 'acg', labelKey: 'artists.styles.acg' },
-]
+const styleOptions = computed(() => [
+  { key: '', label: t('artists.styles.all') },
+  { key: 'pop', label: t('artists.styles.pop') },
+  { key: 'rock', label: t('artists.styles.rock') },
+  { key: 'folk', label: t('artists.styles.folk') },
+  { key: 'hiphop', label: t('artists.styles.hiphop') },
+  { key: 'electronic', label: t('artists.styles.electronic') },
+  { key: 'gufeng', label: t('artists.styles.gufeng') },
+  { key: 'rnb', label: t('artists.styles.rnb') },
+  { key: 'acg', label: t('artists.styles.acg') },
+])
+
+const searchOptions = computed(() => [
+  { key: 'all', label: t('artists.tabs.all') },
+  { key: 'artists', label: `${t('artists.tabs.artists')} (${searchState.artists.length})` },
+  { key: 'albums', label: `${t('artists.tabs.albums')} (${searchState.albums.length})` },
+] as const)
 
 // 排序后的分类歌手列表
 const sortedArtists = computed(() => {
@@ -310,132 +316,37 @@ onMounted(() => loadArtists(true))
         </div>
       </div>
 
-      <!-- 第二栏：分类筛选栏（未搜索时展示） -->
-      <div v-if="!searchState.isSearching" class="pt-3 space-y-2.5">
-        <!-- 地区细分 -->
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-14">
-            {{ t('artists.area') }}:
-          </span>
-          <div class="flex flex-wrap gap-1">
+      <div v-if="!searchState.isSearching" class="space-y-1.5 pt-3">
+        <FilterRow v-model="area" :label="t('artists.area') + ':'" :options="areaOptions" />
+        <FilterRow v-model="type" :label="t('artists.type') + ':'" :options="typeOptions" />
+        <FilterRow
+          v-model="initial"
+          :label="t('artists.initial') + ':'"
+          :options="initialOptions"
+          scroll="horizontal"
+        />
+        <FilterRow
+          :model-value="selectedStyle"
+          :label="t('artists.genre') + ':'"
+          :options="styleOptions"
+          @update:model-value="selectStyle"
+        />
+        <FilterRow v-model="sortBy" :label="t('artists.sortBy') + ':'" :options="sortOptions">
+          <template #actions>
             <button
-              v-for="opt in areaOptions"
-              :key="opt.key"
-              class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer"
-              :class="
-                area === opt.key
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                  : 'text-primary/60 hover:bg-white/5 hover:text-primary'
-              "
-              @click="area = opt.key"
-            >
-              {{ t(opt.labelKey) }}
-            </button>
-          </div>
-        </div>
-
-        <!-- 歌手类型细分 -->
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-14">
-            {{ t('artists.type') }}:
-          </span>
-          <div class="flex flex-wrap gap-1">
-            <button
-              v-for="opt in typeOptions"
-              :key="opt.key"
-              class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer"
-              :class="
-                type === opt.key
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                  : 'text-primary/60 hover:bg-white/5 hover:text-primary'
-              "
-              @click="type = opt.key"
-            >
-              {{ t(opt.labelKey) }}
-            </button>
-          </div>
-        </div>
-
-        <!-- 首字母筛选（支持热门、A-Z 与 #） -->
-        <div class="flex items-center gap-2">
-          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 w-14">
-            {{ t('artists.initial') }}:
-          </span>
-          <div class="flex flex-1 items-center gap-1 overflow-x-auto py-0.5 no-scrollbar">
-            <button
-              v-for="opt in initialOptions"
-              :key="opt.key"
-              class="rounded px-2 py-0.5 text-xs transition-all shrink-0 cursor-pointer"
-              :class="
-                initial === opt.key
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                  : 'text-primary/60 hover:bg-white/5 hover:text-primary'
-              "
-              @click="initial = opt.key"
-            >
-              {{ opt.labelKey.startsWith('artists.') ? t(opt.labelKey) : opt.labelKey }}
-            </button>
-          </div>
-        </div>
-
-        <!-- 扩展维度：风格流派与排序 -->
-        <div class="flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-white/5">
-          <!-- 风格标签快速筛选 -->
-          <div class="flex flex-wrap items-center gap-1.5">
-            <span class="text-primary/40 text-xs shrink-0 mr-1">
-              {{ t('artists.styles.all') }}:
-            </span>
-            <button
-              v-for="opt in styleOptions"
-              :key="opt.key"
-              class="rounded-md px-2 py-0.5 text-[11px] transition-all cursor-pointer"
-              :class="
-                selectedStyle === opt.key
-                  ? 'bg-indigo-500/25 text-indigo-300 border border-indigo-500/40 font-medium'
-                  : 'text-primary/50 hover:bg-white/5 hover:text-primary'
-              "
-              @click="selectStyle(opt.key)"
-            >
-              {{ t(opt.labelKey) }}
-            </button>
-          </div>
-
-          <!-- 排序维度与状态 -->
-          <div class="flex items-center gap-2 ml-auto">
-            <span class="text-primary/40 text-xs hidden sm:inline">
-              {{ t('artists.sortBy') }}:
-            </span>
-            <div class="flex gap-1">
-              <button
-                v-for="sort in sortOptions"
-                :key="sort.key"
-                class="rounded-md px-2 py-0.5 text-[11px] transition-all cursor-pointer"
-                :class="
-                  sortBy === sort.key
-                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-medium'
-                    : 'text-primary/50 hover:bg-white/5 hover:text-primary'
-                "
-                @click="sortBy = (sort.key as any)"
-              >
-                {{ t(sort.labelKey) }}
-              </button>
-            </div>
-
-            <!-- 重置按钮 -->
-            <button
-              class="flex items-center gap-1 text-[11px] text-primary/40 hover:text-sky-400 px-2 py-0.5 rounded transition-colors cursor-pointer"
-              :title="t('artists.resetFilters')"
+              type="button"
+              class="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-lg px-2.5 py-1 text-xs text-secondary transition-colors hover:bg-hover-glass hover:text-primary focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:[outline-color:var(--glass-focus-outline)]"
               @click="resetFilters"
             >
-              <span class="icon-[mdi--restart] h-3.5 w-3.5" />
+              <span class="icon-[mdi--restart] h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               <span>{{ t('artists.resetFilters') }}</span>
             </button>
-          </div>
-        </div>
+          </template>
+        </FilterRow>
       </div>
 
       <!-- 搜索状态下的信息条与 Tab 切换 -->
-      <div v-else class="pt-3 flex flex-wrap items-center justify-between gap-3">
+      <div v-else class="grid gap-2 pt-3">
         <div class="flex items-center gap-2">
           <span class="text-primary text-xs sm:text-sm font-semibold">
             “{{ searchState.appliedKeyword }}”
@@ -450,42 +361,11 @@ onMounted(() => loadArtists(true))
           </span>
         </div>
 
-        <!-- 搜索分类切换 Tab -->
-        <div class="flex items-center gap-1 bg-white/5 p-1 rounded-lg border border-white/10">
-          <button
-            class="rounded-md px-2.5 py-1 text-xs transition-all cursor-pointer"
-            :class="
-              searchState.activeTab === 'all'
-                ? 'bg-sky-500/20 text-sky-400 font-medium'
-                : 'text-primary/60 hover:text-primary'
-            "
-            @click="searchState.activeTab = 'all'"
-          >
-            {{ t('artists.tabs.all') }}
-          </button>
-          <button
-            class="rounded-md px-2.5 py-1 text-xs transition-all cursor-pointer"
-            :class="
-              searchState.activeTab === 'artists'
-                ? 'bg-sky-500/20 text-sky-400 font-medium'
-                : 'text-primary/60 hover:text-primary'
-            "
-            @click="searchState.activeTab = 'artists'"
-          >
-            {{ t('artists.tabs.artists') }} ({{ searchState.artists.length }})
-          </button>
-          <button
-            class="rounded-md px-2.5 py-1 text-xs transition-all cursor-pointer"
-            :class="
-              searchState.activeTab === 'albums'
-                ? 'bg-sky-500/20 text-sky-400 font-medium'
-                : 'text-primary/60 hover:text-primary'
-            "
-            @click="searchState.activeTab = 'albums'"
-          >
-            {{ t('artists.tabs.albums') }} ({{ searchState.albums.length }})
-          </button>
-        </div>
+        <FilterRow
+          v-model="searchState.activeTab"
+          :label="t('artists.results') + ':'"
+          :options="searchOptions"
+        />
       </div>
     </div>
 

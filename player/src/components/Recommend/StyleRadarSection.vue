@@ -125,19 +125,21 @@ defineExpose({
           @click="loadDiscoverTracks(true)"
           :disabled="loading"
           class="border-glass bg-hover-glass text-primary/75 hover:text-primary inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-medium transition-all"
+          :class="{ 'min-h-11': compact }"
         >
           <span
             class="icon-[mdi--refresh] h-3.5 w-3.5"
             :class="loading ? 'animate-spin' : ''"
           />
-          <span>换一批</span>
+          <span>{{ t('recommend.actions.refresh') }}</span>
         </button>
 
         <button
           v-if="visibleTracks.length > 0"
           type="button"
           @click="handlePlayAll"
-          class="inline-flex items-center gap-1.5 rounded-xl bg-sky-500/20 px-3.5 py-1.5 text-xs font-semibold text-[var(--glass-text-accent)] transition-all hover:bg-sky-500/30"
+          class="text-primary inline-flex items-center gap-1.5 rounded-xl bg-sky-500/20 px-3.5 py-1.5 text-xs font-semibold transition-all hover:bg-sky-500/30"
+          :class="{ 'min-h-11': compact }"
         >
           <span class="icon-[mdi--play] h-4 w-4" />
           <span>{{ t('recommend.actions.playAll') }}</span>

@@ -132,17 +132,18 @@ const clearAllLocalData = async () => {
           :aria-label="t('recommend.privacy.personalizationTitle')"
           :aria-checked="recommendStore.personalizationEnabled"
           @click="handleTogglePersonalization"
-          class="border-glass relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors"
-          :class="
-            recommendStore.personalizationEnabled
-              ? 'bg-sky-500/40'
-              : 'bg-[var(--glass-bg-overlay)]'
-          "
+          class="inline-flex size-11 shrink-0 cursor-pointer items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50"
         >
           <span
-            class="inline-block h-4 w-4 transform rounded-full bg-sky-400 transition-transform"
-            :class="recommendStore.personalizationEnabled ? 'translate-x-5' : 'translate-x-1'"
-          />
+            aria-hidden="true"
+            class="border-glass inline-flex h-6 w-full items-center rounded-full border transition-colors"
+            :class="recommendStore.personalizationEnabled ? 'bg-sky-500/40' : 'bg-[var(--glass-bg-overlay)]'"
+          >
+            <span
+              class="size-4 rounded-full bg-sky-400 transition-transform"
+              :class="recommendStore.personalizationEnabled ? 'translate-x-5' : 'translate-x-1'"
+            />
+          </span>
         </button>
       </div>
 
@@ -158,17 +159,21 @@ const clearAllLocalData = async () => {
         <button
           type="button"
           role="switch"
+          :aria-label="t('recommend.privacy.autoDjTitle')"
           :aria-checked="recommendStore.autoDjEnabled"
           @click="handleToggleAutoDj"
-          class="border-glass relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center rounded-full border transition-colors"
-          :class="
-            recommendStore.autoDjEnabled ? 'bg-sky-500/40' : 'bg-[var(--glass-bg-overlay)]'
-          "
+          class="inline-flex size-11 shrink-0 cursor-pointer items-center rounded-full outline-none focus-visible:ring-2 focus-visible:ring-sky-500/50"
         >
           <span
-            class="inline-block h-4 w-4 transform rounded-full bg-sky-400 transition-transform"
-            :class="recommendStore.autoDjEnabled ? 'translate-x-5' : 'translate-x-1'"
-          />
+            aria-hidden="true"
+            class="border-glass inline-flex h-6 w-full items-center rounded-full border transition-colors"
+            :class="recommendStore.autoDjEnabled ? 'bg-sky-500/40' : 'bg-[var(--glass-bg-overlay)]'"
+          >
+            <span
+              class="size-4 rounded-full bg-sky-400 transition-transform"
+              :class="recommendStore.autoDjEnabled ? 'translate-x-5' : 'translate-x-1'"
+            />
+          </span>
         </button>
       </div>
 

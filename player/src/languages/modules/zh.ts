@@ -267,7 +267,7 @@ export default {
       footerLyricsLimit: '最多选择两种歌词语言',
       footerLyricsAtLeastOne: '已关闭底部歌词：至少需要保留一种歌词语言',
       privacyTitle: '隐私与本地数据',
-      privacyDesc: '以下数据只保存在你的浏览器中，不会上传到服务器。',
+      privacyDesc: '这里列出的设置和媒体数据保存在你的浏览器中。',
       privacyLocalStorageTitle: '浏览器本地存储',
       privacyLocalStorageDesc: '主题、语言、搜索历史、收藏、播放设置与最近播放记录。',
       privacyIndexedDbTitle: '浏览器数据库（IndexedDB）',
@@ -634,6 +634,8 @@ export default {
     playCount: '{count} 播放',
   },
   artists: {
+    genre: '风格',
+    results: '结果',
     type: '类型',
     area: '地区',
     initial: '首字母',
@@ -787,7 +789,7 @@ export default {
     },
     privacy: {
       personalizationTitle: '智能搜索与个性化推荐',
-      personalizationDesc: '基于本机匿名标识与完播、收藏、搜索点击信号优化推荐排序；关闭后立即切换为纯公共模式且不再记录任何行为事件',
+      personalizationDesc: '开启后，Sonic 会发送播放、收藏和搜索结果点击事件，用于个性化推荐。事件与账号或匿名设备标识关联。关闭后停止发送这些事件。',
       autoDjTitle: '自动连续电台 (Auto DJ)',
       autoDjDesc: '当播放列表最后一首自然播完时，根据当前歌曲自动续接风格相似的可播放曲目',
       clearRecommendProfile: '重置推荐画像与不感兴趣记录',

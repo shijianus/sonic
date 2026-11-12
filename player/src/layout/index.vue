@@ -87,7 +87,11 @@ const onRouteEnter = (el: Element, done: () => void) => {
 
 const onRouteLeave = (el: Element, done: () => void) => {
   const node = el as HTMLElement
-  if (prefersReducedMotion()) return done()
+  if (prefersReducedMotion()) {
+    // Let Vue finish patching the out-in placeholder before it mounts the new page.
+    queueMicrotask(done)
+    return
+  }
   node.style.transition = `opacity ${ROUTE_TRANSITION_MS}ms ease, transform ${ROUTE_TRANSITION_MS}ms ease`
   setTimeout(() => {
     node.style.opacity = '0'

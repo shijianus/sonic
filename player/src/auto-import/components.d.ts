@@ -25,6 +25,7 @@ declare module 'vue' {
     ColorBends: typeof import('./../components/Background/ColorBends.vue')['default']
     ColorBendsSettingsPanel: typeof import('./../components/Background/ColorBendsSettingsPanel.vue')['default']
     DownloadQualityDialog: typeof import('./../components/Dialog/DownloadQualityDialog.vue')['default']
+    FilterRow: typeof import('./../components/Ui/FilterRow.vue')['default']
     GlassCheckbox: typeof import('./../components/Ui/GlassCheckbox.vue')['default']
     GlassSelect: typeof import('./../components/Ui/GlassSelect.vue')['default']
     GlobalToast: typeof import('./../components/Ui/GlobalToast.vue')['default']

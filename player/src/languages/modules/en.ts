@@ -277,7 +277,7 @@ export default {
       footerLyricsLimit: 'You can select up to two lyric languages',
       footerLyricsAtLeastOne: 'Footer lyrics turned off: keep at least one lyric language',
       privacyTitle: 'Privacy & Local Data',
-      privacyDesc: 'The data below stays in your browser and is never uploaded to a server.',
+      privacyDesc: 'Your browser stores the settings and media data listed here.',
       privacyLocalStorageTitle: 'Browser local storage',
       privacyLocalStorageDesc: 'Theme, language, search history, favorites, playback settings and recent plays.',
       privacyIndexedDbTitle: 'Browser database (IndexedDB)',
@@ -645,6 +645,8 @@ export default {
     playCount: '{count} plays',
   },
   artists: {
+    genre: 'Genre',
+    results: 'Results',
     type: 'Type',
     area: 'Region',
     initial: 'Initial',
@@ -805,7 +807,7 @@ export default {
     },
     privacy: {
       personalizationTitle: 'Smart Search & Personalized Recommendations',
-      personalizationDesc: 'Uses an anonymous device ID and playback/favorite/click signals to tailor results. Turn off to switch to pure public mode with zero event logging.',
+      personalizationDesc: 'When enabled, Sonic sends playback, favorite, and search click events to personalize results. These events are linked to your account or an anonymous device ID. Turning this off stops sending them.',
       autoDjTitle: 'Continuous Radio (Auto DJ)',
       autoDjDesc: 'Automatically appends similar playable tracks when your queue reaches the end',
       clearRecommendProfile: 'Reset Recommendation Profile & Dislikes',

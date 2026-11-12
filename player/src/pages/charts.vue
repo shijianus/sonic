@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { reactive, toRefs, computed, watch, onMounted } from 'vue'
 import SongList from '@/components/SongList.vue'
+import FilterRow from '@/components/Ui/FilterRow.vue'
+import { useChartFilters, type ChartCategory, type ChartWindow, type ChartRegion } from '@/composables/useChartFilters'
 import { topSong, toplist, playlistTrackAll, playlistDetail } from '@/api'
 import { fetchRecommendTrending } from '@/api/recommend'
 import { useRecommendStore } from '@/stores/modules/recommend'
@@ -10,15 +12,14 @@ import { transformTopSongs, transformSongs, type SongData } from '@/utils/transf
 const { t } = useI18n()
 const recommendStore = useRecommendStore()
 
-type MainTabKey = 'trending' | 'newSong' | 'official'
-type TrendingWindowKey = '7d' | '24h' | 'surging' | 'new'
+const { categories, trendingWindows, newSongRegions } = useChartFilters()
 
 const state = reactive({
-  activeTab: 'trending' as MainTabKey,
-  trendingWindow: '7d' as TrendingWindowKey,
+  activeTab: 'trending' as ChartCategory,
+  trendingWindow: '7d' as ChartWindow,
   trendingSongs: [] as SongData[],
   trendingLoading: false,
-  activeType: 0 as 0 | 7 | 96 | 8 | 16,
+  activeType: 0 as ChartRegion,
   songs: [] as SongData[],
   newSongLoading: false,
   officialLists: [] as any[],
@@ -30,28 +31,7 @@ const state = reactive({
 
 const { activeTab, trendingWindow, activeType } = toRefs(state)
 
-const displayedOfficialLists = computed(() => state.officialLists)
-
-const mainTabs = computed(() => [
-  { key: 'trending' as const, labelKey: 'charts.trending', icon: 'icon-[mdi--chart-line-variant]' },
-  { key: 'newSong' as const, labelKey: 'charts.newSongs', icon: 'icon-[mdi--music-note-plus]' },
-  { key: 'official' as const, labelKey: 'charts.official', icon: 'icon-[mdi--trophy]' },
-])
-
-const trendingWindows = [
-  { key: '7d', labelKey: 'recommend.windows.7d', icon: 'icon-[mdi--chart-timeline-variant]' },
-  { key: '24h', labelKey: 'recommend.windows.24h', icon: 'icon-[mdi--fire]' },
-  { key: 'surging', labelKey: 'recommend.windows.surging', icon: 'icon-[mdi--rocket-launch-outline]' },
-  { key: 'new', labelKey: 'recommend.windows.new', icon: 'icon-[mdi--sparkles]' },
-]
-
-const newSongTypes = [
-  { key: 0, labelKey: 'charts.types.all', icon: 'icon-[mdi--fire]' },
-  { key: 7, labelKey: 'charts.types.mandarin', icon: 'icon-[mdi--music-note]' },
-  { key: 96, labelKey: 'charts.types.west', icon: 'icon-[mdi--earth]' },
-  { key: 8, labelKey: 'charts.types.japan', icon: 'icon-[mdi--flower-tulip]' },
-  { key: 16, labelKey: 'charts.types.korea', icon: 'icon-[mdi--star-four-points]' },
-]
+const officialOptions = computed(() => state.officialLists.map(item => ({ key: item.id, label: item.name })))
 
 let trendingRequestGeneration = 0
 
@@ -142,6 +122,10 @@ const selectList = async (item: any, force = false) => {
   }
 }
 
+const selectOfficialChart = (id: string | number) => {
+  void selectList(state.officialLists.find(item => item.id === id))
+}
+
 const loadOfficialLists = async () => {
   try {
     state.officialListLoading = true
@@ -183,12 +167,12 @@ const currentLoading = computed(() => {
 
 const headerTitle = computed(() => {
   if (state.activeTab === 'trending') {
-    const cur = trendingWindows.find((w) => w.key === state.trendingWindow)
-    return `${t('charts.trending')} · ${cur ? t(cur.labelKey) : ''}`
+    const cur = trendingWindows.value.find(option => option.key === state.trendingWindow)
+    return `${t('charts.trending')} · ${cur?.label ?? ''}`
   }
   if (state.activeTab === 'newSong') {
-    const cur = newSongTypes.find((tp) => tp.key === state.activeType)
-    return `${t('charts.newSongs')} · ${cur ? t(cur.labelKey) : ''}`
+    const cur = newSongRegions.value.find(option => option.key === state.activeType)
+    return `${t('charts.newSongs')} · ${cur?.label ?? ''}`
   }
   return state.selectedList?.name || t('charts.official')
 })
@@ -247,10 +231,10 @@ onMounted(() => {
           </div>
           <div class="min-w-0">
             <div class="flex items-center gap-2">
-              <h1 class="text-primary text-base sm:text-lg font-bold tracking-tight">
+              <h1 class="text-primary shrink-0 text-base sm:text-lg font-bold tracking-tight">
                 {{ t('routes.charts') }}
               </h1>
-              <span class="rounded bg-sky-500/15 border border-sky-500/30 px-2 py-0.5 text-[10px] sm:text-[11px] font-medium text-sky-400 whitespace-nowrap">
+              <span class="rounded bg-sky-500/15 border border-sky-500/30 px-2 py-0.5 text-[11px] min-w-0 font-medium wrap-anywhere text-[color:var(--glass-accent-text)]">
                 {{ headerTitle }}
               </span>
             </div>
@@ -268,109 +252,32 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- 第二栏（下栏）：分类维度筛选（严格保持与歌手页完全一致的结构规范） -->
-      <!-- 高度按官方榜两行按钮预留；所有 Tab 使用同一高度，切换时不跳动。 -->
-      <div class="pt-2.5 h-[154px] flex flex-col justify-between">
-        <!-- 维度行 1：主分类切换（趋势榜 / 新歌速递 / 官方榜单） -->
-        <div class="flex items-center gap-2 flex-wrap">
-          <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[92px]">
-            {{ t('charts.categoryLabel') }}
-          </span>
-          <div class="flex items-center gap-1 flex-wrap">
-            <button
-              v-for="tab in mainTabs"
-              :key="tab.key"
-              type="button"
-              class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer flex items-center gap-1.5 shrink-0 whitespace-nowrap"
-              :class="
-                activeTab === tab.key
-                  ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                  : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
-              "
-              @click="state.activeTab = tab.key"
-            >
-              <span :class="[tab.icon, 'h-3.5 w-3.5']" />
-              <span>{{ t(tab.labelKey) }}</span>
-            </button>
-          </div>
-        </div>
+      <div class="grid gap-2 pt-2.5">
+        <FilterRow v-model="activeTab" :label="t('charts.categoryLabel')" :options="categories" />
 
-        <!-- 维度行 2：子选项区域（高度固定 116px，官方榜多行滚动也不会越界遮挡分类按钮） -->
-        <div class="h-[116px] flex flex-col justify-center">
-          <!-- 模式 A：趋势榜时间范围选项 -->
-          <div v-if="activeTab === 'trending'" class="flex items-center gap-2 flex-wrap">
-            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[92px]">
-              {{ t('charts.trendingLabel') }}
-            </span>
-            <div class="flex items-center gap-1 flex-wrap">
-              <button
-                v-for="win in trendingWindows"
-                :key="win.key"
-                type="button"
-                class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer flex items-center gap-1 shrink-0 whitespace-nowrap"
-                :class="
-                  trendingWindow === win.key
-                    ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                    : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
-                "
-                @click="trendingWindow = win.key as any"
-              >
-                <span :class="[win.icon, 'h-3.5 w-3.5']" />
-                <span>{{ t(win.labelKey) }}</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- 模式 B：新歌榜地区选项 -->
-          <div v-else-if="activeTab === 'newSong'" class="flex items-center gap-2 flex-wrap">
-            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[92px]">
-              {{ t('charts.newSongLabel') }}
-            </span>
-            <div class="flex items-center gap-1 flex-wrap">
-              <button
-                v-for="type in newSongTypes"
-                :key="type.key"
-                type="button"
-                class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer flex items-center gap-1 shrink-0 whitespace-nowrap"
-                :class="
-                  activeType === type.key
-                    ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                    : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
-                "
-                @click="activeType = type.key as any"
-              >
-                <span :class="[type.icon, 'h-3.5 w-3.5']" />
-                <span>{{ t(type.labelKey) }}</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- 模式 C：官方榜单（结构完全同步，2 行紧凑排布，文字完整展示绝无省略截断） -->
-          <div v-else class="flex items-start gap-2 flex-wrap">
-            <span class="text-primary/60 text-xs sm:text-sm font-medium shrink-0 whitespace-nowrap w-[92px] mt-1">
-              {{ t('charts.officialLabel') }}
-            </span>
-            <div class="official-filter-scroll flex items-center gap-1 flex-wrap flex-1 min-w-0 max-h-[116px] overflow-y-auto content-start pr-1" tabindex="0">
-              <button
-                v-for="item in displayedOfficialLists"
-                :key="item.id"
-                type="button"
-                class="rounded-lg px-2.5 py-1 text-xs transition-all cursor-pointer flex items-center gap-1 shrink-0 whitespace-nowrap"
-                :class="
-                  state.selectedList?.id === item.id
-                    ? 'bg-sky-500/20 text-sky-400 border border-sky-500/30 font-medium shadow-[0_0_8px_rgba(56,189,248,0.15)]'
-                    : 'text-primary/60 hover:bg-hover-glass hover:text-primary'
-                "
-                @click="selectList(item)"
-              >
-                <span
-                  v-if="state.selectedList?.id === item.id"
-                  class="icon-[mdi--equalizer] h-3 w-3 text-sky-400 animate-pulse shrink-0"
-                />
-                <span class="whitespace-nowrap">{{ item.name }}</span>
-              </button>
-            </div>
-          </div>
+        <!-- Reserve the same space for each chart category, including the scrollable official list. -->
+        <div class="h-26">
+          <FilterRow
+            v-if="activeTab === 'trending'"
+            v-model="trendingWindow"
+            :label="t('charts.trendingLabel')"
+            :options="trendingWindows"
+          />
+          <FilterRow
+            v-else-if="activeTab === 'newSong'"
+            v-model="activeType"
+            :label="t('charts.newSongLabel')"
+            :options="newSongRegions"
+          />
+          <FilterRow
+            v-else
+            :model-value="state.selectedList?.id"
+            :label="t('charts.officialLabel')"
+            :options="officialOptions"
+            scroll="vertical"
+            options-class="official-filter-scroll"
+            @update:model-value="selectOfficialChart"
+          />
         </div>
       </div>
     </div>
@@ -385,28 +292,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* Keep every official chart reachable without silently clipping the filter row. */
-.official-filter-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(56, 189, 248, 0.55) transparent;
-  scrollbar-gutter: stable;
-  -ms-overflow-style: auto;
-}
-.official-filter-scroll::-webkit-scrollbar {
-  display: block;
-  width: 6px;
-}
-.official-filter-scroll::-webkit-scrollbar-track {
-  background: transparent;
-}
-.official-filter-scroll::-webkit-scrollbar-thumb {
-  background: rgba(56, 189, 248, 0.5);
-  border-radius: 999px;
-}
-.official-filter-scroll::-webkit-scrollbar-thumb:hover {
-  background: rgba(56, 189, 248, 0.75);
-}
-
 /* ── 深度强化歌曲列表的垂直滚动条滑块（清晰可见、精致毛玻璃触感、支持拖拽） ── */
 .charts-content-container :deep(.song-list-scroll) {
   scrollbar-width: thin !important;

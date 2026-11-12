@@ -37,6 +37,20 @@ test.describe('移动端响应式与可访问性', () => {
     expect(await horizontalOverflow(page)).toBeLessThanOrEqual(1)
   })
 
+  test('mobile recommendation switches have named, full-size touch targets', async ({ page }) => {
+    await page.goto('/#/settings')
+    for (const name of ['Smart Search & Personalized Recommendations', 'Continuous Radio (Auto DJ)']) {
+      const control = page.getByRole('switch', { name, exact: true })
+      await expect(control).toBeVisible()
+      const box = await control.boundingBox()
+      expect(box?.height).toBeGreaterThanOrEqual(44)
+      expect(box?.width).toBeGreaterThanOrEqual(44)
+      const initialValue = await control.getAttribute('aria-checked')
+      await control.tap({ position: { x: 22, y: 4 } })
+      await expect(control).toHaveAttribute('aria-checked', initialValue === 'true' ? 'false' : 'true')
+    }
+  })
+
   test('移动端页面 lang 与 viewport 正确设置', async ({ page }) => {
     await page.goto('/')
     const meta = await page.evaluate(() => ({

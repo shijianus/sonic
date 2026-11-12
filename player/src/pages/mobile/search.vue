@@ -606,22 +606,27 @@ watch(
   <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
     <div class="mobile-search-top shrink-0 px-4 pb-3">
       <div ref="searchBoxRef" class="relative">
-        <div class="glass-card flex items-center gap-2 px-3 py-1.5">
-          <span class="icon-[mdi--magnify] search-icon h-4.5 w-4.5 shrink-0 text-primary/40"></span>
+        <div class="glass-card flex items-center gap-1.5 px-2 py-1">
+          <span
+            class="icon-[mdi--magnify] search-icon ml-1 h-4.5 w-4.5 shrink-0 text-primary/40"
+            aria-hidden="true"
+          ></span>
           <input
             ref="inputRef"
             v-model="q"
             @keyup.enter="handleSearchClick"
             @focus="handleInputFocus"
             type="text"
+            :aria-label="$t('common.search.label')"
             :placeholder="placeholder || $t('common.search.placeholder')"
-            class="search-input h-9 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-primary/40"
+            class="search-input h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-primary/40"
           />
           <Button
             v-if="q"
             variant="ghost"
-            size="none"
-            class="clear-btn flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-all"
+            size="icon-sm"
+            rounded="full"
+            class="clear-btn shrink-0"
             icon="icon-[mdi--close-circle]"
             icon-class="h-4 w-4"
             :title="$t('common.clear')"
@@ -631,7 +636,8 @@ watch(
           <Button
             variant="gradient"
             size="none"
-            class="search-btn flex h-7.5 items-center gap-1 rounded-full px-3 text-xs font-medium text-white transition-all active:scale-95"
+            rounded="full"
+            class="search-btn min-h-11 shrink-0 gap-1 px-3 text-xs text-white active:scale-95"
             icon="icon-[mdi--magnify]"
             icon-class="h-3.5 w-3.5"
             @click="handleSearchClick"
