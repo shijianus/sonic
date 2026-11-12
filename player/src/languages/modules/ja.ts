@@ -214,6 +214,10 @@ export default {
     trendingLabel: 'トレンド:',
     newSongLabel: '新曲:',
     officialLabel: '公式ランキング:',
+    loadFailed: 'ランキングを読み込めませんでした。',
+    empty: 'このランキングに曲はありません。',
+    trendingFallback: 'トレンドを取得できないため、新曲を表示しています。',
+    updateFrequency: { realtime: 'リアルタイム更新', daily: '毎日更新', periodic: '定期更新' },
   },
   components: {
     infiniteScroll: {

@@ -133,22 +133,21 @@ async function signedSessionToken(record: Omit<AccessSessionRecord, 'sessionHash
   return `${payload}.${base64UrlEncode(new Uint8Array(signature))}`;
 }
 
-async function verifySignedSession(token: string, env: AppEnv, nowMs: number): Promise<AccessSessionRecord | null> {
-  const key = await accessSecret(env);
-  if (!key) return null;
+async function verifySignedSession(token: string, key: CryptoKey, nowMs: number): Promise<AccessSessionResult> {
   const parts = token.split('.');
-  if (parts.length !== 2) return null;
+  if (parts.length !== 2) return { valid: false, reason: 'invalid' };
   try {
     const signature = base64UrlDecode(parts[1]);
     const signatureBuffer = signature.buffer.slice(signature.byteOffset, signature.byteOffset + signature.byteLength) as ArrayBuffer;
     const data = textEncoder.encode(ACCESS_TOKEN_DOMAIN + parts[0]);
     const dataBuffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
     const valid = await crypto.subtle.verify('HMAC', key, signatureBuffer, dataBuffer);
-    if (!valid) return null;
+    if (!valid) return { valid: false, reason: 'invalid' };
     const payload = JSON.parse(textDecoder.decode(base64UrlDecode(parts[0]))) as { v: number; iat: number; exp: number };
-    if (payload.v !== 1 || !Number.isInteger(payload.iat) || !Number.isInteger(payload.exp) || payload.exp <= nowMs || payload.exp - payload.iat > MAX_ACCESS_SESSION_MAX_AGE_SEC * 1000) return null;
-    return { sessionHash: getStoreKey(ACCESS_SESSION_HASH_PREFIX, sha256Hex(`sonic-access-session-v1:${token}`)), createdAt: payload.iat, expiresAt: payload.exp };
-  } catch { return null; }
+    if (payload.v !== 1 || !Number.isInteger(payload.iat) || !Number.isInteger(payload.exp) || payload.exp - payload.iat > MAX_ACCESS_SESSION_MAX_AGE_SEC * 1000) return { valid: false, reason: 'invalid' };
+    if (payload.exp <= nowMs) return { valid: false, reason: 'expired' };
+    return { valid: true, session: { sessionHash: getStoreKey(ACCESS_SESSION_HASH_PREFIX, sha256Hex(`sonic-access-session-v1:${token}`)), createdAt: payload.iat, expiresAt: payload.exp } };
+  } catch { return { valid: false, reason: 'invalid' }; }
 }
 
 
@@ -301,8 +300,8 @@ export async function verifyAccessSession(
   const repository = getAccessRepository(env);
   if (!hash) return { valid: false, reason: 'invalid' };
   if (!repository) {
-    const signed = await verifySignedSession(token, env, nowMs);
-    return signed ? { valid: true, session: signed } : { valid: false, reason: 'store_unavailable' };
+    const key = await accessSecret(env).catch(() => null);
+    return key ? verifySignedSession(token, key, nowMs) : { valid: false, reason: 'store_unavailable' };
   }
   try {
     const session = await repository.getSession(getStoreKey(ACCESS_SESSION_HASH_PREFIX, hash), nowMs);

@@ -33,6 +33,7 @@ type PlaylistInfo = {
 
 const route = useRoute()
 const playlistId = computed(() => Number(route.params.id))
+const isCollected = computed(() => libraryStore.isPlaylistCollected(playlistId.value))
 
 const SONG_PAGE_SIZE = 100
 
@@ -40,7 +41,6 @@ const state = reactive({
   info: {} as PlaylistInfo,
   songs: [] as SongData[],
   loading: true,
-  collected: false,
   showFullDesc: false,
   showComments: false,
   songTotal: 0,
@@ -117,7 +117,6 @@ const load = async (id: number) => {
         songCount: detail.songCount || songList.length,
       }
       state.songTotal = detail.songCount || songList.length
-      state.collected = libraryStore.isPlaylistCollected(id)
     } else if (songList.length > 0) {
       state.info = {
         name: t('common.unknownPlaylist'),
@@ -266,7 +265,7 @@ watch(
 
 const toggleCollect = () => {
   if (!playlistId.value) return
-  state.collected = libraryStore.toggleCollectPlaylist({
+  libraryStore.toggleCollectPlaylist({
     id: playlistId.value,
     name: state.info.name,
     coverImgUrl: state.info.coverImgUrl,
@@ -394,11 +393,11 @@ const toggleCollect = () => {
           size="icon-lg"
           rounded="full"
           class="collect-btn"
-          :class="state.collected ? 'collected' : ''"
-          :icon="state.collected ? 'icon-[mdi--heart]' : 'icon-[mdi--heart-outline]'"
+          :class="isCollected ? 'collected' : ''"
+          :icon="isCollected ? 'icon-[mdi--heart]' : 'icon-[mdi--heart-outline]'"
           icon-class="h-5 w-5"
-          :aria-label="state.collected ? t('common.uncollect') : t('common.collect')"
-          :title="state.collected ? t('common.uncollect') : t('common.collect')"
+          :aria-label="isCollected ? t('common.uncollect') : t('common.collect')"
+          :title="isCollected ? t('common.uncollect') : t('common.collect')"
           @click="toggleCollect"
         />
         <Button

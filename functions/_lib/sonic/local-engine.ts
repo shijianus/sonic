@@ -10,6 +10,7 @@ import { resolveAuthenticatedSubject } from './authenticated-subject';
 import type { UserIdentityContext } from './recommend/types';
 
 export type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN';
+export const CHART_UPSTREAM_UNAVAILABLE = 'CHART_UPSTREAM_UNAVAILABLE';
 
 interface EndpointCircuit {
   state: CircuitState;
@@ -352,7 +353,6 @@ export async function callLocalEngineJson<T = any>(
     }, { timeoutMs, signals });
     if (response.status >= 500 || INSTANT_TRIP_HTTP_STATUSES.has(response.status)) {
       const error = `Engine HTTP ${response.status}`;
-      completeCircuit(c, lease, 'failure', error, threshold, INSTANT_TRIP_HTTP_STATUSES.has(response.status));
       let data: any;
       if (response.status === 503 && response.headers.get('content-type')?.includes('application/json') && response.body) {
         const reader = response.body.getReader();
@@ -375,6 +375,8 @@ export async function callLocalEngineJson<T = any>(
         void response.body?.cancel().catch(() => {});
       }
       const errorCode = data?.brand === 'Sonic' && typeof data?.error?.code === 'string' ? data.error.code : undefined;
+      // A branded chart error confirms that the Engine is reachable even when its catalog provider is down.
+      completeCircuit(c, lease, errorCode === CHART_UPSTREAM_UNAVAILABLE ? 'success' : 'failure', error, threshold, INSTANT_TRIP_HTTP_STATUSES.has(response.status));
       return { ok: false, status: response.status, data, latencyMs: Date.now() - start, skippedByCircuit: false, circuitState: c.state, error, errorCode };
     }
     let data: any;

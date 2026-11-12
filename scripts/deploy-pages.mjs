@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
 import { buildPagesDeploymentTree, parseDeploymentOrigin, readStagingAcceptance, verifyProductionPagesBinding } from './pages-release-lib.mjs';
 
 const require = createRequire(import.meta.url);
@@ -12,7 +13,7 @@ function requireEnv(name) {
   return value;
 }
 
-async function deploy() {
+async function deploy({ preflight }) {
   const project = requireEnv('CF_PAGES_PROJECT');
   const branch = requireEnv('CF_PAGES_BRANCH');
   if (project === 'sonic-staging' || (process.env.SONIC_DEPLOY_ENV || 'production') !== 'production') {
@@ -60,13 +61,20 @@ async function deploy() {
       const result = spawnSync(process.execPath, ['scripts/verify-deployed-release.mjs', ...args], {
         cwd: process.cwd(),
         env: { ...process.env, SONIC_DEPLOY_ENV: 'production', SONIC_DEPLOY_EXPECTED_ARTIFACT_DIGEST: pagesArtifactDigest },
-        stdio: 'inherit',
+        stdio: preflight ? ['ignore', 'ignore', 'inherit'] : 'inherit',
       });
       if (result.error) throw result.error;
       return result.status === 0;
     };
     if (!verify('--engine-only', engineOrigin)) {
       throw new Error('Production Engine preflight failed before uploading Pages');
+    }
+    if (preflight) {
+      return {
+        ok: true, decision: 'GO', mode: 'production-preflight', project, branch,
+        baseCommit: manifest.baseCommit, releaseId: manifest.releaseId,
+        sourceDigest: manifest.sourceDigest, pagesArtifactDigest,
+      };
     }
 
     const wranglerBin = process.env.WRANGLER_BIN?.trim();
@@ -96,7 +104,20 @@ async function deploy() {
   }
 }
 
-deploy().catch(error => {
+async function main() {
+  const { values: { preflight } } = parseArgs({ options: { preflight: { type: 'boolean' } } });
+  try {
+    const decision = await deploy({ preflight });
+    if (preflight) console.log(JSON.stringify(decision));
+  } catch (error) {
+    if (preflight) {
+      console.log(JSON.stringify({ ok: false, decision: 'BLOCK', mode: 'production-preflight', reason: error.message }));
+    }
+    throw error;
+  }
+}
+
+main().catch(error => {
   console.error(`[deploy] ${error.message}`);
   process.exitCode = 1;
 });

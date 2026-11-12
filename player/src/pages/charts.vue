@@ -1,219 +1,44 @@
 <script setup lang="ts">
-import { reactive, toRefs, computed, watch, onMounted } from 'vue'
-import SongList from '@/components/SongList.vue'
-import FilterRow from '@/components/Ui/FilterRow.vue'
-import { useChartFilters, type ChartCategory, type ChartWindow, type ChartRegion } from '@/composables/useChartFilters'
-import { topSong, toplist, playlistTrackAll, playlistDetail } from '@/api'
-import { fetchRecommendTrending } from '@/api/recommend'
-import { useRecommendStore } from '@/stores/modules/recommend'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { transformTopSongs, transformSongs, type SongData } from '@/utils/transformers'
+import SongList from '@/components/SongList.vue'
+import ChartResultNotice from '@/components/Ui/ChartResultNotice.vue'
+import FilterRow from '@/components/Ui/FilterRow.vue'
+import { useChartFilters } from '@/composables/useChartFilters'
+import { useCharts } from '@/composables/useCharts'
 
 const { t } = useI18n()
-const recommendStore = useRecommendStore()
-
 const { categories, trendingWindows, newSongRegions } = useChartFilters()
-
-const state = reactive({
-  activeTab: 'trending' as ChartCategory,
-  trendingWindow: '7d' as ChartWindow,
-  trendingSongs: [] as SongData[],
-  trendingLoading: false,
-  activeType: 0 as ChartRegion,
-  songs: [] as SongData[],
-  newSongLoading: false,
-  officialLists: [] as any[],
-  officialListLoading: false,
-  selectedList: null as any,
-  listSongs: [] as SongData[],
-  listLoading: false,
-})
-
-const { activeTab, trendingWindow, activeType } = toRefs(state)
-
-const officialOptions = computed(() => state.officialLists.map(item => ({ key: item.id, label: item.name })))
-
-let trendingRequestGeneration = 0
-
-const loadTrendingSongs = async () => {
-  const generation = ++trendingRequestGeneration
-  state.trendingLoading = true
-  try {
-    let tracks: SongData[] = []
-    try {
-      const res = await fetchRecommendTrending(
-        {
-          window: state.trendingWindow,
-          count: 50,
-          personalized: recommendStore.personalizationEnabled,
-        },
-        recommendStore.buildRequestHeaders(true)
-      )
-      tracks = res.tracks
-    } catch (err) {
-      if (generation !== trendingRequestGeneration) return
-      console.warn('[Charts] loadTrendingSongs failed, applying fallback:', err)
-    }
-    if (generation !== trendingRequestGeneration) return
-    if (!tracks.length) {
-      const fallback = await topSong({ type: 0 })
-      tracks = transformTopSongs(fallback as Record<string, unknown>, 50)
-    }
-    if (generation === trendingRequestGeneration) state.trendingSongs = tracks
-  } catch (err) {
-    if (generation !== trendingRequestGeneration) return
-    console.error('[Charts] fallback failed:', err)
-    state.trendingSongs = []
-  } finally {
-    if (generation === trendingRequestGeneration) state.trendingLoading = false
-  }
-}
-
-let newSongRequestGeneration = 0
-
-const loadNewSongs = async () => {
-  const generation = ++newSongRequestGeneration
-  state.newSongLoading = true
-  try {
-    const res = await topSong({ type: activeType.value })
-    if (generation !== newSongRequestGeneration) return
-    state.songs = transformTopSongs(res as Record<string, unknown>)
-  } catch (err) {
-    if (generation !== newSongRequestGeneration) return
-    console.error('[Charts] loadNewSongs failed:', err)
-    state.songs = []
-  } finally {
-    if (generation === newSongRequestGeneration) state.newSongLoading = false
-  }
-}
-
-let listRequestGeneration = 0
-
-const selectList = async (item: any, force = false) => {
-  if (!item?.id) return
-  if (!force && state.selectedList?.id === item.id && state.listSongs.length > 0) return
-
-  const generation = ++listRequestGeneration
-  state.selectedList = item
-  state.listLoading = true
-  try {
-    const numericId = Number(item.id) || item.id
-    const [tracksRes, detailRes] = await Promise.allSettled([
-      playlistTrackAll({ id: numericId, limit: 100 }),
-      playlistDetail({ id: Number(numericId) }),
-    ])
-    if (generation !== listRequestGeneration) return
-
-    let songs: SongData[] = []
-    if (tracksRes.status === 'fulfilled' && tracksRes.value) {
-      songs = transformSongs(tracksRes.value as Record<string, unknown>, 100)
-    }
-    if ((!songs || songs.length === 0) && detailRes.status === 'fulfilled' && detailRes.value) {
-      songs = transformSongs(detailRes.value as Record<string, unknown>, 100)
-    }
-
-    state.listSongs = songs
-  } catch (err) {
-    if (generation !== listRequestGeneration) return
-    console.error('[Charts] selectList failed:', err)
-    state.listSongs = []
-  } finally {
-    if (generation === listRequestGeneration) state.listLoading = false
-  }
-}
-
-const selectOfficialChart = (id: string | number) => {
-  void selectList(state.officialLists.find(item => item.id === id))
-}
-
-const loadOfficialLists = async () => {
-  try {
-    state.officialListLoading = true
-    const res: any = await toplist()
-    const list: any[] = res?.list || res?.data?.list || []
-    state.officialLists = list.map((it: any) => ({
-      id: it?.id,
-      name: it?.name,
-      cover: it?.coverImgUrl || '',
-      updateFrequency: it?.updateFrequency || '',
-      trackCount: it?.trackCount || 0,
-      playCount: it?.playCount || 0,
-      description: it?.description || '',
-    }))
-    if (state.officialLists.length) {
-      const target = state.selectedList
-        ? state.officialLists.find((it) => it.id === state.selectedList.id) || state.officialLists[0]
-        : state.officialLists[0]
-      await selectList(target, !state.listSongs.length)
-    }
-  } catch (err) {
-    console.error('[Charts] loadOfficialLists failed:', err)
-  } finally {
-    state.officialListLoading = false
-  }
-}
-
-const currentSongs = computed(() => {
-  if (state.activeTab === 'trending') return state.trendingSongs
-  if (state.activeTab === 'newSong') return state.songs
-  return state.listSongs
-})
-
-const currentLoading = computed(() => {
-  if (state.activeTab === 'trending') return state.trendingLoading
-  if (state.activeTab === 'newSong') return state.newSongLoading
-  return state.listLoading || (state.officialListLoading && !state.listSongs.length)
-})
+const {
+  activeTab,
+  trendingWindow,
+  activeType,
+  officialOptions,
+  selectedList,
+  selectOfficialChart,
+  result,
+  loadCurrent,
+} = useCharts({ trendingCount: 50, showTrendingFallback: true })
 
 const headerTitle = computed(() => {
-  if (state.activeTab === 'trending') {
-    const cur = trendingWindows.value.find(option => option.key === state.trendingWindow)
-    return `${t('charts.trending')} · ${cur?.label ?? ''}`
+  if (result.value.status === 'fallback') return t('charts.newSongs')
+  if (activeTab.value === 'trending') {
+    const window = trendingWindows.value.find(option => option.key === trendingWindow.value)
+    return `${t('charts.trending')} · ${window?.label ?? ''}`
   }
-  if (state.activeTab === 'newSong') {
-    const cur = newSongRegions.value.find(option => option.key === state.activeType)
-    return `${t('charts.newSongs')} · ${cur?.label ?? ''}`
+  if (activeTab.value === 'newSong') {
+    const region = newSongRegions.value.find(option => option.key === activeType.value)
+    return `${t('charts.newSongs')} · ${region?.label ?? ''}`
   }
-  return state.selectedList?.name || t('charts.official')
+  return selectedList.value?.name || t('charts.official')
 })
 
 const currentSubtitle = computed(() => {
-  if (state.activeTab === 'trending') return '实时更新'
-  if (state.activeTab === 'newSong') return '每日更新'
-  return state.selectedList?.updateFrequency || '定期更新'
-})
-
-const loadCurrentTab = async () => {
-  if (state.activeTab === 'trending') {
-    if (!state.trendingSongs.length) await loadTrendingSongs()
-  } else if (state.activeTab === 'newSong') {
-    if (!state.songs.length) await loadNewSongs()
-  } else if (state.activeTab === 'official') {
-    if (!state.officialLists.length) {
-      await loadOfficialLists()
-    } else if (!state.listSongs.length && state.selectedList) {
-      await selectList(state.selectedList)
-    }
+  if (result.value.status === 'fallback' || activeTab.value === 'newSong') {
+    return t('charts.updateFrequency.daily')
   }
-}
-
-watch(trendingWindow, () => {
-  if (state.activeTab === 'trending') loadTrendingSongs()
-})
-
-watch(activeType, () => {
-  if (state.activeTab === 'newSong') loadNewSongs()
-})
-
-watch(activeTab, () => {
-  loadCurrentTab()
-})
-
-onMounted(() => {
-  loadCurrentTab()
-  if (state.activeTab !== 'official' && !state.officialLists.length) {
-    loadOfficialLists()
-  }
+  if (activeTab.value === 'trending') return t('charts.updateFrequency.realtime')
+  return selectedList.value?.updateFrequency || t('charts.updateFrequency.periodic')
 })
 </script>
 
@@ -239,13 +64,16 @@ onMounted(() => {
               </span>
             </div>
             <!-- 排行榜下方的更新频率与曲目数徽章（极简克制，只展示结果） -->
-            <div class="flex items-center gap-2 mt-0.5">
+            <div
+              class="flex items-center gap-2 mt-0.5"
+              :class="{ invisible: result.status === 'loading' || result.status === 'error' }"
+            >
               <span class="text-primary/40 text-[11px]">
                 {{ currentSubtitle }}
               </span>
               <span class="text-primary/20 text-[10px] shrink-0">·</span>
               <span class="text-primary/50 text-[11px] px-2 py-0.5 rounded-full bg-button-glass border border-glass-subtle shrink-0 font-medium">
-                {{ currentSongs.length }} {{ t('charts.songs') }}
+                {{ result.songs.length }} {{ t('charts.songs') }}
               </span>
             </div>
           </div>
@@ -271,7 +99,7 @@ onMounted(() => {
           />
           <FilterRow
             v-else
-            :model-value="state.selectedList?.id"
+            :model-value="selectedList?.id"
             :label="t('charts.officialLabel')"
             :options="officialOptions"
             scroll="vertical"
@@ -285,8 +113,17 @@ onMounted(() => {
     <!-- ═══════════════════════════════════════════════════════════ -->
     <!-- 主展示区（下栏内容区）：严格同步“歌手”页面，并配置清晰可见的滚动滑块 -->
     <!-- ═══════════════════════════════════════════════════════════ -->
-    <div class="charts-content-container flex-1 min-h-0 px-1 sm:px-2 pb-2 overflow-hidden">
-      <SongList :songs="currentSongs" :loading="currentLoading" :show-header="true" :show-controls="true" :flat="true" />
+    <div class="charts-content-container flex flex-1 min-h-0 flex-col px-1 sm:px-2 pb-2 overflow-hidden">
+      <ChartResultNotice :status="result.status" :empty="!result.songs.length" @retry="loadCurrent" />
+      <div v-if="result.status === 'loading' || result.songs.length" class="flex-1 min-h-0">
+        <SongList
+          :songs="result.songs"
+          :loading="result.status === 'loading'"
+          :show-header="true"
+          :show-controls="true"
+          :flat="true"
+        />
+      </div>
     </div>
   </div>
 </template>

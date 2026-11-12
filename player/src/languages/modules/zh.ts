@@ -210,6 +210,10 @@ export default {
     trendingLabel: '站内趋势:',
     newSongLabel: '新歌分类:',
     officialLabel: '官方榜单:',
+    loadFailed: '榜单加载失败。',
+    empty: '此榜单暂无歌曲。',
+    trendingFallback: '趋势榜暂不可用，正在显示新歌。',
+    updateFrequency: { realtime: '实时更新', daily: '每日更新', periodic: '定期更新' },
   },
   components: {
     infiniteScroll: {

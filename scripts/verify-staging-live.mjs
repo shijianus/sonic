@@ -14,6 +14,8 @@ const remoteIdentityPath = process.env.SONIC_STAGING_REMOTE_IDENTITY_PATH || '';
 const sshTarget = process.env.SONIC_STAGING_SSH_TARGET || '';
 const sshPort = process.env.SONIC_STAGING_SSH_PORT || '22';
 const sshArgs = ['-T', '-p', sshPort, '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'StrictHostKeyChecking=yes', '-o', 'UpdateHostKeys=no', '-o', 'ForwardAgent=no', sshTarget, 'python3', '-'];
+const protectedInviteProbe = '/api/music/search?q=Sonic&source=synthetic&count=1';
+const inviteCookieName = '__Host-sonic_access';
 const checks = [];
 class SafeError extends Error {}
 function ensure(value, code) { if (!value) throw new SafeError(code); }
@@ -90,7 +92,15 @@ async function projectMetadata(stable = false) {
   const production = project.deployment_configs?.production;
   ensure(preview && production, 'STAGING_ENVIRONMENTS_MISSING');
   const variables = (stable ? production : preview).env_vars || {};
-  for (const name of ['SONIC_STAGING_ACCESS_TOKEN', 'SONIC_ENGINE_SECRET', 'SONIC_SECRET']) {
+  const accessModeBinding = variables.SONIC_ACCESS_MODE;
+  ensure(!accessModeBinding || accessModeBinding.type === 'plain_text', 'STAGING_ACCESS_MODE_UNVERIFIABLE');
+  const declaredAccessMode = String(accessModeBinding?.value || '').trim().toLowerCase();
+  ensure(['', 'open', 'legacy-staging', 'invite'].includes(declaredAccessMode), 'STAGING_ACCESS_MODE_INVALID');
+  const accessGateMode = declaredAccessMode === 'invite' ? 'invite' : 'legacy-staging';
+  const accessBindings = accessGateMode === 'invite'
+    ? ['SONIC_ACCESS_SECRET', 'SONIC_INVITE_CODES']
+    : ['SONIC_STAGING_ACCESS_TOKEN'];
+  for (const name of [...accessBindings, 'SONIC_ENGINE_SECRET', 'SONIC_SECRET']) {
     ensure(variables[name]?.type === 'secret_text', 'EXISTING_PREVIEW_SECRET_BINDING_MISSING');
   }
   ensure(['staging', 'preview'].includes(variables.SONIC_ENV?.value), 'PREVIEW_ENVIRONMENT_REQUIRED');
@@ -106,6 +116,7 @@ async function projectMetadata(stable = false) {
     productionBranch: project.production_branch,
     publicStagingUrl: 'https://sonic-staging.pages.dev',
     engineUrl: engine.toString().replace(/\/$/, ''),
+    accessGateMode,
     variableNamesEqual: JSON.stringify(names) === JSON.stringify(existingNames),
     variableBindings: Object.fromEntries(allNames.map(name => [name, {
       previewType: variables[name]?.type || null,
@@ -124,12 +135,14 @@ async function projectMetadata(stable = false) {
   passed('existing staging project and preview bindings inspected without changes');
   return { apiPath, metadata };
 }
-async function credentials() {
+async function credentials(accessGateMode) {
   ensure(sshTarget, 'SONIC_STAGING_SSH_TARGET_REQUIRED');
   ensure(remoteEnvPath, 'SONIC_STAGING_REMOTE_ENV_PATH_REQUIRED');
   ensure(remoteIdentityPath, 'SONIC_STAGING_REMOTE_IDENTITY_PATH_REQUIRED');
   const remoteDataDir = process.env.SONIC_STAGING_REMOTE_DATA_DIR || '';
   ensure(remoteDataDir, 'SONIC_STAGING_REMOTE_DATA_DIR_REQUIRED');
+  const requiredKeys = ['SONIC_ENGINE_SECRET', 'SONIC_SECRET'];
+  if (accessGateMode === 'legacy-staging') requiredKeys.push('SONIC_STAGING_ACCESS_TOKEN');
   // Only this captured pipe contains values; never inherit SSH stdout/stderr or write it to a file.
   const source = String.raw`
 import json,pathlib,re,shlex,stat,subprocess
@@ -155,9 +168,9 @@ try
  if not any(m['Source']==data_dir and m['Destination']=='/app/data' for m in container['Mounts']):raise ValueError()
  if container['HostConfig']['PortBindings'].get('8080/tcp')!=[{'HostIp':'127.0.0.1','HostPort':'18080'}]:raise ValueError()
  running=dict(item.split('=',1) for item in container['Config']['Env'] if '=' in item)
- keys=['SONIC_STAGING_ACCESS_TOKEN','SONIC_ENGINE_SECRET','SONIC_SECRET']
+ keys=${JSON.stringify(requiredKeys)}
  if not all(values.get(key) and values[key]==running.get(key) for key in keys):raise ValueError()
- if len(values['SONIC_STAGING_ACCESS_TOKEN'])<16 or len(values['SONIC_ENGINE_SECRET'])<32:raise ValueError()
+ if len(values['SONIC_ENGINE_SECRET'])<32 or ('SONIC_STAGING_ACCESS_TOKEN' in keys and len(values['SONIC_STAGING_ACCESS_TOKEN'])<16):raise ValueError()
  identity_path=pathlib.Path(${JSON.stringify(remoteIdentityPath)})
  if identity_path.exists():
   if not identity_path.is_file() or stat.S_IMODE(identity_path.stat().st_mode)!=0o600:raise ValueError()
@@ -173,7 +186,9 @@ except Exception:
  raise SystemExit(1)
 `;
   const result = await new Promise((done, reject) => {
-    const child = spawn('ssh', sshArgs, { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const sshEnv = { ...process.env };
+    delete sshEnv.SONIC_STAGING_TEST_INVITE_CODE;
+    const child = spawn('ssh', sshArgs, { env: sshEnv, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let output = '';
     let tooLarge = false;
     const timer = setTimeout(() => child.kill(), 45000);
@@ -206,7 +221,7 @@ function releaseMatches(release, manifest) {
 function frontendMatches(value, manifest) {
   return ['schemaVersion', 'baseCommit', 'sourceDigest', 'releaseId', 'buildTime', 'dirty'].every(key => value?.[key] === manifest[key]);
 }
-async function verifyAccess(base, secrets, manifest) {
+export async function verifyLegacyAccess(base, secrets, manifest) {
   const headers = { 'X-Sonic-Staging-Token': secrets.SONIC_STAGING_ACCESS_TOKEN };
   let response = await request(`${base}/`);
   ensure(response.status === 401 && /noindex/.test(response.headers.get('x-robots-tag') || ''), 'ANONYMOUS_STAGING_GATE_FAILED');
@@ -233,6 +248,82 @@ async function verifyAccess(base, secrets, manifest) {
   await discard(response);
   passed('staging invitation exchanges into a Secure HttpOnly cookie and strips the token URL');
   return headers;
+}
+function safeInviteCookie(cookie) {
+  return /;\s*Path=\/(?:;|$)/i.test(cookie) && !/;\s*Domain=/i.test(cookie) &&
+    /;\s*HttpOnly(?:;|$)/i.test(cookie) && /;\s*Secure(?:;|$)/i.test(cookie) && /;\s*SameSite=Lax(?:;|$)/i.test(cookie);
+}
+async function verifyInviteDenial(base, headers = {}, code = 'STAGING_INVITE_ANONYMOUS_GATE_FAILED') {
+  const response = await request(base + protectedInviteProbe, { headers });
+  ensure(response.status === 401 && /noindex/.test(response.headers.get('x-robots-tag') || '') &&
+    /no-store/.test(response.headers.get('cache-control') || ''), code);
+  ensure((await json(response)).error?.code === 'ACCESS_REQUIRED', code);
+}
+export async function verifyInviteGate(base, manifest) {
+  let response = await request(`${base}/`);
+  ensure(response.status === 200 && /text\/html/i.test(response.headers.get('content-type') || '') &&
+    /noindex/.test(response.headers.get('x-robots-tag') || ''), 'STAGING_INVITE_PAGE_UNAVAILABLE');
+  if (manifest) ensure(response.headers.get('x-sonic-release') === manifest.releaseId, 'HTML_RELEASE_HEADER_MISMATCH');
+  await discard(response);
+  response = await request(`${base}/api/access/session`);
+  ensure(response.status === 401, 'STAGING_INVITE_MODE_UNVERIFIED');
+  const session = await json(response);
+  ensure(session.mode === 'invite' && session.access === false && session.error?.code === 'ACCESS_REQUIRED', 'STAGING_INVITE_MODE_UNVERIFIED');
+  await verifyInviteDenial(base);
+  passed('invite entry is reachable with noindex and protected API denies anonymous access');
+}
+async function closeInviteSession(base, headers) {
+  const response = await request(`${base}/api/access/logout`, { method: 'POST', headers: { ...headers, Origin: base } });
+  ensure(response.status === 200 && /no-store/.test(response.headers.get('cache-control') || ''), 'STAGING_INVITE_LOGOUT_FAILED');
+  const cleared = response.headers.getSetCookie().find(cookie => cookie.startsWith(`${inviteCookieName}=;`));
+  ensure(cleared && safeInviteCookie(cleared) && /;\s*Max-Age=0(?:;|$)/i.test(cleared), 'STAGING_INVITE_COOKIE_NOT_CLEARED');
+  const logout = await json(response);
+  ensure(logout.ok === true && logout.access === false && typeof logout.revocationDurable === 'boolean' &&
+    logout.revoked === logout.revocationDurable && logout.serverRevoked === logout.revocationDurable, 'STAGING_INVITE_REVOCATION_FAILED');
+  await verifyInviteDenial(base);
+  if (logout.revocationDurable) {
+    await verifyInviteDenial(base, headers, 'STAGING_INVITE_REVOKED_COOKIE_ACCEPTED');
+    passed('durable invite logout revokes the issued session and rejects its replay');
+  } else {
+    passed('invite logout clears the browser cookie and anonymous access remains blocked');
+  }
+  return logout.revocationDurable;
+}
+export async function withInviteAccess(base, code, manifest, verify) {
+  ensure(typeof code === 'string' && code.length >= 16 && code.length <= 256 &&
+    !/[\u0000-\u0020\u007f]/.test(code), 'STAGING_TEST_INVITE_CODE_REQUIRED');
+  await verifyInviteGate(base, manifest);
+  let headers;
+  let result;
+  let inviteSessionRevocationDurable;
+  try {
+    let response = await request(`${base}/api/access/redeem`, {
+      method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+    });
+    const cookie = response.headers.getSetCookie().find(value => value.startsWith(`${inviteCookieName}=`));
+    const pair = cookie?.split(';', 1)[0];
+    // Retain only the recognized Cookie so it can be cleared even if a later check fails.
+    if (pair && /^[A-Za-z0-9_.-]{1,512}$/.test(pair.slice(inviteCookieName.length + 1))) headers = { Cookie: pair };
+    ensure(response.status === 200 && /no-store/.test(response.headers.get('cache-control') || '') &&
+      response.headers.get('referrer-policy') === 'no-referrer', 'STAGING_INVITE_REDEMPTION_FAILED');
+    ensure(headers && safeInviteCookie(cookie) && /;\s*Max-Age=[1-9][0-9]*(?:;|$)/i.test(cookie), 'STAGING_INVITE_COOKIE_INVALID');
+    const redemption = await json(response);
+    ensure(redemption.ok === true && redemption.access === true && typeof redemption.expiresAt === 'string' &&
+      Date.parse(redemption.expiresAt) > Date.now(), 'STAGING_INVITE_REDEMPTION_FAILED');
+    response = await request(`${base}/api/access/session`, { headers });
+    ensure(response.status === 200 && /no-store/.test(response.headers.get('cache-control') || ''), 'STAGING_INVITE_COOKIE_ACCESS_FAILED');
+    const session = await json(response);
+    ensure(session.mode === 'invite' && session.access === true && session.expiresAt === redemption.expiresAt, 'STAGING_INVITE_COOKIE_ACCESS_FAILED');
+    await verifyInviteDenial(base, { Cookie: `${inviteCookieName}=invalid.signature` }, 'STAGING_INVALID_INVITE_COOKIE_ACCEPTED');
+    passed('disposable invite redeems into a secure expiring session and invalid Cookie is rejected');
+    result = await verify(headers);
+  } finally {
+    if (headers) {
+      try { inviteSessionRevocationDurable = await closeInviteSession(base, headers); }
+      finally { headers.Cookie = ''; }
+    }
+  }
+  return { result, inviteSessionRevocationDurable };
 }
 async function health(base, secrets) {
   const response = await request(`${base}/api/sonic/engine/health`, { headers: { 'X-Sonic-Engine-Key': secrets.SONIC_ENGINE_SECRET } });
@@ -554,19 +645,22 @@ async function selfTest() {
 async function main() {
   const { values } = parseArgs({ options: { preflight: { type: 'boolean' }, stable: { type: 'boolean' }, 'serve-browser': { type: 'boolean' }, 'self-test': { type: 'boolean' }, manifest: { type: 'string' }, url: { type: 'string' }, help: { type: 'boolean' } }, strict: true });
   if (values.help) {
-    console.log('Read-only preflight: node scripts/verify-staging-live.mjs --preflight\nPost-deploy checks: node scripts/verify-staging-live.mjs [--manifest path] [--url isolated-preview-url]\nStable Staging checks: node scripts/verify-staging-live.mjs --stable\nPost-deploy checks and one-use browser entry: node scripts/verify-staging-live.mjs --serve-browser\nLocal security checks: node scripts/verify-staging-live.mjs --self-test\nExisting Cloudflare auth and the fixed authorized SSH connection are required. No config or credentials are written. Live checks create fresh random subjects and verify their cleanup.');
+    console.log('Read-only stable Staging preflight: node scripts/verify-staging-live.mjs --preflight\nPost-deploy checks: node scripts/verify-staging-live.mjs [--manifest path] [--url isolated-preview-url]\nStable Staging checks: node scripts/verify-staging-live.mjs --stable\nLegacy gate checks and one-use browser entry: node scripts/verify-staging-live.mjs --serve-browser\nLocal security checks: node scripts/verify-staging-live.mjs --self-test\nExisting Cloudflare auth and the fixed authorized SSH connection are required. Product invite checks use a dedicated disposable SONIC_STAGING_TEST_INVITE_CODE from the environment. Live checks create fresh random subjects and verify their cleanup.');
     return;
   }
   if (values['self-test']) return selfTest();
   ensure(!(values.preflight && (values.url || values['serve-browser'])), 'PREFLIGHT_OPTIONS_CONFLICT');
   ensure(!(values.stable && values['serve-browser']), 'STABLE_BROWSER_BRIDGE_NOT_SUPPORTED');
-  const project = await projectMetadata(Boolean(values.stable));
-  const saved = await credentials();
-  const secrets = saved.credentials;
-  ensure(Boolean(secrets?.SONIC_STAGING_ACCESS_TOKEN && secrets?.SONIC_ENGINE_SECRET), 'STAGING_ACCESS_CREDENTIALS_MISSING');
+  const project = await projectMetadata(Boolean(values.stable || values.preflight));
+  const { accessGateMode } = project.metadata;
+  ensure(!(accessGateMode === 'invite' && values['serve-browser']), 'INVITE_BROWSER_REDEMPTION_REQUIRES_FORM');
+  const saved = await credentials(accessGateMode);
+  const secrets = saved.credentials || {};
   try {
+    ensure(Boolean(secrets?.SONIC_ENGINE_SECRET && (accessGateMode === 'invite' || secrets.SONIC_STAGING_ACCESS_TOKEN)), 'STAGING_ACCESS_CREDENTIALS_MISSING');
     if (values.preflight) {
-      await verifyAccess(project.metadata.publicStagingUrl, secrets);
+      if (accessGateMode === 'invite') await verifyInviteGate(project.metadata.publicStagingUrl);
+      else await verifyLegacyAccess(project.metadata.publicStagingUrl, secrets);
       const engine = await health(project.metadata.engineUrl, secrets);
       passed('existing Engine accepts the preserved inter-service key and reports durable readiness');
       console.log(JSON.stringify({ ok: true, mode: 'read-only-preflight', ...project.metadata, credentialFile: { path: envPath, mode: saved.mode, presence: saved.presence, savedMatchesRunning: saved.savedMatchesRunning }, currentEngineRelease: engine.release, checks }, null, 2));
@@ -575,12 +669,18 @@ async function main() {
     const manifest = readJson(resolve(root, values.manifest || 'dist/release.json'));
     validateManifest(manifest);
     const target = await selectDeployment(project.apiPath, manifest, values.url, Boolean(values.stable));
-    const headers = await verifyAccess(target.base, secrets, manifest);
-    const pairedRelease = await verifyRelease(target.base, project.metadata.engineUrl, headers, secrets, manifest);
-    await verifySearchAndMedia(target.base, headers, manifest);
-    ensure(project.metadata.independentIdentityBindingPresent && secrets.SONIC_ENGINE_IDENTITY_SECRET, 'INDEPENDENT_IDENTITY_NOT_DEPLOYED');
-    await verifyEvents(target.base, project.metadata.engineUrl, headers, secrets);
-    await verifyAuthenticatedIdentity(target.base, project.metadata.engineUrl, headers, secrets);
+    const verifyCandidate = async headers => {
+      const pairedRelease = await verifyRelease(target.base, project.metadata.engineUrl, headers, secrets, manifest);
+      await verifySearchAndMedia(target.base, headers, manifest);
+      ensure(project.metadata.independentIdentityBindingPresent && secrets.SONIC_ENGINE_IDENTITY_SECRET, 'INDEPENDENT_IDENTITY_NOT_DEPLOYED');
+      await verifyEvents(target.base, project.metadata.engineUrl, headers, secrets);
+      await verifyAuthenticatedIdentity(target.base, project.metadata.engineUrl, headers, secrets);
+      return pairedRelease;
+    };
+    const inviteAccessLiveVerified = accessGateMode === 'invite';
+    const { result: pairedRelease, inviteSessionRevocationDurable } = inviteAccessLiveVerified
+      ? await withInviteAccess(target.base, process.env.SONIC_STAGING_TEST_INVITE_CODE, manifest, verifyCandidate)
+      : { result: await verifyCandidate(await verifyLegacyAccess(target.base, secrets, manifest)), inviteSessionRevocationDurable: null };
     if (values['serve-browser']) {
       const bridge = await browserBootstrap(target.base, secrets.SONIC_STAGING_ACCESS_TOKEN);
       // The only stdout is this local URL. Invitation and Cookie values stay in memory.
@@ -591,6 +691,7 @@ async function main() {
     } else {
       console.log(JSON.stringify({
         ok: true, mode: 'staging-live', ...target, ...manifest, ...pairedRelease,
+        accessGateMode, inviteAccessLiveVerified, inviteSessionRevocationDurable,
         independentIdentityBindingPresent: project.metadata.independentIdentityBindingPresent,
         authenticatedIdentityAssertionLiveVerified: true, eventEpochLiveVerified: true, oauthLoginVerified: false,
         authenticationLimitation: 'Ephemeral signed staging subjects exercise the identity hop. External OAuth requires separate verification.', checks,

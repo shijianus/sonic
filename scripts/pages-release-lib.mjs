@@ -77,7 +77,7 @@ export async function verifyProductionPagesBinding({ pagesOrigin, engineOrigin, 
   }
   const normalized = key => String(value(key) ?? '').trim().toLowerCase();
   const environment = normalized('SONIC_ENV');
-  if ((environment && environment !== 'production') || normalized('SONIC_RUNTIME') === 'linux-engine') {
+  if (environment !== 'production' || normalized('SONIC_RUNTIME') === 'linux-engine') {
     throw new Error('Production Pages must use the Pages runtime and production environment');
   }
   const expectedAccess = env.SONIC_ACCESS_MODE?.trim().toLowerCase();
@@ -119,6 +119,9 @@ export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest,
   }
   if (manifest.dirty !== false || evidence.branch !== 'staging' ||
       evidence.base !== stagingOrigin || evidence.branchUrl !== stagingOrigin) fail();
+  if (evidence.accessGateMode !== 'invite' || evidence.inviteAccessLiveVerified !== true) {
+    throw new Error('Production requires live product invite access verification on stable Staging');
+  }
   for (const key of productionChecks) {
     const check = evidence.productionChecks?.[key];
     if (check?.ok !== true || typeof check.evidence !== 'string' || !check.evidence.trim()) {

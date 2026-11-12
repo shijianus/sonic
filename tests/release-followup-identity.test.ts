@@ -1,15 +1,23 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createSession } from '../functions/_lib/auth';
 import type { AppEnv } from '../functions/_lib/types';
+import { onRequest as pagesMiddleware } from '../functions/_middleware';
+import { onRequest as redeemInvite } from '../functions/api/access/invite';
+import { onRequest as readAccessSession } from '../functions/api/access/session';
+import { onRequest as logoutAccess } from '../functions/api/access/logout';
 import { onRequest as events, resetEventIngestQuotaForTest } from '../functions/api/sonic/events';
 import { onRequest as health } from '../functions/api/sonic/engine/health';
 import { callLocalEngineJson, resetLocalEngineCircuitForTest } from '../functions/_lib/sonic/local-engine';
 import { ENGINE_IDENTITY_HEADER, ENGINE_IDENTITY_REQUIRED_HEADER, issueEngineIdentity, getEngineIdentityReadiness } from '../functions/_lib/sonic/engine-identity';
 import { resolveUserIdentity } from '../functions/_lib/sonic/recommend/identity';
 import { SqliteRecommendStore } from '../server/recommend-sqlite';
+import { SqliteAccessStore } from '../server/access-store';
 import { sanitizeInboundHeaders } from '../server/request-adapter';
 import { MemoryRecommendStore } from '../functions/_lib/sonic/recommend/memory-store';
-import { verifyAuthenticatedIdentity, verifyEvents, verifyRelease } from '../scripts/verify-staging-live.mjs';
+import { verifyAuthenticatedIdentity, verifyEvents, verifyLegacyAccess, verifyRelease, withInviteAccess } from '../scripts/verify-staging-live.mjs';
 
 const serviceKey = 'followup-service-key-at-least-32-characters-long';
 const assertionKey = 'followup-identity-key-at-least-32-characters-long';
@@ -39,6 +47,90 @@ afterEach(() => {
   resetLocalEngineCircuitForTest();
   resetEventIngestQuotaForTest();
   for (const store of stores.splice(0)) store.close();
+});
+
+describe('Live Staging access probes against Pages handlers', () => {
+  const base = 'https://edge.invite.test';
+  const code = 'disposable-fixture-invite-code';
+  const manifest = { releaseId: 'invite-fixture-release' };
+  const protectedUrl = `${base}/api/music/search?q=Sonic&source=synthetic&count=1`;
+  const staging: AppEnv = { SONIC_ENV: 'staging', SONIC_RELEASE_ID: manifest.releaseId, SONIC_RATE_LIMIT_ANON_RPM: '10000' };
+  const inviteEnv: AppEnv = {
+    ...staging, SONIC_ACCESS_MODE: 'invite', SONIC_INVITE_CODES: code,
+    SONIC_ACCESS_SECRET: 'fixture-access-key-at-least-32-characters',
+  };
+
+  function usePages(env: AppEnv) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async (url, init) => {
+      const request = new Request(String(url), init);
+      expect(new URL(request.url).origin).toBe(base);
+      return pagesMiddleware({ request, env, next: async () => {
+        switch (new URL(request.url).pathname) {
+          case '/': return new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } });
+          case '/api/access/redeem': return redeemInvite({ request, env });
+          case '/api/access/session': return readAccessSession({ request, env });
+          case '/api/access/logout': return logoutAccess({ request, env });
+          case '/api/music/search': return Response.json({ ok: true });
+          default: return new Response(null, { status: 404 });
+        }
+      } });
+    });
+  }
+
+  it('retains the legacy token and browser bootstrap path', async () => {
+    const token = 'fixture-legacy-staging-token';
+    usePages({ ...staging, SONIC_STAGING_ACCESS_TOKEN: token });
+    await expect(verifyLegacyAccess(base, { SONIC_STAGING_ACCESS_TOKEN: token }, manifest))
+      .resolves.toEqual({ 'X-Sonic-Staging-Token': token });
+  });
+
+  it('redeems a signed Pages invite, verifies protected access and rejects expiry as 401', async () => {
+    usePages(inviteEnv);
+    const result = await withInviteAccess(base, code, manifest, async (headers: Record<string, string>) => {
+      expect((await fetch(protectedUrl, { headers })).status).toBe(200);
+      const session = await (await fetch(`${base}/api/access/session`, { headers })).json();
+      const now = vi.spyOn(Date, 'now').mockReturnValue(Date.parse(session.expiresAt));
+      try {
+        const expired = await fetch(protectedUrl, { headers });
+        expect(expired.status).toBe(401);
+        expect(await expired.json()).toMatchObject({ error: { code: 'ACCESS_REQUIRED' } });
+      } finally { now.mockRestore(); }
+      return 'checked';
+    });
+    expect(result).toEqual({ result: 'checked', inviteSessionRevocationDurable: false });
+  });
+
+  it('blocks before redeeming when no disposable code is supplied or the invite gate is open', async () => {
+    const fetchPages = usePages({ ...inviteEnv, SONIC_ACCESS_MODE: 'open' });
+    const verify = vi.fn();
+    await expect(withInviteAccess(base, undefined, manifest, verify)).rejects.toThrow('STAGING_TEST_INVITE_CODE_REQUIRED');
+    expect(fetchPages).not.toHaveBeenCalled();
+    await expect(withInviteAccess(base, code, manifest, verify)).rejects.toThrow('STAGING_INVITE_MODE_UNVERIFIED');
+    expect(fetchPages.mock.calls.some(([url]) => String(url).endsWith('/api/access/redeem'))).toBe(false);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('revokes a durable disposable session when a candidate check fails: %s', async fail => {
+    const temp = mkdtempSync(join(tmpdir(), 'sonic-staging-invite-'));
+    const access = new SqliteAccessStore(join(temp, 'access.sqlite'), code);
+    usePages({ ...inviteEnv, SONIC_ACCESS_STORE: access });
+    let cookie = '';
+    try {
+      const run = withInviteAccess(base, code, manifest, async (headers: Record<string, string>) => {
+        cookie = headers.Cookie;
+        expect((await fetch(protectedUrl, { headers })).status).toBe(200);
+        if (fail) throw new Error('candidate check failed');
+        return 'checked';
+      });
+      if (fail) await expect(run).rejects.toThrow('candidate check failed');
+      else await expect(run).resolves.toEqual({ result: 'checked', inviteSessionRevocationDurable: true });
+      expect(cookie).toMatch(/^__Host-sonic_access=/);
+      expect((await fetch(protectedUrl, { headers: { Cookie: cookie } })).status).toBe(401);
+    } finally {
+      access.close();
+      rmSync(temp, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('Live Staging release probes', () => {

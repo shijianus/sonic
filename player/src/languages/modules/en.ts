@@ -214,6 +214,10 @@ export default {
     trendingLabel: 'Trending:',
     newSongLabel: 'New songs:',
     officialLabel: 'Official charts:',
+    loadFailed: 'Could not load this chart.',
+    empty: 'No songs in this chart.',
+    trendingFallback: 'Trending is unavailable. Showing New Songs.',
+    updateFrequency: { realtime: 'Live updates', daily: 'Updated daily', periodic: 'Updated periodically' },
   },
   components: {
     infiniteScroll: {

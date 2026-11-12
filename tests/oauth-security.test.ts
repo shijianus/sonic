@@ -13,7 +13,7 @@ import { onRequest as handleAuthUser } from '../functions/api/auth/user';
 import { onRequest as handleAuthKey } from '../functions/api/auth/key';
 import { onRequest as handleAuthLogout } from '../functions/api/auth/logout';
 import { onRequest as handleAuthRevoke } from '../functions/api/auth/revoke';
-import { resetRateLimitsForTest } from '../functions/_lib/sonic/security';
+import { checkStagingAccessGate, resetRateLimitsForTest } from '../functions/_lib/sonic/security';
 import { guardGatewayRequest } from '../functions/_lib/sonic/route-helpers';
 
 const SECRET = 'super_secret_sonic_key_2026_primary_abcdef123456';
@@ -349,6 +349,32 @@ describe('Session-backed API key management', () => {
     expect(cookies.some((c) => c.startsWith('__Host-sonic_session=;'))).toBe(true);
     expect(cookies.some((c) => c.startsWith('sonic_session=;'))).toBe(true);
     expect(cookies.some((c) => c.includes('Max-Age=0'))).toBe(true);
+  });
+
+  it('clears both legacy staging cookie names after an HTTPS bootstrap', async () => {
+    const origin = 'https://sonic-staging.example.com';
+    const token = 'staging_test_fixture_token';
+    const environment = env({ SONIC_ACCESS_MODE: 'legacy-staging', SONIC_STAGING_ACCESS_TOKEN: token });
+    const bootstrap = checkStagingAccessGate(new Request(`${origin}/?staging_token=${token}`), environment);
+    expect(bootstrap?.status).toBe(302);
+    const cookie = setCookies(bootstrap!)[0].split(';', 1)[0];
+    expect(cookie).toMatch(/^__Host-sonic_staging_access=/);
+    expect(checkStagingAccessGate(new Request(origin, { headers: { Cookie: cookie } }), environment)).toBeNull();
+
+    const response = await handleAuthLogout({
+      request: new Request(`${origin}/api/auth/logout`, {
+        method: 'POST',
+        headers: { Cookie: cookie, Origin: origin },
+      }),
+      env: environment,
+    });
+    expect(response.status).toBe(200);
+    for (const name of ['sonic_staging_access', '__Host-sonic_staging_access']) {
+      const expiration = setCookies(response).find(value => value.startsWith(`${name}=;`));
+      expect(expiration).toMatch(/; Secure;/);
+      expect(expiration).toMatch(/; Path=\/; Max-Age=0;/);
+    }
+    expect(checkStagingAccessGate(new Request(origin), environment)?.status).toBe(401);
   });
 
   it('rejects cross-site cookie-authenticated writes', async () => {

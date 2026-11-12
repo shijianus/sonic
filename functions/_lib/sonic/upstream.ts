@@ -5,7 +5,7 @@
 import { jsonResponse, handleOptions } from '../http';
 import { BRAND_PRODUCT } from '../brand';
 import { getSonicConfig, SONIC_UA } from './config';
-import { callLocalEngineJson, createRuntimeAbortBudget, fetchWithRuntimeBudget } from './local-engine';
+import { callLocalEngineJson, CHART_UPSTREAM_UNAVAILABLE, createRuntimeAbortBudget, fetchWithRuntimeBudget } from './local-engine';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from './security';
 import { recordLicensingBlockMetric } from './observability';
 import { callNeteaseLinuxApi as nativeLinuxApi, callNeteaseEapi as nativeEapi } from './native-protocols';
@@ -85,6 +85,25 @@ export function desensitizeData<T>(obj: T): T {
   return obj;
 }
 
+function chartCatalogField(endpoint: string): 'data' | 'list' | undefined {
+  if (endpoint === 'top/song' || endpoint === 'personalized/newsong') return 'data';
+  if (endpoint === 'toplist' || endpoint === 'toplist/detail') return 'list';
+}
+
+function chartCatalogList(payload: unknown, field: 'data' | 'list'): unknown[] | undefined {
+  if (!payload || typeof payload !== 'object') return;
+  const { code, [field]: entries } = payload as Record<string, unknown>;
+  if (code !== undefined && code !== 200 && code !== '200') return;
+  if (Array.isArray(entries)) return entries;
+}
+
+function chartCatalogUnavailable(): Response {
+  return jsonResponse(
+    { code: 503, brand: 'Sonic', error: { code: CHART_UPSTREAM_UNAVAILABLE, message: 'Chart catalog is temporarily unavailable' } },
+    { status: 503, headers: { 'Cache-Control': 'no-store', 'Retry-After': '3' } },
+  );
+}
+
 /**
  * Fetch and dispatch upstream endpoints
  */
@@ -119,6 +138,12 @@ export async function handleUpstreamEndpoint(
       }
     }
     return response;
+  } catch (error) {
+    if (!request.signal.aborted && budget.signal.reason?.name === 'TimeoutError' &&
+        chartCatalogField(endpoint.replace(/^\/+|\/+$/g, '').toLowerCase())) {
+      return chartCatalogUnavailable();
+    }
+    throw error;
   } finally {
     budget.dispose();
   }
@@ -186,6 +211,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
     return withSonicJsonSingleFlight(key, (signal) => nativeEapi(apiPath, payload, providerEnv, signal), request.signal);
   };
   const normEndpoint = endpoint.replace(/^\/+|\/+$/g, '').toLowerCase();
+  const chartField = chartCatalogField(normEndpoint);
 
   // Discrepancy 7 fix: graceful response for legacy NetEase login status checks in SPA
   if (normEndpoint === 'login/status') {
@@ -223,7 +249,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       request,
       timeoutMs: cfg.engineTimeoutMs,
     });
-    if (engineRes.ok && engineRes.data) {
+    if (engineRes.ok && engineRes.data && (!chartField || chartCatalogList(engineRes.data, chartField))) {
       const engineCache = String(engineRes.cacheControl || '').trim();
       const engineCacheLower = engineCache.toLowerCase();
       // Never synthesize a public policy for an engine payload. Only relay an
@@ -286,7 +312,10 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       });
       if (ncmResp.ok) {
         const ncmData = await ncmResp.json();
-        if (ncmData && (ncmData.code === 200 || ncmData.songs || ncmData.playlist || ncmData.data)) {
+        const usable = chartField
+          ? chartCatalogList(ncmData, chartField)
+          : ncmData && (ncmData.code === 200 || ncmData.songs || ncmData.playlist || ncmData.data);
+        if (usable) {
           return jsonResponse(desensitizeData({ brand: 'Sonic', ...ncmData }), {
             headers: {
               'Cache-Control': 'public, max-age=1800',
@@ -442,8 +471,10 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       const resp = await timedFetch('https://music.163.com/api/v1/discovery/new/songs', {
         headers: buildUpstreamHeaders(cfg.realIp),
       });
-      const data: any = await resp.json();
-      const songs = (data.data || []).map((s: any) => ({
+      if (!resp.ok) return chartCatalogUnavailable();
+      const entries = chartCatalogList(await resp.json(), 'data');
+      if (!entries) return chartCatalogUnavailable();
+      const songs = entries.map((s: any) => ({
         ...s,
         duration: s.duration || (s.dt ? Math.floor(s.dt / 1000) : 0),
         dt: s.dt || (s.duration ? s.duration * 1000 : 0),
@@ -453,7 +484,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
         { headers: { 'Cache-Control': 'public, max-age=3600' } },
       );
     } catch { request.signal.throwIfAborted(); }
-    return jsonResponse({ code: 200, brand: 'Sonic', data: [] });
+    return chartCatalogUnavailable();
   }
 
   // 4. Artists (Top / List)
@@ -1192,18 +1223,21 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
   if (normEndpoint === 'toplist/detail' || normEndpoint === 'toplist') {
     try {
       const resp = await timedFetch('https://music.163.com/api/toplist/detail', { headers: buildUpstreamHeaders(cfg.realIp) });
+      if (!resp.ok) return chartCatalogUnavailable();
       const data: any = await resp.json();
+      const entries = chartCatalogList(data, 'list');
+      if (!entries) return chartCatalogUnavailable();
       return jsonResponse(
         {
           code: 200,
           brand: 'Sonic',
-          list: desensitizeData(data.list || []),
+          list: desensitizeData(entries),
           artistToplist: desensitizeData(data.artistToplist || {}),
         },
         { headers: { 'Cache-Control': 'public, max-age=3600' } },
       );
     } catch { request.signal.throwIfAborted(); }
-    return jsonResponse({ code: 200, brand: 'Sonic', list: [] });
+    return chartCatalogUnavailable();
   }
 
   // 12. Playlist Detail & Track All

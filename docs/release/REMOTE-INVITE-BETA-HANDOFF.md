@@ -45,7 +45,7 @@ SONIC_INVITE_CODES               # 仅在受控密钥管理中提供；不得写
 
 ```text
 SONIC_STAGING_SSH_TARGET=user@approved-host
-SONIC_STAGING_SSH_PORT=22
+SONIC_STAGING_SSH_PORT=<approved SSH port>
 SONIC_STAGING_ENV_PATH=<local protected env path>
 SONIC_STAGING_REMOTE_ENV_PATH=<remote protected env path>
 SONIC_STAGING_REMOTE_IDENTITY_PATH=<remote protected identity env path>
@@ -54,9 +54,16 @@ SONIC_STAGING_DATA_DIR=<local/remote data mount used by docker checks>
 SONIC_STAGING_ENV_FILE=<protected staging env file>
 SONIC_STAGING_IDENTITY_FILE=<protected identity env file>
 SONIC_EXPECTED_STAGING_IMAGE_ID=sha256:<previous immutable image digest>
+SONIC_STAGING_TEST_INVITE_CODE=<disposable staging invite from secure storage>
 ```
 
 这些值不得写入源码、报告、命令参数、浏览器 URL 或提交记录；远端脚本在缺少必要变量时应 fail closed。
+
+在能访问受控 Staging VPS SSH 的执行环境中运行 `node scripts/verify-staging-live.mjs --preflight`，核对稳定 Staging 的访问模式、匿名门禁与 Engine 就绪状态。预检不兑换邀请码。
+
+使用已部署的候选制品执行 `node scripts/verify-staging-live.mjs --url <isolated-preview-url>`，再对同一份制品的稳定 Staging 执行 `node scripts/verify-staging-live.mjs --stable`。每次邀请制验收都使用独立的测试邀请码，通过受控环境注入 `SONIC_STAGING_TEST_INVITE_CODE`。脚本向 Staging 的兑换接口提交邀请码，核对受保护 API、无效会话和退出后的访问控制，并在结束时清理测试会话。发布证据须包含 `accessGateMode: "invite"` 和 `inviteAccessLiveVerified: true`。
+
+`inviteSessionRevocationDurable` 记录是否验证了服务端撤销与旧 Cookie 重放拒绝。Pages 签名会话验收会验证浏览器 Cookie 清理，并报告该字段为 `false`。使用短有效期并在验收后移除临时测试邀请码。`--serve-browser` 用于旧共享门禁。产品邀请制浏览器测试应使用另一个专用邀请码在 Staging 页面表单兑换。
 
 Staging Engine 默认仅启用 `synthetic`。在邀请门禁开启的同一候选发布上测试真实媒体时，可设置 `SONIC_STAGING_APPROVED_SOURCES`，按需从 `netease,qq,kugou,kuwo,amll,lrclib` 选择已获批准的来源。`python3 scripts/deploy-staging-engine.py --check-source-policy` 只打印会使用的内容策略与来源开关。保持 Pages 的受限访问门禁，并根据本次测试范围配置 Pages 白名单和真实 OAuth。
 

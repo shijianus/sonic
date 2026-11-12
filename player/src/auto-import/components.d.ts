@@ -22,6 +22,7 @@ declare module 'vue' {
     Aurora: typeof import('./../components/Background/Aurora.vue')['default']
     AuroraSettingsPanel: typeof import('./../components/Background/AuroraSettingsPanel.vue')['default']
     Button: typeof import('./../components/Ui/Button.vue')['default']
+    ChartResultNotice: typeof import('./../components/Ui/ChartResultNotice.vue')['default']
     ColorBends: typeof import('./../components/Background/ColorBends.vue')['default']
     ColorBendsSettingsPanel: typeof import('./../components/Background/ColorBendsSettingsPanel.vue')['default']
     DownloadQualityDialog: typeof import('./../components/Dialog/DownloadQualityDialog.vue')['default']

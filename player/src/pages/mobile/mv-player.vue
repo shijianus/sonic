@@ -16,6 +16,7 @@ const libraryStore = useLibraryStore()
 const radarAlbumStore = useRadarAlbumStore()
 
 const mvId = computed(() => String(route.params.id || ''))
+const isLiked = computed(() => libraryStore.isMvLiked(mvId.value))
 
 const DEFAULT_RECOMMEND_CANDIDATES = [
   {
@@ -245,7 +246,6 @@ const state = reactive({
   playCount: '',
   description: '',
   loading: true,
-  liked: false,
   error: false,
   retryKey: 0,
   isDescExpanded: false,
@@ -367,7 +367,6 @@ const load = async (id: string) => {
     state.url = u?.url || ''
     state.error = !state.url
     state.retryKey += 1
-    state.liked = libraryStore.isMvLiked(id)
     const simis =
       simiRes.status === 'fulfilled'
         ? (simiRes.value as any)?.mvs || (simiRes.value as any)?.data || []
@@ -506,7 +505,7 @@ const retryVideo = async () => {
 
 const toggleLike = () => {
   if (!mvId.value) return
-  state.liked = libraryStore.toggleLikeMv({
+  libraryStore.toggleLikeMv({
     id: mvId.value,
     name: state.name,
     artist: state.artist,
@@ -608,15 +607,17 @@ watch(
             <div class="flex items-center gap-1.5">
               <button
                 type="button"
-                class="flex items-center gap-1 rounded-full bg-surface-glass border border-glass-subtle px-2.5 py-1 text-xs font-medium text-primary"
-                :class="state.liked ? 'text-sky-400 font-semibold' : ''"
+                class="flex min-h-11 items-center gap-1.5 rounded-full border border-glass-subtle bg-surface-glass px-3 py-1 text-xs font-medium focus-visible:ring-2 focus-visible:ring-sky-500"
+                :class="isLiked ? 'font-semibold text-[color:var(--glass-accent-text)]' : 'text-primary'"
+                :aria-pressed="isLiked"
                 @click="toggleLike"
               >
                 <span
                   class="h-3.5 w-3.5"
-                  :class="state.liked ? 'icon-[mdi--thumb-up]' : 'icon-[mdi--thumb-up-outline]'"
+                  :class="isLiked ? 'icon-[mdi--thumb-up]' : 'icon-[mdi--thumb-up-outline]'"
+                  aria-hidden="true"
                 ></span>
-                <span>{{ formatCount(state.playCount) }}</span>
+                <span>{{ t('mvPlayer.actions.like') }}</span>
               </button>
             </div>
           </div>

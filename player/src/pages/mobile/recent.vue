@@ -29,7 +29,9 @@ const reducedMotion = usePreferredReducedMotion()
 const prefersReduced = computed(() => reducedMotion.value === 'reduce')
 const { setPlaylist, play, playlist, clearPlaylistWithUndo } = useAudio()
 const libraryStore = useLibraryStore()
-const likedCount = computed(() => libraryStore.likedSongCount)
+const favoritesCount = computed(
+  () => libraryStore.likedSongCount + libraryStore.collectedPlaylistCount + libraryStore.likedMvCount
+)
 
 const state = reactive({
   activeTab: 0,
@@ -97,7 +99,7 @@ const tabs = computed(() => [
         <span class="text-primary flex-1 text-left text-sm font-medium">
           {{ t('likes.title') }}
         </span>
-        <span v-if="likedCount > 0" class="text-primary/60 text-xs">{{ likedCount }}</span>
+        <span v-if="favoritesCount > 0" class="text-primary/60 text-xs">{{ favoritesCount }}</span>
         <span class="icon-[mdi--chevron-right] text-primary/40 h-5 w-5"></span>
       </router-link>
     </div>

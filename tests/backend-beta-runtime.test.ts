@@ -363,6 +363,75 @@ describe('backend beta bounded cache and singleflight', () => {
   });
 });
 
+describe.each([
+  { endpoint: 'top/song', field: 'data', provider: 'https://music.163.com/api/v1/discovery/new/songs' },
+  { endpoint: 'toplist', field: 'list', provider: 'https://music.163.com/api/toplist/detail' },
+])('chart catalog response for $endpoint', ({ endpoint, field, provider }) => {
+  const url = new URL(`https://sonic.test/api/${endpoint}`);
+  const request = () => handleUpstreamEndpoint(endpoint, url, new Request(url), { SONIC_ENV: 'test', SONIC_ENABLE_LOCAL_ENGINE: '0' });
+
+  it.each([
+    { label: 'empty', list: [] },
+    { label: 'populated', list: [{ id: 42, name: 'Chart item' }] },
+  ])('preserves valid $label results', async ({ list }) => {
+    const fetchMock = vi.fn(async () => Response.json({ code: 200, [field]: list }));
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await request();
+    expect(fetchMock).toHaveBeenCalledWith(provider, expect.anything());
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ code: 200, brand: 'Sonic', [field]: list });
+  });
+
+  it.each(['network', 'http', 'invalid-json', 'missing-list', 'provider-code'])('returns a retryable failure for %s', async (failure) => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      if (failure === 'network') throw new Error('fixture provider offline');
+      if (failure === 'http') return Response.json({ [field]: [] }, { status: 429 });
+      if (failure === 'invalid-json') return new Response('invalid JSON');
+      if (failure === 'missing-list') return Response.json({ code: 200 });
+      return Response.json({ code: 500, [field]: [] });
+    }));
+    const response = await request();
+    expect(response.status).toBe(503);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('retry-after')).toBe('3');
+    expect(await response.json()).toMatchObject({ code: 503, error: { code: 'CHART_UPSTREAM_UNAVAILABLE' } });
+  });
+});
+
+describe('chart catalog deadlines', () => {
+  it('returns a retryable failure when the provider exhausts the gateway budget', async () => {
+    vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => new Promise<Response>((_resolve, reject) => {
+      const signal = init.signal!;
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    })));
+    const url = new URL('https://sonic.test/api/top/song');
+    const response = await handleUpstreamEndpoint('top/song', url, new Request(url), { SONIC_ENV: 'test', SONIC_TIMEOUT_MS: '500' });
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: 'CHART_UPSTREAM_UNAVAILABLE' } });
+  });
+
+  it('keeps the shared Engine circuit available after a chart provider failure', async () => {
+    const fetchMock = vi.fn(async (input: string) => {
+      if (input === `${engineEnv.SONIC_LOCAL_ENGINE_URL}/api/top/song`) {
+        return Response.json({ brand: 'Sonic', code: 503, error: { code: 'CHART_UPSTREAM_UNAVAILABLE' } }, { status: 503 });
+      }
+      if (input === `${engineEnv.SONIC_LOCAL_ENGINE_URL}/api/banner`) return Response.json({ code: 200, banners: [] });
+      throw new Error('fixture chart provider offline');
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const env = { ...engineEnv, SONIC_ENABLE_LOCAL_ENGINE: '1', SONIC_ENV: 'test' };
+    const chartsUrl = new URL('https://sonic.test/api/top/song');
+    const chartResponse = await handleUpstreamEndpoint('top/song', chartsUrl, new Request(chartsUrl), env);
+    expect(chartResponse.status).toBe(503);
+    expect(getLocalEngineCircuitSnapshot(env)).toMatchObject({ state: 'CLOSED', consecutiveFailures: 0 });
+
+    const bannerUrl = new URL('https://sonic.test/api/banner');
+    const bannerResponse = await handleUpstreamEndpoint('banner', bannerUrl, new Request(bannerUrl), env);
+    expect(bannerResponse.status).toBe(200);
+    expect(bannerResponse.headers.get('x-sonic-provider')).toBe('local-engine');
+  });
+});
+
 describe('backend beta readiness, drain and maintenance', () => {
   const base = { SONIC_ENV: 'test', SONIC_RUNTIME: 'linux-engine', SONIC_ENGINE_SECRET: key, SONIC_RECOMMEND_DB_PATH: 'memory', RECOMMEND_STORE: new MemoryRecommendStore() };
   const healthRequest = () => new Request('https://engine.test/api/sonic/engine/health', { headers: { 'X-Sonic-Engine-Key': key } });

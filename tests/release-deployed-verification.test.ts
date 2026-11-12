@@ -165,6 +165,7 @@ describe('deployed release verification', () => {
   it.each([
     ['SONIC_LOCAL_ENGINE_URL', 'https://other.example.test', 'Engine binding'],
     ['SONIC_ENABLE_LOCAL_ENGINE', '0', 'Engine binding'],
+    ['SONIC_ENV', '', 'Pages runtime and production environment'],
     ['SONIC_ENV', 'preview', 'Pages runtime and production environment'],
     ['SONIC_RUNTIME', 'linux-engine', 'Pages runtime and production environment'],
     ['SONIC_ACCESS_MODE', 'open', 'access mode'],
