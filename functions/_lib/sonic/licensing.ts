@@ -267,6 +267,10 @@ export function normalizeSourceId(raw: string): string {
   return s;
 }
 
+export function normalizeLyricsSourceId(provider: unknown): string {
+  return typeof provider === 'string' ? normalizeSourceId(provider.replace(/^local-/i, '')) : '';
+}
+
 const STRICT_POLICY_ALIASES = new Set(['strict', 'strict-allowlist', 'allowlist', 'controlled-beta']);
 const STANDARD_POLICY_ALIASES = new Set(['default', 'standard']);
 const MIN_PLAYABLE_SOURCE_CAPABILITIES = new Set<ContentCapability>(['audio']);

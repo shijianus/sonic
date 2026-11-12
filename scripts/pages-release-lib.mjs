@@ -98,7 +98,7 @@ function isStagingPreview(value) {
   return typeof value === 'string' && /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sonic-staging\.pages\.dev$/.test(value);
 }
 
-export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest, { production = false } = {}) {
+export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest, { production = false, productionSources = [] } = {}) {
   const fail = () => { throw new Error('Accepted live Staging evidence must match this exact release and Pages output'); };
   const identityMatches = value => ['baseCommit', 'releaseId', 'sourceDigest', 'buildTime', 'dirty'].every(key => value?.[key] === manifest[key]);
   if (evidence?.ok !== true || evidence.mode !== 'staging-live' ||
@@ -126,6 +126,23 @@ export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest,
     const check = evidence.productionChecks?.[key];
     if (check?.ok !== true || typeof check.evidence !== 'string' || !check.evidence.trim()) {
       throw new Error(`Production requires passing Staging evidence for ${key}`);
+    }
+  }
+  const realSources = productionSources.filter(source => source !== 'synthetic');
+  if (!realSources.length) throw new Error('Production requires a non-synthetic source in SONIC_ALLOWED_SOURCES');
+  for (const runtime of ['pages', 'engine']) {
+    const policy = evidence.stagingContentPolicy?.[runtime];
+    if (policy?.ok !== true || policy.mode !== 'strict-allowlist' ||
+        !Array.isArray(policy.allowedSources) || !Array.isArray(policy.effectiveSources)) {
+      throw new Error(`Production requires live strict source policy evidence from Staging ${runtime}`);
+    }
+    const missing = realSources.filter(source => !policy.allowedSources.includes(source) || !policy.effectiveSources.includes(source));
+    if (missing.length) throw new Error(`Production sources were not enabled on Staging ${runtime}: ${missing.join(', ')}`);
+  }
+  for (const source of realSources) {
+    const check = evidence.productionChecks?.sourceAcceptance?.[source];
+    if (check?.ok !== true || typeof check.evidence !== 'string' || !check.evidence.trim()) {
+      throw new Error(`Production requires passing Staging source evidence for ${source}`);
     }
   }
 }

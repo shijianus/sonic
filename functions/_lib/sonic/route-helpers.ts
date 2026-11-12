@@ -6,13 +6,16 @@ import { jsonResponse, handleOptions } from '../http';
 import { getSonicConfig } from './config';
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse, isSameOriginRequest } from './security';
-import { isSourceEnabledByPolicy } from './licensing';
+import { isSourceEnabledByPolicy, normalizeLyricsSourceId, normalizeSourceId } from './licensing';
 import { recordLicensingBlockMetric, redactSensitiveString } from './observability';
 import { extractAuthCredentials } from '../auth';
 import { checkEngineIdentityAccess } from './engine-identity';
 import { callLocalEngineJson, createRuntimeAbortBudget } from './local-engine';
 
 export { handleOptions };
+
+// Lyric source policy is enforced at the origin on every request.
+export const LYRICS_CACHE_CONTROL = 'private, no-store';
 
 const MAX_SEARCH_QUERY_LEN = 256;
 const MAX_LYRICS_FIELD_LEN = 200;
@@ -316,15 +319,16 @@ export async function handleSingleProviderLyricsRequest(
   sortedQuery.sort();
   const cacheIdentifier = `${p}:${sortedQuery.toString()}`;
   const cacheNamespace = p === 'kugou' ? 'lyrics-prov-v5' : 'lyrics-prov-v4';
+  const source = normalizeSourceId(p);
 
   if (!params.nocache) {
     const hit = await getSonicCachedJson<any>(cacheNamespace, cacheIdentifier, env);
-    if (hit?.value) {
+    if (hit && normalizeLyricsSourceId(hit.value?.data?.provider) === source) {
       const body = { ...hit.value, meta: { ...hit.value.meta, cached: true, cacheLevel: hit.cacheLevel } };
       return jsonResponse(body, {
         status: 200,
         headers: buildGatewayHeaders({
-          'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+          'Cache-Control': LYRICS_CACHE_CONTROL,
           'X-Sonic-Cache': 'HIT',
           'X-Sonic-Provider': p,
         }),
@@ -345,7 +349,8 @@ export async function handleSingleProviderLyricsRequest(
     });
     request.signal.throwIfAborted();
     circuitState = engineRes.circuitState;
-    if (engineRes.ok && engineRes.data?.brand === 'Sonic' && engineRes.data?.data) {
+    const hasEngineLyrics = engineRes.ok && engineRes.data?.brand === 'Sonic' && engineRes.data?.data;
+    if (hasEngineLyrics && normalizeLyricsSourceId(engineRes.data.data.provider) === source) {
       const body = engineRes.data;
       body.meta = {
         ...body.meta,
@@ -363,22 +368,22 @@ export async function handleSingleProviderLyricsRequest(
       return jsonResponse(body, {
         status: 200,
         headers: buildGatewayHeaders({
-          'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+          'Cache-Control': LYRICS_CACHE_CONTROL,
           'X-Sonic-Cache': 'MISS',
           'X-Sonic-Provider': p,
         }),
       });
     }
     degraded = true;
-    degradedReason = engineRes.error || 'local_engine_unavailable';
-      attemptsPrefix.push({
-        provider: 'local-engine',
-        via: 'local-engine',
-        ok: false,
-        ms: engineRes.latencyMs,
-        error: degradedReason,
-      });
-    }
+    degradedReason = hasEngineLyrics ? 'local_engine_lyrics_source_mismatch' : engineRes.error || 'local_engine_unavailable';
+    attemptsPrefix.push({
+      provider: 'local-engine',
+      via: 'local-engine',
+      ok: false,
+      ms: engineRes.latencyMs,
+      error: degradedReason,
+    });
+  }
 
   const budget = createRuntimeAbortBudget([request.signal], config.timeoutMs);
   const startTime = Date.now();
@@ -426,7 +431,7 @@ export async function handleSingleProviderLyricsRequest(
       };
       return jsonResponse(emptyResp, {
         status: 200,
-        headers: buildGatewayHeaders({ 'Cache-Control': 'public, max-age=60' }, degraded, circuitState),
+        headers: buildGatewayHeaders({ 'Cache-Control': LYRICS_CACHE_CONTROL }, degraded, circuitState),
       });
     }
 
@@ -455,7 +460,7 @@ export async function handleSingleProviderLyricsRequest(
       status: 200,
       headers: buildGatewayHeaders(
         {
-          'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+          'Cache-Control': LYRICS_CACHE_CONTROL,
           'X-Sonic-Cache': 'MISS',
           'X-Sonic-Provider': p,
           'X-Sonic-Level': result.data.level,

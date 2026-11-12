@@ -105,11 +105,18 @@ function chartCatalogUnavailable(): Response {
 }
 
 function topSongsResponse(entries: unknown[], fromSidecar = false): Response {
-  const songs = entries.map((song: any) => ({
-    ...song,
-    duration: song.duration || (song.dt ? Math.floor(song.dt / 1000) : 0),
-    dt: song.dt || (song.duration ? song.duration * 1000 : 0),
-  }));
+  const songs = entries.map((entry) => {
+    const song = entry as { duration?: unknown; dt?: unknown };
+    const rawDuration = Number(song.duration);
+    // Unitless duration follows the player's chart convention: values under an
+    // hour are seconds and larger values are milliseconds. Explicit dt is ms.
+    const duration = Number.isFinite(rawDuration) && rawDuration > 0
+      ? (rawDuration < 3600 ? rawDuration : rawDuration / 1000)
+      : 0;
+    const rawDt = Number(song.dt);
+    const dt = Number.isFinite(rawDt) && rawDt > 0 ? rawDt : Math.round(duration * 1000);
+    return { ...song, duration: duration || Math.floor(dt / 1000), dt };
+  });
   return jsonResponse({ code: 200, brand: 'Sonic', data: desensitizeData(songs) }, {
     headers: fromSidecar
       ? { 'Cache-Control': 'public, max-age=1800', 'X-Sonic-Provider': 'local-netease' }

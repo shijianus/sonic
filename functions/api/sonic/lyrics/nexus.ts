@@ -5,13 +5,14 @@
 import type { AppEnv } from '../../../_lib/types';
 import type { SonicLyricsResponse } from '../../../_lib/sonic/types';
 import { jsonResponse, errorResponse } from '../../../_lib/http';
-import { parseLyricsParams, sonicError, handleOptions, buildGatewayHeaders } from '../../../_lib/sonic/route-helpers';
-import { resolveNexusLyrics } from '../../../_lib/sonic/nexus-lyrics';
+import { parseLyricsParams, sonicError, handleOptions, buildGatewayHeaders, LYRICS_CACHE_CONTROL } from '../../../_lib/sonic/route-helpers';
+import { isNexusLyricsSourceAllowed, resolveNexusLyrics } from '../../../_lib/sonic/nexus-lyrics';
 import { getSonicCachedJson, putSonicCachedJson } from '../../../_lib/sonic/cache';
+import { computeContentPolicyEpoch } from '../../../_lib/sonic/licensing';
 import { redactSensitiveString } from '../../../_lib/sonic/observability';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from '../../../_lib/sonic/security';
 
-const LYRICS_CACHE_NAMESPACE = 'lyrics-nexus-v7';
+const LYRICS_CACHE_NAMESPACE = 'lyrics-nexus-v8';
 
 export async function handleNexusLyricsRequest(
   request: Request,
@@ -45,11 +46,11 @@ export async function handleNexusLyricsRequest(
   sortedQuery.delete('nocache');
   sortedQuery.delete('_t');
   sortedQuery.sort();
-  const cacheIdentifier = sortedQuery.toString();
+  const cacheIdentifier = `${computeContentPolicyEpoch(env)}:${sortedQuery.toString()}`;
 
   if (!params.nocache) {
     const hit = await getSonicCachedJson<SonicLyricsResponse>(LYRICS_CACHE_NAMESPACE, cacheIdentifier, env);
-    if (hit?.value) {
+    if (hit && isNexusLyricsSourceAllowed(hit.value?.data, env)) {
       const body: SonicLyricsResponse = {
         ...hit.value,
         meta: {
@@ -61,7 +62,7 @@ export async function handleNexusLyricsRequest(
       return jsonResponse(body, {
         status: 200,
         headers: buildGatewayHeaders({
-          'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+          'Cache-Control': LYRICS_CACHE_CONTROL,
           'X-Sonic-Cache': 'HIT',
           'X-Sonic-Provider': String(body.data?.provider || 'nexus'),
         }),
@@ -77,7 +78,7 @@ export async function handleNexusLyricsRequest(
 
     if (result.degraded && result.data.level === 'none' && !params.nocache) {
       const staleHit = await getSonicCachedJson<SonicLyricsResponse>(LYRICS_CACHE_NAMESPACE, cacheIdentifier, env, { allowStale: true });
-      if (staleHit?.value) {
+      if (staleHit && isNexusLyricsSourceAllowed(staleHit.value?.data, env)) {
         const staleBody: SonicLyricsResponse = {
           ...staleHit.value,
           meta: {
@@ -93,7 +94,7 @@ export async function handleNexusLyricsRequest(
         return jsonResponse(staleBody, {
           status: 200,
           headers: buildGatewayHeaders(
-            { 'Cache-Control': 'public, max-age=120', 'X-Sonic-Cache': 'STALE' },
+            { 'Cache-Control': LYRICS_CACHE_CONTROL, 'X-Sonic-Cache': 'STALE' },
             true,
             result.circuitState,
           ),
@@ -120,7 +121,7 @@ export async function handleNexusLyricsRequest(
       },
     };
 
-    if (result.data.level !== 'none' && !params.nocache) {
+    if (result.data.level !== 'none' && !params.nocache && isNexusLyricsSourceAllowed(result.data, env)) {
       await putSonicCachedJson(LYRICS_CACHE_NAMESPACE, cacheIdentifier, response, 86400, 604800, env, waitUntil);
     }
 
@@ -128,7 +129,7 @@ export async function handleNexusLyricsRequest(
       status: 200,
       headers: buildGatewayHeaders(
         {
-          'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+          'Cache-Control': LYRICS_CACHE_CONTROL,
           'X-Sonic-Cache': 'MISS',
           'X-Sonic-Provider': String(result.provider),
           'X-Sonic-Level': result.data.level,

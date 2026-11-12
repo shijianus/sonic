@@ -3,7 +3,7 @@ import { rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { buildPagesDeploymentTree, parseDeploymentOrigin, readStagingAcceptance, verifyProductionPagesBinding } from './pages-release-lib.mjs';
+import { buildPagesDeploymentTree, deploymentSourceIds, parseDeploymentOrigin, readStagingAcceptance, verifyProductionPagesBinding } from './pages-release-lib.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -32,7 +32,8 @@ async function deploy({ preflight }) {
   if (requireEnv('SONIC_CONTENT_POLICY') !== 'strict-allowlist') {
     throw new Error('SONIC_CONTENT_POLICY must be strict-allowlist');
   }
-  if (!/^[a-z0-9-]+(?:\s*,\s*[a-z0-9-]+)*$/.test(requireEnv('SONIC_ALLOWED_SOURCES'))) {
+  const allowedSources = requireEnv('SONIC_ALLOWED_SOURCES');
+  if (!/^[a-z0-9-]+(?:\s*,\s*[a-z0-9-]+)*$/.test(allowedSources)) {
     throw new Error('SONIC_ALLOWED_SOURCES must be a comma-separated list of approved source IDs');
   }
   const verifyOrigin = parseDeploymentOrigin(requireEnv('SONIC_DEPLOY_VERIFY_URL'));
@@ -54,7 +55,9 @@ async function deploy({ preflight }) {
     if (manifest.dirty || manifest.baseCommit !== head) {
       throw new Error('Production promotion requires a clean release manifest for the checked-out commit');
     }
-    readStagingAcceptance(acceptanceFile, manifest, pagesArtifactDigest, { production: true });
+    readStagingAcceptance(acceptanceFile, manifest, pagesArtifactDigest, {
+      production: true, productionSources: deploymentSourceIds(allowedSources),
+    });
     await verifyProductionPagesBinding({ pagesOrigin: verifyOrigin, engineOrigin });
 
     const verify = (...args) => {

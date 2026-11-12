@@ -3,13 +3,13 @@
 // Supports format: 'sonic' (default), 'lrc', 'ttml', 'json'
 
 import type { SonicLyricsResponse } from '../../../_lib/sonic/types';
-import { parseLyricsParams, sonicError, handleOptions } from '../../../_lib/sonic/route-helpers';
+import { parseLyricsParams, sonicError, handleOptions, LYRICS_CACHE_CONTROL } from '../../../_lib/sonic/route-helpers';
 import { resolveNexusLyrics } from '../../../_lib/sonic/nexus-lyrics';
 import { jsonResponse } from '../../../_lib/http';
 import { sonicLinesToLrc, sonicLinesToTtml } from '../../../_lib/sonic/utils';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from '../../../_lib/sonic/security';
 
-export async function onRequest({ request, env, waitUntil }: any): Promise<Response> {
+export async function onRequest({ request, env }: any): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return jsonResponse(
@@ -34,27 +34,9 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
     });
   }
 
-  // Cloudflare Cache API
-  const cache = typeof caches !== 'undefined' ? (caches as any).default : null;
-  const cacheKeyUrl = new URL(request.url);
-  cacheKeyUrl.searchParams.sort();
-  cacheKeyUrl.searchParams.set('_sonic_cache_v', '5.1');
-  const cacheKey = new Request(cacheKeyUrl.toString(), { method: 'GET' });
-
-  if (cache && !params.nocache) {
-    try {
-      const cached = await cache.match(cacheKey);
-      if (cached) {
-        const cachedResp = new Response(cached.body, cached);
-        cachedResp.headers.set('X-Sonic-Cache', 'HIT');
-        return cachedResp;
-      }
-    } catch {}
-  }
-
   const startTime = Date.now();
   try {
-    const result = await resolveNexusLyrics(params, env);
+    const result = await resolveNexusLyrics(params, env, { request });
     const latencyMs = Date.now() - startTime;
 
     const baseHeaders = {
@@ -65,43 +47,31 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
       'X-Sonic-Cache': 'MISS',
       'X-Sonic-Provider': result.provider,
       'X-Sonic-Level': result.data.level,
-      'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+      'Cache-Control': LYRICS_CACHE_CONTROL,
     };
 
     if (format === 'lrc') {
       const lrcText = result.data.plainLyrics && /\[\d{2}:\d{2}/.test(result.data.plainLyrics)
         ? result.data.plainLyrics
         : sonicLinesToLrc(result.data.syncedLyrics, result.data.track.title, result.data.track.artist);
-      const resp = new Response(lrcText, {
+      return new Response(lrcText, {
         status: 200,
         headers: {
           ...baseHeaders,
           'Content-Type': 'text/plain; charset=utf-8',
         },
       });
-      if (cache && !params.nocache && result.data.level !== 'none') {
-        const cachePromise = cache.put(cacheKey, resp.clone());
-        if (typeof waitUntil === 'function') waitUntil(cachePromise);
-        else cachePromise.catch(() => {});
-      }
-      return resp;
     }
 
     if (format === 'ttml') {
       const ttmlContent = result.data.rawTtml || sonicLinesToTtml(result.data.syncedLyrics, result.data.track.title, result.data.track.artist);
-      const resp = new Response(ttmlContent, {
+      return new Response(ttmlContent, {
         status: 200,
         headers: {
           ...baseHeaders,
           'Content-Type': 'application/ttml+xml; charset=utf-8',
         },
       });
-      if (cache && !params.nocache && result.data.level !== 'none') {
-        const cachePromise = cache.put(cacheKey, resp.clone());
-        if (typeof waitUntil === 'function') waitUntil(cachePromise);
-        else cachePromise.catch(() => {});
-      }
-      return resp;
     }
 
     if (format === 'json') {
@@ -119,13 +89,7 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
           words: l.words,
         })),
       };
-      const resp = jsonResponse(simplified, { status: 200, headers: baseHeaders });
-      if (cache && !params.nocache && result.data.level !== 'none') {
-        const cachePromise = cache.put(cacheKey, resp.clone());
-        if (typeof waitUntil === 'function') waitUntil(cachePromise);
-        else cachePromise.catch(() => {});
-      }
-      return resp;
+      return jsonResponse(simplified, { status: 200, headers: baseHeaders });
     }
 
     // Default: 'sonic' format
@@ -145,16 +109,9 @@ export async function onRequest({ request, env, waitUntil }: any): Promise<Respo
       },
     };
 
-    const resp = jsonResponse(response, { status: 200, headers: baseHeaders });
-
-    if (cache && !params.nocache && result.data.level !== 'none') {
-      const cachePromise = cache.put(cacheKey, resp.clone());
-      if (typeof waitUntil === 'function') waitUntil(cachePromise);
-      else cachePromise.catch(() => {});
-    }
-
-    return resp;
+    return jsonResponse(response, { status: 200, headers: baseHeaders });
   } catch (err: any) {
+    request.signal.throwIfAborted();
     const latencyMs = Date.now() - startTime;
     return sonicError('SYNC_ERROR', err?.message || 'Failed to sync lyrics', 500, {
       provider: 'sync',

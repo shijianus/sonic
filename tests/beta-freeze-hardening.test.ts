@@ -1,6 +1,7 @@
 // Regressions for the 2026-11-06 beta-freeze audit (P0-1/P0-2, P1-1..P1-8).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../functions/_lib/types';
+import type { SonicLyricsResponse } from '../functions/_lib/sonic/types';
 
 import { MemoryRecommendStore } from '../functions/_lib/sonic/recommend/memory-store';
 import { fetchProviderUrl, fetchProviderDirect, isAllowedProviderHost, readBoundedProviderJson } from '../functions/_lib/sonic/provider-fetch';
@@ -20,8 +21,16 @@ import {
   getStreamSlotLimit,
 } from '../functions/_lib/sonic/security';
 import { getEngineIdentityReadiness, verifyEngineIdentity } from '../functions/_lib/sonic/engine-identity';
+import { resetLocalEngineCircuitForTest } from '../functions/_lib/sonic/local-engine';
 import { onRequest as accessInvite } from '../functions/api/access/invite';
+import { onRequest as legacyMusicLyrics } from '../functions/api/music/lyric';
 import { onRequest as eventsRoute, resetEventIngestQuotaForTest } from '../functions/api/sonic/events';
+import { onRequest as forward } from '../functions/api/sonic/forward';
+import { onRequest as providerLyrics } from '../functions/api/sonic/lyrics/[platform]';
+import { handleNexusLyricsRequest } from '../functions/api/sonic/lyrics/nexus';
+import { onRequest as syncLyrics } from '../functions/api/sonic/lyrics/sync';
+import { withProviderFixtures } from '../scripts/test-fixtures/provider-fetch.mjs';
+import { respondToSonicGatewayProvider } from '../scripts/test-fixtures/sonic-gateway.mjs';
 
 const HTTPS_URL = new URL('https://sonic.example.org/x');
 const HTTP_URL = new URL('http://localhost:8787/x');
@@ -373,6 +382,187 @@ describe('P1-7: cache keys bound to policy epoch and environment', () => {
     const devHit = await getSonicCachedJson<{ marker: string }>('unit-ns', 'ident-A', {} as AppEnv);
     expect(devHit).toBeNull();
     clearSonicMemoryCacheForTest();
+  });
+});
+
+describe('P1-7: withdrawn lyrics sources', () => {
+  const origin = 'https://sonic.example.org';
+  const engineOrigin = 'https://engine.example.com';
+  const query = 'title=Shape%20of%20You&artist=Ed%20Sheeran';
+  const enabled: AppEnv = {
+    SONIC_ENV: 'test-lyrics-policy',
+    SONIC_CONTENT_POLICY: 'strict-allowlist',
+    SONIC_ALLOWED_SOURCES: 'lrclib,netease',
+    SONIC_ENABLE_LOCAL_ENGINE: '0',
+  };
+  const withdrawn = { SONIC_ALLOWED_SOURCES: 'netease' };
+  const engine = {
+    SONIC_ENABLE_LOCAL_ENGINE: '1',
+    SONIC_LOCAL_ENGINE_URL: engineOrigin,
+    SONIC_ENGINE_SECRET: 'lyrics-policy-test-engine-key-32-characters',
+  };
+  const requestLyrics = (env: AppEnv) =>
+    handleNexusLyricsRequest(new Request(`${origin}/api/sonic/lyrics/nexus?${query}`), env);
+
+  function simulatePersistentKv() {
+    const entries = new Map<string, string>();
+    return {
+      get: async (key: string) => entries.get(key),
+      put: async (key: string, value: string) => { entries.set(key, value); },
+    };
+  }
+
+  function simulateEdgeCache() {
+    const entries = new Map<string, Response>();
+    vi.stubGlobal('caches', {
+      default: {
+        match: async (key: Request) => entries.get(key.url)?.clone(),
+        put: async (key: Request, value: Response) => { entries.set(key.url, value.clone()); },
+      },
+    });
+  }
+
+  beforeEach(resetLocalEngineCircuitForTest);
+
+  it.each([
+    ['allowlist removal', withdrawn],
+    ['explicit feature disable', { SONIC_ENABLE_LRCLIB: '0' }],
+  ])('rejects an already-cached lyric after %s', async (_label, policyChange) => {
+    const env = { ...enabled, KV: simulatePersistentKv() };
+    await withProviderFixtures(respondToSonicGatewayProvider, async () => {
+      const warm = await requestLyrics(env);
+      expect(await warm.json()).toMatchObject({ data: { provider: 'lrclib', level: 'word' } });
+      clearSonicMemoryCacheForTest();
+      const stillAllowed = await requestLyrics(env);
+      expect(stillAllowed.headers.get('X-Sonic-Cache')).toBe('HIT');
+      expect(await stillAllowed.json()).toMatchObject({ meta: { cacheLevel: 'kv' }, data: { provider: 'lrclib' } });
+
+      const blocked = await requestLyrics({ ...env, ...policyChange });
+      expect(blocked.headers.get('X-Sonic-Cache')).not.toBe('HIT');
+      expect(await blocked.json()).toMatchObject({ data: { provider: 'none', level: 'none', syncedLyrics: [] } });
+      expect(warm.headers.get('Cache-Control')).toContain('no-store');
+      expect(stillAllowed.headers.get('Cache-Control')).toContain('no-store');
+    });
+  });
+
+  it('can serve stale lyrics on outage only under the policy that cached them', async () => {
+    const env = { ...enabled, ...engine, KV: simulatePersistentKv() };
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-12T00:00:00Z'));
+    let lrclibAvailable = true;
+    await withProviderFixtures((url: URL, init: RequestInit) => {
+      if (url.origin === engineOrigin) return new Response('unavailable', { status: 503 });
+      if (!lrclibAvailable && url.hostname === 'lrclib.net') return new Response(null, { status: 503 });
+      return respondToSonicGatewayProvider(url, init);
+    }, async () => {
+      const warm = await requestLyrics(env);
+      expect(await warm.json()).toMatchObject({ data: { provider: 'lrclib', level: 'word' } });
+      clearSonicMemoryCacheForTest();
+      lrclibAvailable = false;
+      vi.setSystemTime(new Date('2026-11-14T00:00:00Z'));
+
+      const stillAllowed = await requestLyrics(env);
+      expect(stillAllowed.headers.get('X-Sonic-Cache')).toBe('STALE');
+      expect(stillAllowed.headers.get('Cache-Control')).toContain('no-store');
+      expect(await stillAllowed.json()).toMatchObject({ meta: { cacheLevel: 'kv', degraded: true }, data: { provider: 'lrclib' } });
+
+      const blocked = await requestLyrics({ ...env, ...withdrawn });
+      expect(blocked.headers.get('X-Sonic-Cache')).not.toBe('STALE');
+      expect(await blocked.json()).toMatchObject({ data: { provider: 'none', level: 'none', syncedLyrics: [] } });
+    });
+  });
+
+  it('checks the Engine lyric data provider against the Pages source policy', async () => {
+    let engineBody: SonicLyricsResponse;
+    await withProviderFixtures((url: URL, init: RequestInit) => {
+      if (url.origin === engineOrigin && url.pathname === '/api/sonic/lyrics/nexus') return Response.json(engineBody);
+      return respondToSonicGatewayProvider(url, init);
+    }, async () => {
+      engineBody = await (await requestLyrics(enabled)).json();
+      expect(engineBody.data.provider).toBe('lrclib');
+      // The local policy must inspect the payload source, even if metadata names an allowed source.
+      engineBody.meta.provider = 'local-netease';
+      const blocked = await requestLyrics({ ...enabled, ...withdrawn, ...engine });
+      expect(await blocked.json()).toMatchObject({ data: { provider: 'none', level: 'none', syncedLyrics: [] } });
+
+      engineBody.data.provider = 'local-netease';
+      const allowed = await requestLyrics({ ...enabled, ...withdrawn, ...engine });
+      expect(await allowed.json()).toMatchObject({ data: { provider: 'local-netease', level: 'word' } });
+    });
+  });
+
+  it('falls back to the requested provider when the Engine returns a different source', async () => {
+    let engineBody: SonicLyricsResponse;
+    await withProviderFixtures((url: URL, init: RequestInit) => {
+      if (url.origin === engineOrigin && url.pathname === '/api/sonic/lyrics/netease') return Response.json(engineBody);
+      return respondToSonicGatewayProvider(url, init);
+    }, async () => {
+      engineBody = await (await requestLyrics(enabled)).json();
+      expect(engineBody.data.provider).toBe('lrclib');
+      const response = await providerLyrics({
+        request: new Request(`${origin}/api/sonic/lyrics/netease?platformId=1293886117`),
+        params: { platform: 'netease' },
+        env: { ...enabled, ...engine },
+      });
+      expect(await response.json()).toMatchObject({
+        data: { provider: 'netease', level: 'word' },
+        meta: { attempts: [{ provider: 'local-engine', ok: false }, { provider: 'netease', ok: true }] },
+      });
+    });
+  });
+
+  it.each([
+    ['/api/sonic/lyrics/sync', syncLyrics],
+    ['/api/sonic/forward', forward],
+  ])('enforces withdrawal on the %s JSON format', async (path, route) => {
+    simulateEdgeCache();
+    const request = () => new Request(`${origin}${path}?${query}&format=json`);
+    await withProviderFixtures(respondToSonicGatewayProvider, async () => {
+      const warm = await route({ request: request(), env: enabled });
+      expect(await warm.json()).toMatchObject({ provider: 'lrclib', level: 'word' });
+      clearSonicMemoryCacheForTest();
+
+      const blocked = await route({ request: request(), env: { ...enabled, ...withdrawn } });
+      expect(await blocked.json()).toMatchObject({ provider: 'none', level: 'none', lyrics: [] });
+      expect(warm.headers.get('Cache-Control')).toContain('no-store');
+      expect(blocked.headers.get('Cache-Control')).toContain('no-store');
+    });
+  });
+
+  it('enforces withdrawal on the legacy music lyric endpoint', async () => {
+    simulateEdgeCache();
+    const request = () => new Request(`${origin}/api/music/lyric?id=1293886117`);
+    await withProviderFixtures((url: URL, init: RequestInit) => {
+      if (url.origin === 'https://music.163.com' && url.pathname === '/api/song/detail/') return new Response(null, { status: 404 });
+      return respondToSonicGatewayProvider(url, init);
+    }, async () => {
+      const warm = await legacyMusicLyrics({ request: request(), env: enabled });
+      expect(await warm.json()).toMatchObject({ source: 'netease', lineCount: 2 });
+
+      const blocked = await legacyMusicLyrics({
+        request: request(),
+        env: { ...enabled, SONIC_ALLOWED_SOURCES: 'lrclib' },
+      });
+      expect(await blocked.json()).toMatchObject({ lineCount: 0, lrc: { lyric: '' } });
+      expect(warm.headers.get('Cache-Control')).toContain('no-store');
+      expect(blocked.headers.get('Cache-Control')).toContain('no-store');
+    });
+  });
+
+  it.each([
+    ['lrc', 'text/plain', /\[00:01\.00\]/],
+    ['ttml', 'application/ttml+xml', /<tt\b/],
+  ])('preserves the sync endpoint %s format without HTTP caching', async (format, contentType, marker) => {
+    const request = new Request(`${origin}/api/sonic/lyrics/sync?${query}&format=${format}`);
+    await withProviderFixtures(respondToSonicGatewayProvider, async () => {
+      const response = await syncLyrics({ request, env: enabled });
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Content-Type')).toContain(contentType);
+      expect(response.headers.get('Cache-Control')).toContain('no-store');
+      const body = await response.text();
+      expect(body).toMatch(marker);
+      expect(body.replace(/<[^>]+>/g, '')).toContain('A local verse begins');
+    });
   });
 });
 

@@ -1,9 +1,10 @@
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import { getUniversalLyrics } from '../../_lib/music';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from '../../_lib/sonic/security';
+import { LYRICS_CACHE_CONTROL } from '../../_lib/sonic/route-helpers';
 import type { AppEnv } from '../../_lib/types';
 
-export async function onRequest({ request, env, waitUntil }: { request: Request; env: AppEnv; waitUntil?: (promise: Promise<any>) => void }): Promise<Response> {
+export async function onRequest({ request, env }: { request: Request; env: AppEnv; waitUntil?: (promise: Promise<any>) => void }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
   if (request.method !== 'GET' && request.method !== 'HEAD') {
     return errorResponse('Method not allowed', 405);
@@ -29,25 +30,6 @@ export async function onRequest({ request, env, waitUntil }: { request: Request;
   }
 
   const format = url.searchParams.get('format')?.toLowerCase() || 'json';
-
-  // 1. 尝试从 Cloudflare Cache API 检索缓存
-  const cache = typeof caches !== 'undefined' ? (caches as any).default : null;
-  // Cache-busting params must never reach the key: every unique `_t` value
-  // would otherwise create a new edge-cache entry (audit P2-1).
-  const cacheKeyUrl = new URL(request.url);
-  cacheKeyUrl.searchParams.delete('nocache');
-  cacheKeyUrl.searchParams.delete('_t');
-  cacheKeyUrl.searchParams.sort();
-  cacheKeyUrl.searchParams.set('_v', '2.5');
-  const cacheKey = new Request(cacheKeyUrl.toString(), { method: 'GET' });
-  const bypassCache = url.searchParams.has('nocache') || url.searchParams.has('_t');
-
-  if (cache && !bypassCache) {
-    try {
-      const cached = await cache.match(cacheKey);
-      if (cached) return cached;
-    } catch {}
-  }
 
   let cleanId = id;
   let effectiveSource = source;
@@ -75,7 +57,7 @@ export async function onRequest({ request, env, waitUntil }: { request: Request;
     });
 
     const cacheHeaders = {
-      'Cache-Control': 'public, max-age=86400, s-maxage=86400',
+      'Cache-Control': LYRICS_CACHE_CONTROL,
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
       'X-Content-Type-Options': 'nosniff',
@@ -145,17 +127,6 @@ export async function onRequest({ request, env, waitUntil }: { request: Request;
         200,
         cacheHeaders,
       );
-    }
-
-    if (cache && response.status === 200 && !bypassCache) {
-      try {
-        const cachePromise = cache.put(cacheKey, response.clone());
-        if (typeof waitUntil === 'function') {
-          waitUntil(cachePromise);
-        } else {
-          cachePromise.catch(() => {});
-        }
-      } catch {}
     }
 
     return response;

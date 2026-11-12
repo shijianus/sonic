@@ -361,6 +361,10 @@ async function selectDeployment(apiPath, manifest, suppliedUrl, stable = false) 
   passed('Cloudflare confirms an isolated preview branch for this manifest and commit');
   return { base, branch, branchUrl: `https://${branch}.sonic-staging.pages.dev`, deploymentId: deployment.id };
 }
+function contentPolicyEvidence(health) {
+  const { ok, mode, allowedSources, effectiveSources } = health.readiness?.contentPolicy || {};
+  return { ok, mode, allowedSources, effectiveSources };
+}
 export async function verifyRelease(base, engine, headers, secrets, manifest) {
   let response = await request(`${base}/release.json`, { headers });
   ensure(response.status === 200 && response.headers.get('x-sonic-release') === manifest.releaseId, 'FRONTEND_RELEASE_RESPONSE_FAILED');
@@ -387,6 +391,7 @@ export async function verifyRelease(base, engine, headers, secrets, manifest) {
   passed('Pages and Engine release identities match and direct Engine health is private and durable');
   return {
     pagesArtifactDigest,
+    stagingContentPolicy: { pages: contentPolicyEvidence(edgeHealth), engine: contentPolicyEvidence(engineHealth) },
     engineStorage: engineHealth.recommendEngine.storageKind,
     engineErasureRecoveryVersion: engineHealth.recommendEngine.erasureRecoveryVersion,
     engineRelease: {

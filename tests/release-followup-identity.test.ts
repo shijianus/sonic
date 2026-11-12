@@ -167,6 +167,8 @@ describe('Live Staging release probes', () => {
     const manifest = { schemaVersion: 1, baseCommit: 'a'.repeat(40), sourceDigest: 'b'.repeat(64), releaseId: 'staging-check', buildTime: '2026-11-12T00:00:00.000Z', dirty: false };
     const pagesArtifactDigest = 'c'.repeat(64);
     const identity = { ok: true, configured: true, required: true };
+    const pagesPolicy = { ok: true, mode: 'strict-allowlist', allowedSources: ['synthetic', 'netease', 'lrclib'], effectiveSources: ['synthetic', 'netease'] };
+    const enginePolicy = { ...pagesPolicy, effectiveSources: [...pagesPolicy.allowedSources] };
     let compiled = true;
     let writable = true;
     let recoveryVersion: number | undefined = 1;
@@ -181,11 +183,15 @@ describe('Live Staging release probes', () => {
         ok: true,
         runtime: isPages ? 'cf-pages' : 'linux-engine',
         release: { ...manifest, releaseCommit: manifest.baseCommit, environment: 'staging', pagesArtifactDigest, engineIdentityCompiled: compiled },
-        readiness: { identity },
+        readiness: { identity, contentPolicy: isPages ? pagesPolicy : enginePolicy },
         recommendEngine: { storageKind: 'sqlite', persistenceExpected: true, storageHealthy: true, disk: { writable }, erasureRecoveryVersion: recoveryVersion },
       }, { headers });
     });
-    await expect(verifyRelease(base, peer, {}, secrets, manifest)).resolves.toMatchObject({ pagesArtifactDigest, engineStorage: 'sqlite', engineErasureRecoveryVersion: 1, engineRelease: { baseCommit: manifest.baseCommit, engineIdentityCompiled: true } });
+    await expect(verifyRelease(base, peer, {}, secrets, manifest)).resolves.toMatchObject({
+      pagesArtifactDigest, engineStorage: 'sqlite', engineErasureRecoveryVersion: 1,
+      engineRelease: { baseCommit: manifest.baseCommit, engineIdentityCompiled: true },
+      stagingContentPolicy: { pages: pagesPolicy, engine: enginePolicy },
+    });
     compiled = false;
     await expect(verifyRelease(base, peer, {}, secrets, manifest)).rejects.toThrow('ENGINE_RELEASE_IDENTITY_MISMATCH');
     compiled = true;

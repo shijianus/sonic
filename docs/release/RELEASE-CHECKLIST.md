@@ -136,6 +136,8 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
    | `lyricsSync` | 歌词随播放及拖动同步 |
    | `imageAndSqliteRollback` | 使用保留清除保护的配套镜像和可验证快照回滚，确认已清除事件和旧批次保持不可用 |
 
+   保留脚本生成的 `stagingContentPolicy`，其中包含 Pages 和 Engine 实测的白名单及运行时启用来源。对生产 `SONIC_ALLOWED_SOURCES` 中每个真实来源，在 `productionChecks.sourceAcceptance` 下用来源 ID 填写 `{ "ok": true, "evidence": "现有验收记录中该来源的条目位置" }`。来源的音频、歌词或目录功能以实际启用能力为准，可引用上表中的同一份记录。生产预检要求这些来源在稳定 Staging 的 Pages 和 Engine 上均列入白名单且实际启用。
+
 3. 准备候选 Engine 并核对其编译身份和私有健康检查。设置 `CF_PAGES_PROJECT`、`CF_PAGES_BRANCH`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN` 和上述两个验证 origin。`SONIC_DEPLOY_VERIFY_URL` 使用项目默认 Pages 域名或在该项目已激活的自定义域名。保留已验收的 `dist/`，运行 `npm run deploy -- --preflight` 核对验收记录、域名归属、生产分支、Engine 绑定、访问模式、内容白名单、限流策略和 Engine 健康。该命令仅执行检查，失败输出 `BLOCK` 并以非零状态结束。看到 `GO` 后，可用 `npm run deploy` 提升同一构建，上传前会再次执行这些检查。上传后会重新验证 Engine，并确认实际 Pages 能访问同一 Engine，同时检查访问模式、白名单、分布式限流和匿名鉴权。单独运行 `npm run verify:deployed` 核验生产时同样使用 Cloudflare 项目信息校验目标地址。上传后校验失败时按回滚手册恢复兼容版本。
 
 ## E. 部署后冒烟（真实 HTTP）

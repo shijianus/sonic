@@ -34,6 +34,16 @@ import {
 } from '../music';
 import { callLocalEngineJson, createRuntimeAbortBudget, type CircuitState } from './local-engine';
 import { titlesMatchStrictly, artistsMatchStrictly } from './native-protocols';
+import { isSourceEnabledByPolicy, normalizeLyricsSourceId } from './licensing';
+
+export function isNexusLyricsSourceAllowed(data: SonicLyricsData | undefined, env?: AppEnv): boolean {
+  if (!data) return false;
+  const source = normalizeLyricsSourceId(data.provider);
+  if (source === 'none') {
+    return data.level === 'none' && data.syncedLyrics?.length === 0 && !data.plainLyrics && !data.rawTtml;
+  }
+  return source !== 'sonic' && isSourceEnabledByPolicy(source, env);
+}
 
 export interface NexusLyricsResult {
   data: SonicLyricsData;
@@ -197,8 +207,8 @@ async function resolveNexusLyricsWithinBudget(
     throwIfClientAborted();
     circuitState = engineRes.circuitState;
 
-    if (engineRes.ok && engineRes.data?.data) {
-      const d = engineRes.data.data;
+    const d = engineRes.data?.data;
+    if (engineRes.ok && d && isNexusLyricsSourceAllowed(d, env)) {
       const m = engineRes.data.meta || {};
       const upstreamAttempts = (m.attempts || []).map((a) => ({
         ...a,
@@ -221,7 +231,7 @@ async function resolveNexusLyricsWithinBudget(
     }
 
     degraded = true;
-    degradedReason = engineRes.error || 'local_engine_unavailable';
+    degradedReason = engineRes.ok && d ? 'local_engine_lyrics_source_not_allowed' : engineRes.error || 'local_engine_unavailable';
     attempts.push({
       provider: 'local-engine',
       via: 'local-engine',
@@ -622,5 +632,5 @@ async function resolveNexusLyricsWithinBudget(
 
   // ⑧ No lyrics found
   const emptyResult = buildResult('none', [], 'none', 'NONE', 0);
-  return finalize(emptyResult);
+  return { ...finalize(emptyResult), degraded, degradedReason };
 }

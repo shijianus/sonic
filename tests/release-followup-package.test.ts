@@ -90,6 +90,11 @@ function productionFixture() {
   return { root, control, marker, run };
 }
 
+function stagingContentPolicy(effectiveSources: string[]) {
+  const policy = { ok: true, mode: 'strict-allowlist', allowedSources: effectiveSources, effectiveSources };
+  return { pages: policy, engine: policy };
+}
+
 describe('complete, secret-safe release source packages', { timeout: 30_000 }, () => {
   it('binds Staging evidence to the exact Pages output and requires production checks', () => {
     const root = fixture();
@@ -120,21 +125,39 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
       ...preview, branch: 'staging', base: 'https://sonic-staging.pages.dev', branchUrl: 'https://sonic-staging.pages.dev',
       accessGateMode: 'invite', inviteAccessLiveVerified: true,
     };
-    expect(() => assertStagingAcceptance(stable, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/oauthLoginAndRevocation/);
-    const evidence = { ...stable, productionChecks: Object.fromEntries([
+    const production = { production: true, productionSources: ['netease', 'lrclib'] };
+    expect(() => assertStagingAcceptance(stable, first.manifest, first.pagesArtifactDigest, production)).toThrow(/oauthLoginAndRevocation/);
+    const manualChecks = Object.fromEntries([
       'oauthLoginAndRevocation', 'authorizedMediaPlaybackAndSeek', 'lyricsSync', 'imageAndSqliteRollback',
-    ].map(name => [name, { ok: true, evidence: `record for ${name}` }])) };
-    expect(() => assertStagingAcceptance(evidence, first.manifest, first.pagesArtifactDigest, { production: true })).not.toThrow();
-    expect(() => assertStagingAcceptance({ ...evidence, accessGateMode: 'legacy-staging' }, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/live product invite/);
-    expect(() => assertStagingAcceptance({ ...evidence, inviteAccessLiveVerified: undefined }, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/live product invite/);
-    expect(() => assertStagingAcceptance({ ...evidence, baseCommit: 'b'.repeat(40) }, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/exact release/);
+    ].map(name => [name, { ok: true, evidence: `record for ${name}` }]));
+    const evidence = {
+      ...stable, stagingContentPolicy: stagingContentPolicy(['synthetic', 'netease', 'lrclib']),
+      productionChecks: { ...manualChecks, sourceAcceptance: {
+        netease: { ok: true, evidence: 'media record #netease' },
+        lrclib: { ok: true, evidence: 'lyrics record #lrclib' },
+      } },
+    };
+    const verify = (record: unknown, productionSources = production.productionSources) =>
+      assertStagingAcceptance(record, first.manifest, first.pagesArtifactDigest, { ...production, productionSources });
+    expect(() => verify(evidence, ['synthetic', 'netease', 'lrclib'])).not.toThrow();
+    expect(() => verify(evidence, ['synthetic'])).toThrow(/non-synthetic source/);
+    expect(() => verify({ ...evidence, accessGateMode: 'legacy-staging' })).toThrow(/live product invite/);
+    expect(() => verify({ ...evidence, inviteAccessLiveVerified: undefined })).toThrow(/live product invite/);
+    expect(() => verify({ ...evidence, baseCommit: 'b'.repeat(40) })).toThrow(/exact release/);
+    expect(() => verify({ ...evidence, stagingContentPolicy: undefined })).toThrow(/live strict source policy/);
+    expect(() => verify({ ...evidence, productionChecks: manualChecks })).toThrow(/passing Staging source evidence for netease/);
+    expect(() => verify({ ...evidence, stagingContentPolicy: {
+      ...evidence.stagingContentPolicy,
+      engine: { ...evidence.stagingContentPolicy.engine, effectiveSources: ['synthetic', 'netease'] },
+    } })).toThrow(/not enabled on Staging engine: lrclib/);
+    expect(() => verify(evidence, ['netease', 'qq'])).toThrow(/not enabled on Staging pages: qq/);
 
     put(root, 'dist/index.html', 'modified artifact');
     const changed = buildPagesDeploymentTree(root);
     directories.push(changed.stagingRoot);
     expect(changed.manifest).toEqual(first.manifest);
     expect(changed.pagesArtifactDigest).not.toBe(first.pagesArtifactDigest);
-    expect(() => assertStagingAcceptance(evidence, changed.manifest, changed.pagesArtifactDigest, { production: true })).toThrow(/exact release/);
+    expect(() => assertStagingAcceptance(evidence, changed.manifest, changed.pagesArtifactDigest, production)).toThrow(/exact release/);
   });
 
   it.each(['http://sonic.example/', 'https://user:password@sonic.example/', 'https://sonic.example/elsewhere', 'https://sonic.example/?q=1', 'https://sonic.example/#hash'])('rejects a noncanonical production verification target %s', (target) => {
@@ -181,8 +204,12 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
       engineStorage: 'sqlite', independentIdentityBindingPresent: true, authenticatedIdentityAssertionLiveVerified: true,
       engineRelease: { ...manifest, engineIdentityCompiled: true }, eventEpochLiveVerified: true, engineErasureRecoveryVersion: 1,
       checks: Array.from({ length: 12 }, (_, index) => ({ name: `check ${index}`, ok: true })),
-      productionChecks: Object.fromEntries(['oauthLoginAndRevocation', 'authorizedMediaPlaybackAndSeek', 'lyricsSync', 'imageAndSqliteRollback']
-        .map(name => [name, { ok: true, evidence: `record for ${name}` }])),
+      stagingContentPolicy: stagingContentPolicy(['synthetic', 'netease']),
+      productionChecks: {
+        ...Object.fromEntries(['oauthLoginAndRevocation', 'authorizedMediaPlaybackAndSeek', 'lyricsSync', 'imageAndSqliteRollback']
+          .map(name => [name, { ok: true, evidence: `record for ${name}` }])),
+        sourceAcceptance: { netease: { ok: true, evidence: 'media record #netease' } },
+      },
     };
     put(control, 'acceptance.json', JSON.stringify(acceptance));
 
@@ -219,6 +246,10 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
     expect(JSON.parse(preflight.stdout)).toMatchObject({
       ok: true, decision: 'GO', mode: 'production-preflight', baseCommit: manifest.baseCommit, pagesArtifactDigest,
     });
+
+    const untested = run('sonic-prod', ['--preflight'], { ...env, SONIC_ALLOWED_SOURCES: 'netease,lrclib' });
+    expect(untested.status).toBe(1);
+    expect(JSON.parse(untested.stdout)).toMatchObject({ ok: false, decision: 'BLOCK', reason: 'Production sources were not enabled on Staging pages: lrclib' });
 
     const unhealthy = run('sonic-prod', ['--preflight'], { ...env, SONIC_TEST_ENGINE_UNREACHABLE: '1' });
     expect(unhealthy.status).toBe(1);

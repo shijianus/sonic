@@ -443,6 +443,27 @@ describe('new-song regions', () => {
     expect(fetchMock).toHaveBeenCalledExactlyOnceWith('http://ncm:3000/top/song?type=8&realIP=203.0.113.10', expect.anything());
   });
 
+  it.each([
+    { transport: 'default API', query: '', env: {} },
+    { transport: 'regional WEAPI', query: '?type=7', env: {} },
+    { transport: 'regional sidecar', query: '?type=7', env: sidecarEnv },
+  ])('normalizes song durations from the $transport', async ({ query, env }) => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ code: 200, data: [
+      { id: 1, duration: 180.5 },
+      { id: 2, duration: 180500 },
+      { id: 3, dt: 180500 },
+      { id: 4, duration: 180, dt: 180500 },
+    ] })));
+    const response = await request(query, env);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: [
+      { id: 1, duration: 180.5, dt: 180500 },
+      { id: 2, duration: 180.5, dt: 180500 },
+      { id: 3, duration: 180, dt: 180500 },
+      { id: 4, duration: 180, dt: 180500 },
+    ] });
+  });
+
   it('returns retryable failure when both regional transports fail without substituting default songs', async () => {
     const fetchMock = vi.fn(async (_input: string) => Response.json({}, { status: 503 }));
     vi.stubGlobal('fetch', fetchMock);
