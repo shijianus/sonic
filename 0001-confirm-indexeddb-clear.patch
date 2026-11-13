@@ -1,0 +1,216 @@
+From 890fdab0fd5a8467630905c0111dbc23740eb794 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Wed, 11 Nov 2026 02:29:06 -0600
+Subject: [PATCH] Confirm local music database deletion before reporting
+ success
+
+Close cached IndexedDB connections on versionchange so another app tab can delete the database. Treat blocked deletion as incomplete and share the pending browser request until it settles, preventing a retry from queuing behind itself.
+
+Exercise both cooperative and blocked connections in real two-tab Chromium. Base: shijianus/sonic rc/sonic-20261031 at c85fe948bb6a80165dff078e4c32b5e762a35854.
+---
+ player/e2e/specs/privacy-erasure.spec.ts | 101 +++++++++++++++++++++++
+ player/src/utils/indexedDB.ts            |  47 +++++++----
+ 2 files changed, 131 insertions(+), 17 deletions(-)
+
+diff --git a/player/e2e/specs/privacy-erasure.spec.ts b/player/e2e/specs/privacy-erasure.spec.ts
+index 8090b8f..0b41c33 100644
+--- a/player/e2e/specs/privacy-erasure.spec.ts
++++ b/player/e2e/specs/privacy-erasure.spec.ts
+@@ -1,4 +1,5 @@
+ import { test, expect } from '../fixtures'
++import type { Page } from '@playwright/test'
+ 
+ test('an erasure identity conflict preserves the anonymous profile ID for retry', async ({ page }, testInfo) => {
+   const anonId = 'anon_erasure_browser_001'
+@@ -35,3 +36,103 @@ test('an erasure identity conflict preserves the anonymous profile ID for retry'
+   const expected = { anonId, target: 'anonymous-opt-in' }
+   expect(deletes).toEqual([expected, expected])
+ })
++
++const musicDbName = 'SonicMusicPlayerDB'
++const localTrack = { id: 'erasure-local-track', name: 'Local music erasure test' }
++
++async function seedMusicDatabase(page: Page) {
++  await page.goto('/api/sonic/engine/health')
++  return page.evaluateHandle(async ({ dbName, track }) => {
++    const db = await new Promise<IDBDatabase>((resolve, reject) => {
++      const request = indexedDB.open(dbName, 2)
++      request.onupgradeneeded = () => {
++        request.result.createObjectStore('local_music', { keyPath: 'id' })
++        request.result.createObjectStore('downloaded_music', { keyPath: 'id' })
++      }
++      request.onsuccess = () => resolve(request.result)
++      request.onerror = () => reject(request.error)
++    })
++    await new Promise<void>((resolve, reject) => {
++      const tx = db.transaction('local_music', 'readwrite')
++      tx.objectStore('local_music').put({ ...track, artist: 'Test', duration: 1000, file: new Blob(['test']) })
++      tx.oncomplete = () => resolve()
++      tx.onabort = () => reject(tx.error)
++    })
++    return db
++  }, { dbName: musicDbName, track: localTrack })
++}
++
++async function openClearSettings(page: Page) {
++  await page.addInitScript(() => {
++    localStorage.setItem('recommend', JSON.stringify({ personalizationEnabled: false }))
++  })
++  await page.route('**/api/sonic/events', async (route) => {
++    if (route.request().method() !== 'DELETE') return route.continue()
++    await route.fulfill({ json: {
++      brand: 'Sonic', data: { privacyMode: 'public', cleared: false, removedEvents: 0 },
++    } })
++  })
++  await page.goto('/#/settings')
++}
++
++async function confirmLocalClear(page: Page) {
++  await page.getByRole('button', { name: 'Clear all local data', exact: true }).click()
++  await page.getByRole('dialog', { name: 'Clear all local data?' })
++    .getByRole('button', { name: 'Clear everything' }).click()
++}
++
++async function hasMusicDatabase(page: Page) {
++  return page.evaluate(async name => (await indexedDB.databases()).some(db => db.name === name), musicDbName)
++}
++
++test('local data clearing closes another app tab’s music database and lets it reopen empty', async ({ context, page }) => {
++  const other = await context.newPage()
++  const seeded = await seedMusicDatabase(other)
++  await seeded.evaluate(db => db.close())
++  await other.addInitScript(() => localStorage.setItem('global', JSON.stringify({ lang: 'en' })))
++  await other.goto('/#/local-music')
++  await expect(other.getByText(localTrack.name, { exact: true })).toBeVisible()
++
++  await openClearSettings(page)
++  await Promise.all([page.waitForEvent('load'), confirmLocalClear(page)])
++  expect(await hasMusicDatabase(other)).toBe(false)
++
++  // Downloads uses the same cached connection and opens it on first mount.
++  await other.getByRole('link', { name: 'Downloads', exact: true }).click()
++  await expect.poll(() => hasMusicDatabase(other)).toBe(true)
++  const localCount = await other.evaluate(name => new Promise<number>((resolve, reject) => {
++    const open = indexedDB.open(name, 2)
++    open.onerror = () => reject(open.error)
++    open.onsuccess = () => {
++      const db = open.result
++      const count = db.transaction('local_music').objectStore('local_music').count()
++      count.onsuccess = () => resolve(count.result)
++      count.onerror = () => reject(count.error)
++      db.close()
++    }
++  }), musicDbName)
++  expect(localCount).toBe(0)
++})
++
++test('blocked local data clearing reports failure and can be retried after the blocker closes', async ({ context, page }, testInfo) => {
++  const other = await context.newPage()
++  const blocker = await seedMusicDatabase(other)
++  await openClearSettings(page)
++  await confirmLocalClear(page)
++  await expect(page.getByText('Some data could not be cleared. Please retry.')).toBeVisible()
++  await expect(page.getByText('Local data cleared', { exact: true })).toHaveCount(0)
++  await page.screenshot({ path: testInfo.outputPath('indexeddb-blocked.png') })
++  const retained = await blocker.evaluate((db, id) => new Promise((resolve, reject) => {
++    const request = db.transaction('local_music').objectStore('local_music').get(id)
++    request.onsuccess = () => resolve(request.result?.id)
++    request.onerror = () => reject(request.error)
++  }), localTrack.id)
++  expect(retained).toBe(localTrack.id)
++
++  await confirmLocalClear(page)
++  await expect(page.getByRole('dialog', { name: 'Clear all local data?' })).toBeHidden()
++  await other.close()
++  await expect.poll(() => hasMusicDatabase(page)).toBe(false)
++  await Promise.all([page.waitForEvent('load'), confirmLocalClear(page)])
++  expect(await hasMusicDatabase(page)).toBe(false)
++})
+diff --git a/player/src/utils/indexedDB.ts b/player/src/utils/indexedDB.ts
+index a77496e..3925e45 100644
+--- a/player/src/utils/indexedDB.ts
++++ b/player/src/utils/indexedDB.ts
+@@ -42,40 +42,52 @@ const STORE_DOWNLOAD = 'downloaded_music'
+ const DB_VERSION = 2
+ 
+ let globalDbPromise: Promise<IDBDatabase> | null = null
++let databaseDeletion: Promise<void> | null = null
+ 
+ /** 关闭并删除整个本地音乐数据库（用于“清除全部本地数据”） */
+ export async function deleteMusicDatabase(): Promise<void> {
+   if (typeof indexedDB === 'undefined') return
+-  if (globalDbPromise) {
+-    try {
+-      const db = await globalDbPromise
+-      db.close()
+-    } catch {
+-      // 数据库未成功打开时直接继续删除
++  if (databaseDeletion) return databaseDeletion
++
++  const opening = globalDbPromise
++  globalDbPromise = null
++  void opening?.then(db => db.close(), () => {})
++
++  const request = indexedDB.deleteDatabase(DB_NAME)
++  databaseDeletion = new Promise<void>((resolve, reject) => {
++    request.onsuccess = () => {
++      databaseDeletion = null
++      resolve()
+     }
+-    globalDbPromise = null
+-  }
+-  await new Promise<void>((resolve, reject) => {
+-    const request = indexedDB.deleteDatabase(DB_NAME)
+-    request.onsuccess = () => resolve()
+-    request.onerror = () => reject(request.error)
+-    request.onblocked = () => resolve()
++    request.onerror = () => {
++      databaseDeletion = null
++      reject(request.error)
++    }
++    // 浏览器仍保留受阻的删除请求，等待它结束期间复用当前结果。
++    request.onblocked = () => reject(new Error('Another tab is holding the local music database open'))
+   })
++  return databaseDeletion
+ }
+ 
+ function openDatabase(): Promise<IDBDatabase> {
++  if (databaseDeletion) return databaseDeletion.then(openDatabase)
+   if (globalDbPromise) return globalDbPromise
+ 
+-  globalDbPromise = new Promise((resolve, reject) => {
++  const opening = new Promise<IDBDatabase>((resolve, reject) => {
+     const request = indexedDB.open(DB_NAME, DB_VERSION)
+ 
+     request.onerror = () => {
+-      globalDbPromise = null
++      if (globalDbPromise === opening) globalDbPromise = null
+       reject(request.error)
+     }
+ 
+     request.onsuccess = () => {
+-      resolve(request.result)
++      const db = request.result
++      db.onversionchange = () => {
++        db.close()
++        if (globalDbPromise === opening) globalDbPromise = null
++      }
++      resolve(db)
+     }
+ 
+     request.onupgradeneeded = (event) => {
+@@ -89,7 +101,8 @@ function openDatabase(): Promise<IDBDatabase> {
+     }
+   })
+ 
+-  return globalDbPromise
++  globalDbPromise = opening
++  return opening
+ }
+ 
+ async function executeInStore<T>(
+
+base-commit: c85fe948bb6a80165dff078e4c32b5e762a35854
+-- 
+2.52.0
+

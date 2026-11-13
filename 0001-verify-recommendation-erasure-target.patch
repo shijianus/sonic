@@ -1,0 +1,409 @@
+From eb3870379886a3a6f19f27433340abd4ebd251b0 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Wed, 11 Nov 2026 01:59:58 -0600
+Subject: [PATCH] Verify the intended recommendation profile before deletion
+
+Send the current UI erasure target with the DELETE request and compare it against the verified request identity before touching any profile. Reject missing target on cookie-authenticated account erasure, and use the same verified identity for the Engine signature and local cleanup.
+
+Accept success in the player only when the acknowledged privacy mode matches. Cover stale guest and account sessions with signed Cookie and SQLite regressions, and browser retry behavior.
+
+Base: shijianus/sonic rc/sonic-20261031 at bc6a47ffc2317bb78de4632dd0c3212cf6ce4b06.
+---
+ API.md                                   |  2 +
+ functions/_lib/sonic/local-engine.ts     |  6 +-
+ functions/api/sonic/events.ts            | 27 +++++++--
+ player/e2e/specs/privacy-erasure.spec.ts | 14 +++--
+ player/src/api/recommend.ts              | 11 ++--
+ player/src/stores/modules/recommend.ts   | 13 +++--
+ player/tests/recommendStore.test.ts      | 28 ++++++---
+ tests/release-followup-identity.test.ts  | 74 +++++++++++++++++++++++-
+ 8 files changed, 143 insertions(+), 32 deletions(-)
+
+diff --git a/API.md b/API.md
+index 00c2252..68e8b75 100644
+--- a/API.md
++++ b/API.md
+@@ -248,6 +248,8 @@ async function getRecommendations() {
+ | `GET` | `/api/sonic/search/smart` | 智能混合搜索与自动补全建议 | `q`, `mode=search\|suggest`, `page`, `count`, `personalize=0\|1` |
+ | `POST / DELETE / GET` | `/api/sonic/events` | 行为反馈上报与一键清除推荐画像（支持单曲及专辑/歌单/MV实体级反馈与双向软传播） | 请求体 `{ events: [...] }`；支持 `entity_type` (`track\|album\|playlist\|mv`)、`action` (`favorite\|play_complete\|watch_complete\|open\|add_to_playlist\|skip\|dislike`)；支持 `X-Sonic-Personalization: off` 隐私关闭 |
+ 
++同源客户端使用会话 Cookie 删除账户画像时，发送 `X-Sonic-Erasure-Target: account:<当前界面的账户 ID>`。访客可使用 `anonymous-opt-in` 并附带原匿名 ID，无画像时可使用 `public`。目标与服务端解析的身份不一致时返回 `409 EVENT_ERASURE_IDENTITY_MISMATCH`，刷新登录状态后再重试。带明确目标的画像删除通过 Pages 转发时使用 Engine 身份签名。
++
+ 站内热榜按窗口统计已登录且允许个性化的账户播放活动，`window=all` 使用存储保留期内的数据。匿名用户开启个性化后，其活动仍可用于自己的推荐。外部榜单分数通过 `popularity.externalChartScore` 单独返回。
+ 
+ 完整算法公式、实体图谱与多实体混合推荐设计请参阅 [`docs/recommend-multi-entity.md`](docs/recommend-multi-entity.md)、[`docs/recommendation/01-audit-and-selection.md`](docs/recommendation/01-audit-and-selection.md) 与 [`docs/recommendation/02-architecture-and-algorithms.md`](docs/recommendation/02-architecture-and-algorithms.md)。
+diff --git a/functions/_lib/sonic/local-engine.ts b/functions/_lib/sonic/local-engine.ts
+index e8410e5..727da02 100644
+--- a/functions/_lib/sonic/local-engine.ts
++++ b/functions/_lib/sonic/local-engine.ts
+@@ -294,6 +294,7 @@ export async function callLocalEngineJson<T = any>(
+   options?: {
+     request?: Request; method?: 'GET' | 'POST' | 'DELETE'; body?: string;
+     timeoutMs?: number; signal?: AbortSignal; clientIp?: string;
++    resolvedIdentity?: UserIdentityContext;
+   },
+ ): Promise<LocalEngineCallResult<T>> {
+   const cfg = getSonicConfig(env);
+@@ -327,7 +328,7 @@ export async function callLocalEngineJson<T = any>(
+       const accountSubject = accountRoute ? await resolveAuthenticatedSubject(options.request, env) : null;
+       forwardedIdentity = accountRoute
+         ? { mode: 'public', subjectKey: null, personalizationEnabled: false, isAuthenticated: false }
+-        : await resolveUserIdentity(options.request, env);
++        : options.resolvedIdentity ?? await resolveUserIdentity(options.request, env);
+       const optedOut = hasPersonalizationOptOut(options.request);
+       if (optedOut) {
+         headers['x-sonic-personalization'] = 'off';
+@@ -343,7 +344,8 @@ export async function callLocalEngineJson<T = any>(
+       if (assertion || optedOut || forwardedIdentity.mode === 'public') {
+         for (const credential of ['authorization', 'cookie', 'x-sonic-key', 'x-cfsolara-key', 'x-api-key']) delete headers[credential];
+       }
+-      if ((readiness.required || accountRoute) && !assertion) throw new EngineIdentityError();
++      // A caller that has checked an erasure target must send that exact subject.
++      if ((readiness.required || accountRoute || options.resolvedIdentity?.subjectKey) && !assertion) throw new EngineIdentityError();
+     }
+     const response = await fetchWithRuntimeBudget(`${cfg.localEngineUrl}${pathWithQuery.startsWith('/') ? '' : '/'}${pathWithQuery}`, {
+       method, headers, body: method !== 'GET' ? options?.body : undefined, redirect: 'error',
+diff --git a/functions/api/sonic/events.ts b/functions/api/sonic/events.ts
+index 7237859..14a880b 100644
+--- a/functions/api/sonic/events.ts
++++ b/functions/api/sonic/events.ts
+@@ -5,6 +5,7 @@
+ // - GET: Inspect current privacy mode and high-level preference profile summary (no raw PII)
+ 
+ import type { AppEnv } from '../../_lib/types';
++import { extractAuthCredentials } from '../../_lib/auth';
+ import { jsonResponse, handleOptions } from '../../_lib/http';
+ import { getSonicConfig } from '../../_lib/sonic/config';
+ import { callLocalEngineJson } from '../../_lib/sonic/local-engine';
+@@ -23,6 +24,7 @@ import {
+ } from '../../_lib/sonic/recommend';
+ 
+ const MAX_BODY_BYTES = 64 * 1024;
++const ERASURE_TARGET_HEADER = 'X-Sonic-Erasure-Target';
+ // Events are the only anonymous write surface that feeds global popularity.
+ // Bound both the network identity (IP) and the claimed subject so a single
+ // client cannot amplify the store by replaying large batches.
+@@ -228,22 +230,37 @@ export async function onRequest({
+   }
+ 
+   if (method === 'DELETE') {
++    const identity = await resolveUserIdentity(request, env);
++    const target = request.headers.get(ERASURE_TARGET_HEADER);
++    const resolvedTarget = identity.mode === 'authenticated'
++      ? identity.userId && `account:${identity.userId}`
++      : identity.mode;
++    const needsTarget = identity.mode === 'authenticated' && extractAuthCredentials(request).source === 'cookie';
++    if (target === null ? needsTarget : target !== resolvedTarget) {
++      return jsonResponse({
++        brand: 'Sonic',
++        error: { code: 'EVENT_ERASURE_IDENTITY_MISMATCH', message: 'Refresh your session before retrying recommendation data deletion' },
++      }, { status: 409, headers: buildGatewayHeaders(privateHeaders) });
++    }
+     if (config.enableLocalEngine) {
+       const engineRes = await callLocalEngineJson<any>('/api/sonic/events', env, {
+         request, method: 'DELETE', timeoutMs: config.engineTimeoutMs, signal: request.signal,
++        ...(target !== null ? { resolvedIdentity: identity } : {}),
+       });
++      const erasure = engineRes.data?.data;
+       if (engineRes.ok && engineRes.data?.brand === 'Sonic' &&
+-          ((engineRes.data?.data?.cleared === true && engineRes.data.data.storageKind === 'sqlite') ||
+-            (engineRes.data?.data?.privacyMode === 'public' && engineRes.data.data.cleared === false && engineRes.data.data.removedEvents === 0)) &&
+-          Number.isInteger(engineRes.data.data.removedEvents) && engineRes.data.data.removedEvents >= 0) {
++          erasure?.privacyMode === identity.mode &&
++          Number.isSafeInteger(erasure.removedEvents) && erasure.removedEvents >= 0 &&
++          (identity.mode === 'public'
++            ? erasure.cleared === false && erasure.removedEvents === 0
++            : erasure.cleared === true && erasure.storageKind === 'sqlite')) {
+         // Authority's result/count, never an Edge OR-success. Clear stale local
+         // read-fallback data only after the durable deletion is acknowledged.
+-        try { clearUserRecommendationData(await resolveUserIdentity(request, env), env); } catch {}
++        try { clearUserRecommendationData(identity, env); } catch {}
+         return jsonResponse(engineRes.data, { status: 200, headers: buildGatewayHeaders(privateHeaders, false, engineRes.circuitState) });
+       }
+       return engineRejected(engineRes, start, engineRes.circuitState);
+     }
+-    const identity = await resolveUserIdentity(request, env);
+     if (identity.subjectKey && getRecommendStore(env).kind !== 'sqlite') return storageUnavailable(start);
+     try {
+       const localClear = await clearUserRecommendationDataAndExternal(identity, env);
+diff --git a/player/e2e/specs/privacy-erasure.spec.ts b/player/e2e/specs/privacy-erasure.spec.ts
+index 5ffdcc1..8090b8f 100644
+--- a/player/e2e/specs/privacy-erasure.spec.ts
++++ b/player/e2e/specs/privacy-erasure.spec.ts
+@@ -1,8 +1,8 @@
+ import { test, expect } from '../fixtures'
+ 
+-test('a failed remote erasure preserves the anonymous profile ID for retry', async ({ page }, testInfo) => {
++test('an erasure identity conflict preserves the anonymous profile ID for retry', async ({ page }, testInfo) => {
+   const anonId = 'anon_erasure_browser_001'
+-  const deletes: string[] = []
++  const deletes: Array<{ anonId: string | undefined; target: string | undefined }> = []
+   await page.addInitScript((id) => {
+     localStorage.setItem('recommend', JSON.stringify({ personalizationEnabled: true, anonId: id }))
+     localStorage.setItem('sonic-e2e-local-data', 'preserved')
+@@ -10,12 +10,13 @@ test('a failed remote erasure preserves the anonymous profile ID for retry', asy
+ 
+   await page.route('**/api/sonic/events', async (route) => {
+     if (route.request().method() !== 'DELETE') return route.continue()
+-    deletes.push(route.request().headers()['x-sonic-anon-id'] || '')
++    const headers = route.request().headers()
++    deletes.push({ anonId: headers['x-sonic-anon-id'], target: headers['x-sonic-erasure-target'] })
+     if (deletes.length === 1) {
+-      await route.fulfill({ status: 503, json: { brand: 'Sonic', error: { code: 'EVENT_ERASURE_INCOMPLETE' } } })
++      await route.fulfill({ status: 409, json: { brand: 'Sonic', error: { code: 'EVENT_ERASURE_IDENTITY_MISMATCH' } } })
+     } else {
+       await route.fulfill({ json: {
+-        brand: 'Sonic', data: { cleared: true, storageKind: 'sqlite', removedEvents: 1 },
++        brand: 'Sonic', data: { privacyMode: 'anonymous-opt-in', cleared: true, storageKind: 'sqlite', removedEvents: 1 },
+       } })
+     }
+   })
+@@ -31,5 +32,6 @@ test('a failed remote erasure preserves the anonymous profile ID for retry', asy
+ 
+   await page.getByRole('button', { name: 'Reset Recommendation Profile & Dislikes' }).click()
+   await expect(page.getByText('Recommendation profile and disliked tracks cleared')).toBeVisible()
+-  expect(deletes).toEqual([anonId, anonId])
++  const expected = { anonId, target: 'anonymous-opt-in' }
++  expect(deletes).toEqual([expected, expected])
+ })
+diff --git a/player/src/api/recommend.ts b/player/src/api/recommend.ts
+index 4a92004..bc903ad 100644
+--- a/player/src/api/recommend.ts
++++ b/player/src/api/recommend.ts
+@@ -394,8 +394,8 @@ export async function postSonicEvents(
+ }
+ 
+ export async function deleteSonicEvents(
+-  headers: Record<string, string> = {},
+-  expectStoredProfile = false
++  headers: Record<string, string>,
++  expectedMode: 'authenticated' | 'anonymous-opt-in' | 'public'
+ ): Promise<boolean> {
+   try {
+     const resp = await fetch('/api/sonic/events', {
+@@ -406,10 +406,11 @@ export async function deleteSonicEvents(
+     const result = await resp.json()
+     if (result?.brand !== 'Sonic') return false
+     const data = result.data
++    if (data?.privacyMode !== expectedMode) return false
+     if (!Number.isSafeInteger(data?.removedEvents) || data.removedEvents < 0) return false
+-    if (data?.cleared === true && data.storageKind === 'sqlite') return true
+-    return !expectStoredProfile && data?.privacyMode === 'public' && data.cleared === false &&
+-      data.removedEvents === 0
++    return expectedMode === 'public'
++      ? data.cleared === false && data.removedEvents === 0
++      : data.cleared === true && data.storageKind === 'sqlite'
+   } catch {
+     return false
+   }
+diff --git a/player/src/stores/modules/recommend.ts b/player/src/stores/modules/recommend.ts
+index df11086..ef5180e 100644
+--- a/player/src/stores/modules/recommend.ts
++++ b/player/src/stores/modules/recommend.ts
+@@ -416,27 +416,28 @@ export const useRecommendStore = defineStore('recommend', {
+       if (delivery.clearing) return delivery.clearing
+       const headers = this.buildRequestHeaders(false)
+       const auth = useAuthStore()
+-      const hasAccount = Boolean(auth.isAuthenticated && auth.user?.id)
++      const accountId = auth.isAuthenticated ? auth.user?.id : undefined
+       const hasAnonId = ANON_ID_PATTERN.test(this.anonId)
+       // An expired account session must not silently delete the guest profile.
+       // Guest erasure still needs the old device ID after personalization is off.
+-      if (hasAccount) {
++      if (accountId) {
+         delete headers['X-Sonic-Anon-Id']
+       } else if (hasAnonId) {
+         headers['X-Sonic-Anon-Id'] = this.anonId
+       }
+-      const expectStoredProfile = hasAccount || hasAnonId
+-      if (expectStoredProfile) delete headers['X-Sonic-Personalization']
++      const mode = accountId ? 'authenticated' : hasAnonId ? 'anonymous-opt-in' : 'public'
++      headers['X-Sonic-Erasure-Target'] = accountId ? `account:${accountId}` : mode
++      if (mode !== 'public') delete headers['X-Sonic-Personalization']
+       const identity = deliveryIdentity(this.anonId)
+       discardPending(delivery)
+       // Drain all writes from this tab before DELETE. No new events can be
+       // queued during erasure, including via pagehide or a failed batch retry.
+       const clearing = waitForWrites(delivery.writes).then(async (drained) => {
+         if (!drained || deliveryIdentity(this.anonId) !== identity) return false
+-        const ok = await deleteSonicEvents(headers, expectStoredProfile)
++        const ok = await deleteSonicEvents(headers, mode)
+         if (!ok || deliveryIdentity(this.anonId) !== identity) return false
+         this.dislikedTracks = []
+-        if (!hasAccount) this.anonId = this.personalizationEnabled ? generateAnonId() : ''
++        if (!accountId) this.anonId = this.personalizationEnabled ? generateAnonId() : ''
+         return true
+       })
+       delivery.clearing = clearing
+diff --git a/player/tests/recommendStore.test.ts b/player/tests/recommendStore.test.ts
+index dc61da6..0eebfca 100644
+--- a/player/tests/recommendStore.test.ts
++++ b/player/tests/recommendStore.test.ts
+@@ -6,8 +6,8 @@ import { useRecommendStore } from '@/stores/modules/recommend'
+ import { useLibraryStore } from '@/stores/modules/library'
+ import { useAuthStore } from '@/stores/modules/auth'
+ 
+-function erasedProfile() {
+-  return Response.json({ brand: 'Sonic', data: { cleared: true, storageKind: 'sqlite', removedEvents: 1 } })
++function erasedProfile(privacyMode = 'anonymous-opt-in') {
++  return Response.json({ brand: 'Sonic', data: { privacyMode, cleared: true, storageKind: 'sqlite', removedEvents: 1 } })
+ }
+ 
+ function delayedResponse() {
+@@ -127,7 +127,10 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
+ 
+     previousPost.finish(new Response(null, { status: 503 }))
+     await vi.waitFor(() => expect(fetchSpy.mock.calls.map(([, init]) => init?.method)).toEqual(['POST', 'DELETE']))
+-    expect(fetchSpy.mock.calls[1][1]?.headers).toMatchObject({ 'X-Sonic-Anon-Id': originalId })
++    expect(fetchSpy.mock.calls[1][1]?.headers).toMatchObject({
++      'X-Sonic-Anon-Id': originalId,
++      'X-Sonic-Erasure-Target': 'anonymous-opt-in',
++    })
+     deletion.finish(erasedProfile())
+     expect(await clearing).toBe(true)
+     expect(await duplicate).toBe(true)
+@@ -184,7 +187,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
+   })
+ 
+   it('已有账号在关闭个性化后仍可清除服务端画像', async () => {
+-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile())
++    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile('authenticated'))
+     const rec = useRecommendStore()
+     const auth = useAuthStore()
+     auth.user = { id: 'user-A', email: 'a@example.test', name: 'A' }
+@@ -193,11 +196,11 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
+     expect(rec.anonId).toBe('')
+ 
+     expect(await rec.clearAllRecommendationProfile()).toBe(true)
+-    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({})
++    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({ 'X-Sonic-Erasure-Target': 'account:user-A' })
+   })
+ 
+   it('清除账号画像时不发送访客 ID，保留独立的访客画像标识', async () => {
+-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile())
++    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile('authenticated'))
+     const rec = useRecommendStore()
+     const guestId = rec.ensureAnonId()
+     const auth = useAuthStore()
+@@ -205,7 +208,7 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
+     auth.isAuthenticated = true
+ 
+     expect(await rec.clearAllRecommendationProfile()).toBe(true)
+-    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({})
++    expect(fetchSpy.mock.calls[0][1]?.headers).toEqual({ 'X-Sonic-Erasure-Target': 'account:user-A' })
+     expect(rec.anonId).toBe(guestId)
+   })
+ 
+@@ -220,6 +223,17 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
+     expect(rec.anonId).toBe(originalId)
+   })
+ 
++  it('账号画像的成功响应不能确认访客画像删除', async () => {
++    vi.spyOn(globalThis, 'fetch').mockResolvedValue(erasedProfile('authenticated'))
++    const rec = useRecommendStore()
++    const originalId = rec.ensureAnonId()
++    rec.dislikeSong({ id: 1000, name: '保留', artist: '测试' })
++
++    expect(await rec.clearAllRecommendationProfile()).toBe(false)
++    expect(rec.anonId).toBe(originalId)
++    expect(rec.dislikedCount).toBe(1)
++  })
++
+   it('事件批量发送失败后整批回到队首,随下一次批量一起重试', async () => {
+     vi.useFakeTimers()
+     try {
+diff --git a/tests/release-followup-identity.test.ts b/tests/release-followup-identity.test.ts
+index bc7fe78..2f56a5b 100644
+--- a/tests/release-followup-identity.test.ts
++++ b/tests/release-followup-identity.test.ts
+@@ -132,12 +132,84 @@ describe('Follow-up identity and consent over the actual events hop', () => {
+     expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(1);
+     const read = await events({ request: incoming('GET', '?personalization=off'), env: edge() });
+     expect(await read.json()).toMatchObject({ data: { privacyMode: 'public', totalEvents: 0 } });
+-    const deleted = await events({ request: incoming('DELETE', '?personalize=false'), env: edge() });
++    const deleted = await events({ request: incoming('DELETE', '?personalize=false', { 'X-Sonic-Erasure-Target': 'public' }), env: edge() });
+     expect(deleted.status).toBe(200);
+     expect(await deleted.json()).toMatchObject({ data: { privacyMode: 'public', cleared: false, removedEvents: 0 } });
+     expect(authority.RECOMMEND_STORE.getStats().eventCount).toBe(1);
+   });
+ 
++  it.each(['Pages with Engine', 'local SQLite'])('checks the intended erasure target before mutation (%s)', async (runtime) => {
++    const authority = engine();
++    const throughEngine = runtime === 'Pages with Engine';
++    const env = throughEngine ? edge() : { ...edge(), SONIC_LOCAL_ENGINE_URL: '', RECOMMEND_STORE: authority.RECOMMEND_STORE };
++    const hop = engineHop(authority);
++    const accountA = await createSession(env, { email: 'erasure-a@example.invalid', name: 'A', avatar: '' });
++    const accountB = await createSession(env, { email: 'erasure-b@example.invalid', name: 'B', avatar: '' });
++    const cookieA = { Cookie: `sonic_session=${accountA.apiKey}`, Origin: 'https://edge.followup.test' };
++    const cookieB = { Cookie: `sonic_session=${accountB.apiKey}`, Origin: 'https://edge.followup.test' };
++    const target = 'X-Sonic-Erasure-Target';
++    const subjects = [{}, cookieA, cookieB];
++    const readCounts = async () => Promise.all(subjects.map(async (headers) => {
++      const response = await events({ request: incoming('GET', '', headers), env });
++      expect(response.status).toBe(200);
++      return (await response.json()).data.totalEvents;
++    }));
++
++    for (const headers of subjects) {
++      expect((await events({ request: incoming('POST', '', headers), env })).status).toBe(200);
++    }
++    expect(await readCounts()).toEqual([1, 1, 1]);
++    hop.mockClear();
++    for (const headers of [
++      { ...cookieB, [target]: 'anonymous-opt-in' },
++      { ...cookieB, [target]: `account:${accountA.id}` },
++      { ...cookieB, [target]: 'public' },
++      { ...cookieB, [target]: 'account:' },
++      { [target]: `account:${accountA.id}` },
++      cookieB,
++    ]) {
++      const response = await events({ request: incoming('DELETE', '', headers), env });
++      expect(response.status).toBe(409);
++      expect(response.headers.get('cache-control')).toBe('private, no-store');
++      expect(await response.json()).toMatchObject({ error: { code: 'EVENT_ERASURE_IDENTITY_MISMATCH' } });
++    }
++    expect(hop).not.toHaveBeenCalled();
++    expect(await readCounts()).toEqual([1, 1, 1]);
++
++    hop.mockClear();
++    const cleared = await events({
++      request: incoming('DELETE', '', { ...cookieA, [target]: `account:${accountA.id}` }), env,
++    });
++    expect(cleared.status).toBe(200);
++    expect(await cleared.json()).toMatchObject({ data: { privacyMode: 'authenticated', cleared: true, removedEvents: 1 } });
++    if (throughEngine) {
++      const forwarded = new Headers(hop.mock.calls[0]?.[1]?.headers);
++      for (const name of [target, 'Cookie', 'X-Sonic-Anon-Id']) expect(forwarded.has(name)).toBe(false);
++      expect(forwarded.has(ENGINE_IDENTITY_HEADER)).toBe(true);
++    }
++    expect(await readCounts()).toEqual([1, 0, 1]);
++
++    const guestCleared = await events({ request: incoming('DELETE', '', { [target]: 'anonymous-opt-in' }), env });
++    expect(guestCleared.status).toBe(200);
++    expect(await guestCleared.json()).toMatchObject({ data: { privacyMode: 'anonymous-opt-in', cleared: true, removedEvents: 1 } });
++    expect(await readCounts()).toEqual([0, 0, 1]);
++
++    const keyCleared = await events({ request: incoming('DELETE', '', { 'X-Sonic-Key': accountB.apiKey }), env });
++    expect(keyCleared.status).toBe(200);
++    expect(await readCounts()).toEqual([0, 0, 0]);
++  });
++
++  it('refuses to forward a checked stored target without a signed identity', async () => {
++    const hop = vi.spyOn(globalThis, 'fetch');
++    const env = { ...edge(), SONIC_REQUIRE_ENGINE_IDENTITY: '0', SONIC_ENGINE_IDENTITY_SECRET: '' };
++    const response = await events({
++      request: incoming('DELETE', '', { 'X-Sonic-Erasure-Target': 'anonymous-opt-in' }), env,
++    });
++    expect(response.status).toBe(503);
++    expect(await response.json()).toMatchObject({ error: { code: 'ENGINE_IDENTITY_UNAVAILABLE' } });
++    expect(hop).not.toHaveBeenCalled();
++  });
++
+   it('fails required configuration before a network request and reports missing readiness', async () => {
+     const fetch = vi.spyOn(globalThis, 'fetch');
+     const env = { ...edge(), SONIC_ENGINE_IDENTITY_SECRET: '' };
+
+base-commit: bc6a47ffc2317bb78de4632dd0c3212cf6ce4b06
+-- 
+2.52.0
+

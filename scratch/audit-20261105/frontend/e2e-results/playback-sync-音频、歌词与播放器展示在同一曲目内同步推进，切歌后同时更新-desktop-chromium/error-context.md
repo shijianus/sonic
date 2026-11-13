@@ -1,0 +1,418 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e1]:
+  - generic [ref=e3]:
+    - generic [ref=e5]:
+      - img
+    - generic [ref=e13]:
+      - complementary [ref=e14]:
+        - generic [ref=e15]:
+          - generic [ref=e16]:
+            - generic [ref=e17]:
+              - generic [ref=e18]:
+                - button [ref=e19] [cursor=pointer]:
+                  - img [ref=e20]
+                - generic [ref=e23]:
+                  - generic [ref=e24]: epocanvas
+                  - generic [ref=e25]:
+                    - generic [ref=e26]: Sonic
+                    - generic [ref=e27]: STUDIO
+              - generic [ref=e28]:
+                - button [disabled] [ref=e29]
+                - button [disabled] [ref=e31]
+            - generic [ref=e34]:
+              - textbox [ref=e36]:
+                - /placeholder: Search songs, artists, albums...
+              - generic [ref=e37]: ↵
+            - generic [ref=e39]:
+              - generic [ref=e40]:
+                - heading [level=3] [ref=e41]: Explore
+                - navigation [ref=e42]:
+                  - link [ref=e43] [cursor=pointer]:
+                    - /url: "#/"
+                    - generic [ref=e45]: Home
+                  - link [ref=e46] [cursor=pointer]:
+                    - /url: "#/mv-list"
+                    - generic [ref=e48]: MV
+                  - link [ref=e49] [cursor=pointer]:
+                    - /url: "#/charts"
+                    - generic [ref=e51]: Charts
+                  - link [ref=e52] [cursor=pointer]:
+                    - /url: "#/artists"
+                    - generic [ref=e54]: Artists
+                  - link [ref=e55] [cursor=pointer]:
+                    - /url: "#/new-albums"
+                    - generic [ref=e57]: New Albums
+                  - link [ref=e58] [cursor=pointer]:
+                    - /url: "#/search"
+                    - generic [ref=e60]: Search
+              - generic [ref=e61]:
+                - heading [level=3] [ref=e62]: My Music
+                - navigation [ref=e63]:
+                  - link [ref=e64] [cursor=pointer]:
+                    - /url: "#/likes"
+                    - generic [ref=e66]: Favorites
+                  - link [ref=e67] [cursor=pointer]:
+                    - /url: "#/recent"
+                    - generic [ref=e69]: Recent
+                  - link [ref=e70] [cursor=pointer]:
+                    - /url: "#/downloads"
+                    - generic [ref=e72]: Downloads
+                  - link [ref=e73] [cursor=pointer]:
+                    - /url: "#/local-music"
+                    - generic [ref=e75]: Local Music
+              - generic [ref=e76]:
+                - heading [level=3] [ref=e77]: System
+                - navigation [ref=e78]:
+                  - link [ref=e79] [cursor=pointer]:
+                    - /url: "#/settings"
+                    - generic [ref=e81]: Settings
+          - button [ref=e85] [cursor=pointer]:
+            - generic [ref=e89]:
+              - generic [ref=e91]: Guest User
+              - generic [ref=e92]: Unified authentication & sync
+      - generic [ref=e95]:
+        - main [ref=e96]:
+          - generic [ref=e97]:
+            - generic [ref=e98]:
+              - generic [ref=e100]:
+                - textbox [ref=e102]:
+                  - /placeholder: sonic
+                  - text: sonic
+                - button [ref=e103]
+                - button [ref=e105]:
+                  - generic [ref=e106]: Search
+              - generic [ref=e107]:
+                - generic [ref=e111]: Explore Styles
+                - generic [ref=e112]:
+                  - button [ref=e113]:
+                    - generic [ref=e114]: "#"
+                    - generic [ref=e115]: 华语流行
+                  - button [ref=e116]:
+                    - generic [ref=e117]: "#"
+                    - generic [ref=e118]: 欧美流行
+                  - button [ref=e119]:
+                    - generic [ref=e120]: "#"
+                    - generic [ref=e121]: 粤语金曲
+                  - button [ref=e122]:
+                    - generic [ref=e123]: "#"
+                    - generic [ref=e124]: 日韩流行
+                  - button [ref=e125]:
+                    - generic [ref=e126]: "#"
+                    - generic [ref=e127]: 摇滚
+                  - button [ref=e128]:
+                    - generic [ref=e129]: "#"
+                    - generic [ref=e130]: 民谣
+                  - button [ref=e131]:
+                    - generic [ref=e132]: "#"
+                    - generic [ref=e133]: 电子音乐
+                  - button [ref=e134]:
+                    - generic [ref=e135]: "#"
+                    - generic [ref=e136]: 说唱
+                  - button [ref=e137]:
+                    - generic [ref=e138]: "#"
+                    - generic [ref=e139]: R&B
+                  - button [ref=e140]:
+                    - generic [ref=e141]: "#"
+                    - generic [ref=e142]: 纯音乐
+                  - button [ref=e143]:
+                    - generic [ref=e144]: "#"
+                    - generic [ref=e145]: 古典
+                  - button [ref=e146]:
+                    - generic [ref=e147]: "#"
+                    - generic [ref=e148]: 爵士
+                  - button [ref=e149]:
+                    - generic [ref=e150]: "#"
+                    - generic [ref=e151]: 古风
+                  - button [ref=e152]:
+                    - generic [ref=e153]: "#"
+                    - generic [ref=e154]: 轻音乐
+                  - button [ref=e155]:
+                    - generic [ref=e156]: "#"
+                    - generic [ref=e157]: 朋克
+                  - button [ref=e158]:
+                    - generic [ref=e159]: "#"
+                    - generic [ref=e160]: 金属
+                  - button [ref=e161]:
+                    - generic [ref=e162]: "#"
+                    - generic [ref=e163]: 蓝调
+                  - button [ref=e164]:
+                    - generic [ref=e165]: "#"
+                    - generic [ref=e166]: 乡村音乐
+                  - button [ref=e167]:
+                    - generic [ref=e168]: "#"
+                    - generic [ref=e169]: 舞曲
+                  - button [ref=e170]:
+                    - generic [ref=e171]: "#"
+                    - generic [ref=e172]: 治愈系
+                  - button [ref=e173]:
+                    - generic [ref=e174]: "#"
+                    - generic [ref=e175]: 浪漫抒情
+                  - button [ref=e176]:
+                    - generic [ref=e177]: "#"
+                    - generic [ref=e178]: 安静舒缓
+                  - button [ref=e179]:
+                    - generic [ref=e180]: "#"
+                    - generic [ref=e181]: 燃炸热血
+                  - button [ref=e182]:
+                    - generic [ref=e183]: "#"
+                    - generic [ref=e184]: 伤感回忆
+                  - button [ref=e185]:
+                    - generic [ref=e186]: "#"
+                    - generic [ref=e187]: 学习工作
+                  - button [ref=e188]:
+                    - generic [ref=e189]: "#"
+                    - generic [ref=e190]: 运动健身
+                  - button [ref=e191]:
+                    - generic [ref=e192]: "#"
+                    - generic [ref=e193]: 晚安助眠
+                  - button [ref=e194]:
+                    - generic [ref=e195]: "#"
+                    - generic [ref=e196]: 通勤随行
+                  - button [ref=e197]:
+                    - generic [ref=e198]: "#"
+                    - generic [ref=e199]: 自驾旅行
+                  - button [ref=e200]:
+                    - generic [ref=e201]: "#"
+                    - generic [ref=e202]: 经典老歌
+                  - button [ref=e203]:
+                    - generic [ref=e204]: "#"
+                    - generic [ref=e205]: 影视原声
+                  - button [ref=e206]:
+                    - generic [ref=e207]: "#"
+                    - generic [ref=e208]: ACG二次元
+                  - button [ref=e209]:
+                    - generic [ref=e210]: "#"
+                    - generic [ref=e211]: 独立音乐
+            - generic [ref=e212]:
+              - generic [ref=e213]:
+                - generic [ref=e217]:
+                  - heading [level=1] [ref=e218]: Search "sonic"
+                  - paragraph [ref=e219]: Found 4 results
+                - generic [ref=e220]:
+                  - generic [ref=e221]:
+                    - button [ref=e222]:
+                      - generic [ref=e224]: Songs
+                    - button [ref=e225]:
+                      - generic [ref=e227]: Playlists
+                    - button [ref=e228]:
+                      - generic [ref=e230]: MV
+                  - generic [ref=e231]:
+                    - button [ref=e232] [cursor=pointer]: Play All
+                    - generic [ref=e235]:
+                      - button [disabled] [ref=e236]
+                      - generic [ref=e238]: 1 / 1
+                      - button [disabled] [ref=e239]
+              - generic [ref=e244]:
+                - generic [ref=e245]:
+                  - generic [ref=e246]: "#"
+                  - generic [ref=e247]:
+                    - generic [ref=e248]: Song
+                    - generic [ref=e249]: Artist
+                    - generic [ref=e250]: Album
+                    - generic [ref=e251]: Duration
+                    - generic [ref=e252]: Actions
+                - generic [ref=e253]:
+                  - generic [ref=e261] [cursor=pointer]:
+                    - generic [ref=e262]:
+                      - img [ref=e265]
+                      - heading [level=3] [ref=e269]: Test Song One
+                    - generic [ref=e270]: Tester A
+                    - generic [ref=e271]: E2E Album
+                    - generic [ref=e273]: 0:20
+                    - generic [ref=e275]:
+                      - button [ref=e276]
+                      - button [ref=e278]
+                      - button [ref=e280]
+                      - button [ref=e282]
+                  - generic [ref=e284] [cursor=pointer]:
+                    - generic [ref=e285]:
+                      - generic [ref=e286]: "2"
+                      - button [ref=e287]
+                    - generic [ref=e289]:
+                      - generic [ref=e290]:
+                        - img [ref=e293]
+                        - heading [level=3] [ref=e297]: Test Song Two
+                      - generic [ref=e298]: Tester B
+                      - generic [ref=e299]: E2E Album
+                      - generic [ref=e301]: 0:20
+                      - generic [ref=e303]:
+                        - button [ref=e304]
+                        - button [ref=e306]
+                        - button [ref=e308]
+                        - button [ref=e310]
+                  - generic [ref=e312] [cursor=pointer]:
+                    - generic [ref=e313]:
+                      - generic [ref=e314]: "3"
+                      - button [ref=e315]
+                    - generic [ref=e317]:
+                      - generic [ref=e318]:
+                        - img [ref=e321]
+                        - heading [level=3] [ref=e325]: Test Song Three
+                      - generic [ref=e326]: Tester C
+                      - generic [ref=e327]: E2E Album
+                      - generic [ref=e329]: 0:20
+                      - generic [ref=e331]:
+                        - button [ref=e332]
+                        - button [ref=e334]
+                        - button [ref=e336]
+                        - button [ref=e338]
+                  - generic [ref=e340] [cursor=pointer]:
+                    - generic [ref=e341]:
+                      - generic [ref=e342]: "4"
+                      - button [ref=e343]
+                    - generic [ref=e345]:
+                      - generic [ref=e346]:
+                        - img [ref=e349]
+                        - heading [level=3] [ref=e353]: Test Song Four
+                      - generic [ref=e354]: Tester D
+                      - generic [ref=e355]: E2E Album
+                      - generic [ref=e357]: 0:20
+                      - generic [ref=e359]:
+                        - button [ref=e360]
+                        - button [ref=e362]
+                        - button [ref=e364]
+                        - button [ref=e366]
+              - generic [ref=e369]:
+                - generic [ref=e370]:
+                  - heading [level=2] [ref=e372]:
+                    - generic [ref=e374]: Style Radar
+                    - generic [ref=e375]: "# sonic"
+                  - generic [ref=e376]:
+                    - button [ref=e377]:
+                      - generic [ref=e379]: 换一批
+                    - button [ref=e380]:
+                      - generic [ref=e382]: Play All
+                - generic [ref=e384]:
+                  - button [ref=e385] [cursor=pointer]:
+                    - generic [ref=e386]: "1"
+                    - generic [ref=e390]: C
+                    - generic [ref=e396]:
+                      - paragraph [ref=e397]: Test Song One
+                      - paragraph [ref=e398]: Tester A
+                    - generic [ref=e399]: 0:20
+                  - button [ref=e400] [cursor=pointer]:
+                    - generic [ref=e401]: "2"
+                    - generic [ref=e405]: C
+                    - generic [ref=e408]:
+                      - paragraph [ref=e409]: Test Song Two
+                      - paragraph [ref=e410]: Tester B
+                    - generic [ref=e411]: 0:20
+                  - button [ref=e412] [cursor=pointer]:
+                    - generic [ref=e413]: "3"
+                    - generic [ref=e417]: C
+                    - generic [ref=e420]:
+                      - paragraph [ref=e421]: Test Song Three
+                      - paragraph [ref=e422]: Tester C
+                    - generic [ref=e423]: 0:20
+                  - button [ref=e424] [cursor=pointer]:
+                    - generic [ref=e425]: "4"
+                    - generic [ref=e429]: C
+                    - generic [ref=e432]:
+                      - paragraph [ref=e433]: Test Song Four
+                      - paragraph [ref=e434]: Tester D
+                    - generic [ref=e435]: 0:20
+        - contentinfo [ref=e436]:
+          - generic [ref=e437]:
+            - generic [ref=e438]:
+              - button [ref=e440] [cursor=pointer]
+              - generic [ref=e441]:
+                - paragraph [ref=e443]: Test Song One
+                - paragraph [ref=e444]: Tester A
+              - paragraph [ref=e446]: Test Song One line 2
+            - generic [ref=e447]:
+              - button [ref=e448] [cursor=pointer]
+              - button [ref=e450] [cursor=pointer]
+              - button [ref=e452] [cursor=pointer]
+              - button [ref=e454] [cursor=pointer]
+            - generic [ref=e456]:
+              - button [ref=e458] [cursor=pointer]:
+                - generic [ref=e460]: WAV 64k
+              - button [ref=e462] [cursor=pointer]
+              - button [ref=e464] [cursor=pointer]
+              - generic [ref=e467]:
+                - button [ref=e468] [cursor=pointer]
+                - slider [ref=e470] [cursor=pointer]
+              - button [ref=e475] [cursor=pointer]
+          - generic [ref=e477]:
+            - generic [ref=e478]: 00:05
+            - slider [ref=e479] [cursor=pointer]
+            - generic [ref=e482]: 00:20
+        - dialog "Full-screen music player and lyrics" [ref=e483]:
+          - generic [ref=e490]:
+            - generic [ref=e492]:
+              - button "Font-" [ref=e493] [cursor=pointer]
+              - button "Font+" [ref=e495] [cursor=pointer]
+              - button "Auto Center" [ref=e498] [cursor=pointer]
+            - generic [ref=e501]:
+              - 'button "Toggle Background: Cover/Plain" [ref=e502] [cursor=pointer]'
+              - button "Visualizer" [ref=e504] [cursor=pointer]
+              - button "Visualizer mode" [ref=e506] [cursor=pointer]
+              - button "Theme Mode" [ref=e508] [cursor=pointer]
+              - button "Close" [ref=e511] [cursor=pointer]
+          - generic [ref=e513]:
+            - generic [ref=e526]:
+              - heading "Test Song One" [level=2] [ref=e528]
+              - paragraph [ref=e529]: Tester A
+              - paragraph [ref=e530]: E2E Album
+            - generic [ref=e531]:
+              - slider "Playback progress" [ref=e532] [cursor=pointer]
+              - generic [ref=e535]:
+                - generic [ref=e536]: 00:05
+                - generic [ref=e537]: 00:20
+            - generic [ref=e538]:
+              - button "Play mode" [ref=e539] [cursor=pointer]
+              - button "Previous" [ref=e541] [cursor=pointer]
+              - button "Play" [active] [ref=e543] [cursor=pointer]
+              - button "Next track" [ref=e545] [cursor=pointer]
+              - button "Playlist" [ref=e549] [cursor=pointer]
+            - generic [ref=e551]:
+              - button "Comments" [ref=e552] [cursor=pointer]:
+                - generic [ref=e554]: "0"
+              - generic [ref=e556]:
+                - button "Mute" [ref=e557] [cursor=pointer]
+                - slider "Volume" [ref=e559] [cursor=pointer]
+            - generic [ref=e562]:
+              - button "Like" [ref=e563] [cursor=pointer]
+              - button "Download" [ref=e565] [cursor=pointer]
+              - button "Add to playlist" [ref=e567] [cursor=pointer]
+          - generic [ref=e571]:
+            - paragraph [ref=e573]:
+              - generic [ref=e574] [cursor=pointer]: Test
+              - generic [ref=e575] [cursor=pointer]: Song
+              - generic [ref=e576] [cursor=pointer]: One
+              - generic [ref=e577] [cursor=pointer]: line
+              - generic [ref=e578] [cursor=pointer]: "1"
+            - paragraph [ref=e580]:
+              - generic [ref=e581] [cursor=pointer]: Test
+              - generic [ref=e582] [cursor=pointer]: Song
+              - generic [ref=e583] [cursor=pointer]: One
+              - generic [ref=e584] [cursor=pointer]: line
+              - generic [ref=e585] [cursor=pointer]: "2"
+            - paragraph [ref=e587]:
+              - generic [ref=e588] [cursor=pointer]: Test
+              - generic [ref=e589] [cursor=pointer]: Song
+              - generic [ref=e590] [cursor=pointer]: One
+              - generic [ref=e591] [cursor=pointer]: line
+              - generic [ref=e592] [cursor=pointer]: "3"
+            - paragraph [ref=e594]:
+              - generic [ref=e595] [cursor=pointer]: Test
+              - generic [ref=e596] [cursor=pointer]: Song
+              - generic [ref=e597] [cursor=pointer]: One
+              - generic [ref=e598] [cursor=pointer]: line
+              - generic [ref=e599] [cursor=pointer]: "4"
+            - paragraph [ref=e601]:
+              - generic [ref=e602] [cursor=pointer]: Test
+              - generic [ref=e603] [cursor=pointer]: Song
+              - generic [ref=e604] [cursor=pointer]: One
+              - generic [ref=e605] [cursor=pointer]: line
+              - generic [ref=e606] [cursor=pointer]: "5"
+            - paragraph [ref=e608]:
+              - generic [ref=e609] [cursor=pointer]: Test
+              - generic [ref=e610] [cursor=pointer]: Song
+              - generic [ref=e611] [cursor=pointer]: One
+              - generic [ref=e612] [cursor=pointer]: line
+              - generic [ref=e613] [cursor=pointer]: "6"
+  - img
+```
