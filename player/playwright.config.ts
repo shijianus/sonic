@@ -47,7 +47,7 @@ export default defineConfig({
     },
     {
       name: 'mobile-chromium',
-      testMatch: /responsive\.spec\.ts/,
+      testMatch: [/responsive\.spec\.ts/, /search-timeout\.spec\.ts/],
       use: { ...devices['Pixel 7'] },
     },
   ],

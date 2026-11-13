@@ -203,6 +203,7 @@ export default {
     loadFailedNetwork: 'Network error. Check your connection and retry.',
     loadFailedRateLimited: 'Too many requests. Please wait a moment and retry.',
     loadFailedUpstream: 'The music service returned an error. Please retry later.',
+    loadFailedTimeout: 'The search timed out. Please retry.',
   },
   charts: {
     types: { all: 'All', mandarin: 'Mandarin', west: 'Western', japan: 'Japan', korea: 'Korea' },

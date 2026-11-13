@@ -20,6 +20,7 @@ import { kugouProvider } from './providers/kugou';
 import { callLocalEngineJson, type CircuitState } from './local-engine';
 import { createRuntimeAbortBudget, UPSTREAM_TIMEOUT } from './request-budget';
 import { redactSensitiveString } from './observability';
+import { restrictsSearchCaching } from './search-cache-policy';
 
 export interface NexusSearchResult {
   data: SonicSearchData;
@@ -27,6 +28,7 @@ export interface NexusSearchResult {
   degraded?: boolean;
   degradedReason?: string;
   circuitState?: CircuitState;
+  noStore?: boolean;
 }
 
 async function computeSongSha(title: string, artist: string): Promise<string> {
@@ -136,7 +138,8 @@ async function searchNexusWithinBudget(
     circuitState = engineRes.circuitState;
 
     if (engineRes.ok && engineRes.data?.data && Array.isArray(engineRes.data.data.tracks)) {
-      const upstreamAttempts = (engineRes.data.meta?.attempts || []).map((a) => ({
+      const attemptsFromEngine = engineRes.data.meta?.attempts;
+      const upstreamAttempts = (Array.isArray(attemptsFromEngine) ? attemptsFromEngine : []).map((a) => ({
         ...a,
         via: a.via || 'local-engine',
         source: a.source || a.via || 'local-engine',
@@ -149,6 +152,7 @@ async function searchNexusWithinBudget(
         ],
         degraded: false,
         circuitState: 'CLOSED',
+        noStore: restrictsSearchCaching(engineRes.cacheControl),
       };
     }
 
@@ -161,7 +165,7 @@ async function searchNexusWithinBudget(
       ok: false,
       ms: engineRes.latencyMs,
       error: degradedReason,
-      ...(engineRes.errorCode === UPSTREAM_TIMEOUT ? { errorCode: UPSTREAM_TIMEOUT } : {}),
+      ...(engineRes.errorCode === UPSTREAM_TIMEOUT || engineRes.status === 504 ? { errorCode: UPSTREAM_TIMEOUT } : {}),
     });
   }
 

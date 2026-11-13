@@ -25,6 +25,7 @@ import {
   type MVData,
 } from '@/utils/transformers'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { checkSearchPayload, classifySearchError, hasSearchTimeout, type SearchErrorKind } from '@/utils/searchErrors'
 
 const creativeEffect = {
   prev: {
@@ -39,28 +40,6 @@ const creativeEffect = {
 }
 
 type SearchTab = 'song' | 'playlist' | 'mv'
-type SearchErrorKind = '' | 'network' | 'rateLimited' | 'upstream'
-
-// Match desktop search feedback, retaining failures until a fallback returns results.
-const classifySearchError = (error: unknown): SearchErrorKind => {
-  const err = error as any
-  const status = Number(err?.response?.status ?? err?.status ?? 0)
-  if (status === 429) return 'rateLimited'
-  if (status > 0) return 'upstream'
-  if (err?.name === 'TypeError' || /failed to fetch|network|offline|timeout/i.test(String(err?.message || ''))) {
-    return 'network'
-  }
-  return 'upstream'
-}
-
-// Some providers wrap HTTP failures in a 200 JSON response.
-const checkSearchPayload = (payload: any) => {
-  if (payload?.error || Number(payload?.code) >= 400) {
-    const status = Number(payload?.status ?? payload?.code)
-    const rateLimited = /rate.limit/i.test(String(payload?.error?.code || ''))
-    throw Object.assign(new Error('Search provider failed'), { status: rateLimited ? 429 : status || 502 })
-  }
-}
 
 const { t } = useI18n()
 const { setPlaylist, play, beginDeferredPlayback } = useAudio()
@@ -146,7 +125,7 @@ const suggest = useSearchSuggestions(
   300
 )
 
-const searchErrors = reactive<Record<SearchTab, SearchErrorKind>>({ song: '', playlist: '', mv: '' })
+const searchErrors = reactive<Record<SearchTab, '' | SearchErrorKind>>({ song: '', playlist: '', mv: '' })
 
 import {
   exploreTags,
@@ -254,7 +233,7 @@ const runSearch = async (keyword: string) => {
   await searchAll()
 }
 
-const fetchSongs = async (signal: AbortSignal, generation: number) => {
+const fetchSongs = async (signal: AbortSignal, generation: number, nocache: boolean) => {
   const term = state.q.trim()
   if (!term) {
     if (generation === searchGeneration) {
@@ -264,12 +243,12 @@ const fetchSongs = async (signal: AbortSignal, generation: number) => {
     return
   }
 
-  let lastError: unknown = null
+  let lastError: '' | SearchErrorKind = ''
   // 1. 优先调用 Sonic 统一多源 SHA 聚合与音质分级搜索网关
   try {
     const response = await fetch(
-      `/api/sonic/search/nexus?q=${encodeURIComponent(term)}&page=${state.songPage}&count=${state.songPageSize}`,
-      { signal }
+      `/api/sonic/search/nexus?q=${encodeURIComponent(term)}&page=${state.songPage}&count=${state.songPageSize}${nocache ? '&nocache=1' : ''}`,
+      { signal, cache: nocache ? 'no-store' : undefined }
     )
     if (!response.ok) {
       throw Object.assign(new Error(`Sonic HTTP ${response.status}`), { status: response.status })
@@ -308,9 +287,10 @@ const fetchSongs = async (signal: AbortSignal, generation: number) => {
       state.songTotal = sonicRes?.data?.total || tracks.length
       return
     }
+    if (hasSearchTimeout(sonicRes)) lastError = 'timeout'
   } catch (err) {
     if (signal.aborted || generation !== searchGeneration) return
-    lastError = err
+    lastError = classifySearchError(err)
   }
 
   // 2. 备用兜底检索通道
@@ -320,6 +300,7 @@ const fetchSongs = async (signal: AbortSignal, generation: number) => {
       type: 1,
       limit: state.songPageSize,
       offset: (state.songPage - 1) * state.songPageSize,
+      ...(nocache ? { nocache: 1 } : {}),
     }, signal)
     if (signal.aborted || generation !== searchGeneration) return
     checkSearchPayload(res)
@@ -327,13 +308,14 @@ const fetchSongs = async (signal: AbortSignal, generation: number) => {
     state.songs = songs
     state.songTotal = total
     if (songs.length > 0) return
+    if (hasSearchTimeout(res)) lastError = 'timeout'
   } catch (err) {
     if (signal.aborted || generation !== searchGeneration) return
     state.songs = []
     state.songTotal = 0
-    lastError = err
+    if (lastError !== 'timeout') lastError = classifySearchError(err)
   }
-  if (lastError) searchErrors.song = classifySearchError(lastError)
+  searchErrors.song = lastError
 }
 
 const fetchPlaylists = async (signal: AbortSignal, generation: number) => {
@@ -380,7 +362,7 @@ const fetchMVs = async (signal: AbortSignal, generation: number) => {
   }
 }
 
-const searchAll = async () => {
+const searchAll = async (nocache = false) => {
   if (!state.q.trim()) {
     searchAbort?.abort()
     searchGeneration += 1
@@ -398,7 +380,7 @@ const searchAll = async () => {
   state.loading = true
   try {
     await Promise.all([
-      fetchSongs(controller.signal, generation),
+      fetchSongs(controller.signal, generation, nocache),
       fetchPlaylists(controller.signal, generation),
       fetchMVs(controller.signal, generation),
     ])
@@ -871,7 +853,7 @@ watch(
               </Button>
             </div>
 
-            <MobileSearchError v-if="searchErrors.song" :kind="searchErrors.song" @retry="searchAll" />
+            <MobileSearchError v-if="searchErrors.song" :kind="searchErrors.song" @retry="searchAll(true)" />
             <div
               v-else-if="hasSearched && songs.length === 0"
               class="empty-state flex flex-col items-center py-16"
@@ -907,7 +889,7 @@ watch(
               </p>
             </div>
 
-            <MobileSearchError v-if="searchErrors.playlist" :kind="searchErrors.playlist" @retry="searchAll" />
+            <MobileSearchError v-if="searchErrors.playlist" :kind="searchErrors.playlist" @retry="searchAll()" />
             <div
               v-else-if="hasSearched && playlists.length === 0"
               class="empty-state flex flex-col items-center py-16"
@@ -974,7 +956,7 @@ watch(
               </p>
             </div>
 
-            <MobileSearchError v-if="searchErrors.mv" :kind="searchErrors.mv" @retry="searchAll" />
+            <MobileSearchError v-if="searchErrors.mv" :kind="searchErrors.mv" @retry="searchAll()" />
             <div
               v-else-if="hasSearched && mvs.length === 0"
               class="empty-state flex flex-col items-center py-16"

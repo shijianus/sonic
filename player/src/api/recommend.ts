@@ -5,6 +5,7 @@
 import { inspectGatewayHeaders } from '@/utils/gatewayHealth'
 import { formatCoverUrl } from '@/utils/imageUrl'
 import { normalizeDurationMs, type SongData } from '@/utils/transformers'
+import { checkSearchPayload } from '@/utils/searchErrors'
 
 export interface RecommendExplanation {
   primaryReason: string
@@ -327,6 +328,7 @@ export async function fetchSmartSearch(
     page?: number
     count?: number
     personalize?: boolean
+    nocache?: boolean
   },
   headers: Record<string, string> = {},
   signal?: AbortSignal
@@ -337,11 +339,14 @@ export async function fetchSmartSearch(
     count: String(params.count || 30),
   })
   if (params.personalize === false) qs.set('personalize', '0')
+  if (params.nocache) qs.set('nocache', '1')
 
   const json = await sonicFetchJson<any>(`/api/sonic/search/smart?${qs.toString()}`, {
     headers,
     signal,
+    cache: params.nocache ? 'no-store' : undefined,
   })
+  checkSearchPayload(json)
   const data = json?.data || {}
   const rawTracks = Array.isArray(data.tracks) ? data.tracks : []
   const rawFallback = Array.isArray(data.fallbackTracks) ? data.fallbackTracks : []

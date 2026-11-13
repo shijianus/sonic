@@ -23,7 +23,9 @@ declare global {
   const buildProcessedWords: typeof import('../utils/lyricsWordSync').buildProcessedWords
   const calibrateWordsInterludeIsolation: typeof import('../utils/lyricsWordSync').calibrateWordsInterludeIsolation
   const cancelSongProbe: typeof import('../utils/qualityProbe').cancelSongProbe
+  const checkSearchPayload: typeof import('../utils/searchErrors').checkSearchPayload
   const classifyPlaybackError: typeof import('../stores/modules/audio').classifyPlaybackError
+  const classifySearchError: typeof import('../utils/searchErrors').classifySearchError
   const computed: typeof import('vue').computed
   const createApp: typeof import('vue').createApp
   const createAudioVisualizer: typeof import('../utils/audioUtils').createAudioVisualizer
@@ -79,6 +81,7 @@ declare global {
   const groupOrder: typeof import('../utils/exploreTags').groupOrder
   const h: typeof import('vue').h
   const hasLocalCommentDB: typeof import('../utils/localCommentDB').hasLocalCommentDB
+  const hasSearchTimeout: typeof import('../utils/searchErrors').hasSearchTimeout
   const httpGet: typeof import('../utils/http').httpGet
   const httpPost: typeof import('../utils/http').httpPost
   const httpUpload: typeof import('../utils/http').httpUpload
@@ -244,6 +247,9 @@ declare global {
   // @ts-ignore
   export type { QualityLevel, QualityChoiceMeta, ProbeQualityItem, SongProbeResult } from '../utils/qualityProbe'
   import('../utils/qualityProbe')
+  // @ts-ignore
+  export type { SearchErrorKind } from '../utils/searchErrors'
+  import('../utils/searchErrors')
   // @ts-ignore
   export type { SonicPocketTrack, SonicPocketPlayback, SonicPocketLyricWord, SonicPocketLyricLine, SonicPocketLyrics, SonicPocketMessage, PocketCommandMessage } from '../utils/sonicBlogBridge'
   import('../utils/sonicBlogBridge')

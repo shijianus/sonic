@@ -7,6 +7,9 @@ import { jsonResponse, handleOptions } from '../../../_lib/http';
 import { getSonicConfig } from '../../../_lib/sonic/config';
 import { getSonicCachedJson, putSonicCachedJson } from '../../../_lib/sonic/cache';
 import { callLocalEngineJson } from '../../../_lib/sonic/local-engine';
+import { UPSTREAM_TIMEOUT } from '../../../_lib/sonic/request-budget';
+import { hasSearchTimeout, restrictsSearchCaching } from '../../../_lib/sonic/search-cache-policy';
+import type { SonicAttempt } from '../../../_lib/sonic/types';
 import {
   buildGatewayHeaders,
   guardGatewayRequest,
@@ -19,6 +22,9 @@ import {
   executeSmartSuggest,
   resolveUserIdentity,
 } from '../../../_lib/sonic/recommend';
+
+// v1 could contain partial provider results, even from a no-store Engine response.
+const SMART_SEARCH_CACHE = 'search-smart-v2';
 
 export async function onRequest({
   request,
@@ -49,6 +55,9 @@ export async function onRequest({
     600,
   );
   const config = getSonicConfig(env);
+  const responseCacheHeaders = (noStore = false) => noStore || nocache
+    ? { ...privacyHeaders, 'Cache-Control': 'private, no-store' }
+    : privacyHeaders;
 
   // Fast Autocomplete Suggest Mode (`?mode=suggest&q=...`)
   if (mode === 'suggest') {
@@ -58,11 +67,12 @@ export async function onRequest({
         env,
         { request, timeoutMs: Math.min(1800, config.engineTimeoutMs) },
       );
+      request.signal.throwIfAborted();
       if (engineRes.ok && engineRes.data?.brand === 'Sonic') {
         return jsonResponse(engineRes.data, {
           status: 200,
           headers: buildGatewayHeaders(
-            { ...privacyHeaders, 'X-Sonic-Provider': 'smart-suggest' },
+            { ...responseCacheHeaders(restrictsSearchCaching(engineRes.cacheControl)), 'X-Sonic-Provider': 'smart-suggest' },
             false,
             'CLOSED',
           ),
@@ -87,7 +97,7 @@ export async function onRequest({
       },
       {
         status: 200,
-        headers: buildGatewayHeaders({ ...privacyHeaders, 'X-Sonic-Provider': 'smart-suggest' }),
+        headers: buildGatewayHeaders({ ...responseCacheHeaders(), 'X-Sonic-Provider': 'smart-suggest' }),
       },
     );
   }
@@ -102,7 +112,7 @@ export async function onRequest({
   const skipLiveUpstream = url.searchParams.get('localOnly') === '1';
   const cacheIdentifier = `q=${query.toLowerCase()}:p=${page}:c=${count}:l=${skipLiveUpstream ? 1 : 0}:z=${personalize ? 1 : 0}`;
   if (allowSharedCache && !nocache) {
-    const hit = await getSonicCachedJson<any>('search-smart-v1', cacheIdentifier, env);
+    const hit = await getSonicCachedJson<any>(SMART_SEARCH_CACHE, cacheIdentifier, env);
     if (hit?.value) {
       return jsonResponse(
         { ...hit.value, meta: { ...hit.value.meta, cached: true, cacheLevel: hit.cacheLevel } },
@@ -122,6 +132,7 @@ export async function onRequest({
   let degraded = false;
   let degradedReason: string | undefined;
   let circuitState: string | undefined;
+  const engineAttempts: SonicAttempt[] = [];
 
   if (config.enableLocalEngine) {
     const engineRes = await callLocalEngineJson<any>(
@@ -129,6 +140,7 @@ export async function onRequest({
       env,
       { request, timeoutMs: Math.min(config.engineTimeoutMs, config.timeoutMs) },
     );
+    request.signal.throwIfAborted();
     circuitState = engineRes.circuitState;
     if (engineRes.ok && engineRes.data?.brand === 'Sonic' && engineRes.data?.data) {
       const body = {
@@ -142,13 +154,14 @@ export async function onRequest({
           circuitState: 'CLOSED',
         },
       };
-      if (allowSharedCache && !nocache && Array.isArray(body.data.tracks) && body.data.tracks.length > 0) {
-        await putSonicCachedJson('search-smart-v1', cacheIdentifier, body, 600, 7200, env, waitUntil);
+      const noStore = restrictsSearchCaching(engineRes.cacheControl) || hasSearchTimeout(body.meta.attempts);
+      if (allowSharedCache && !nocache && !noStore && Array.isArray(body.data.tracks) && body.data.tracks.length > 0) {
+        await putSonicCachedJson(SMART_SEARCH_CACHE, cacheIdentifier, body, 600, 7200, env, waitUntil);
       }
       return jsonResponse(body, {
         status: 200,
         headers: buildGatewayHeaders(
-          { ...privacyHeaders, 'X-Sonic-Cache': 'MISS', 'X-Sonic-Provider': 'smart' },
+          { ...responseCacheHeaders(noStore), 'X-Sonic-Cache': 'MISS', 'X-Sonic-Provider': 'smart' },
           false,
           'CLOSED',
         ),
@@ -156,6 +169,9 @@ export async function onRequest({
     }
     degraded = true;
     degradedReason = engineRes.error || 'local_engine_unavailable';
+    if (engineRes.errorCode === UPSTREAM_TIMEOUT || engineRes.data?.error?.code === UPSTREAM_TIMEOUT || engineRes.status === 504) {
+      engineAttempts.push({ provider: 'local-engine', via: 'local-engine', ok: false, ms: engineRes.latencyMs, errorCode: UPSTREAM_TIMEOUT });
+    }
   }
 
   try {
@@ -165,10 +181,13 @@ export async function onRequest({
       identity,
       env,
     );
+    request.signal.throwIfAborted();
 
     const effectiveDegraded = degraded || Boolean(result.degraded);
     const effectiveReason = degradedReason || result.degradedReason;
     const effectiveCircuit = circuitState || result.circuitState;
+    const attempts = [...engineAttempts, ...result.attempts];
+    const noStore = result.noStore || hasSearchTimeout(attempts);
 
     const responseBody = {
       brand: 'Sonic',
@@ -180,23 +199,24 @@ export async function onRequest({
         provider: 'smart',
         degraded: effectiveDegraded,
         ...(effectiveDegraded ? { degradedReason: effectiveReason, circuitState: effectiveCircuit } : {}),
-        attempts: result.attempts,
+        attempts,
       },
     };
 
-    if (allowSharedCache && !nocache && result.data.tracks.length > 0) {
-      await putSonicCachedJson('search-smart-v1', cacheIdentifier, responseBody, 600, 7200, env, waitUntil);
+    if (allowSharedCache && !nocache && !noStore && result.data.tracks.length > 0) {
+      await putSonicCachedJson(SMART_SEARCH_CACHE, cacheIdentifier, responseBody, 600, 7200, env, waitUntil);
     }
 
     return jsonResponse(responseBody, {
       status: 200,
       headers: buildGatewayHeaders(
-        { ...privacyHeaders, 'X-Sonic-Cache': 'MISS', 'X-Sonic-Provider': 'smart' },
+        { ...responseCacheHeaders(noStore), 'X-Sonic-Cache': 'MISS', 'X-Sonic-Provider': 'smart' },
         effectiveDegraded,
         effectiveCircuit,
       ),
     });
   } catch (err: any) {
+    request.signal.throwIfAborted();
     return sonicError('SMART_SEARCH_ERROR', err?.message || 'Smart search failed', 502, {
       provider: 'smart',
       latencyMs: Date.now() - start,

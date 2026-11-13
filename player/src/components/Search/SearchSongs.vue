@@ -11,6 +11,7 @@ import { useAudio } from '@/composables/useAudio'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { transformSearchSongs, normalizeDurationMs, type SongData } from '@/utils/transformers'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { checkSearchPayload, classifySearchError, hasSearchTimeout, type SearchErrorKind } from '@/utils/searchErrors'
 
 interface Props {
   keywords: string
@@ -29,7 +30,7 @@ interface SongsState {
   suggestions: SmartSuggestionItem[]
   fallbackUsed: boolean
   isLoading: boolean
-  errorKind: '' | 'network' | 'rateLimited' | 'upstream'
+  errorKind: '' | SearchErrorKind
 }
 
 const router = useRouter()
@@ -43,28 +44,6 @@ const state = reactive<SongsState>({
   errorKind: '',
 })
 const { results, fallbackTracks, suggestions, fallbackUsed, isLoading, errorKind } = toRefs(state)
-
-/** 区分“真的没有结果”与“上游失败”，避免把 403/429/断网伪装成空搜索 */
-const classifySearchError = (error: unknown): SongsState['errorKind'] => {
-  const err = error as any
-  const status = Number(err?.response?.status ?? err?.status ?? 0)
-  if (status === 429) return 'rateLimited'
-  if (status === 403 || status >= 500) return 'upstream'
-  const msg = String(err?.message || '')
-  const httpMatch = msg.match(/Sonic HTTP (\d{3})/)
-  if (httpMatch) return Number(httpMatch[1]) === 429 ? 'rateLimited' : 'upstream'
-  if (err?.name === 'TypeError' || /failed to fetch|network|offline|timeout/i.test(msg)) return 'network'
-  return 'upstream'
-}
-
-// Keep provider errors in HTTP-200 envelopes distinct from genuine empty results.
-const checkSearchPayload = (payload: any) => {
-  if (payload?.error || Number(payload?.code) >= 400) {
-    const status = Number(payload?.status ?? payload?.code)
-    const rateLimited = /rate.limit/i.test(String(payload?.error?.code || ''))
-    throw Object.assign(new Error('Search provider failed'), { status: rateLimited ? 429 : status || 502 })
-  }
-}
 
 const { setPlaylist, play } = useAudio()
 let requestController: AbortController | null = null
@@ -113,7 +92,7 @@ const applySuggestion = (text: string) => {
   router.push({ path: '/search', query: { q: text.trim() } })
 }
 
-const fetchSongs = async () => {
+const fetchSongs = async (nocache = false) => {
   const generation = ++requestGeneration
   requestController?.abort()
   const controller = new AbortController()
@@ -129,11 +108,14 @@ const fetchSongs = async () => {
     return
   }
   state.isLoading = true
-  let lastError: unknown = null
+  let lastError: SongsState['errorKind'] = ''
+  const noteError = (kind: SearchErrorKind) => {
+    if (lastError !== 'timeout') lastError = kind
+  }
   const page = Math.floor((props.offset ?? 0) / (props.limit ?? 40)) + 1
   const count = props.limit ?? 40
 
-  if (page === 1) {
+  if (page === 1 && !nocache) {
     recommendStore.recordEvent({
       type: 'search',
       query: term,
@@ -149,6 +131,7 @@ const fetchSongs = async () => {
           page,
           count,
           personalize: recommendStore.personalizationEnabled,
+          nocache,
         },
         recommendStore.buildRequestHeaders(true),
         controller.signal
@@ -163,7 +146,9 @@ const fetchSongs = async () => {
         emit('total', smartRes.total || state.results.length)
         return
       }
-      if (smartRes.fallbackUsed && smartRes.fallbackTracks.length > 0) {
+      if (hasSearchTimeout(smartRes)) {
+        noteError('timeout')
+      } else if (smartRes.fallbackUsed && smartRes.fallbackTracks.length > 0) {
         state.results = []
         state.fallbackTracks = smartRes.fallbackTracks
         state.fallbackUsed = true
@@ -173,15 +158,15 @@ const fetchSongs = async () => {
       }
     } catch (smartErr) {
       if (controller.signal.aborted || generation !== requestGeneration) return
-      lastError = smartErr
+      noteError(classifySearchError(smartErr))
       console.warn('[Sonic Search] Smart search fallback to nexus:', smartErr)
     }
 
     // 1. 备用调用 Sonic 统一多源 SHA 聚合与音质分级搜索网关
     try {
       const response = await fetch(
-        `/api/sonic/search/nexus?q=${encodeURIComponent(term)}&page=${page}&count=${count}`,
-        { signal: controller.signal },
+        `/api/sonic/search/nexus?q=${encodeURIComponent(term)}&page=${page}&count=${count}${nocache ? '&nocache=1' : ''}`,
+        { signal: controller.signal, cache: nocache ? 'no-store' : undefined },
       )
       if (!response.ok) {
         throw Object.assign(new Error(`Sonic HTTP ${response.status}`), { status: response.status })
@@ -223,9 +208,10 @@ const fetchSongs = async () => {
         emit('total', sonicRes?.data?.total || state.results.length)
         return
       }
+      if (hasSearchTimeout(sonicRes)) noteError('timeout')
     } catch (err) {
       if (controller.signal.aborted || generation !== requestGeneration) return
-      lastError = err
+      noteError(classifySearchError(err))
       console.warn('[Sonic Search] Nexus gateway warning:', err)
     }
 
@@ -236,6 +222,7 @@ const fetchSongs = async () => {
         type: 1,
         limit: props.limit ?? 40,
         offset: props.offset ?? 0,
+        ...(nocache ? { nocache: 1 } : {}),
       }, controller.signal)
       if (controller.signal.aborted || generation !== requestGeneration) return
       checkSearchPayload(res)
@@ -248,14 +235,15 @@ const fetchSongs = async () => {
         emit('total', total)
         return
       }
+      if (hasSearchTimeout(res)) noteError('timeout')
     } catch (err) {
       if (controller.signal.aborted || generation !== requestGeneration) return
-      lastError = err
+      noteError(classifySearchError(err))
       console.warn('[Sonic Search] CloudSearch fallback warning:', err)
     }
 
     state.results = []
-    if (lastError) state.errorKind = classifySearchError(lastError)
+    state.errorKind = lastError
     emit('loaded', 0)
     emit('total', 0)
   } finally {
@@ -304,7 +292,7 @@ defineExpose({
       v-if="!isLoading && errorKind && results.length === 0 && fallbackTracks.length === 0"
       :kind="errorKind"
       class="mx-1 shrink-0"
-      @retry="fetchSongs"
+      @retry="fetchSongs(true)"
     />
 
     <!-- 零结果时的智能可播放兜底面板 -->

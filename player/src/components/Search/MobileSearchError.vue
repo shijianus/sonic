@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import Button from '@/components/Ui/Button.vue'
+import type { SearchErrorKind } from '@/utils/searchErrors'
 
-const props = defineProps<{ kind: 'network' | 'rateLimited' | 'upstream' }>()
+const props = defineProps<{ kind: SearchErrorKind }>()
 defineEmits<{ retry: [] }>()
 
 const messageKey = computed(() => {
   if (props.kind === 'network') return 'search.loadFailedNetwork'
   if (props.kind === 'rateLimited') return 'search.loadFailedRateLimited'
+  if (props.kind === 'timeout') return 'search.loadFailedTimeout'
   return 'search.loadFailedUpstream'
 })
 </script>

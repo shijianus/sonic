@@ -6,6 +6,7 @@ import type { AppEnv } from '../../types';
 import type { SonicAttempt } from '../types';
 import type { CircuitState } from '../local-engine';
 import { searchNexus } from '../nexus-search';
+import { hasSearchTimeout } from '../search-cache-policy';
 import type {
   CanonicalTrack,
   SmartSearchResultData,
@@ -40,6 +41,7 @@ export interface SmartSearchExecutionResult {
   degraded?: boolean;
   degradedReason?: string;
   circuitState?: CircuitState;
+  noStore?: boolean;
 }
 
 export function executeSmartSuggest(
@@ -281,6 +283,7 @@ export async function executeSmartSearch(
   let degraded = false;
   let degradedReason: string | undefined;
   let circuitState: CircuitState | undefined;
+  let noStore = false;
 
   // Query popularity is recorded by opted-in behavior events with erasure attribution.
 
@@ -339,6 +342,7 @@ export async function executeSmartSearch(
       degraded = Boolean(nexusRes.degraded);
       degradedReason = nexusRes.degradedReason;
       circuitState = nexusRes.circuitState;
+      noStore = Boolean(nexusRes.noStore);
 
       nexusRes.data.tracks.forEach((rawTrack, idx) => {
         const ct = toCanonicalTrack(rawTrack, { rank: idx });
@@ -353,6 +357,8 @@ export async function executeSmartSearch(
         }
       }
     } catch (err: any) {
+      options.signal?.throwIfAborted();
+      options.request?.signal.throwIfAborted();
       degraded = true;
       degradedReason = err?.message || 'live_search_failed';
       attempts.push({
@@ -505,7 +511,7 @@ export async function executeSmartSearch(
 
   // 6. Zero-Result Smart Fallback (never leave user on a dead blank page)
   if (outputTracks.length === 0) {
-    const fallbackRec = await getRecommendationsForYou(
+    const fallbackRec = hasSearchTimeout(attempts) ? null : await getRecommendationsForYou(
       identity,
       { mode: 'for-you', count: 8 },
       { ...(env || {}), SONIC_RECOMMEND_OFFLINE: '1' },
@@ -521,14 +527,15 @@ export async function executeSmartSearch(
         personalizedApplied: false,
         tracks: [],
         suggestions,
-        fallbackUsed: true,
+        fallbackUsed: Boolean(fallbackRec),
         fallbackQuery: exp.matchedArtist || suggestions[0]?.text || '热门精选',
-        fallbackTracks: fallbackRec.tracks,
+        fallbackTracks: fallbackRec?.tracks ?? [],
       },
       attempts,
       degraded,
       degradedReason,
       circuitState,
+      noStore,
     };
   }
 
@@ -549,5 +556,6 @@ export async function executeSmartSearch(
     degraded,
     degradedReason,
     circuitState,
+    noStore,
   };
 }

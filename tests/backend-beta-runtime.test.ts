@@ -27,6 +27,7 @@ import { resetRateLimitsForTest } from '../functions/_lib/sonic/security';
 import { handleNexusLyricsRequest } from '../functions/api/sonic/lyrics/nexus';
 import { handleNexusSearchRequest } from '../functions/_lib/sonic/route-helpers';
 import { onRequest as handleSonicForward } from '../functions/api/sonic/forward';
+import { onRequest as handleSmartSearch } from '../functions/api/sonic/search/smart';
 import { neteaseProvider } from '../functions/_lib/sonic/providers/netease';
 
 const key = 'runtime-test-service-key-32-characters-long';
@@ -290,6 +291,115 @@ describe('Nexus search deadlines', () => {
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect((await response.json()).meta.attempts).toMatchObject([{ provider: 'local-engine', ok: false, errorCode: 'UPSTREAM_TIMEOUT' }]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns a classified timeout from the compatibility route when its request budget expires', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream())));
+    const url = new URL('https://sonic.test/api/cloudsearch?keywords=deadline-test&type=1');
+    const pending = handleUpstreamEndpoint('cloudsearch', url, new Request(url), env);
+    await vi.advanceTimersByTimeAsync(500);
+    const response = await pending;
+    expect(response.status).toBe(504);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect((await response.json()).error.code).toBe('UPSTREAM_TIMEOUT');
+  });
+});
+
+describe('Smart Search cache recovery', () => {
+  const query = 'Search Recovery Fixture';
+  const request = (mode = '') => new Request(`https://sonic.test/api/sonic/search/smart?q=${encodeURIComponent(query)}${mode}`);
+  const env = () => ({ SONIC_ENV: 'test', RECOMMEND_STORE: new MemoryRecommendStore() });
+  const track = (platformId: string) => ({ platformId, title: `${query} ${platformId}`, artist: 'Fixture Artist' });
+  const timeout = { provider: 'netease', ok: false, errorCode: 'UPSTREAM_TIMEOUT' };
+
+  it.each([
+    { cacheControl: 'no-store', attempts: [timeout] },
+    { cacheControl: 'PUBLIC, No-Store', attempts: [] },
+    { cacheControl: 'public, max-age=600', attempts: [timeout] },
+    { cacheControl: 'private, max-age=600', attempts: [] },
+  ])('refreshes a partial Engine result with policy $cacheControl and attempts $attempts', async ({ cacheControl, attempts }) => {
+    const engine = vi.fn()
+      .mockImplementationOnce(async () => Response.json({
+        brand: 'Sonic', data: { tracks: [track('quick')] }, meta: { attempts },
+      }, { headers: { 'Cache-Control': cacheControl } }))
+      .mockImplementation(async () => Response.json({
+        brand: 'Sonic', data: { tracks: [track('quick'), track('recovered')] }, meta: { attempts: [] },
+      }, { headers: { 'Cache-Control': 'public, max-age=600' } }));
+    vi.stubGlobal('fetch', engine);
+    const environment = { ...env(), ...engineEnv };
+    await putSonicCachedJson('search-smart-v1', `q=${query.toLowerCase()}:p=1:c=20:l=0:z=1`,
+      { brand: 'Sonic', data: { tracks: [track('old-partial')] }, meta: { attempts: [] } }, 600, 7200, environment);
+
+    const partial = await handleSmartSearch({ request: request(), env: environment });
+    expect(partial.status).toBe(200);
+    expect(partial.headers.get('Cache-Control')).toContain('no-store');
+    expect(partial.headers.get('X-Sonic-Cache')).toBe('MISS');
+    expect((await partial.json()).data.tracks).toEqual([track('quick')]);
+    expect(engine).toHaveBeenCalledTimes(1);
+
+    const recovered = await handleSmartSearch({ request: request(), env: environment });
+    expect(recovered.headers.get('X-Sonic-Cache')).toBe('MISS');
+    expect(recovered.headers.get('Cache-Control')).toContain('public');
+    expect((await recovered.json()).data.tracks).toEqual([track('quick'), track('recovered')]);
+    const cached = await handleSmartSearch({ request: request(), env: environment });
+    expect(cached.headers.get('X-Sonic-Cache')).toBe('HIT');
+    expect((await cached.json()).data.tracks).toEqual([track('quick'), track('recovered')]);
+    expect(engine).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not turn a private Engine suggestion response into a public response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ brand: 'Sonic', data: { suggestions: [] } }, {
+      headers: { 'Cache-Control': 'private, no-store' },
+    })));
+    const response = await handleSmartSearch({ request: request('&mode=suggest'), env: { ...env(), ...engineEnv } });
+    expect(response.headers.get('Cache-Control')).toContain('no-store');
+    expect(response.headers.get('Vary')).toContain('Authorization');
+  });
+
+  it('does not offer unrelated recommendations when the direct search times out without a match', async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream())));
+    const pending = handleSmartSearch({ request: request(), env: { ...env(), SONIC_TIMEOUT_MS: '500' } });
+    await vi.advanceTimersByTimeAsync(500);
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+    expect(await response.json()).toMatchObject({
+      data: { tracks: [], fallbackUsed: false, fallbackTracks: [] },
+      meta: { attempts: expect.arrayContaining([expect.objectContaining(timeout)]) },
+    });
+  });
+
+  it('preserves a direct provider result through a stalled body, then finds the recovered track', async () => {
+    vi.useFakeTimers();
+    const environment = { ...env(), SONIC_TIMEOUT_MS: '500', SONIC_ENABLE_KUGOU: '0', SONIC_ENABLE_GDSTUDIO: '0' };
+    let recovered = false;
+    const fetchMock = vi.fn(async (input: string) => {
+      const { hostname } = new URL(input);
+      if (hostname === 'c.y.qq.com') {
+        return Response.json({ data: { song: { list: [{ songmid: 'quick', songname: `${query} Quick`, singer: [{ name: 'Fixture Artist' }] }] } } });
+      }
+      expect(hostname).toBe('music.163.com');
+      return recovered
+        ? Response.json({ code: 200, result: { songs: [{ id: 8123, name: `${query} Recovered`, ar: [{ name: 'Fixture Artist' }], dt: 120000 }] } })
+        : new Response(new ReadableStream());
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const pending = handleSmartSearch({ request: request(), env: environment });
+    await vi.advanceTimersByTimeAsync(500);
+    const partial = await pending;
+    expect(partial.status).toBe(200);
+    expect(partial.headers.get('Cache-Control')).toContain('no-store');
+    const partialBody = await partial.json();
+    expect(partialBody.data.tracks.map(({ title }: any) => title)).toEqual([`${query} Quick`]);
+    expect(partialBody.meta.attempts).toEqual(expect.arrayContaining([expect.objectContaining(timeout)]));
+    recovered = true;
+
+    const complete = await handleSmartSearch({ request: request(), env: environment });
+    expect(complete.headers.get('X-Sonic-Cache')).toBe('MISS');
+    expect((await complete.json()).data.tracks.map(({ title }: any) => title)).toEqual(expect.arrayContaining([`${query} Quick`, `${query} Recovered`]));
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });
 

@@ -5,7 +5,7 @@
 import { parseLyricsParams, parseSearchParams, sonicError, handleOptions, LYRICS_CACHE_CONTROL } from '../../_lib/sonic/route-helpers';
 import { resolveNexusLyrics } from '../../_lib/sonic/nexus-lyrics';
 import { searchNexus } from '../../_lib/sonic/nexus-search';
-import { UPSTREAM_TIMEOUT } from '../../_lib/sonic/request-budget';
+import { hasSearchTimeout } from '../../_lib/sonic/search-cache-policy';
 import { jsonResponse } from '../../_lib/http';
 import { sonicLinesToLrc, sonicLinesToTtml } from '../../_lib/sonic/utils';
 import { SONIC_UA } from '../../_lib/sonic/config';
@@ -214,7 +214,7 @@ export async function onRequest({ request, env }: any): Promise<Response> {
     try {
       const result = await searchNexus(query, { page, count, signal: request.signal }, env);
       const latencyMs = Date.now() - startTime;
-      const timedOut = result.attempts.some(attempt => attempt.errorCode === UPSTREAM_TIMEOUT);
+      const noStore = result.noStore || hasSearchTimeout(result.attempts);
 
       return jsonResponse(
         {
@@ -234,7 +234,7 @@ export async function onRequest({ request, env }: any): Promise<Response> {
           headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-            'Cache-Control': timedOut ? 'no-store' : 'public, max-age=3600',
+            'Cache-Control': noStore ? 'no-store' : 'public, max-age=3600',
             'X-Sonic-Cache': 'MISS',
             'X-Sonic-Provider': 'nexus',
           },

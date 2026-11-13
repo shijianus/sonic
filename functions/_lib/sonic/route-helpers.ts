@@ -11,7 +11,7 @@ import { recordLicensingBlockMetric, redactSensitiveString } from './observabili
 import { extractAuthCredentials } from '../auth';
 import { checkEngineIdentityAccess } from './engine-identity';
 import { callLocalEngineJson, createRuntimeAbortBudget } from './local-engine';
-import { UPSTREAM_TIMEOUT } from './request-budget';
+import { hasSearchTimeout } from './search-cache-policy';
 
 export { handleOptions };
 
@@ -527,7 +527,7 @@ export async function handleNexusSearchRequest(
     const { searchNexus } = await import('./nexus-search');
     const result = await searchNexus(query, { page, count, request }, env);
     const latencyMs = Date.now() - startTime;
-    const timedOut = result.attempts.some(attempt => attempt.errorCode === UPSTREAM_TIMEOUT);
+    const noStore = result.noStore || hasSearchTimeout(result.attempts);
 
     // If local engine was down AND CF fallback yielded 0 tracks, check stale cache before returning empty
     if (result.degraded && result.data.tracks.length === 0 && !nocache) {
@@ -547,7 +547,7 @@ export async function handleNexusSearchRequest(
         };
         return jsonResponse(staleBody, {
           status: 200,
-          headers: buildGatewayHeaders({ 'Cache-Control': 'public, max-age=60', 'X-Sonic-Cache': 'STALE' }, true, result.circuitState),
+          headers: buildGatewayHeaders({ 'Cache-Control': noStore ? 'no-store' : 'public, max-age=60', 'X-Sonic-Cache': 'STALE' }, true, result.circuitState),
         });
       }
     }
@@ -570,7 +570,7 @@ export async function handleNexusSearchRequest(
       },
     };
 
-    if (result.data.tracks.length > 0 && !nocache && !timedOut) {
+    if (result.data.tracks.length > 0 && !nocache && !noStore) {
       await putSonicCachedJson('search-nexus-v4', cacheIdentifier, response, 3600, 86400, env, waitUntil);
     }
 
@@ -578,7 +578,7 @@ export async function handleNexusSearchRequest(
       status: 200,
       headers: buildGatewayHeaders(
         {
-          'Cache-Control': timedOut ? 'no-store' : 'public, max-age=3600, s-maxage=3600',
+          'Cache-Control': noStore ? 'no-store' : 'public, max-age=3600, s-maxage=3600',
           'X-Sonic-Cache': 'MISS',
           'X-Sonic-Provider': 'nexus',
         },

@@ -199,6 +199,7 @@ export default {
     loadFailedNetwork: '网络异常，请检查网络后重试。',
     loadFailedRateLimited: '请求过于频繁，请稍后再试。',
     loadFailedUpstream: '上游音乐服务返回错误，请稍后重试。',
+    loadFailedTimeout: '搜索超时，请重试。',
   },
   charts: {
     types: { all: '全部', mandarin: '华语', west: '欧美', japan: '日本', korea: '韩国' },

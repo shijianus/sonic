@@ -203,6 +203,7 @@ export default {
     loadFailedNetwork: 'ネットワークエラーです。接続を確認して再試行してください。',
     loadFailedRateLimited: 'リクエストが多すぎます。しばらく待ってから再試行してください。',
     loadFailedUpstream: '音楽サービスでエラーが発生しました。後でもう一度お試しください。',
+    loadFailedTimeout: '検索がタイムアウトしました。もう一度お試しください。',
   },
   charts: {
     types: { all: '全部', mandarin: '華語', west: '洋楽', japan: '日本', korea: '韓国' },

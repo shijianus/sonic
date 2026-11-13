@@ -6,6 +6,8 @@ import { jsonResponse, handleOptions } from '../http';
 import { BRAND_PRODUCT } from '../brand';
 import { getSonicConfig, SONIC_UA } from './config';
 import { callLocalEngineJson, CHART_UPSTREAM_UNAVAILABLE, createRuntimeAbortBudget, fetchWithRuntimeBudget } from './local-engine';
+import { UPSTREAM_TIMEOUT } from './request-budget';
+import { hasSearchTimeout } from './search-cache-policy';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from './security';
 import { recordLicensingBlockMetric } from './observability';
 import { callNeteaseLinuxApi as nativeLinuxApi, callNeteaseEapi as nativeEapi, fetchNeteaseRegionalTopSongs } from './native-protocols';
@@ -159,9 +161,14 @@ export async function handleUpstreamEndpoint(
     }
     return response;
   } catch (error) {
-    if (!request.signal.aborted && budget.signal.reason?.name === 'TimeoutError' &&
-        chartCatalogField(endpoint.replace(/^\/+|\/+$/g, '').toLowerCase())) {
-      return chartCatalogUnavailable();
+    if (!request.signal.aborted && budget.signal.reason?.name === 'TimeoutError') {
+      const normalized = endpoint.replace(/^\/+|\/+$/g, '').toLowerCase();
+      if (chartCatalogField(normalized)) return chartCatalogUnavailable();
+      if (['cloudsearch', 'search'].includes(normalized) && (url.searchParams.get('type') || '1') === '1') {
+        return jsonResponse({ code: 504, brand: 'Sonic', error: { code: UPSTREAM_TIMEOUT, message: 'Song search timed out' } }, {
+          status: 504, headers: { 'Cache-Control': 'no-store' },
+        });
+      }
     }
     throw error;
   } finally {
@@ -232,6 +239,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
   };
   const normEndpoint = endpoint.replace(/^\/+|\/+$/g, '').toLowerCase();
   const chartField = chartCatalogField(normEndpoint);
+  const bypassSongCache = ['cloudsearch', 'search'].includes(normEndpoint) &&
+    (url.searchParams.get('type') || '1') === '1' && url.searchParams.has('nocache');
 
   // Discrepancy 7 fix: graceful response for legacy NetEase login status checks in SPA
   if (normEndpoint === 'login/status') {
@@ -286,7 +295,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       // explicitly public directive; private/no-store (and a missing directive)
       // stay private so signed or identity-bound data cannot enter shared caches.
       const cacheControl =
-        engineCacheLower.startsWith('public') &&
+        !bypassSongCache && engineCacheLower.startsWith('public') &&
         !engineCacheLower.includes('private') &&
         !engineCacheLower.includes('no-store')
           ? engineCache
@@ -1940,6 +1949,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       const { searchNexus } = await import('./nexus-search');
       const page = Math.floor(parseInt(offset, 10) / parseInt(limit, 10)) + 1;
       const res = await searchNexus(keywords, { page, count: parseInt(limit, 10), request }, env);
+      const timedOut = hasSearchTimeout(res.attempts);
       const songs = (res.data?.tracks || []).map((t: any) => ({
         id: t.id,
         name: t.title || t.name,
@@ -1955,8 +1965,9 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           code: 200,
           brand: 'Sonic',
           result: { songs, songCount: res.data?.total || songs.length },
+          ...(timedOut ? { meta: { attempts: res.attempts } } : {}),
         },
-        { headers: { 'Cache-Control': 'public, max-age=1800' } },
+        { headers: { 'Cache-Control': res.noStore || timedOut || bypassSongCache ? 'no-store' : 'public, max-age=1800' } },
       );
     } catch { request.signal.throwIfAborted(); }
     return jsonResponse({ code: 200, brand: 'Sonic', result: { songs: [], songCount: 0 } });

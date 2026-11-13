@@ -32,6 +32,8 @@ let engine;
 const engineCalls = [];
 let redirectEngine = false;
 let providerRequests = 0;
+let smartRequests = 0;
+let smartRecovered = false;
 try {
   const cli = resolve(dirname(require.resolve('wrangler/package.json')), 'bin/wrangler.js');
   execFileSync(process.execPath, [cli, 'pages', 'functions', 'build', 'functions', '--project-directory', '.',
@@ -83,6 +85,14 @@ try {
         }), { headers: { 'Content-Type': 'application/json' } });
       }
       assert.equal(target.origin, engineBindingOrigin, 'Only the local provider fixture and loopback Engine are allowed');
+      if (target.pathname === '/api/sonic/search/smart' && target.searchParams.get('q') === 'local-smart-recovery') {
+        smartRequests++;
+        const ids = smartRecovered ? ['fast-track', 'recovered-track'] : ['fast-track'];
+        return Response.json({
+          brand: 'Sonic', data: { tracks: ids.map(platformId => ({ platformId, title: platformId })), total: ids.length },
+          meta: { attempts: smartRecovered ? [] : [{ provider: 'netease', ok: false, errorCode: 'UPSTREAM_TIMEOUT' }] },
+        }, { headers: { 'Cache-Control': smartRecovered ? 'public, max-age=600' : 'no-store' } });
+      }
       if (redirectEngine) return new Response(null, { status: 307, headers: { Location: 'https://unused.sonic.test/' } });
       const result = await fetch(`${engineOrigin}${target.pathname}${target.search}`, {
         method: request.method, headers: [...request.headers], redirect: 'error', signal: AbortSignal.timeout(5000),
@@ -97,6 +107,7 @@ try {
   runtime = new Miniflare(convertV4MiniflareOptions({ host: '127.0.0.1', port: 0, workers: [
     worker('pages-a', namespace), worker('pages-b', namespace), worker('pages-no-binding', {}),
     worker('pages-staging', namespace, staging), worker('pages-backend-down', unavailable),
+    worker('pages-search-load', namespace, { ...staging, SONIC_ACCESS_MODE: 'open' }),
     { name: 'rate-limiter', modules: true, script: `${readFileSync(resolve(root, 'edge-rate-limiter/index.mjs'), 'utf8')}
       export class UnavailableBucket extends DurableObject { fetch() { return new Response(null, {status:503}); } }`,
       compatibilityDate, durableObjects: { LOCAL_BUCKETS: { className: 'SonicRateBucket', useSQLite: true },
@@ -104,8 +115,8 @@ try {
   ] }));
   const loopback = await runtime.ready;
   assert.equal(loopback.hostname, '127.0.0.1');
-  const [a, b, broken, localStaging, backendDown] = await Promise.all(
-    ['pages-a', 'pages-b', 'pages-no-binding', 'pages-staging', 'pages-backend-down'].map(name => runtime.getWorker(name)));
+  const [a, b, broken, localStaging, backendDown, searchLoad] = await Promise.all(
+    ['pages-a', 'pages-b', 'pages-no-binding', 'pages-staging', 'pages-backend-down', 'pages-search-load'].map(name => runtime.getWorker(name)));
   const denied = await a.fetch(`http://127.0.0.1${health}`);
   assert.equal(denied.status, 401);
   const ready = await a.fetch(`http://127.0.0.1${health}`, { headers: { 'X-Sonic-Engine-Key': key } });
@@ -153,6 +164,24 @@ try {
   assert.equal(stream.status, 206);
   assert.equal(stream.headers.get('x-sonic-via'), 'local-engine');
   assert.equal(Buffer.from(await stream.arrayBuffer()).subarray(0, 4).toString(), 'RIFF');
+
+  const smartBurstSize = 20;
+  const requestSmart = async (cache, expectedIds) => {
+    const response = await searchLoad.fetch('http://127.0.0.1/api/sonic/search/smart?q=local-smart-recovery', {
+      headers: { 'CF-Connecting-IP': '192.0.2.6' },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get('x-sonic-cache'), cache);
+    assert.match(response.headers.get('cache-control'), expectedIds.length === 1 ? /no-store/ : /^public,/);
+    assert.deepEqual((await response.json()).data.tracks.map(track => track.platformId), expectedIds);
+  };
+  await Promise.all(Array.from({ length: smartBurstSize }, () => requestSmart('MISS', ['fast-track'])));
+  assert.equal(smartRequests, smartBurstSize);
+  smartRecovered = true;
+  await requestSmart('MISS', ['fast-track', 'recovered-track']);
+  await Promise.all(Array.from({ length: smartBurstSize }, () => requestSmart('HIT', ['fast-track', 'recovered-track'])));
+  assert.equal(smartRequests, smartBurstSize + 1);
+
   redirectEngine = true;
   const redirected = await localStaging.fetch(`http://127.0.0.1${health}?verifyEngine=1`, { headers: { 'X-Sonic-Engine-Key': key } });
   const rejectedRedirect = await redirected.json();
@@ -182,7 +211,8 @@ try {
     workers: 2, requests: burstSize, allowedToReachInviteCheck: 50, rejected429: 150,
     durationMs: Math.round(performance.now() - start), authRequests: 40, authRejected429: 10,
     missingBinding503: true, backendUnavailable503: true, protectedHealth401: true, pagesToEngineRange206: true,
-    engineRedirectRejected: true, providerBodyTimeout: true, actualPagesBundle: true }));
+    engineRedirectRejected: true, providerBodyTimeout: true, actualPagesBundle: true,
+    smartSearch: { partialMisses: smartBurstSize, recoveryMisses: 1, fullHits: smartBurstSize, engineRequests: smartRequests } }));
 } finally {
   try {
     await runtime?.dispose();
