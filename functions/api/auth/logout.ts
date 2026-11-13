@@ -63,6 +63,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       serverRevoked,
       accessRevoked: accessRevocation.revoked,
       accessRevocationDurable: accessRevocation.durable,
+      ...(accessRevocation.unavailable ? { accessRevocationWarning: '浏览器 Cookie 已清除；服务端访问撤销未确认' } : {}),
       ...(revocationWarning ? { revocationWarning } : {}),
       message: '已退出当前浏览器会话',
       revocationNote: serverRevoked

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createAccessSession, requireAccess } from '../functions/_lib/sonic/access'
+import { createAccessSession, getAccessReadiness, redeemAccessInvite, requireAccess } from '../functions/_lib/sonic/access'
 
 const req = (path: string) => new Request(`https://sonic.example.com${path}`)
 const production = (extra: Record<string, unknown> = {}) => ({
@@ -23,6 +23,19 @@ describe('access-mode production fail-closed policy', () => {
     const response = await requireAccess(req('/api/sonic/events'), production({ SONIC_ACCESS_MODE: 'invite' }))
     expect(response?.status).toBe(401)
     expect((await response!.json())?.error?.code).toBe('ACCESS_REQUIRED')
+  })
+
+  it('requires durable storage for production Pages even without the opt-in flag', async () => {
+    const code = 'production-fixture-invite';
+    const env = production({ SONIC_ACCESS_MODE: 'invite', CF_PAGES: '1', SONIC_INVITE_CODES: code });
+    expect(await redeemAccessInvite(env, code)).toEqual({ ok: false, code: 'store_unavailable' });
+    expect(await getAccessReadiness(env)).toMatchObject({ ok: false, durableRequired: true, storeUsable: false });
+  })
+
+  it('does not open Staging when durable invitations are required but the mode is missing', async () => {
+    const env = { SONIC_ENV: 'staging', SONIC_REQUIRE_DURABLE_INVITES: '1' };
+    const response = await requireAccess(req('/api/sonic/events'), env);
+    expect(response?.status).toBe(503);
   })
 
   it('keeps the access lifecycle endpoints reachable in invite mode', async () => {

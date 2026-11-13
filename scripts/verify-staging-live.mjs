@@ -5,7 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import { strictEdgeRateLimitReady } from './pages-release-lib.mjs';
+import { durablePagesInviteNamespace, durablePagesInviteReady, strictEdgeRateLimitReady } from './pages-release-lib.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const projectName = process.env.CF_PAGES_PROJECT || 'sonic-staging';
@@ -100,8 +100,14 @@ async function projectMetadata(stable = false) {
   const declaredAccessMode = String(accessModeBinding?.value || '').trim().toLowerCase();
   ensure(['', 'open', 'legacy-staging', 'invite'].includes(declaredAccessMode), 'STAGING_ACCESS_MODE_INVALID');
   const accessGateMode = declaredAccessMode === 'invite' ? 'invite' : 'legacy-staging';
+  const stagingAccessNamespaceId = durablePagesInviteNamespace(selected);
+  const otherAccessNamespaceId = (stable ? preview : production).durable_object_namespaces?.SONIC_ACCESS_BUCKETS?.namespace_id;
+  const inviteGateBlockers = accessGateMode !== 'invite' ? ['STAGING_PRODUCT_INVITE_MODE_REQUIRED'] :
+    !stagingAccessNamespaceId ? ['STAGING_DURABLE_INVITE_BINDING_REQUIRED'] :
+    stagingAccessNamespaceId === otherAccessNamespaceId ? ['STAGING_INVITE_NAMESPACE_NOT_ISOLATED'] : [];
+  const durableSelected = Boolean(selected.durable_object_namespaces?.SONIC_ACCESS_BUCKETS || variables.SONIC_REQUIRE_DURABLE_INVITES);
   const accessBindings = accessGateMode === 'invite'
-    ? ['SONIC_ACCESS_SECRET', 'SONIC_INVITE_CODES']
+    ? ['SONIC_INVITE_CODES', ...(durableSelected ? [] : ['SONIC_ACCESS_SECRET'])]
     : ['SONIC_STAGING_ACCESS_TOKEN'];
   for (const name of [...accessBindings, 'SONIC_ENGINE_SECRET', 'SONIC_SECRET']) {
     ensure(variables[name]?.type === 'secret_text', 'EXISTING_PREVIEW_SECRET_BINDING_MISSING');
@@ -120,6 +126,8 @@ async function projectMetadata(stable = false) {
     publicStagingUrl: 'https://sonic-staging.pages.dev',
     engineUrl: engine.toString().replace(/\/$/, ''),
     accessGateMode,
+    stagingAccessNamespaceId,
+    inviteGateBlockers,
     stagingRateLimitNamespaceId,
     variableNamesEqual: JSON.stringify(names) === JSON.stringify(existingNames),
     variableBindings: Object.fromEntries(allNames.map(name => [name, {
@@ -266,12 +274,14 @@ async function verifyInviteDenial(base, headers = {}, code = 'STAGING_INVITE_ANO
   ensure((await json(response)).error?.code === 'ACCESS_REQUIRED', code);
 }
 export async function verifyInviteGate(base, manifest) {
-  let response = await request(`${base}/`);
-  ensure(response.status === 200 && /text\/html/i.test(response.headers.get('content-type') || '') &&
-    /noindex/.test(response.headers.get('x-robots-tag') || ''), 'STAGING_INVITE_PAGE_UNAVAILABLE');
-  if (manifest) ensure(response.headers.get('x-sonic-release') === manifest.releaseId, 'HTML_RELEASE_HEADER_MISMATCH');
-  await discard(response);
-  response = await request(`${base}/api/access/session`);
+  for (const path of ['/', '/invite']) {
+    const page = await request(base + path);
+    ensure(page.status === 200 && /text\/html/i.test(page.headers.get('content-type') || '') &&
+      /noindex/.test(page.headers.get('x-robots-tag') || ''), 'STAGING_INVITE_PAGE_UNAVAILABLE');
+    if (manifest) ensure(page.headers.get('x-sonic-release') === manifest.releaseId, 'HTML_RELEASE_HEADER_MISMATCH');
+    await discard(page);
+  }
+  const response = await request(`${base}/api/access/session`);
   ensure(response.status === 401, 'STAGING_INVITE_MODE_UNVERIFIED');
   const session = await json(response);
   ensure(session.mode === 'invite' && session.access === false && session.error?.code === 'ACCESS_REQUIRED', 'STAGING_INVITE_MODE_UNVERIFIED');
@@ -295,21 +305,28 @@ async function closeInviteSession(base, headers) {
   }
   return logout.revocationDurable;
 }
-export async function withInviteAccess(base, code, manifest, verify) {
+export async function withInviteAccess(base, code, manifest, verify, { requireDurable = false } = {}) {
   ensure(typeof code === 'string' && code.length >= 16 && code.length <= 256 &&
     !/[\u0000-\u0020\u007f]/.test(code), 'STAGING_TEST_INVITE_CODE_REQUIRED');
   await verifyInviteGate(base, manifest);
-  let headers;
-  let result;
-  let inviteSessionRevocationDurable;
-  try {
-    let response = await request(`${base}/api/access/redeem`, {
-      method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
-    });
+  const sessions = new Map();
+  function rememberSession(response) {
     const cookie = response.headers.getSetCookie().find(value => value.startsWith(`${inviteCookieName}=`));
     const pair = cookie?.split(';', 1)[0];
-    // Retain only the recognized Cookie so it can be cleared even if a later check fails.
-    if (pair && /^[A-Za-z0-9_.-]{1,512}$/.test(pair.slice(inviteCookieName.length + 1))) headers = { Cookie: pair };
+    const headers = pair && /^[A-Za-z0-9_.-]{1,512}$/.test(pair.slice(inviteCookieName.length + 1)) ? { Cookie: pair } : null;
+    if (headers) sessions.set(pair, headers);
+    return { cookie, headers };
+  }
+  const redeem = () => request(`${base}/api/access/redeem`, {
+    method: 'POST', headers: { Origin: base, 'Content-Type': 'application/json' }, body: JSON.stringify({ code }),
+  });
+  let result;
+  let inviteSessionRevocationDurable;
+  let inviteSingleUseLiveVerified = false;
+  let failure;
+  try {
+    let response = await redeem();
+    const { cookie, headers } = rememberSession(response);
     ensure(response.status === 200 && /no-store/.test(response.headers.get('cache-control') || '') &&
       response.headers.get('referrer-policy') === 'no-referrer', 'STAGING_INVITE_REDEMPTION_FAILED');
     ensure(headers && safeInviteCookie(cookie) && /;\s*Max-Age=[1-9][0-9]*(?:;|$)/i.test(cookie), 'STAGING_INVITE_COOKIE_INVALID');
@@ -322,14 +339,33 @@ export async function withInviteAccess(base, code, manifest, verify) {
     ensure(session.mode === 'invite' && session.access === true && session.expiresAt === redemption.expiresAt, 'STAGING_INVITE_COOKIE_ACCESS_FAILED');
     await verifyInviteDenial(base, { Cookie: `${inviteCookieName}=invalid.signature` }, 'STAGING_INVALID_INVITE_COOKIE_ACCEPTED');
     passed('disposable invite redeems into a secure expiring session and invalid Cookie is rejected');
+    if (requireDurable) {
+      const repeated = await redeem();
+      rememberSession(repeated);
+      ensure(repeated.status === 401 && repeated.headers.getSetCookie().length === 0 &&
+        (await json(repeated)).error?.code === 'INVITE_INVALID', 'STAGING_INVITE_REDEEMED_TWICE');
+      const protectedResult = await request(base + protectedInviteProbe, { headers });
+      const cacheControl = protectedResult.headers.get('cache-control') || '';
+      ensure(protectedResult.status === 200 && /\bprivate\b/i.test(cacheControl) && /\bno-store\b/i.test(cacheControl),
+        'STAGING_PROTECTED_RESPONSE_MUST_NOT_BE_CACHED');
+      await discard(protectedResult);
+      inviteSingleUseLiveVerified = true;
+      passed('consumed invite cannot be redeemed again and protected results are not cacheable');
+    }
     result = await verify(headers);
+  } catch (error) {
+    failure = error;
   } finally {
-    if (headers) {
+    for (const headers of sessions.values()) {
       try { inviteSessionRevocationDurable = await closeInviteSession(base, headers); }
+      catch (error) { failure ||= error; }
       finally { headers.Cookie = ''; }
     }
+    sessions.clear();
   }
-  return { result, inviteSessionRevocationDurable };
+  if (failure) throw failure;
+  if (requireDurable) ensure(inviteSessionRevocationDurable === true, 'STAGING_DURABLE_INVITE_REVOCATION_REQUIRED');
+  return { result, inviteSessionRevocationDurable, inviteSingleUseLiveVerified };
 }
 async function health(base, secrets) {
   const response = await request(`${base}/api/sonic/engine/health`, { headers: { 'X-Sonic-Engine-Key': secrets.SONIC_ENGINE_SECRET } });
@@ -398,6 +434,7 @@ export async function verifyRelease(base, engine, headers, secrets, manifest) {
   return {
     pagesArtifactDigest,
     stagingRateLimit: edgeHealth.rateLimit,
+    stagingAccess: edgeHealth.readiness?.access,
     stagingContentPolicy: { pages: contentPolicyEvidence(edgeHealth), engine: contentPolicyEvidence(engineHealth) },
     engineStorage: engineHealth.recommendEngine.storageKind,
     engineErasureRecoveryVersion: engineHealth.recommendEngine.erasureRecoveryVersion,
@@ -664,8 +701,11 @@ async function main() {
   ensure(!(values.preflight && (values.url || values['serve-browser'])), 'PREFLIGHT_OPTIONS_CONFLICT');
   ensure(!(values.stable && values['serve-browser']), 'STABLE_BROWSER_BRIDGE_NOT_SUPPORTED');
   const project = await projectMetadata(Boolean(values.stable || values.preflight));
-  const { accessGateMode } = project.metadata;
+  const { accessGateMode, inviteGateBlockers, stagingAccessNamespaceId } = project.metadata;
   ensure(!(accessGateMode === 'invite' && values['serve-browser']), 'INVITE_BROWSER_REDEMPTION_REQUIRES_FORM');
+  // Non-deploying preflight can diagnose legacy or incomplete configuration;
+  // live candidate acceptance must use the isolated durable invite flow.
+  if (!values.preflight && !values['serve-browser']) ensure(inviteGateBlockers.length === 0, inviteGateBlockers[0]);
   const saved = await credentials(accessGateMode);
   const secrets = saved.credentials || {};
   try {
@@ -683,6 +723,7 @@ async function main() {
     const target = await selectDeployment(project.apiPath, manifest, values.url, Boolean(values.stable));
     const verifyCandidate = async headers => {
       const pairedRelease = await verifyRelease(target.base, project.metadata.engineUrl, headers, secrets, manifest);
+      if (!values['serve-browser']) ensure(durablePagesInviteReady(pairedRelease.stagingAccess), 'STAGING_DURABLE_INVITE_HEALTH_NOT_READY');
       if (values.stable) ensure(/^[a-f0-9]{32}$/.test(project.metadata.stagingRateLimitNamespaceId || '') &&
         strictEdgeRateLimitReady(pairedRelease.stagingRateLimit), 'STABLE_STAGING_SHARED_RATE_LIMITER_UNVERIFIED');
       await verifySearchAndMedia(target.base, headers, manifest);
@@ -692,9 +733,9 @@ async function main() {
       return pairedRelease;
     };
     const inviteAccessLiveVerified = accessGateMode === 'invite';
-    const { result: pairedRelease, inviteSessionRevocationDurable } = inviteAccessLiveVerified
-      ? await withInviteAccess(target.base, process.env.SONIC_STAGING_TEST_INVITE_CODE, manifest, verifyCandidate)
-      : { result: await verifyCandidate(await verifyLegacyAccess(target.base, secrets, manifest)), inviteSessionRevocationDurable: null };
+    const { result: pairedRelease, inviteSessionRevocationDurable, inviteSingleUseLiveVerified } = inviteAccessLiveVerified
+      ? await withInviteAccess(target.base, process.env.SONIC_STAGING_TEST_INVITE_CODE, manifest, verifyCandidate, { requireDurable: true })
+      : { result: await verifyCandidate(await verifyLegacyAccess(target.base, secrets, manifest)), inviteSessionRevocationDurable: null, inviteSingleUseLiveVerified: false };
     if (values['serve-browser']) {
       const bridge = await browserBootstrap(target.base, secrets.SONIC_STAGING_ACCESS_TOKEN);
       // The only stdout is this local URL. Invitation and Cookie values stay in memory.
@@ -706,7 +747,7 @@ async function main() {
       console.log(JSON.stringify({
         ok: true, mode: 'staging-live', ...target, ...manifest, ...pairedRelease,
         stagingEngineImageId: saved.imageId, stagingRateLimitNamespaceId: project.metadata.stagingRateLimitNamespaceId,
-        accessGateMode, inviteAccessLiveVerified, inviteSessionRevocationDurable,
+        accessGateMode, stagingAccessNamespaceId, inviteAccessLiveVerified, inviteSingleUseLiveVerified, inviteSessionRevocationDurable,
         independentIdentityBindingPresent: project.metadata.independentIdentityBindingPresent,
         authenticatedIdentityAssertionLiveVerified: true, eventEpochLiveVerified: true, oauthLoginVerified: false,
         authenticationLimitation: 'Ephemeral signed staging subjects exercise the identity hop. External OAuth requires separate verification.', checks,

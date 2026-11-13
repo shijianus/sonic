@@ -21,7 +21,7 @@
 SONIC_ENGINE_SECRET              # Pages -> Engine 服务密钥，>=32 字符
 SONIC_ENGINE_IDENTITY_SECRET     # 独立 Engine 身份断言密钥，不能复用上面两项
 SONIC_SECRET                     # OAuth/API Key HMAC 密钥，>=32 字符
-SONIC_ACCESS_SECRET              # Pages invite 签名 session 密钥，>=32 字符，独立
+SONIC_ACCESS_SECRET              # 仅旧签名会话模式，>=32 字符，独立
 EPOMAIL_CLIENT_ID
 EPOMAIL_CLIENT_SECRET
 SONIC_INVITE_CODES               # 仅在受控密钥管理中提供；不得写入 commit
@@ -33,8 +33,9 @@ SONIC_INVITE_CODES               # 仅在受控密钥管理中提供；不得写
   - `SONIC_RECOMMEND_DB_PATH=/app/data/sonic-recommend.sqlite`
   - `SONIC_ACCOUNT_DB_PATH=/app/data/sonic-account.sqlite`
   - `SONIC_ACCESS_DB_PATH=/app/data/sonic-access.sqlite`
-- Pages invite 模式没有 SQLite 时必须设置 `SONIC_ACCESS_SECRET` 和服务端邀请码来源；无安全持久/签名配置时应 fail closed。
-- 邀请码每个至少 16 字符。Pages-only 签名会话可被重复兑换且无法服务端撤销，只适合短 TTL 的受控内测；需要单次使用或撤销时必须使用 Engine SQLite（`SONIC_ACCESS_DB_PATH`），并用 `npm run revoke:invite -- <db> <code>` 撤销。
+- Pages 使用 `SONIC_ACCESS_MODE=invite`、`SONIC_REQUIRE_DURABLE_INVITES=1` 和绑定 `SONIC_ACCESS_BUCKETS`（`edge-rate-limiter/` 的 `SonicAccessStore`），与 Engine SQLite 无关。预览、稳定 Staging 和生产使用不同的 Worker 命名空间。绑定缺失或不可达时不会退回签名 Cookie。签名 Cookie 模式仅供短 TTL 的兼容内测。
+- 使用至少 16 字符的随机邀请码。Pages 的 `SONIC_INVITE_CODES` 仅允许新兑换；去掉一个码会阻止以后兑换，但不会结束已有会话。退出会撤销当前会话；已核销的邀请码移除后再加入也不会恢复。迁移时废弃旧共享码，为每位测试者签发新码，并明确退出或会话过期后需新码。`npm run revoke:invite -- <db> <code>` 只操作 Engine SQLite，不会改 Pages 的会话。
+- 保持当前环境的 Durable Object 状态跨部署保留，不从旧快照恢复活跃会话或核销前状态。必须换命名空间时，先停止发码，废弃所有旧码和旧会话，重新生成独立码并重复验收。
 - `SONIC_CONTENT_POLICY=strict-allowlist` 时只列入已书面批准的来源。
 - 邀请制环境设置 `SONIC_ACCESS_MODE=invite`，不要同时依赖旧的共享 `SONIC_STAGING_ACCESS_TOKEN`。
 - 继续设置 `X-Robots-Tag: noindex, nofollow, noarchive`、外部访问门禁和独立测试域名。
@@ -59,11 +60,11 @@ SONIC_STAGING_TEST_INVITE_CODE=<disposable staging invite from secure storage>
 
 这些值不得写入源码、报告、命令参数、浏览器 URL 或提交记录；远端脚本在缺少必要变量时应 fail closed。
 
-在能访问受控 Staging VPS SSH 的执行环境中运行 `node scripts/verify-staging-live.mjs --preflight`，核对稳定 Staging 的访问模式、匿名门禁与 Engine 就绪状态。预检不兑换邀请码。
+由发布负责人在已有访问权限的受控环境中运行 `node scripts/verify-staging-live.mjs --preflight`，核对稳定 Staging 的访问模式、匿名门禁与 Engine 就绪状态。预检不兑换邀请码；即使返回 `ok: true`，`inviteGateBlockers` 非空也表示尚不能接受邀请制候选。
 
-使用已部署的候选制品执行 `node scripts/verify-staging-live.mjs --url <isolated-preview-url>`，再对同一份制品的稳定 Staging 执行 `node scripts/verify-staging-live.mjs --stable`。每次邀请制验收都使用独立的测试邀请码，通过受控环境注入 `SONIC_STAGING_TEST_INVITE_CODE`。脚本向 Staging 的兑换接口提交邀请码，核对受保护 API、无效会话和退出后的访问控制，并在结束时清理测试会话。发布证据须包含 `accessGateMode: "invite"` 和 `inviteAccessLiveVerified: true`。
+使用已部署的候选制品执行 `node scripts/verify-staging-live.mjs --url <isolated-preview-url>`，再对同一份制品的稳定 Staging 执行 `node scripts/verify-staging-live.mjs --stable`。每次邀请制验收都使用独立的测试邀请码，通过受控环境注入 `SONIC_STAGING_TEST_INVITE_CODE`。脚本核对匿名 `/` 和 `/invite` 可达、业务 API 未兑换时拒绝、同一码只可兑换一次、授权响应禁止共享缓存、退出后旧 Cookie 被拒绝。验收证据需保留 `stagingAccessNamespaceId` 和 `stagingAccess`，以及 `inviteAccessLiveVerified`、`inviteSingleUseLiveVerified`、`inviteSessionRevocationDurable` 全为 `true`。
 
-`inviteSessionRevocationDurable` 记录是否验证了服务端撤销与旧 Cookie 重放拒绝。Pages 签名会话验收会验证浏览器 Cookie 清理，并报告该字段为 `false`。使用短有效期并在验收后移除临时测试邀请码。`--serve-browser` 用于旧共享门禁。产品邀请制浏览器测试应使用另一个专用邀请码在 Staging 页面表单兑换。
+使用短有效期并在验收后移除临时测试码。`--serve-browser` 只用于旧共享门禁，不产生发布证据。产品邀请制浏览器测试应使用另一个专用邀请码在页面表单兑换。Work 中可在构建 Pages 和 Engine 后运行 `SONIC_LOCAL_EDGE_SCREENSHOTS=<本机目录> node scripts/verify-local-edge.mjs`，用已安装 Chromium 检查桌面和移动布局及回环生命周期。
 
 Staging Engine 默认仅启用 `synthetic`。在邀请门禁开启的同一候选发布上测试真实媒体时，可设置 `SONIC_STAGING_APPROVED_SOURCES`，按需从 `netease,qq,kugou,kuwo,amll,lrclib` 选择已获批准的来源。`python3 scripts/deploy-staging-engine.py --check-source-policy` 只打印会使用的内容策略与来源开关。保持 Pages 的受限访问门禁，并根据本次测试范围配置 Pages 白名单和真实 OAuth。
 

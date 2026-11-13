@@ -161,7 +161,7 @@ describe('search input hardening', () => {
 
   it('reports a non-durable access revocation when no repository is configured', async () => {
     const result = await revokeAccessSession(request('/api/access/session'), inviteEnv);
-    expect(result).toEqual({ revoked: false, durable: false });
+    expect(result).toEqual({ revoked: false, durable: false, unavailable: false });
   });
 });
 

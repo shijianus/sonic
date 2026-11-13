@@ -22,25 +22,30 @@ const HOST = '127.0.0.1'
 // ── 音频夹具：20s / 8kHz / 8-bit mono PCM WAV，正弦波 ───────────────────────
 const WAV_SECONDS = 20
 const SAMPLE_RATE = 8000
-const WAV_DATA_SIZE = WAV_SECONDS * SAMPLE_RATE
-const wav = Buffer.alloc(44 + WAV_DATA_SIZE)
-wav.write('RIFF', 0)
-wav.writeUInt32LE(36 + WAV_DATA_SIZE, 4)
-wav.write('WAVE', 8)
-wav.write('fmt ', 12)
-wav.writeUInt32LE(16, 16)
-wav.writeUInt16LE(1, 20) // PCM
-wav.writeUInt16LE(1, 22) // mono
-wav.writeUInt32LE(SAMPLE_RATE, 24)
-wav.writeUInt32LE(SAMPLE_RATE, 28)
-wav.writeUInt16LE(1, 32)
-wav.writeUInt16LE(8, 34)
-wav.write('data', 36)
-wav.writeUInt32LE(WAV_DATA_SIZE, 40)
-for (let i = 0; i < WAV_DATA_SIZE; i++) {
-  const v = Math.round(128 + 32 * Math.sin((2 * Math.PI * 440 * i) / SAMPLE_RATE))
-  wav[44 + i] = Math.max(0, Math.min(255, v))
+function makeWav(seconds) {
+  const dataSize = seconds * SAMPLE_RATE
+  const audio = Buffer.alloc(44 + dataSize)
+  audio.write('RIFF', 0)
+  audio.writeUInt32LE(36 + dataSize, 4)
+  audio.write('WAVE', 8)
+  audio.write('fmt ', 12)
+  audio.writeUInt32LE(16, 16)
+  audio.writeUInt16LE(1, 20) // PCM
+  audio.writeUInt16LE(1, 22) // mono
+  audio.writeUInt32LE(SAMPLE_RATE, 24)
+  audio.writeUInt32LE(SAMPLE_RATE, 28)
+  audio.writeUInt16LE(1, 32)
+  audio.writeUInt16LE(8, 34)
+  audio.write('data', 36)
+  audio.writeUInt32LE(dataSize, 40)
+  for (let i = 0; i < dataSize; i++) {
+    audio[44 + i] = Math.round(128 + 32 * Math.sin((2 * Math.PI * 440 * i) / SAMPLE_RATE))
+  }
+  return audio
 }
+const wav = makeWav(WAV_SECONDS)
+// The long mobile layout test takes screenshots while a real audio element plays.
+const longLayoutWav = makeWav(120)
 
 // ── 曲目夹具 ───────────────────────────────────────────────────────────────
 const SONG_META = {
@@ -97,7 +102,7 @@ const sendJson = (res, body, status = 200, extraHeaders = {}) => {
   res.end(payload)
 }
 
-const sendAudio = (req, res) => {
+const sendAudio = (req, res, audio = wav) => {
   const range = req.headers.range
   const headers = {
     'Content-Type': 'audio/wav',
@@ -108,24 +113,24 @@ const sendAudio = (req, res) => {
   if (range) {
     const m = /^bytes=(\d*)-(\d*)$/.exec(range)
     let start = m && m[1] ? Number(m[1]) : 0
-    let end = m && m[2] ? Number(m[2]) : wav.length - 1
+    let end = m && m[2] ? Number(m[2]) : audio.length - 1
     if (Number.isNaN(start) || Number.isNaN(end) || start > end) {
-      res.writeHead(416, { 'Content-Range': `bytes */${wav.length}` })
+      res.writeHead(416, { 'Content-Range': `bytes */${audio.length}` })
       res.end()
       return
     }
-    end = Math.min(end, wav.length - 1)
-    const chunk = wav.subarray(start, end + 1)
+    end = Math.min(end, audio.length - 1)
+    const chunk = audio.subarray(start, end + 1)
     res.writeHead(206, {
       ...headers,
-      'Content-Range': `bytes ${start}-${end}/${wav.length}`,
+      'Content-Range': `bytes ${start}-${end}/${audio.length}`,
       'Content-Length': chunk.length,
     })
     res.end(req.method === 'HEAD' ? undefined : chunk)
     return
   }
-  res.writeHead(200, { ...headers, 'Content-Length': wav.length })
-  res.end(req.method === 'HEAD' ? undefined : wav)
+  res.writeHead(200, { ...headers, 'Content-Length': audio.length })
+  res.end(req.method === 'HEAD' ? undefined : audio)
 }
 
 // ── API 路由 ───────────────────────────────────────────────────────────────
@@ -241,7 +246,7 @@ async function handleApi(req, res, url) {
       })
     }
     if (id === '9001') await sleep(600)
-    return sendAudio(req, res)
+    return sendAudio(req, res, id === '9400' ? longLayoutWav : wav)
   }
 
   if (p === '/api/sonic/lyrics/nexus') {

@@ -4,8 +4,10 @@
 import { base64UrlDecode, base64UrlEncode, readCookie, shouldUseSecureCookie } from '../auth';
 import { jsonResponse } from '../http';
 import { hasValidEngineSecret, canonicalPolicyPath, timingSafeEqualStr } from './security';
-import { isProductionDeployment } from './environment';
+import { isCloudflarePages, isProductionDeployment } from './environment';
 import { sha256Hex } from './crypto';
+import { isEnvEnabled } from './config';
+import { createDurableAccessRepository } from './access-do';
 import type { AppEnv } from '../types';
 
 export const SONIC_ACCESS_COOKIE = 'sonic_access';
@@ -47,21 +49,17 @@ export interface InviteRedemption {
  * an atomic binding on Pages). Raw invite/session tokens must never be stored.
  */
 export interface AccessRepository {
-  redeemInvite(codeHash: string, nowMs: number): Promise<InviteRedemption | null> | InviteRedemption | null;
-  redeemInviteAndCreateSession?(codeHash: string, record: AccessSessionRecord, nowMs: number): Promise<InviteRedemption | null> | InviteRedemption | null;
-  createSession(record: AccessSessionRecord): Promise<void> | void;
+  redeemInviteAndCreateSession(codeHash: string, record: AccessSessionRecord, nowMs: number): Promise<InviteRedemption | null> | InviteRedemption | null;
+  createSession?(record: AccessSessionRecord): Promise<void> | void;
   getSession(sessionHash: string, nowMs: number): Promise<AccessSessionRecord | null> | AccessSessionRecord | null;
-  revokeSession?(sessionHash: string, nowMs: number): Promise<void> | void;
+  revokeSession(sessionHash: string, nowMs: number): Promise<void> | void;
+  checkReady?(): Promise<void>;
 }
 
 export interface AccessSessionResult {
   valid: boolean;
   session?: AccessSessionRecord;
   reason?: 'missing' | 'invalid' | 'expired' | 'revoked' | 'store_unavailable';
-}
-
-function asTrimmedString(value: unknown, maxLength: number): string {
-  return typeof value === 'string' ? value.trim().slice(0, maxLength) : '';
 }
 
 export function getAccessMode(env?: AppEnv): AccessMode {
@@ -87,16 +85,26 @@ export function getAccessSessionMaxAgeSec(env?: AppEnv): number {
   return Math.min(MAX_ACCESS_SESSION_MAX_AGE_SEC, Math.max(MIN_ACCESS_SESSION_MAX_AGE_SEC, Math.floor(raw)));
 }
 
-export function getAccessRepository(env?: AppEnv): AccessRepository | null {
-  const candidate = (env as any)?.SONIC_ACCESS_STORE;
-  if (!candidate || typeof candidate !== 'object') return null;
-  if (typeof candidate.redeemInvite === 'function' && typeof candidate.createSession === 'function' && typeof candidate.getSession === 'function') return candidate as AccessRepository;
-  return null;
+export function isDurableInviteRequired(env?: AppEnv): boolean {
+  return isEnvEnabled(env?.SONIC_REQUIRE_DURABLE_INVITES, false) ||
+    (getAccessMode(env) === 'invite' && (isCloudflarePages(env) || env?.SONIC_RUNTIME === 'cf-pages') && isProductionDeployment(env));
 }
 
+function useDurableAccess(env?: AppEnv): boolean {
+  return isDurableInviteRequired(env) || env?.SONIC_ACCESS_BUCKETS != null || env?.SONIC_ACCESS_STORE != null;
+}
+
+function getAccessRepository(env?: AppEnv): AccessRepository | null {
+  if (env?.SONIC_ACCESS_BUCKETS != null) {
+    return typeof env.SONIC_ACCESS_BUCKETS.getByName === 'function' ? createDurableAccessRepository(env.SONIC_ACCESS_BUCKETS) : null;
+  }
+  const candidate = env?.SONIC_ACCESS_STORE;
+  return typeof candidate?.getSession === 'function' && typeof candidate?.redeemInviteAndCreateSession === 'function' &&
+    typeof candidate?.revokeSession === 'function' ? candidate as AccessRepository : null;
+}
 
 function normalizeInviteCode(code: unknown): string {
-  const value = asTrimmedString(code, MAX_INVITE_CODE_LENGTH);
+  const value = typeof code === 'string' ? code.trim() : '';
   if (
     value.length < MIN_INVITE_CODE_LENGTH ||
     value.length > MAX_INVITE_CODE_LENGTH ||
@@ -108,6 +116,46 @@ function normalizeInviteCode(code: unknown): string {
 export function hashInviteCode(code: string): string | null {
   const normalized = normalizeInviteCode(code);
   return normalized ? sha256Hex(`sonic-access-invite-v1:${normalized}`) : null;
+}
+
+function configuredInviteCodes(env: AppEnv): string[] {
+  return String(env.SONIC_INVITE_CODES || '').split(',').map(code => code.trim()).filter(Boolean);
+}
+
+function isConfiguredInviteHash(env: AppEnv, codeHash: string): boolean {
+  let matched = false;
+  for (const code of configuredInviteCodes(env)) {
+    const configuredHash = hashInviteCode(code);
+    if (configuredHash && timingSafeEqualStr(configuredHash, codeHash)) matched = true;
+  }
+  return matched;
+}
+
+export async function getAccessReadiness(env: AppEnv) {
+  const mode = getAccessMode(env);
+  const required = mode === 'invite';
+  const invalid = isAccessModeDeclaredInvalid(env);
+  const durableRequired = isDurableInviteRequired(env);
+  const storeConfigured = env.SONIC_ACCESS_BUCKETS != null || env.SONIC_ACCESS_STORE != null;
+  const repository = required ? getAccessRepository(env) : null;
+  const codes = configuredInviteCodes(env);
+  const validConfiguredInviteCodes = codes.filter(code => hashInviteCode(code) !== null).length;
+  const invalidConfiguredInviteCodes = codes.length - validConfiguredInviteCodes;
+  const secretConfigured = String(env.SONIC_ACCESS_SECRET || '').trim().length >= 32;
+  let storeUsable = Boolean(repository);
+  try { await repository?.checkReady?.(); } catch { storeUsable = false; }
+  let backend = 'none';
+  if (required && repository) backend = env.SONIC_ACCESS_BUCKETS ? 'durable-object' : 'runtime-store';
+  else if (required && !useDurableAccess(env)) backend = 'signed-cookie';
+  const inviteReady = invalidConfiguredInviteCodes === 0 && (
+    backend === 'runtime-store' ? storeUsable : validConfiguredInviteCodes > 0 && (
+      backend === 'durable-object' ? storeUsable : backend === 'signed-cookie' && secretConfigured
+    )
+  );
+  const ok = !invalid && (required ? inviteReady : !durableRequired);
+  return { mode, explicit: isAccessModeExplicit(env), invalid, required, durableRequired, backend,
+    storeConfigured, storeUsable, singleUse: storeUsable, revocable: storeUsable, secretConfigured,
+    configuredInviteCodes: codes.length, validConfiguredInviteCodes, invalidConfiguredInviteCodes, ok };
 }
 
 function hashSessionToken(token: string): string | null {
@@ -181,7 +229,7 @@ export function buildClearAccessSessionCookie(requestUrl: URL): string[] {
 }
 
 export type AccessRedeemResult =
-  | { ok: true; redemption: InviteRedemption; session?: { token: string; record: AccessSessionRecord } }
+  | { ok: true; redemption: InviteRedemption; session: { token: string; record: AccessSessionRecord } }
   | { ok: false; code: 'invalid' | 'store_unavailable' }
 
 export async function redeemAccessInvite(
@@ -197,12 +245,8 @@ export async function redeemAccessInvite(
 
   // Pages without a durable store use the independent signed-session path.
   if (!repository) {
-    const configured = String(env.SONIC_INVITE_CODES || '').split(',').map(value => value.trim()).filter(Boolean);
-    const matched = configured.some(value => {
-      const configuredHash = hashInviteCode(value);
-      return configuredHash !== null && timingSafeEqualStr(configuredHash, codeHash);
-    });
-    if (!matched) return { ok: false, code: 'invalid' };
+    if (useDurableAccess(env)) return { ok: false, code: 'store_unavailable' };
+    if (!isConfiguredInviteHash(env, codeHash)) return { ok: false, code: 'invalid' };
     const recordBase = {
       createdAt: nowMs,
       expiresAt: nowMs + getAccessSessionMaxAgeSec(env) * 1000,
@@ -222,10 +266,8 @@ export async function redeemAccessInvite(
     };
   }
 
-  // A durable repository must redeem and persist the session atomically.
-  if (typeof repository.redeemInviteAndCreateSession !== 'function') {
-    return { ok: false, code: 'store_unavailable' };
-  }
+  // Pages verifies the configured secret locally. Only the digest is sent to the object.
+  if (env.SONIC_ACCESS_BUCKETS && !isConfiguredInviteHash(env, codeHash)) return { ok: false, code: 'invalid' };
   const token = randomOpaqueToken();
   const hash = hashSessionToken(token);
   if (!hash) return { ok: false, code: 'store_unavailable' };
@@ -263,6 +305,7 @@ export async function createAccessSession(
     expiresAt: nowMs + boundedMaxAgeSec * 1000,
   };
   if (!repository) {
+    if (useDurableAccess(env)) return null;
     try {
       const signed = await signedSessionToken(recordBase, env);
       if (!signed) return null;
@@ -274,6 +317,7 @@ export async function createAccessSession(
       return null;
     }
   }
+  if (!repository.createSession) return null;
   const token = randomOpaqueToken();
   const hash = hashSessionToken(token);
   if (!hash) return null;
@@ -282,7 +326,7 @@ export async function createAccessSession(
     ...recordBase,
   };
   try {
-    if (repository) await repository.createSession(record);
+    await repository.createSession(record);
     return { token, record };
   } catch {
     return null;
@@ -300,6 +344,7 @@ export async function verifyAccessSession(
   const repository = getAccessRepository(env);
   if (!hash) return { valid: false, reason: 'invalid' };
   if (!repository) {
+    if (useDurableAccess(env)) return { valid: false, reason: 'store_unavailable' };
     const key = await accessSecret(env).catch(() => null);
     return key ? verifySignedSession(token, key, nowMs) : { valid: false, reason: 'store_unavailable' };
   }
@@ -317,8 +362,10 @@ export async function verifyAccessSession(
 export interface AccessSessionRevocation {
   /** True only when a durable store confirmed the revocation. */
   revoked: boolean;
-  /** True when a durable store is available to make revocation meaningful. */
+  /** True when access requires durable revocation; only revoked confirms success. */
   durable: boolean;
+  /** A token was present but durable revocation could not be confirmed. */
+  unavailable: boolean;
 }
 
 export async function revokeAccessSession(
@@ -329,14 +376,14 @@ export async function revokeAccessSession(
   const token = readAccessSessionToken(request);
   const hash = token ? hashSessionToken(token) : null;
   const repository = getAccessRepository(env);
-  const durable = Boolean(repository?.revokeSession);
-  if (!hash || !repository?.revokeSession) return { revoked: false, durable };
+  const durable = useDurableAccess(env);
+  if (!hash || !repository) return { revoked: false, durable, unavailable: Boolean(hash && durable) };
   try {
     await repository.revokeSession(getStoreKey(ACCESS_SESSION_HASH_PREFIX, hash), nowMs);
-    return { revoked: true, durable: true };
+    return { revoked: true, durable: true, unavailable: false };
   } catch {
     // Cookie clearing remains safe; the next request will fail closed if the store is unavailable.
-    return { revoked: false, durable: true };
+    return { revoked: false, durable: true, unavailable: true };
   }
 }
 
@@ -353,13 +400,13 @@ export async function requireAccess(request: Request, env: AppEnv): Promise<Resp
   // A production edge deployment must state its access policy explicitly. A
   // missing variable previously fell back to public/open access, which would
   // silently remove the invite gate from a restricted beta.
-  if (isProductionDeployment(env) && !isAccessModeExplicit(env)) {
+  const mode = getAccessMode(env);
+  if ((isProductionDeployment(env) && !isAccessModeExplicit(env)) || (isDurableInviteRequired(env) && mode !== 'invite')) {
     return jsonResponse(
-      { brand: 'Sonic', error: { code: 'ACCESS_MODE_MISCONFIGURED', message: 'SONIC_ACCESS_MODE must be explicitly configured in production' } },
+      { brand: 'Sonic', error: { code: 'ACCESS_MODE_MISCONFIGURED', message: 'Production requires an explicit access mode; durable invitations require invite mode' } },
       { status: 503, headers: { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow, noarchive', 'Retry-After': '30' } },
     );
   }
-  const mode = getAccessMode(env);
   if (mode === 'open') return null;
   const path = canonicalPolicyPath(request);
   const publicPath =

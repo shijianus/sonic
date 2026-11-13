@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildPagesDeploymentTree, readStagingAcceptance } from './pages-release-lib.mjs';
+import { buildPagesDeploymentTree, readStagingAcceptance, verifyStableStagingInviteTarget } from './pages-release-lib.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const promote = process.argv.includes('--promote-staging');
@@ -16,11 +16,12 @@ try {
   if ((!promote && branch === 'staging') || !/^[a-z0-9-]{1,63}$/.test(branch)) {
     throw new Error('Stable staging requires explicit promotion from an isolated preview');
   }
+  const shouldDeploy = process.argv.includes('--deploy');
   if (promote) {
     const acceptancePath = process.env.SONIC_STAGING_ACCEPTANCE_FILE || 'reports/release-readiness/accepted-preview.json';
-    readStagingAcceptance(resolve(root, acceptancePath), manifest, pagesArtifactDigest);
+    const previewEvidence = readStagingAcceptance(resolve(root, acceptancePath), manifest, pagesArtifactDigest, { requireDurableInvites: true });
+    if (shouldDeploy) await verifyStableStagingInviteTarget(previewEvidence);
   }
-  const shouldDeploy = process.argv.includes('--deploy');
   const cli = process.env.WRANGLER_CLI;
   if (shouldDeploy && (!cli || !existsSync(cli))) throw new Error('Set WRANGLER_CLI to an installed wrangler/bin/wrangler.js');
   const result = { project, branch, stagingRoot, manifest, pagesArtifactDigest };

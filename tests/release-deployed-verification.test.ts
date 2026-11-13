@@ -45,6 +45,7 @@ const cloudflarePath = `/client/v4/accounts/${'a'.repeat(32)}/pages/projects/${p
 const productionEnv = {
   CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32), CLOUDFLARE_API_TOKEN: 'fixture-api-token',
   SONIC_PRODUCTION_RATE_LIMIT_NAMESPACE_ID: 'd'.repeat(32),
+  SONIC_PRODUCTION_ACCESS_NAMESPACE_ID: 'c'.repeat(32),
   CF_PAGES_PROJECT: productionProject, CF_PAGES_BRANCH: 'main',
   SONIC_ACCESS_MODE: 'invite', SONIC_ALLOWED_SOURCES: 'netease,qq',
 };
@@ -52,10 +53,11 @@ const productionEnv = {
 function productionProjectResponse(overrides: Record<string, string> = {}) {
   return {
     name: productionProject, production_branch: 'main', subdomain: `${productionProject}.pages.dev`,
-    deployment_configs: { production: { durable_object_namespaces: { SONIC_RATE_LIMIT_BUCKETS: { namespace_id: 'd'.repeat(32) } }, env_vars: Object.fromEntries(Object.entries({
-      SONIC_LOCAL_ENGINE_URL: productionEngine, SONIC_ACCESS_MODE: 'invite', SONIC_ENV: 'production',
+    deployment_configs: { production: { durable_object_namespaces: { SONIC_RATE_LIMIT_BUCKETS: { namespace_id: 'd'.repeat(32) },
+      SONIC_ACCESS_BUCKETS: { namespace_id: 'c'.repeat(32) } }, env_vars: { SONIC_INVITE_CODES: { type: 'secret_text' }, ...Object.fromEntries(Object.entries({
+      SONIC_LOCAL_ENGINE_URL: productionEngine, SONIC_ACCESS_MODE: 'invite', SONIC_ENV: 'production', SONIC_REQUIRE_DURABLE_INVITES: '1',
       SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'qq, netease', ...overrides,
-    }).map(([key, value]) => [key, { type: 'plain_text', value }])) } },
+    }).map(([key, value]) => [key, { type: 'plain_text', value }])) } } },
   };
 }
 
@@ -170,6 +172,7 @@ describe('deployed release verification', () => {
     ['SONIC_ENV', 'preview', 'Pages runtime and production environment'],
     ['SONIC_RUNTIME', 'linux-engine', 'Pages runtime and production environment'],
     ['SONIC_ACCESS_MODE', 'open', 'access mode'],
+    ['SONIC_REQUIRE_DURABLE_INVITES', '0', 'SONIC_ACCESS_BUCKETS namespace'],
     ['SONIC_CONTENT_POLICY', 'default', 'source allowlist'],
     ['SONIC_ALLOWED_SOURCES', 'netease', 'source allowlist'],
     ['SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT', '0', 'rate-limit policy'],
@@ -187,6 +190,8 @@ describe('deployed release verification', () => {
       await expect(verifyProductionPagesBinding({ engineOrigin: productionEngine, env: { ...productionEnv, SONIC_PRODUCTION_RATE_LIMIT_NAMESPACE_ID: id } }))
         .rejects.toThrow('SONIC_RATE_LIMIT_BUCKETS');
     }
+    await expect(verifyProductionPagesBinding({ engineOrigin: productionEngine, env: { ...productionEnv, SONIC_PRODUCTION_ACCESS_NAMESPACE_ID: 'd'.repeat(32) } }))
+      .rejects.toThrow('SONIC_ACCESS_BUCKETS namespace');
   });
 
   it('treats remote verification as production by default and refuses an unowned origin before sending an Engine key', async () => {

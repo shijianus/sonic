@@ -9,16 +9,25 @@ import {
   collectReleaseInputs, copyReleaseInputs, createReleaseFileIndex,
   RELEASE_DIRECTORIES, REQUIRED_RELEASE_FILES,
 } from '../scripts/release-inputs.mjs';
-import { assertStagingAcceptance, buildPagesDeploymentTree, parseDeploymentOrigin } from '../scripts/pages-release-lib.mjs';
+import { assertStagingAcceptance, buildPagesDeploymentTree, parseDeploymentOrigin, verifyStableStagingInviteTarget } from '../scripts/pages-release-lib.mjs';
 
 const repo = resolve(import.meta.dirname, '..');
 const strictRateLimit = { configuredBackend: 'durable-object', requireDistributed: true, distributedAtomic: true, failClosedOnDegrade: true, productionCompliant: true };
 const stagingNamespace = 'e'.repeat(32);
+const stagingAccessNamespace = 'b'.repeat(32);
+const productionAccessNamespace = 'c'.repeat(32);
+const stagingAccess = { mode: 'invite', explicit: true, ok: true, backend: 'durable-object', durableRequired: true, storeUsable: true, singleUse: true, revocable: true };
+const inviteEvidence = { accessGateMode: 'invite', inviteAccessLiveVerified: true, inviteSingleUseLiveVerified: true,
+  inviteSessionRevocationDurable: true, stagingAccess, stagingAccessNamespaceId: stagingAccessNamespace };
+const inviteBindings = { SONIC_ACCESS_MODE: { type: 'plain_text', value: 'invite' },
+  SONIC_REQUIRE_DURABLE_INVITES: { type: 'plain_text', value: '1' }, SONIC_INVITE_CODES: { type: 'secret_text' } };
 const stagingImage = `sha256:${'f'.repeat(64)}`;
 const autoChecks = [
   'Cloudflare confirms the stable staging branch deployment',
   'invite entry is reachable with noindex and protected API denies anonymous access',
   'disposable invite redeems into a secure expiring session and invalid Cookie is rejected',
+  'consumed invite cannot be redeemed again and protected results are not cacheable',
+  'durable invite logout revokes the issued session and rejects its replay',
   'Pages and Engine release identities match and direct Engine health is private and durable',
   'synthetic search returns real catalog results through the staging Engine',
   'Engine-backed audio HEAD, RIFF bytes, seek ranges 206 and invalid range 416',
@@ -142,7 +151,9 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
       checks: Array.from({ length: 12 }, (_, index) => ({ name: `check ${index}`, ok: true })),
     };
     expect(() => assertStagingAcceptance(preview, first.manifest, first.pagesArtifactDigest)).not.toThrow();
-    expect(() => assertStagingAcceptance(preview, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/exact release/);
+    expect(() => assertStagingAcceptance(preview, first.manifest, first.pagesArtifactDigest, { requireDurableInvites: true })).toThrow(/live product invite/);
+    expect(() => assertStagingAcceptance({ ...preview, ...inviteEvidence }, first.manifest, first.pagesArtifactDigest, { requireDurableInvites: true })).not.toThrow();
+    expect(() => assertStagingAcceptance({ ...preview, ...inviteEvidence }, first.manifest, first.pagesArtifactDigest, { production: true })).toThrow(/exact release/);
     expect(() => assertStagingAcceptance({ ...preview, eventEpochLiveVerified: undefined }, first.manifest, first.pagesArtifactDigest)).toThrow(/exact release/);
     expect(() => assertStagingAcceptance({ ...preview, engineErasureRecoveryVersion: undefined }, first.manifest, first.pagesArtifactDigest)).toThrow(/exact release/);
     expect(() => assertStagingAcceptance({ ...preview, engineRelease: { ...preview.engineRelease, engineIdentityCompiled: false } }, first.manifest, first.pagesArtifactDigest)).toThrow(/exact release/);
@@ -150,7 +161,7 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
 
     const stable = {
       ...preview, branch: 'staging', base: 'https://sonic-staging.pages.dev', branchUrl: 'https://sonic-staging.pages.dev',
-      accessGateMode: 'invite', inviteAccessLiveVerified: true, checks: autoChecks,
+      ...inviteEvidence, checks: autoChecks,
       stagingRateLimit: strictRateLimit, stagingRateLimitNamespaceId: stagingNamespace, stagingEngineImageId: stagingImage,
     };
     const production = { production: true, productionSources: ['netease', 'lrclib'], verifyRecord: () => true };
@@ -169,6 +180,9 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
     expect(() => verify(evidence, ['synthetic'])).toThrow(/non-synthetic source/);
     expect(() => verify({ ...evidence, accessGateMode: 'legacy-staging' })).toThrow(/live product invite/);
     expect(() => verify({ ...evidence, inviteAccessLiveVerified: undefined })).toThrow(/live product invite/);
+    expect(() => verify({ ...evidence, inviteSingleUseLiveVerified: false })).toThrow(/single-use redemption/);
+    expect(() => verify({ ...evidence, inviteSessionRevocationDurable: false })).toThrow(/confirmed session revocation/);
+    expect(() => verify({ ...evidence, stagingAccessNamespaceId: stagingNamespace })).toThrow(/separate durable Staging invite binding/);
     expect(() => verify({ ...evidence, baseCommit: 'b'.repeat(40) })).toThrow(/exact release/);
     expect(() => verify({ ...evidence, stagingContentPolicy: undefined })).toThrow(/live strict source policy/);
     expect(() => verify({ ...evidence, productionChecks: manualChecks })).toThrow(/passing Staging evidence for source:netease/);
@@ -189,6 +203,20 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
 
   it.each(['http://sonic.example/', 'https://user:password@sonic.example/', 'https://sonic.example/elsewhere', 'https://sonic.example/?q=1', 'https://sonic.example/#hash'])('rejects a noncanonical production verification target %s', (target) => {
     expect(() => parseDeploymentOrigin(target)).toThrow(/canonical HTTPS/);
+  });
+
+  it('refuses stable Staging promotion if the target would use preview state or fall back to signed cookies', async () => {
+    const binding = (id: string) => ({ env_vars: inviteBindings, durable_object_namespaces: { SONIC_ACCESS_BUCKETS: { namespace_id: id } } });
+    const env = { CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32), CLOUDFLARE_API_TOKEN: 'fixture' };
+    const verify = (production: object) => {
+      const previous = globalThis.fetch;
+      globalThis.fetch = async () => Response.json({ success: true, result: { name: 'sonic-staging', production_branch: 'staging',
+        deployment_configs: { preview: binding(stagingAccessNamespace), production } } });
+      return verifyStableStagingInviteTarget(inviteEvidence, env).finally(() => { globalThis.fetch = previous; });
+    };
+    await expect(verify(binding('9'.repeat(32)))).resolves.toBeUndefined();
+    await expect(verify(binding(stagingAccessNamespace))).rejects.toThrow(/separate from the verified preview/);
+    await expect(verify({ env_vars: inviteBindings })).rejects.toThrow(/separate from the verified preview/);
   });
 
   it('promotes the already accepted artifact through the normal npm deploy entrypoint', () => {
@@ -227,7 +255,7 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
     const acceptance = {
       ...manifest, pagesArtifactDigest, ok: true, mode: 'staging-live', branch: 'staging',
       base: 'https://sonic-staging.pages.dev', branchUrl: 'https://sonic-staging.pages.dev',
-      deploymentId: '01234567-89ab-cdef-0123-456789abcdef', accessGateMode: 'invite', inviteAccessLiveVerified: true,
+      deploymentId: '01234567-89ab-cdef-0123-456789abcdef', ...inviteEvidence,
       engineStorage: 'sqlite', independentIdentityBindingPresent: true, authenticatedIdentityAssertionLiveVerified: true,
       engineRelease: { ...manifest, engineIdentityCompiled: true }, eventEpochLiveVerified: true, engineErasureRecoveryVersion: 1,
       checks: autoChecks, stagingRateLimit: strictRateLimit, stagingRateLimitNamespaceId: stagingNamespace, stagingEngineImageId: stagingImage,
@@ -237,10 +265,11 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
 
     const project = {
       name: 'sonic-prod', production_branch: 'main', subdomain: 'sonic-prod.pages.dev',
-      deployment_configs: { production: { durable_object_namespaces: { SONIC_RATE_LIMIT_BUCKETS: { namespace_id: 'd'.repeat(32) } }, env_vars: Object.fromEntries(Object.entries({
-        SONIC_LOCAL_ENGINE_URL: 'https://engine.example.test', SONIC_ENV: 'production', SONIC_ACCESS_MODE: 'invite',
+      deployment_configs: { production: { durable_object_namespaces: { SONIC_RATE_LIMIT_BUCKETS: { namespace_id: 'd'.repeat(32) },
+        SONIC_ACCESS_BUCKETS: { namespace_id: productionAccessNamespace } }, env_vars: { ...inviteBindings, ...Object.fromEntries(Object.entries({
+        SONIC_LOCAL_ENGINE_URL: 'https://engine.example.test', SONIC_ENV: 'production',
         SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'netease',
-      }).map(([name, value]) => [name, { type: 'plain_text', value }])) } },
+      }).map(([name, value]) => [name, { type: 'plain_text', value }])) } } },
     };
     const engine = {
       ok: true, runtime: 'linux-engine',
@@ -250,18 +279,21 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
       recommendEngine: { storageKind: 'sqlite', storageHealthy: true, disk: { ok: true }, erasureRecoveryVersion: 1 },
     };
     const stagingProject = { name: 'sonic-staging', production_branch: 'staging', canonical_deployment: { id: acceptance.deploymentId },
-      deployment_configs: { production: { durable_object_namespaces: { SONIC_RATE_LIMIT_BUCKETS: { namespace_id: stagingNamespace } } } } };
+      deployment_configs: { production: { env_vars: inviteBindings, durable_object_namespaces: {
+        SONIC_RATE_LIMIT_BUCKETS: { namespace_id: stagingNamespace }, SONIC_ACCESS_BUCKETS: { namespace_id: stagingAccessNamespace },
+      } } } };
     const deployment = { id: acceptance.deploymentId, environment: 'production', latest_stage: { status: 'success' },
       deployment_trigger: { metadata: { branch: 'staging', commit_hash: manifest.baseCommit } } };
     const stagingRelease = { ...engine.release, environment: 'staging', pagesArtifactDigest };
     const stagingHealth = { ok: true, runtime: 'cf-pages', release: stagingRelease, rateLimit: strictRateLimit,
-      readiness: { access: { mode: 'invite' }, contentPolicy: acceptance.stagingContentPolicy.pages },
+      readiness: { access: stagingAccess, contentPolicy: acceptance.stagingContentPolicy.pages },
       enginePeer: { ok: true, release: stagingRelease, contentPolicy: acceptance.stagingContentPolicy.engine } };
     put(control, 'mock-preflight.mjs', `globalThis.fetch = async (input, init = {}) => {
       const { origin, pathname } = new URL(input);
       if (origin === 'https://api.cloudflare.com' && pathname === '/client/v4/accounts/${'a'.repeat(32)}/pages/projects/sonic-prod') {
         const project = ${JSON.stringify(project)};
         if (process.env.SONIC_TEST_MISSING_BINDING === '1') delete project.deployment_configs.production.durable_object_namespaces;
+        if (process.env.SONIC_TEST_SHARED_ACCESS === '1') project.deployment_configs.production.durable_object_namespaces.SONIC_ACCESS_BUCKETS.namespace_id = '${stagingAccessNamespace}';
         return Response.json({ success: true, result: project });
       }
       if (origin === 'https://api.cloudflare.com' && pathname.endsWith('/projects/sonic-staging')) return Response.json({success:true,result:${JSON.stringify(stagingProject)}});
@@ -270,6 +302,7 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
         if (new Headers(init.headers).get('x-sonic-engine-key') !== '${'t'.repeat(48)}') return new Response(null, {status:401});
         const health = ${JSON.stringify(stagingHealth)};
         if (process.env.SONIC_TEST_STAGING_LIMITER_DOWN === '1') health.rateLimit.productionCompliant = false;
+        if (process.env.SONIC_TEST_STAGING_ACCESS_DOWN === '1') health.readiness.access.storeUsable = false;
         return Response.json(health,{headers:{'x-sonic-release':${JSON.stringify(manifest.releaseId)}}});
       }
       if (origin !== 'https://engine.example.test' || pathname !== '/api/sonic/engine/health') throw new Error('Unexpected preflight target');
@@ -282,6 +315,7 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
     const env = {
       CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32), CLOUDFLARE_API_TOKEN: 'fixture-api-token',
       SONIC_PRODUCTION_RATE_LIMIT_NAMESPACE_ID: 'd'.repeat(32), SONIC_STAGING_ENGINE_SECRET: 't'.repeat(48),
+      SONIC_PRODUCTION_ACCESS_NAMESPACE_ID: productionAccessNamespace,
       NODE_OPTIONS: `--import=${pathToFileURL(join(control, 'mock-preflight.mjs')).href}`,
     };
     const preflight = run('sonic-prod', ['--preflight'], env);
@@ -302,12 +336,16 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
     for (const [flag, error] of [
       ['SONIC_TEST_MISSING_BINDING', 'SONIC_RATE_LIMIT_BUCKETS'],
       ['SONIC_TEST_STAGING_LIMITER_DOWN', 'working shared limiter'],
+      ['SONIC_TEST_STAGING_ACCESS_DOWN', 'durable invite gate'],
       ['SONIC_TEST_DISABLED_SOURCE', 'effective sources'],
     ]) {
       const refused = run('sonic-prod', [], { ...env, [flag]: '1' });
       expect(refused.status).toBe(1);
       expect(refused.stderr).toContain(error);
     }
+    const sharedAccess = run('sonic-prod', ['--preflight'], { ...env, SONIC_TEST_SHARED_ACCESS: '1', SONIC_PRODUCTION_ACCESS_NAMESPACE_ID: stagingAccessNamespace });
+    expect(sharedAccess.status).toBe(1);
+    expect(sharedAccess.stderr).toContain('invite binding changed or is shared');
     put(control, 'oauthLoginAndRevocation.json', '{"ok":true}');
     const changedEvidence = run('sonic-prod', [], env);
     expect(changedEvidence.status).toBe(1);

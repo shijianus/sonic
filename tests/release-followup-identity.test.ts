@@ -67,6 +67,7 @@ describe('Live Staging access probes against Pages handlers', () => {
       return pagesMiddleware({ request, env, next: async () => {
         switch (new URL(request.url).pathname) {
           case '/': return new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } });
+          case '/invite': return new Response('<html></html>', { headers: { 'Content-Type': 'text/html' } });
           case '/api/access/redeem': return redeemInvite({ request, env });
           case '/api/access/session': return readAccessSession({ request, env });
           case '/api/access/logout': return logoutAccess({ request, env });
@@ -97,7 +98,14 @@ describe('Live Staging access probes against Pages handlers', () => {
       } finally { now.mockRestore(); }
       return 'checked';
     });
-    expect(result).toEqual({ result: 'checked', inviteSessionRevocationDurable: false });
+    expect(result).toEqual({ result: 'checked', inviteSessionRevocationDurable: false, inviteSingleUseLiveVerified: false });
+  });
+
+  it('rejects stateless access when release acceptance requires one-time redemption', async () => {
+    usePages(inviteEnv);
+    const verify = vi.fn();
+    await expect(withInviteAccess(base, code, manifest, verify, { requireDurable: true })).rejects.toThrow('STAGING_INVITE_REDEEMED_TWICE');
+    expect(verify).not.toHaveBeenCalled();
   });
 
   it('blocks before redeeming when no disposable code is supplied or the invite gate is open', async () => {
@@ -121,9 +129,9 @@ describe('Live Staging access probes against Pages handlers', () => {
         expect((await fetch(protectedUrl, { headers })).status).toBe(200);
         if (fail) throw new Error('candidate check failed');
         return 'checked';
-      });
+      }, { requireDurable: true });
       if (fail) await expect(run).rejects.toThrow('candidate check failed');
-      else await expect(run).resolves.toEqual({ result: 'checked', inviteSessionRevocationDurable: true });
+      else await expect(run).resolves.toEqual({ result: 'checked', inviteSessionRevocationDurable: true, inviteSingleUseLiveVerified: true });
       expect(cookie).toMatch(/^__Host-sonic_access=/);
       expect((await fetch(protectedUrl, { headers: { Cookie: cookie } })).status).toBe(401);
     } finally {

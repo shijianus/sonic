@@ -877,6 +877,7 @@ export default {
       required: 'Enter an invite code.',
       network: 'Network error. Check your connection and retry.',
       invalid: 'This invite code is invalid or expired.',
+      revocation: 'Browser access was cleared. Server revocation could not be confirmed.',
       rateLimited: 'Too many attempts. Wait a moment and retry.',
       server: 'Access service is unavailable. Retry later.',
     },

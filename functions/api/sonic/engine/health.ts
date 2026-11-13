@@ -13,13 +13,7 @@ import {
 import { getSonicConfig, isEnvEnabled } from '../../../_lib/sonic/config';
 import { callLocalEngineJson, fetchWithRuntimeBudget, getLocalEngineCircuitSnapshot } from '../../../_lib/sonic/local-engine';
 import { getLicensingAuditSummary, getContentPolicyReadiness } from '../../../_lib/sonic/licensing';
-import {
-  getAccessMode,
-  getAccessRepository,
-  hashInviteCode,
-  isAccessModeDeclaredInvalid,
-  isAccessModeExplicit,
-} from '../../../_lib/sonic/access';
+import { getAccessReadiness } from '../../../_lib/sonic/access';
 import { getEngineIdentityReadiness, requireValidEngineIdentity, EngineIdentityError } from '../../../_lib/sonic/engine-identity';
 import {
   getObservabilitySnapshot,
@@ -161,37 +155,8 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   }
   const rateLimit = getRateLimitConfigStatus(env);
   const rateLimitReady = !rateLimit.requireDistributed || rateLimit.productionCompliant;
-  const accessMode = getAccessMode(env);
-  const accessRepository = getAccessRepository(env);
-  const accessStoreUsable = Boolean(accessRepository) && typeof accessRepository?.redeemInviteAndCreateSession === 'function';
-  const accessSecretConfigured = String(env.SONIC_ACCESS_SECRET || '').trim().length >= 32;
-  const configuredInviteCodes = String(env.SONIC_INVITE_CODES || '')
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean);
-  const validConfiguredInviteCodes = configuredInviteCodes.filter(code => hashInviteCode(code) !== null).length;
-  const invalidConfiguredInviteCodes = configuredInviteCodes.length - validConfiguredInviteCodes;
-  const signedAccessReady = accessSecretConfigured && validConfiguredInviteCodes > 0;
-  const accessReady =
-    !isAccessModeDeclaredInvalid(env) &&
-    invalidConfiguredInviteCodes === 0 &&
-    (accessMode !== 'invite' ||
-      (accessRepository ? accessStoreUsable : signedAccessReady));
-  const accessReadiness = {
-    mode: accessMode,
-    explicit: isAccessModeExplicit(env),
-    invalid: isAccessModeDeclaredInvalid(env),
-    required: accessMode === 'invite',
-    storeConfigured: Boolean(accessRepository),
-    storeUsable: accessStoreUsable,
-    singleUse: Boolean(accessRepository),
-    revocable: Boolean(accessRepository?.revokeSession),
-    secretConfigured: accessSecretConfigured,
-    configuredInviteCodes: configuredInviteCodes.length,
-    validConfiguredInviteCodes,
-    invalidConfiguredInviteCodes,
-    ok: accessReady,
-  };
+  const accessReadiness = await getAccessReadiness(env);
+  const accessReady = accessReadiness.ok;
   const draining = Boolean(env.SONIC_DRAIN_STATE?.draining);
   const ok = storageHealthy && sidecarReady && releaseReadiness.ok && contentPolicyReadiness.ok && accessReady && identityReadiness.ok && rateLimitReady && !draining && enginePeer?.ok !== false;
   const degraded = Boolean(cfg.ncmApiUrl && !sidecarRequired && ncmSidecarHealthy === false);

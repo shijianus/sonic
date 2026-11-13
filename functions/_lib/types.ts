@@ -90,6 +90,8 @@ export interface AppEnv {
   SONIC_STAGING_ACCESS_TOKEN?: string;
   SONIC_ACCESS_MODE?: 'open' | 'legacy-staging' | 'invite' | string;
   SONIC_ACCESS_SECRET?: string;
+  SONIC_REQUIRE_DURABLE_INVITES?: string;
+  SONIC_ACCESS_BUCKETS?: { getByName(name: string): { fetch(input: string, init?: RequestInit): Promise<Response> } };
   SONIC_ACCESS_SESSION_MAX_AGE_SEC?: string;
   SONIC_INVITE_CODES?: string;
   SONIC_ALERT_WEBHOOK_URL?: string;

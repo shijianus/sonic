@@ -25,7 +25,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   return jsonResponse(
     {
       brand: 'Sonic',
-      ok: true,
+      ok: !revocation.unavailable,
       access: getAccessMode(env) === 'open',
       // Clearing the browser cookie always happens; only a durable repository
       // can invalidate a captured token. Report the honest state instead of
@@ -33,8 +33,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       revoked: revocation.revoked,
       serverRevoked: revocation.revoked,
       revocationDurable: revocation.durable,
-      ...(revocation.durable && !revocation.revoked ? { revocationWarning: '服务端撤销失败，已签发的访问令牌可能仍然有效' } : {}),
+      ...(revocation.unavailable ? {
+        error: { code: 'ACCESS_STORE_UNAVAILABLE', message: 'Browser cookie cleared; server-side revocation could not be confirmed' },
+      } : {}),
     },
-    { headers },
+    { status: revocation.unavailable ? 503 : 200, headers },
   );
 }

@@ -2,7 +2,7 @@
 // Engine preflight: node scripts/verify-deployed-release.mjs --engine-only https://engine.example.com
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { deploymentSourceIds, parseDeploymentOrigin, strictEdgeRateLimitReady, verifyProductionPagesBinding } from './pages-release-lib.mjs';
+import { deploymentSourceIds, durablePagesInviteReady, parseDeploymentOrigin, strictEdgeRateLimitReady, verifyProductionPagesBinding } from './pages-release-lib.mjs';
 import { validateReleaseManifest } from './release-inputs.mjs';
 
 const identityFields = ['schemaVersion', 'baseCommit', 'sourceDigest', 'releaseId', 'buildTime', 'dirty'];
@@ -148,6 +148,7 @@ async function verify() {
     check(readiness?.contentPolicy?.mode === 'strict-allowlist', 'live content policy must be strict-allowlist');
     check(sourcesMatch(readiness, expectedSources), 'Pages allowed or effective sources differ from the expected production sources');
     check(strictEdgeRateLimitReady(health?.rateLimit), 'production Pages must have the fail-closed Durable Object rate limiter');
+    if (expectedAccess === 'invite') check(durablePagesInviteReady(readiness?.access), 'production Pages must have a working durable invite store');
   }
 
   // Pages routing is case-insensitive; anonymous probes test route variants too.

@@ -41,7 +41,7 @@ const retry = () => {
       </div>
 
       <div v-else class="space-y-3" data-testid="access-status-error">
-        <p class="text-sm leading-6 text-rose-200" role="alert">
+        <p class="text-sm leading-6 text-rose-800 dark:text-rose-200" role="alert">
           {{ errorKey ? t(errorKey) : t('access.errors.server') }}
         </p>
         <button

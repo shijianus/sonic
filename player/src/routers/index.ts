@@ -50,6 +50,10 @@ const router = createRouter({
       ),
       children: [
         {
+          path: '/invite',
+          redirect: { name: 'home' },
+        },
+        {
           path: '/',
           name: 'home',
           component: responsive(

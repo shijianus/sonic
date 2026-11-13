@@ -2,10 +2,10 @@ import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import {
   buildRateLimitErrorResponse,
   evaluateGatewayRateLimit,
+  isSameOriginRequest,
 } from '../../_lib/sonic/security';
 import {
   buildAccessSessionCookie,
-  createAccessSession,
   getAccessMode,
   redeemAccessInvite,
 } from '../../_lib/sonic/access';
@@ -31,7 +31,8 @@ async function readInviteCode(request: Request): Promise<InviteCodeResult> {
       : { ok: false, status: 400, errorCode: 'READ_ERROR', message: 'Failed to read request body' };
   }
   try {
-    const payload = JSON.parse(body.text) as Record<string, unknown>;
+    const payload = JSON.parse(body.text) as Record<string, unknown> | null;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invite payload must be an object');
     return {
       ok: true,
       code: typeof payload.code === 'string' ? payload.code : typeof payload.invite === 'string' ? payload.invite : '',
@@ -44,6 +45,7 @@ async function readInviteCode(request: Request): Promise<InviteCodeResult> {
 export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
   if (request.method === 'OPTIONS') return handleOptions();
   if (request.method !== 'POST') return errorResponse('Method not allowed', 405);
+  if (!isSameOriginRequest(request)) return errorResponse('Cross-site invite redemption rejected', 403);
   // Anonymous visitors must be able to redeem an invite even with
   // SONIC_REQUIRE_AUTH=1; the anonymous bucket still rate-limits them (P1-8).
   const rl = await evaluateGatewayRateLimit(request, env, 'access-invite', { allowAnonymous: true });
@@ -78,13 +80,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     );
   }
 
-  const session = redemption.session || await createAccessSession(env);
-  if (!session) {
-    return jsonResponse(
-      { brand: 'Sonic', ok: false, error: { code: 'ACCESS_STORE_UNAVAILABLE', message: 'Access store is unavailable' } },
-      { status: 503, headers: NO_STORE_HEADERS },
-    );
-  }
+  const { session } = redemption;
 
   const headers = new Headers(NO_STORE_HEADERS);
   headers.set('Vary', 'Cookie');

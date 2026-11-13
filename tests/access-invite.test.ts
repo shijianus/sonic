@@ -83,4 +83,12 @@ describe('invite endpoint body limits', () => {
     expect(response.status).toBe(401);
     expect((await response.json())?.error?.code).toBe('INVITE_INVALID');
   });
+
+  it('does not truncate an oversized invite into a valid code', async () => {
+    const code = 'x'.repeat(256);
+    const request = new Request(url, { method: 'POST', headers: headers('203.0.113.16'), body: JSON.stringify({ code: code + 'x' }) });
+    const response = await onRequest({ request, env: { ...env, SONIC_INVITE_CODES: code } });
+    expect(response.status).toBe(401);
+    expect(response.headers.get('set-cookie')).toBeNull();
+  });
 });

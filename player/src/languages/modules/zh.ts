@@ -858,6 +858,7 @@ export default {
       required: '请输入邀请码。',
       network: '网络异常，请检查网络后重试。',
       invalid: '邀请码无效或已过期。',
+      revocation: '浏览器访问权限已清除，暂无法确认服务端撤销。',
       rateLimited: '尝试次数过多，请稍后重试。',
       server: '访问服务暂时不可用，请稍后重试。',
     },

@@ -23,11 +23,15 @@ export async function onRequest(context: {
   const startedAt = Date.now();
   const url = new URL(request.url);
   const pathname = url.pathname || '/';
+  const policyPath = canonicalPolicyPath(request);
+  const inviteMode = getAccessMode(env) === 'invite';
+  const noSharedCache = inviteMode && (policyPath === '/api' || policyPath.startsWith('/api/') ||
+    policyPath === '/proxy' || policyPath === '/palette');
   const release = getReleaseMetadata(env);
   const isStaging =
     release.environment === 'staging' ||
     release.environment === 'preview' ||
-    getAccessMode(env) === 'invite' ||
+    inviteMode ||
     Boolean(env?.SONIC_STAGING_ACCESS_TOKEN && String(env.SONIC_STAGING_ACCESS_TOKEN).trim());
 
   const finalizeResponse = (resp: Response): Response => {
@@ -35,7 +39,7 @@ export async function onRequest(context: {
     const needRobots = isStaging && !resp.headers.has('X-Robots-Tag');
     const releaseId = release.releaseId || (release.releaseCommit !== 'unknown' ? release.releaseCommit.slice(0, 12) : '');
     const needRelease = Boolean(releaseId) && !resp.headers.has('X-Sonic-Release');
-    if (!needRobots && !needRelease) {
+    if (!needRobots && !needRelease && !noSharedCache) {
       return resp;
     }
     const headers = new Headers(resp.headers);
@@ -44,6 +48,12 @@ export async function onRequest(context: {
     }
     if (needRelease) {
       headers.set('X-Sonic-Release', releaseId);
+    }
+    if (noSharedCache) {
+      // Revocation is enforced at Pages. A cached protected response must not bypass it.
+      for (const name of ['Cache-Control', 'CDN-Cache-Control', 'Cloudflare-CDN-Cache-Control']) {
+        headers.set(name, 'private, no-store');
+      }
     }
     return new Response(resp.body, {
       status: resp.status,
@@ -71,7 +81,7 @@ export async function onRequest(context: {
   // Health must remain reachable so an operator can see why a deployment is
   // failing closed. The handler reports contentPolicy/release details itself.
   // Route matching is case-insensitive on Pages, so use the canonical path.
-  const isHealthEndpoint = canonicalPolicyPath(request) === '/api/sonic/engine/health';
+  const isHealthEndpoint = policyPath === '/api/sonic/engine/health';
   if (!isHealthEndpoint && !contentPolicy.ok) {
     return finalizeResponse(jsonResponse(
       {

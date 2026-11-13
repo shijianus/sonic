@@ -9,9 +9,10 @@ const code = ref('')
 const touched = ref(false)
 const hasValue = computed(() => code.value.trim().length > 0)
 const errorKey = computed(() => (accessStore.errorKind ? `access.errors.${accessStore.errorKind}` : ''))
+const missingCode = computed(() => touched.value && !hasValue.value)
 
 const submit = async () => {
-  touched.value = true
+  touched.value = !hasValue.value
   if (!hasValue.value || accessStore.isRedeeming) return
   const submitted = code.value
   code.value = ''
@@ -42,10 +43,10 @@ const clearErrorOnInput = () => {
         autocomplete="off"
         autocapitalize="none"
         spellcheck="false"
-        :aria-invalid="touched && !hasValue"
-        :aria-describedby="errorKey || (touched && !hasValue ? 'access-code-hint' : undefined)"
+        :aria-invalid="missingCode || accessStore.errorKind === 'invalid'"
+        :aria-describedby="errorKey ? 'access-code-error' : missingCode ? 'access-code-hint' : undefined"
         :placeholder="t('access.invitePlaceholder')"
-        class="min-h-11 min-w-0 flex-1 rounded-xl border border-glass bg-button-glass px-3 text-sm text-primary outline-none transition-colors placeholder:text-primary/35 focus:border-sky-400/70 focus:ring-2 focus:ring-sky-400/20"
+        class="min-h-11 min-w-0 flex-1 rounded-xl border border-glass bg-button-glass px-3 text-sm text-primary outline-none transition-colors placeholder:text-primary/65 focus:border-sky-400/70 focus:ring-2 focus:ring-sky-400/20"
         data-testid="access-code-input"
         @input="clearErrorOnInput"
       />
@@ -59,11 +60,11 @@ const clearErrorOnInput = () => {
         <span>{{ t('access.redeem') }}</span>
       </button>
     </div>
-    <p v-if="touched && !hasValue" id="access-code-hint" class="text-xs text-amber-300" role="alert">
-      {{ t('access.errors.required') }}
-    </p>
-    <p v-else-if="errorKey" class="text-xs text-rose-300" role="alert" data-testid="access-error">
+    <p v-if="errorKey" id="access-code-error" class="text-xs text-rose-800 dark:text-rose-200" role="alert" data-testid="access-error">
       {{ t(errorKey) }}
+    </p>
+    <p v-else-if="missingCode" id="access-code-hint" class="text-xs text-amber-800 dark:text-amber-200" role="alert">
+      {{ t('access.errors.required') }}
     </p>
   </form>
 </template>

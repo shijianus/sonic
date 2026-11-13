@@ -15,6 +15,8 @@ const stableProbeNames = [
   'Cloudflare confirms the stable staging branch deployment',
   'invite entry is reachable with noindex and protected API denies anonymous access',
   'disposable invite redeems into a secure expiring session and invalid Cookie is rejected',
+  'consumed invite cannot be redeemed again and protected results are not cacheable',
+  'durable invite logout revokes the issued session and rejects its replay',
   'Pages and Engine release identities match and direct Engine health is private and durable',
   'synthetic search returns real catalog results through the staging Engine',
   'Engine-backed audio HEAD, RIFF bytes, seek ranges 206 and invalid range 416',
@@ -28,6 +30,37 @@ const namespaceId = /^[a-f0-9]{32}$/;
 export function strictEdgeRateLimitReady(rateLimit) {
   return rateLimit?.configuredBackend === 'durable-object' && rateLimit.distributedAtomic === true &&
     rateLimit.requireDistributed === true && rateLimit.failClosedOnDegrade === true && rateLimit.productionCompliant === true;
+}
+
+export function durablePagesInviteReady(access) {
+  return access?.mode === 'invite' && access.explicit === true && access.ok === true &&
+    access.backend === 'durable-object' && access.durableRequired === true && access.storeUsable === true &&
+    access.singleUse === true && access.revocable === true;
+}
+
+export function durablePagesInviteNamespace(config) {
+  const access = config?.durable_object_namespaces?.SONIC_ACCESS_BUCKETS?.namespace_id;
+  const limiter = config?.durable_object_namespaces?.SONIC_RATE_LIMIT_BUCKETS?.namespace_id;
+  const vars = config?.env_vars;
+  const required = vars?.SONIC_REQUIRE_DURABLE_INVITES;
+  const mode = vars?.SONIC_ACCESS_MODE;
+  return config?.fail_open !== true && namespaceId.test(access || '') && access !== limiter && mode?.type === 'plain_text' &&
+    String(mode.value).trim().toLowerCase() === 'invite' && required?.type === 'plain_text' &&
+    /^(?:1|true|on|yes)$/i.test(String(required.value).trim()) && vars?.SONIC_INVITE_CODES?.type === 'secret_text'
+    ? access : null;
+}
+
+export async function verifyStableStagingInviteTarget(previewEvidence, env = process.env) {
+  const account = env.CLOUDFLARE_ACCOUNT_ID?.trim();
+  const token = env.CLOUDFLARE_API_TOKEN?.trim();
+  if (!/^[a-f0-9]{32}$/i.test(account || '') || !token) throw new Error('Cloudflare project read access is required to confirm stable Staging invite bindings');
+  const project = await readCloudflarePages(`/accounts/${account}/pages/projects/sonic-staging`, token);
+  const stable = durablePagesInviteNamespace(project.deployment_configs?.production);
+  const preview = durablePagesInviteNamespace(project.deployment_configs?.preview);
+  if (project.name !== 'sonic-staging' || project.production_branch !== 'staging' || !stable ||
+      !preview || preview !== previewEvidence.stagingAccessNamespaceId || stable === preview) {
+    throw new Error('Stable Staging promotion requires a durable invite namespace separate from the verified preview');
+  }
 }
 
 export function parseDeploymentOrigin(value, { allowLoopback = false } = {}) {
@@ -116,6 +149,14 @@ export async function verifyProductionPagesBinding({ pagesOrigin, engineOrigin, 
   if (!namespaceId.test(expectedNamespace || '') || config?.durable_object_namespaces?.SONIC_RATE_LIMIT_BUCKETS?.namespace_id !== expectedNamespace) {
     throw new Error('Production Pages SONIC_RATE_LIMIT_BUCKETS Durable Object binding is missing or points at the wrong namespace');
   }
+  if (expectedAccess === 'invite') {
+    const expectedAccessNamespace = env.SONIC_PRODUCTION_ACCESS_NAMESPACE_ID?.trim();
+    if (!expectedAccessNamespace || durablePagesInviteNamespace(config) !== expectedAccessNamespace) {
+      throw new Error('Production invite Pages requires SONIC_REQUIRE_DURABLE_INVITES, a secret SONIC_INVITE_CODES and the expected SONIC_ACCESS_BUCKETS namespace');
+    }
+  } else if (value('SONIC_REQUIRE_DURABLE_INVITES') && enabledByDefault(value('SONIC_REQUIRE_DURABLE_INVITES'))) {
+    throw new Error('Production open Pages cannot require durable invites');
+  }
 }
 
 export async function verifyAcceptedStableDeployment(evidence, manifest, pagesArtifactDigest, env = process.env) {
@@ -128,6 +169,14 @@ export async function verifyAcceptedStableDeployment(evidence, manifest, pagesAr
   if (project.name !== 'sonic-staging' || project.production_branch !== 'staging' || project.canonical_deployment?.id !== evidence.deploymentId ||
       currentNamespace !== evidence.stagingRateLimitNamespaceId || currentNamespace === env.SONIC_PRODUCTION_RATE_LIMIT_NAMESPACE_ID?.trim()) {
     throw new Error('Stable Staging limiter binding changed or is shared with production');
+  }
+  const accessNamespace = durablePagesInviteNamespace(config);
+  const previewAccessNamespace = project.deployment_configs?.preview?.durable_object_namespaces?.SONIC_ACCESS_BUCKETS?.namespace_id;
+  const productionAccessNamespace = env.SONIC_ACCESS_MODE?.trim().toLowerCase() === 'invite' ? env.SONIC_PRODUCTION_ACCESS_NAMESPACE_ID?.trim() : null;
+  if (!accessNamespace || accessNamespace !== evidence.stagingAccessNamespaceId ||
+      accessNamespace === previewAccessNamespace || (productionAccessNamespace &&
+        [accessNamespace, previewAccessNamespace].includes(productionAccessNamespace))) {
+    throw new Error('Stable Staging invite binding changed or is shared with another environment');
   }
   const deployment = await readCloudflarePages(`${path}/deployments/${evidence.deploymentId}`, token);
   if (deployment.id !== evidence.deploymentId || deployment.environment !== 'production' || deployment.latest_stage?.status !== 'success' ||
@@ -153,11 +202,11 @@ export async function verifyAcceptedStableDeployment(evidence, manifest, pagesAr
       response.headers.get('x-sonic-release') !== manifest.releaseId ||
       !matches(health.release) || health.release.pagesArtifactDigest !== pagesArtifactDigest ||
       !['staging', 'preview'].includes(health.release.environment) || !strictEdgeRateLimitReady(health.rateLimit) ||
-      health.readiness?.access?.mode !== 'invite' || !sameSources(health.readiness?.contentPolicy, evidence.stagingContentPolicy.pages) ||
+      !durablePagesInviteReady(health.readiness?.access) || !sameSources(health.readiness?.contentPolicy, evidence.stagingContentPolicy.pages) ||
       health.enginePeer?.ok !== true || !matches(health.enginePeer.release) || health.enginePeer.release.environment !== 'staging' ||
       health.enginePeer.release.engineIdentityCompiled !== true ||
       !sameSources(health.enginePeer.contentPolicy, evidence.stagingContentPolicy.engine)) {
-    throw new Error('Stable Staging no longer serves the accepted artifact, source policy, invite gate and working shared limiter');
+    throw new Error('Stable Staging no longer serves the accepted artifact, source policy, durable invite gate and working shared limiter');
   }
 }
 
@@ -165,7 +214,7 @@ function isStagingPreview(value) {
   return typeof value === 'string' && /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sonic-staging\.pages\.dev$/.test(value);
 }
 
-export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest, { production = false, productionSources = [], verifyRecord } = {}) {
+export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest, { production = false, requireDurableInvites = false, productionSources = [], verifyRecord } = {}) {
   const fail = () => { throw new Error('Accepted live Staging evidence must match this exact release and Pages output'); };
   const identityMatches = value => ['baseCommit', 'releaseId', 'sourceDigest', 'buildTime', 'dirty'].every(key => value?.[key] === manifest[key]);
   if (evidence?.ok !== true || evidence.mode !== 'staging-live' ||
@@ -179,6 +228,16 @@ export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest,
   if (!Array.isArray(checks) || checks.length < 12 ||
       checks.some(check => check?.ok !== true || typeof check.name !== 'string' || !check.name.trim()) ||
       new Set(checks.map(check => check.name)).size !== checks.length) fail();
+  if (production || requireDurableInvites) {
+    if (evidence.accessGateMode !== 'invite' || evidence.inviteAccessLiveVerified !== true) {
+      throw new Error('Promotion requires live product invite access verification on Staging');
+    }
+    if (evidence.inviteSingleUseLiveVerified !== true || evidence.inviteSessionRevocationDurable !== true ||
+        !durablePagesInviteReady(evidence.stagingAccess) || !namespaceId.test(evidence.stagingAccessNamespaceId || '') ||
+        evidence.stagingAccessNamespaceId === evidence.stagingRateLimitNamespaceId) {
+      throw new Error('Promotion requires a separate durable Staging invite binding, single-use redemption and confirmed session revocation');
+    }
+  }
   if (!production) {
     if (evidence.branch === 'staging' || !isStagingPreview(evidence.base) ||
         !isStagingPreview(evidence.branchUrl) || evidence.branchUrl !== `https://${evidence.branch}.sonic-staging.pages.dev`) fail();
@@ -186,9 +245,6 @@ export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest,
   }
   if (manifest.dirty !== false || evidence.branch !== 'staging' ||
       evidence.base !== stagingOrigin || evidence.branchUrl !== stagingOrigin) fail();
-  if (evidence.accessGateMode !== 'invite' || evidence.inviteAccessLiveVerified !== true) {
-    throw new Error('Production requires live product invite access verification on stable Staging');
-  }
   if (!namespaceId.test(evidence.stagingRateLimitNamespaceId || '') || !strictEdgeRateLimitReady(evidence.stagingRateLimit) ||
       stableProbeNames.some(name => !checks.some(check => check.name === name)) ||
       !/^sha256:[a-f0-9]{64}$/.test(evidence.stagingEngineImageId || '')) {

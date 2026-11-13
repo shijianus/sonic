@@ -3,7 +3,7 @@ import { httpGet, httpPost } from '@/utils/http'
 
 export type AccessMode = 'open' | 'invite'
 export type AccessStatusKind = 'loading' | 'open' | 'granted' | 'required' | 'error'
-export type AccessErrorKind = 'network' | 'invalid' | 'rateLimited' | 'server' | null
+export type AccessErrorKind = 'network' | 'invalid' | 'rateLimited' | 'server' | 'revocation' | null
 
 export interface AccessStatusResponse {
   ok?: boolean
@@ -242,6 +242,13 @@ export const useAccessStore = defineStore('access', {
       } catch (error) {
         this.errorKind = errorKindOf(error)
         this.errorMessage = error instanceof Error ? error.message : ''
+        if (this.mode === 'invite' && errorCodeOf(error) === 'ACCESS_STORE_UNAVAILABLE') {
+          // The server cleared this browser's Cookie but could not confirm remote revocation.
+          this.granted = false
+          this.status = 'required'
+          this.errorKind = 'revocation'
+          this.lastCheckedAt = Date.now()
+        }
         return false
       } finally {
         this.isLoading = false
