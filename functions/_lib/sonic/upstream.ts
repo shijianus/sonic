@@ -106,16 +106,16 @@ function chartCatalogUnavailable(): Response {
 
 function topSongsResponse(entries: unknown[], fromSidecar = false): Response {
   const songs = entries.map((entry) => {
-    const song = entry as { duration?: unknown; dt?: unknown };
-    const rawDuration = Number(song.duration);
-    // Unitless duration follows the player's chart convention: values under an
-    // hour are seconds and larger values are milliseconds. Explicit dt is ms.
-    const duration = Number.isFinite(rawDuration) && rawDuration > 0
-      ? (rawDuration < 3600 ? rawDuration : rawDuration / 1000)
-      : 0;
-    const rawDt = Number(song.dt);
-    const dt = Number.isFinite(rawDt) && rawDt > 0 ? rawDt : Math.round(duration * 1000);
-    return { ...song, duration: duration || Math.floor(dt / 1000), dt };
+    const song = entry as { duration?: unknown; dt?: unknown; durationMs?: unknown };
+    const positive = (value: unknown) => {
+      const number = typeof value === 'number' || typeof value === 'string' ? Number(value) : 0;
+      return Number.isFinite(number) && number > 0 ? number : 0;
+    };
+    const legacy = positive(song.duration);
+    // The legacy field is unitless. Keep compatibility for older adapters;
+    // dt/durationMs take precedence and always carry milliseconds.
+    const durationMs = Math.round(positive(song.dt) || positive(song.durationMs) || (legacy <= 3600 ? legacy * 1000 : legacy));
+    return { ...song, duration: durationMs / 1000, dt: durationMs, durationMs };
   });
   return jsonResponse({ code: 200, brand: 'Sonic', data: desensitizeData(songs) }, {
     headers: fromSidecar

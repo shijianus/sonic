@@ -421,7 +421,7 @@ describe('new-song regions', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [input, init] = fetchMock.mock.calls[0];
     expect(input).toBe(providerUrl);
-    expect(init).toMatchObject({ method: 'POST', redirect: 'error' });
+    expect(init).toMatchObject({ method: 'POST', redirect: 'manual' });
     const body = new URLSearchParams(String(init.body));
     // RSA_NO_PADDING output for the reversed fixture key and sidecar 4.41.1's public key.
     expect(body.get('encSecKey')).toBe('d15a1683c992095d0c234c19966605c5c5964911268bbeda8cb8d08d834913e59d53b32358903a121b5fca784c1f5ae44951fd02524df58ecc98e52cc7cf8689b42c2e93ddf05b0592512d87f5960467e2f086c018849d76014d323500e30f13ef4cafbb0cf5a66731a3f1776c75ca35d0062dac70a3e33245afabcf47938487');
@@ -453,14 +453,20 @@ describe('new-song regions', () => {
       { id: 2, duration: 180500 },
       { id: 3, dt: 180500 },
       { id: 4, duration: 180, dt: 180500 },
+      { id: 5, duration: 3600 },
+      { id: 6, dt: 1500 },
+      { id: 7 },
     ] })));
     const response = await request(query, env);
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ data: [
       { id: 1, duration: 180.5, dt: 180500 },
       { id: 2, duration: 180.5, dt: 180500 },
-      { id: 3, duration: 180, dt: 180500 },
-      { id: 4, duration: 180, dt: 180500 },
+      { id: 3, duration: 180.5, dt: 180500 },
+      { id: 4, duration: 180.5, dt: 180500 },
+      { id: 5, duration: 3600, dt: 3600000, durationMs: 3600000 },
+      { id: 6, duration: 1.5, dt: 1500, durationMs: 1500 },
+      { id: 7, duration: 0, dt: 0, durationMs: 0 },
     ] });
   });
 

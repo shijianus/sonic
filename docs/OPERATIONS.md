@@ -126,9 +126,9 @@ live 需要 `SONIC_ENGINE_SECRET`（≥32 字符），staging 可提供 `SONIC_S
 ## 6. 限流与熔断
 
 - 匿名：默认 240 次/分钟/IP；有效 API Key：默认 600 次/分钟/账户（按邮箱哈希）；引擎调用：更高额度。
-- 优先使用 Cloudflare 原生 `RATE_LIMITER` binding（原子、跨 isolate）。未绑定时可退到 KV（最终一致、非原子），再退到进程内固定窗口（每 isolate，最多 4096 个桶）。
-- `X-RateLimit-Limit` 在原生 binding 模式下展示的是配置值，不一定等于 binding 实际阈值；以 binding 配置为准。
-- 多实例/多 isolate 部署若未绑定原生限流器，**不能**宣称严格全局限流。
+- 生产 Pages 使用 `SONIC_RATE_LIMIT_BUCKETS`。它把同一路由、同一身份档位的请求送到同一 Durable Object，以 SQLite 持久化每分钟计数，缺绑定或调用失败返回 503，超出配额返回 429。
+- 按 [发布清单](release/RELEASE-CHECKLIST.md#pages-生产提升) 分隔预览、稳定 Staging 与生产命名空间。生产请求按可信 IP 或已核验的账号哈希归桶。
+- Linux 单进程 Engine 可使用有界进程内计数。Workers 原生限流、KV 与 isolate 内存计数仅适合非严格模式。
 - 熔断：连续 3 次失败或收到 521/522/523/524/530 立即 `OPEN`；冷却 30 秒后进入 `HALF_OPEN`，只允许一个探针；成功回 `CLOSED`，失败回 `OPEN`。当前不做自动重试，避免放大上游压力。
 - 熔断状态可在健康端点 `circuit` 字段与响应头 `X-Sonic-Circuit` 观察。
 
@@ -229,7 +229,7 @@ docker compose logs -f sonic-engine
 ## 12. 已知限制与残余风险（必须如实告知）
 
 - **DNS rebinding**：Cloudflare Workers 无法把 DNS 解析结果绑定到实际连接；当前依赖 HTTPS + 受控域名白名单。Node 引擎在每次请求前解析并校验 DNS，但 `fetch` 会再次解析，仍存在理论上的 TOCTOU；白名单域名不由攻击者控制，风险受限，但**不能宣称已完全消除**。
-- **限流一致性**：未绑定 Cloudflare 原生 `RATE_LIMITER` 时，KV 与内存限流不具备严格全局原子性。
+- **限流一致性**：跨 Pages 实例的严格配额依赖同一 `SONIC_RATE_LIMIT_BUCKETS` 命名空间，KV 与 isolate 内存不具备这一保证。
 - **OAuth state 重放缓存**：单 isolate/进程内有效；跨 isolate 仍依赖 OAuth 授权码一次性语义。
 - **令牌撤销**：可选 KV 实时撤销已实现（30 秒跨 isolate 传播，KV 读失败默认 fail-closed）；未配置 KV 时仍依赖环境变量 + 重新部署，已签发 Key 无法在部署间隔内即时失效。
 - **浏览器会话**：`sonic_session` Cookie 内含签名 API Key；Cookie 被盗等同于 Key 被盗。`GET /api/auth/key` 会按需把 Key 返回给同源 JS，XSS 仍可读取（已有前端 XSS 回归测试，但不等于绝对免疫）。

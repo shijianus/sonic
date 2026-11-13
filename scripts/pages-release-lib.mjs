@@ -3,13 +3,32 @@
 import { createHash } from 'node:crypto';
 import { cpSync, existsSync, lstatSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { copyReleaseInputs, excludedReleasePath, verifyRelease } from './release-inputs.mjs';
 
 const stagingOrigin = 'https://sonic-staging.pages.dev';
 const productionChecks = [
   'oauthLoginAndRevocation', 'authorizedMediaPlaybackAndSeek', 'lyricsSync', 'imageAndSqliteRollback',
+  'capacityAndAlertDelivery', 'realDevicesAndAccessibility', 'releaseOwnerApproval',
 ];
+const stableProbeNames = [
+  'Cloudflare confirms the stable staging branch deployment',
+  'invite entry is reachable with noindex and protected API denies anonymous access',
+  'disposable invite redeems into a secure expiring session and invalid Cookie is rejected',
+  'Pages and Engine release identities match and direct Engine health is private and durable',
+  'synthetic search returns real catalog results through the staging Engine',
+  'Engine-backed audio HEAD, RIFF bytes, seek ranges 206 and invalid range 416',
+  'anonymous consent, durable isolation, deduplication and erasure epoch verified through Pages and Engine',
+  'temporary live-test subjects deleted and absence confirmed directly on Engine',
+  'authenticated subject parity, erasure epoch and invalid Engine signature rejection',
+];
+const sha256 = /^[a-f0-9]{64}$/;
+const namespaceId = /^[a-f0-9]{32}$/;
+
+export function strictEdgeRateLimitReady(rateLimit) {
+  return rateLimit?.configuredBackend === 'durable-object' && rateLimit.distributedAtomic === true &&
+    rateLimit.requireDistributed === true && rateLimit.failClosedOnDegrade === true && rateLimit.productionCompliant === true;
+}
 
 export function parseDeploymentOrigin(value, { allowLoopback = false } = {}) {
   let url;
@@ -69,7 +88,8 @@ export async function verifyProductionPagesBinding({ pagesOrigin, engineOrigin, 
     }
   }
 
-  const variables = configured.deployment_configs?.production?.env_vars;
+  const config = configured.deployment_configs?.production;
+  const variables = config?.env_vars;
   const value = key => variables?.[key]?.value;
   const configuredEngine = value('SONIC_LOCAL_ENGINE_URL');
   if (!configuredEngine || parseDeploymentOrigin(configuredEngine) !== engineOrigin || !enabledByDefault(value('SONIC_ENABLE_LOCAL_ENGINE'))) {
@@ -92,13 +112,60 @@ export async function verifyProductionPagesBinding({ pagesOrigin, engineOrigin, 
   if (!enabledByDefault(value('SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT')) || !enabledByDefault(value('SONIC_RATE_LIMIT_FAIL_CLOSED'))) {
     throw new Error('Production Pages rate-limit policy must require the distributed limiter and fail closed');
   }
+  const expectedNamespace = env.SONIC_PRODUCTION_RATE_LIMIT_NAMESPACE_ID?.trim();
+  if (!namespaceId.test(expectedNamespace || '') || config?.durable_object_namespaces?.SONIC_RATE_LIMIT_BUCKETS?.namespace_id !== expectedNamespace) {
+    throw new Error('Production Pages SONIC_RATE_LIMIT_BUCKETS Durable Object binding is missing or points at the wrong namespace');
+  }
+}
+
+export async function verifyAcceptedStableDeployment(evidence, manifest, pagesArtifactDigest, env = process.env) {
+  const account = env.CLOUDFLARE_ACCOUNT_ID?.trim();
+  const token = env.CLOUDFLARE_API_TOKEN?.trim();
+  const path = `/accounts/${account}/pages/projects/sonic-staging`;
+  const project = await readCloudflarePages(path, token);
+  const config = project.deployment_configs?.production;
+  const currentNamespace = config?.durable_object_namespaces?.SONIC_RATE_LIMIT_BUCKETS?.namespace_id;
+  if (project.name !== 'sonic-staging' || project.production_branch !== 'staging' || project.canonical_deployment?.id !== evidence.deploymentId ||
+      currentNamespace !== evidence.stagingRateLimitNamespaceId || currentNamespace === env.SONIC_PRODUCTION_RATE_LIMIT_NAMESPACE_ID?.trim()) {
+    throw new Error('Stable Staging limiter binding changed or is shared with production');
+  }
+  const deployment = await readCloudflarePages(`${path}/deployments/${evidence.deploymentId}`, token);
+  if (deployment.id !== evidence.deploymentId || deployment.environment !== 'production' || deployment.latest_stage?.status !== 'success' ||
+      deployment.deployment_trigger?.metadata?.branch !== 'staging' || deployment.deployment_trigger?.metadata?.commit_hash !== manifest.baseCommit ||
+      deployment.deployment_trigger.metadata.commit_dirty === true) {
+    throw new Error('Cloudflare does not confirm the accepted Staging deployment');
+  }
+  const stagingKey = env.SONIC_STAGING_ENGINE_SECRET?.trim();
+  if (!stagingKey || stagingKey.length < 32 || stagingKey === env.SONIC_ENGINE_SECRET?.trim()) {
+    throw new Error('A separate SONIC_STAGING_ENGINE_SECRET is required to recheck accepted Staging');
+  }
+  const response = await fetch(`${stagingOrigin}/api/sonic/engine/health?verifyEngine=1`, {
+    headers: { 'X-Sonic-Engine-Key': stagingKey, 'Cache-Control': 'no-cache' },
+    redirect: 'error', signal: AbortSignal.timeout(15000),
+  });
+  const health = await response.json().catch(() => null);
+  const matches = release => release?.releaseCommit === manifest.baseCommit && release.releaseId === manifest.releaseId &&
+    release.sourceDigest === manifest.sourceDigest && release.buildTime === manifest.buildTime && release.dirty === false;
+  const sameSources = (actual, recorded) => actual?.ok === true && actual.mode === 'strict-allowlist' &&
+    ['allowedSources', 'effectiveSources'].every(field => Array.isArray(actual[field]) &&
+      JSON.stringify([...actual[field]].sort()) === JSON.stringify([...recorded[field]].sort()));
+  if (!response.ok || health?.ok !== true || health.runtime !== 'cf-pages' ||
+      response.headers.get('x-sonic-release') !== manifest.releaseId ||
+      !matches(health.release) || health.release.pagesArtifactDigest !== pagesArtifactDigest ||
+      !['staging', 'preview'].includes(health.release.environment) || !strictEdgeRateLimitReady(health.rateLimit) ||
+      health.readiness?.access?.mode !== 'invite' || !sameSources(health.readiness?.contentPolicy, evidence.stagingContentPolicy.pages) ||
+      health.enginePeer?.ok !== true || !matches(health.enginePeer.release) || health.enginePeer.release.environment !== 'staging' ||
+      health.enginePeer.release.engineIdentityCompiled !== true ||
+      !sameSources(health.enginePeer.contentPolicy, evidence.stagingContentPolicy.engine)) {
+    throw new Error('Stable Staging no longer serves the accepted artifact, source policy, invite gate and working shared limiter');
+  }
 }
 
 function isStagingPreview(value) {
   return typeof value === 'string' && /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.sonic-staging\.pages\.dev$/.test(value);
 }
 
-export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest, { production = false, productionSources = [] } = {}) {
+export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest, { production = false, productionSources = [], verifyRecord } = {}) {
   const fail = () => { throw new Error('Accepted live Staging evidence must match this exact release and Pages output'); };
   const identityMatches = value => ['baseCommit', 'releaseId', 'sourceDigest', 'buildTime', 'dirty'].every(key => value?.[key] === manifest[key]);
   if (evidence?.ok !== true || evidence.mode !== 'staging-live' ||
@@ -122,11 +189,19 @@ export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest,
   if (evidence.accessGateMode !== 'invite' || evidence.inviteAccessLiveVerified !== true) {
     throw new Error('Production requires live product invite access verification on stable Staging');
   }
-  for (const key of productionChecks) {
-    const check = evidence.productionChecks?.[key];
-    if (check?.ok !== true || typeof check.evidence !== 'string' || !check.evidence.trim()) {
-      throw new Error(`Production requires passing Staging evidence for ${key}`);
+  if (!namespaceId.test(evidence.stagingRateLimitNamespaceId || '') || !strictEdgeRateLimitReady(evidence.stagingRateLimit) ||
+      stableProbeNames.some(name => !checks.some(check => check.name === name)) ||
+      !/^sha256:[a-f0-9]{64}$/.test(evidence.stagingEngineImageId || '')) {
+    throw new Error('Production requires the complete stable Staging probes, Engine image ID and a working shared limiter');
+  }
+  const checkedRecord = (check, name) => {
+    if (check?.ok !== true || typeof check.file !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,115}\.json$/.test(check.file) ||
+        !sha256.test(check.sha256 || '') || typeof verifyRecord !== 'function' || !verifyRecord(check, name, evidence)) {
+      throw new Error(`Production requires passing Staging evidence for ${name}`);
     }
+  };
+  for (const key of productionChecks) {
+    checkedRecord(evidence.productionChecks?.[key], key);
   }
   const realSources = productionSources.filter(source => source !== 'synthetic');
   if (!realSources.length) throw new Error('Production requires a non-synthetic source in SONIC_ALLOWED_SOURCES');
@@ -140,10 +215,7 @@ export function assertStagingAcceptance(evidence, manifest, pagesArtifactDigest,
     if (missing.length) throw new Error(`Production sources were not enabled on Staging ${runtime}: ${missing.join(', ')}`);
   }
   for (const source of realSources) {
-    const check = evidence.productionChecks?.sourceAcceptance?.[source];
-    if (check?.ok !== true || typeof check.evidence !== 'string' || !check.evidence.trim()) {
-      throw new Error(`Production requires passing Staging source evidence for ${source}`);
-    }
+    checkedRecord(evidence.productionChecks?.sourceAcceptance?.[source], `source:${source}`);
   }
 }
 
@@ -151,7 +223,25 @@ export function readStagingAcceptance(path, manifest, pagesArtifactDigest, optio
   let evidence;
   try { evidence = JSON.parse(readFileSync(path, 'utf8')); }
   catch { throw new Error('Unable to read accepted live Staging evidence as JSON'); }
-  assertStagingAcceptance(evidence, manifest, pagesArtifactDigest, options);
+  const verifyRecord = ({ file, sha256: expectedHash }, name, accepted) => {
+    try {
+      const filename = resolve(dirname(resolve(path)), file);
+      if (filename === resolve(path)) return false;
+      const stat = lstatSync(filename);
+      if (!stat.isFile() || stat.size > 256 * 1024) return false;
+      const raw = readFileSync(filename);
+      if (createHash('sha256').update(raw).digest('hex') !== expectedHash) return false;
+      const record = JSON.parse(raw);
+      return record.ok === true && record.checkId === name && record.environment === 'staging' &&
+        typeof record.reviewer === 'string' && Boolean(record.reviewer.trim()) &&
+        Number.isFinite(Date.parse(record.checkedAt)) && Date.parse(record.checkedAt) >= Date.parse(manifest.buildTime) &&
+        typeof record.result === 'string' && Boolean(record.result.trim()) &&
+        ['baseCommit', 'releaseId', 'sourceDigest', 'buildTime', 'pagesArtifactDigest', 'deploymentId', 'stagingEngineImageId']
+          .every(field => record[field] === accepted[field]);
+    } catch { return false; }
+  };
+  assertStagingAcceptance(evidence, manifest, pagesArtifactDigest, { ...options, verifyRecord });
+  return evidence;
 }
 
 function digestPagesOutput(output) {

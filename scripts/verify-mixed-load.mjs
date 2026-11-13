@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,6 +10,10 @@ import { verifyLiveObservability } from './verify-observability-and-alerts.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifest = JSON.parse(readFileSync(join(root, 'dist/release.json'), 'utf8'));
+const workers = Number(process.env.SONIC_LOAD_WORKERS || 8);
+const requestsPerWorker = Number(process.env.SONIC_LOAD_REQUESTS_PER_WORKER || 75);
+assert.ok(Number.isInteger(workers) && workers >= 1 && workers <= 32);
+assert.ok(Number.isInteger(requestsPerWorker) && requestsPerWorker >= 10 && requestsPerWorker <= 500 && requestsPerWorker % 5 === 0);
 const work = mkdtempSync(join(tmpdir(), 'sonic-mixed-load-'));
 const serviceKey = randomBytes(32).toString('hex');
 const identityKey = randomBytes(32).toString('hex');
@@ -85,9 +89,8 @@ try {
   const initial = await waitReady();
   assert.equal(initial.readiness.identity.ok, true);
   assert.equal(initial.recommendEngine.storageKind, 'sqlite');
-  const subjects = Array.from({ length: 8 }, (_, i) => 'anon_' + createHash('sha256').update('mixed-load-' + i).digest('hex').slice(0, 24));
+  const subjects = Array.from({ length: workers }, (_, i) => 'anon_' + createHash('sha256').update('mixed-load-' + i).digest('hex').slice(0, 24));
   const startedAt = performance.now();
-  const requestsPerWorker = 75;
   await Promise.all(subjects.map(async (subject, worker) => {
     for (let i = 0; i < requestsPerWorker; i++) {
       const start = performance.now();
@@ -133,10 +136,10 @@ try {
   assert.ok(latency.p95Ms < 2000, 'Local bounded mixed workload exceeded 2s p95 gate');
   for (const subject of subjects) {
     const profile = await (await request('/api/sonic/events', {}, subject)).json();
-    assert.equal(profile.data.totalEvents, 15);
+    assert.equal(profile.data.totalEvents, requestsPerWorker / 5);
     const cleared = await (await request('/api/sonic/events', { method: 'DELETE' }, subject)).json();
     assert.equal(cleared.data.cleared, true);
-    assert.equal(cleared.data.removedEvents, 15);
+    assert.equal(cleared.data.removedEvents, requestsPerWorker / 5);
   }
   const finalHealth = await (await request('/api/sonic/engine/health')).json();
   assert.equal(finalHealth.ok, true);
@@ -161,4 +164,7 @@ try {
   for (const secret of [serviceKey, identityKey, userKey]) log = log.replaceAll(secret, '[redacted]');
   console.error(JSON.stringify({ ok: false, checkedRequests: outcomes.length, error: error.message, engineOutput: log }));
   process.exitCode = 1;
-} finally { await stop(); }
+} finally {
+  await stop();
+  rmSync(work, { recursive: true, force: true });
+}

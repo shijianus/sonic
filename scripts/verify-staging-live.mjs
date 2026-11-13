@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { strictEdgeRateLimitReady } from './pages-release-lib.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const projectName = process.env.CF_PAGES_PROJECT || 'sonic-staging';
@@ -91,7 +92,9 @@ async function projectMetadata(stable = false) {
   const preview = project.deployment_configs?.preview;
   const production = project.deployment_configs?.production;
   ensure(preview && production, 'STAGING_ENVIRONMENTS_MISSING');
-  const variables = (stable ? production : preview).env_vars || {};
+  const selected = stable ? production : preview;
+  const variables = selected.env_vars || {};
+  const stagingRateLimitNamespaceId = selected.durable_object_namespaces?.SONIC_RATE_LIMIT_BUCKETS?.namespace_id;
   const accessModeBinding = variables.SONIC_ACCESS_MODE;
   ensure(!accessModeBinding || accessModeBinding.type === 'plain_text', 'STAGING_ACCESS_MODE_UNVERIFIABLE');
   const declaredAccessMode = String(accessModeBinding?.value || '').trim().toLowerCase();
@@ -117,6 +120,7 @@ async function projectMetadata(stable = false) {
     publicStagingUrl: 'https://sonic-staging.pages.dev',
     engineUrl: engine.toString().replace(/\/$/, ''),
     accessGateMode,
+    stagingRateLimitNamespaceId,
     variableNamesEqual: JSON.stringify(names) === JSON.stringify(existingNames),
     variableBindings: Object.fromEntries(allNames.map(name => [name, {
       previewType: variables[name]?.type || null,
@@ -180,7 +184,9 @@ try
   if len(identity)<32 or identity!=running.get('SONIC_ENGINE_IDENTITY_SECRET') or identity in [values[k] for k in keys]:raise ValueError()
   values['SONIC_ENGINE_IDENTITY_SECRET']=identity
  elif running.get('SONIC_ENGINE_IDENTITY_SECRET'):raise ValueError()
- print(json.dumps({'ok':True,'credentials':{key:values[key] for key in keys+['SONIC_ENGINE_IDENTITY_SECRET'] if values.get(key)},'presence':{key:bool(values.get(key)) for key in keys+['SONIC_ENGINE_IDENTITY_SECRET']},'savedMatchesRunning':True,'mode':'0600'}))
+ image_id=container['Image']
+ if not re.fullmatch(r'sha256:[a-f0-9]{64}',image_id):raise ValueError()
+ print(json.dumps({'ok':True,'imageId':image_id,'credentials':{key:values[key] for key in keys+['SONIC_ENGINE_IDENTITY_SECRET'] if values.get(key)},'presence':{key:bool(values.get(key)) for key in keys+['SONIC_ENGINE_IDENTITY_SECRET']},'savedMatchesRunning':True,'mode':'0600'}))
 except Exception:
  print(json.dumps({'ok':False}))
  raise SystemExit(1)
@@ -391,6 +397,7 @@ export async function verifyRelease(base, engine, headers, secrets, manifest) {
   passed('Pages and Engine release identities match and direct Engine health is private and durable');
   return {
     pagesArtifactDigest,
+    stagingRateLimit: edgeHealth.rateLimit,
     stagingContentPolicy: { pages: contentPolicyEvidence(edgeHealth), engine: contentPolicyEvidence(engineHealth) },
     engineStorage: engineHealth.recommendEngine.storageKind,
     engineErasureRecoveryVersion: engineHealth.recommendEngine.erasureRecoveryVersion,
@@ -676,6 +683,8 @@ async function main() {
     const target = await selectDeployment(project.apiPath, manifest, values.url, Boolean(values.stable));
     const verifyCandidate = async headers => {
       const pairedRelease = await verifyRelease(target.base, project.metadata.engineUrl, headers, secrets, manifest);
+      if (values.stable) ensure(/^[a-f0-9]{32}$/.test(project.metadata.stagingRateLimitNamespaceId || '') &&
+        strictEdgeRateLimitReady(pairedRelease.stagingRateLimit), 'STABLE_STAGING_SHARED_RATE_LIMITER_UNVERIFIED');
       await verifySearchAndMedia(target.base, headers, manifest);
       ensure(project.metadata.independentIdentityBindingPresent && secrets.SONIC_ENGINE_IDENTITY_SECRET, 'INDEPENDENT_IDENTITY_NOT_DEPLOYED');
       await verifyEvents(target.base, project.metadata.engineUrl, headers, secrets);
@@ -696,6 +705,7 @@ async function main() {
     } else {
       console.log(JSON.stringify({
         ok: true, mode: 'staging-live', ...target, ...manifest, ...pairedRelease,
+        stagingEngineImageId: saved.imageId, stagingRateLimitNamespaceId: project.metadata.stagingRateLimitNamespaceId,
         accessGateMode, inviteAccessLiveVerified, inviteSessionRevocationDurable,
         independentIdentityBindingPresent: project.metadata.independentIdentityBindingPresent,
         authenticatedIdentityAssertionLiveVerified: true, eventEpochLiveVerified: true, oauthLoginVerified: false,

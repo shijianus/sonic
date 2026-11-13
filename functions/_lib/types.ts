@@ -21,6 +21,7 @@ export interface AppEnv {
   KV?: any;
   RATE_LIMIT_KV?: any;
   RATE_LIMITER?: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  SONIC_RATE_LIMIT_BUCKETS?: { getByName(name: string): { fetch(input: string, init?: RequestInit): Promise<Response> } };
   DB?: any;
   // Linux VPS Local Engine & Inter-Service Auth
   SONIC_RUNTIME?: 'cf-pages' | 'linux-engine' | string;

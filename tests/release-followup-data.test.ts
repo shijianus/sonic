@@ -526,7 +526,7 @@ describe('explicit optional Gorse erasure acknowledgments', () => {
     expect(result).toMatchObject({ cleared: true, external: { gorse: 'deleted' } });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(fetch.mock.calls[0][0]).toBe(`https://gorse.test/api/user/${encodeURIComponent(who.subjectKey!)}`);
-    expect(fetch.mock.calls[0][1]).toMatchObject({ method: 'DELETE', redirect: 'error', signal: expect.any(AbortSignal) });
+    expect(fetch.mock.calls[0][1]).toMatchObject({ method: 'DELETE', redirect: 'manual', signal: expect.any(AbortSignal) });
   });
 
   it('drains active feedback, suppresses queued/late callbacks, and shares concurrent deletion acknowledgment', async () => {

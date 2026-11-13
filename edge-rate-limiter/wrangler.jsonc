@@ -1,0 +1,9 @@
+{
+  "$schema": "../node_modules/wrangler/config-schema.json",
+  "name": "sonic-rate-limiter",
+  "main": "index.mjs",
+  "compatibility_date": "2026-11-10",
+  "workers_dev": false,
+  "preview_urls": false,
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SonicRateBucket"] }]
+}

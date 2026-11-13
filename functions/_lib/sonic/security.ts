@@ -418,33 +418,86 @@ export interface RateLimitDecision {
 }
 
 function requireDistributedRateLimit(env?: AppEnv): boolean {
-  // Production Pages deployments must bind the native atomic limiter. Without
-  // it, per-isolate memory limits are trivially bypassed by replica fan-out.
-  const productionEdge = isCloudflarePages(env) && isProductionEnvironment(env) && env?.SONIC_RUNTIME !== 'linux-engine';
-  return isEnvEnabled(env?.SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT, productionEdge);
+  return isProductionEdge(env) || isEnvEnabled(env?.SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT, false);
+}
+
+function isProductionEdge(env?: AppEnv): boolean {
+  return (isCloudflarePages(env) || env?.SONIC_RUNTIME === 'cf-pages') && isProductionEnvironment(env) && env?.SONIC_RUNTIME !== 'linux-engine';
+}
+
+function failClosedRateLimit(env?: AppEnv): boolean {
+  return isProductionEdge(env) || isEnvEnabled(env?.SONIC_RATE_LIMIT_FAIL_CLOSED, true);
+}
+
+function getRateBucketsBinding(env?: AppEnv) {
+  const binding = env?.SONIC_RATE_LIMIT_BUCKETS;
+  return typeof binding?.getByName === 'function' ? binding : undefined;
+}
+
+async function evaluateSharedRateLimit(
+  bucketKey: string, tier: RateLimitDecision['tier'], limit: number, scope: string, env?: AppEnv,
+): Promise<RateLimitDecision | undefined> {
+  const binding = getRateBucketsBinding(env);
+  if (binding) {
+    try {
+      const name = sha256Hex(`sonic-rate-v1:${bucketKey}`);
+      const response = await binding.getByName(name).fetch('https://sonic-rate.internal/v1/consume', {
+        method: 'POST', headers: { 'X-Sonic-Bucket-Limit': String(limit) }, signal: AbortSignal.timeout(1500),
+      });
+      if (!response.ok) {
+        await response.body?.cancel();
+        throw new Error('Shared limiter rejected the request');
+      }
+      const result = await response.json() as { allowed: boolean; remaining: number; resetSec: number };
+      if (typeof result?.allowed !== 'boolean' || !Number.isInteger(result.remaining) || result.remaining < 0 ||
+          result.remaining >= limit || (!result.allowed && result.remaining !== 0) ||
+          !Number.isInteger(result.resetSec) || result.resetSec < 1 || result.resetSec > 60) {
+        throw new Error('Invalid shared limiter decision');
+      }
+      recordRateLimitMetric({ allowed: result.allowed, backend: 'durable-object', degraded: false, scope, env });
+      return { ...result, tier, limit, backend: 'durable-object', degraded: false };
+    } catch {
+      // An uncertain result is never retried against another shared counter.
+    }
+  } else if (!requireDistributedRateLimit(env) && env?.RATE_LIMITER) {
+    try {
+      const { success } = await env.RATE_LIMITER.limit({ key: bucketKey });
+      if (typeof success !== 'boolean') throw new Error('Invalid native limiter decision');
+      recordRateLimitMetric({ allowed: success, backend: 'native', degraded: true, scope, env });
+      return { allowed: success, tier, limit, remaining: success ? limit - 1 : 0, resetSec: 60, backend: 'native', degraded: true };
+    } catch {
+      // Native Workers limits are only suitable as a best-effort fallback.
+    }
+  }
+
+  if (env?.SONIC_RUNTIME !== 'linux-engine' && requireDistributedRateLimit(env) && failClosedRateLimit(env)) {
+    recordRateLimitMetric({ allowed: false, backend: 'fail-closed', degraded: true, isFailClosed: true, scope, env });
+    return { allowed: false, tier, limit, remaining: 0, resetSec: 60, backend: 'fail-closed', degraded: true };
+  }
 }
 
 export function getRateLimitConfigStatus(env?: AppEnv): {
-  configuredBackend: 'native' | 'kv' | 'memory';
+  configuredBackend: 'durable-object' | 'native' | 'kv' | 'memory';
   distributedAtomic: boolean;
   requireDistributed: boolean;
   failClosedOnDegrade: boolean;
   productionCompliant: boolean;
 } {
-  const hasNative = Boolean((env as any)?.RATE_LIMITER && typeof (env as any).RATE_LIMITER.limit === 'function');
+  const hasDurable = Boolean(getRateBucketsBinding(env));
+  const hasNative = !requireDistributedRateLimit(env) && typeof env?.RATE_LIMITER?.limit === 'function';
   const kv = env?.RATE_LIMIT_KV || env?.KV;
   const hasKv = Boolean(kv && typeof kv.get === 'function' && typeof kv.put === 'function');
-  const configuredBackend = hasNative ? 'native' : hasKv ? 'kv' : 'memory';
+  const configuredBackend = hasDurable ? 'durable-object' : hasNative ? 'native' : hasKv ? 'kv' : 'memory';
   const isSingleNodeEngine = env?.SONIC_RUNTIME === 'linux-engine';
-  const distributedAtomic = hasNative || isSingleNodeEngine;
+  const distributedAtomic = hasDurable;
   const requireDistributed = requireDistributedRateLimit(env);
-  const failClosedOnDegrade = isEnvEnabled(env?.SONIC_RATE_LIMIT_FAIL_CLOSED, true);
+  const failClosedOnDegrade = failClosedRateLimit(env);
   return {
     configuredBackend,
     distributedAtomic,
     requireDistributed,
     failClosedOnDegrade,
-    productionCompliant: distributedAtomic,
+    productionCompliant: (hasDurable && failClosedOnDegrade) || (isSingleNodeEngine && configuredBackend === 'memory'),
   };
 }
 
@@ -509,65 +562,9 @@ export async function evaluateGatewayRateLimit(
 
   const bucketKey = `${scope}:${subject}`;
 
-  // Preferred: Cloudflare native Rate Limiting binding (atomic and shared across isolates).
-  const nativeLimiter = (env as any)?.RATE_LIMITER;
-  if (nativeLimiter && typeof nativeLimiter.limit === 'function') {
-    try {
-      const outcome = await nativeLimiter.limit({ key: bucketKey });
-      if (!outcome || typeof outcome.success !== 'boolean') {
-        throw new Error('RATE_LIMITER returned an invalid result');
-      }
-      recordRateLimitMetric({
-        allowed: outcome.success,
-        backend: 'native',
-        degraded: false,
-        scope,
-        env,
-      });
-      return {
-        allowed: outcome.success,
-        tier,
-        limit,
-        remaining: outcome.success ? Math.max(0, limit - 1) : 0,
-        resetSec: 60,
-        backend: 'native',
-        degraded: false,
-      };
-    } catch (nativeErr: any) {
-      console.warn(
-        '[Sonic RateLimit] Native RATE_LIMITER failed, evaluating policy:',
-        redactSensitiveString(nativeErr?.message || nativeErr),
-      );
-    }
-  }
+  const shared = await evaluateSharedRateLimit(bucketKey, tier, limit, scope, env);
+  if (shared) return shared;
 
-  // Strict production guard: never silently degrade on multi-isolate edge when native limiter is required
-  if (
-    !isSingleNodeEngine &&
-    requireDistributedRateLimit(env) &&
-    isEnvEnabled(env?.SONIC_RATE_LIMIT_FAIL_CLOSED, true)
-  ) {
-    recordRateLimitMetric({
-      allowed: false,
-      backend: 'fail-closed',
-      degraded: true,
-      isFailClosed: true,
-      scope,
-      env,
-    });
-    return {
-      allowed: false,
-      tier,
-      limit,
-      remaining: 0,
-      resetSec: 60,
-      backend: 'fail-closed',
-      degraded: true,
-    };
-  }
-
-  // Best-effort cross-isolate fallback: Cloudflare KV is not atomic under concurrency, so
-  // strict deployments should bind RATE_LIMITER. KV still raises the cost of abuse.
   const kv = env?.RATE_LIMIT_KV || env?.KV;
   if (kv && typeof kv.get === 'function' && typeof kv.put === 'function') {
     try {
@@ -680,60 +677,8 @@ export async function evaluateAuthRateLimit(
   const bucketKey = `${scope}:ip:${ip}`;
   const isSingleNodeEngine = env?.SONIC_RUNTIME === 'linux-engine';
 
-  const nativeLimiter = (env as any)?.RATE_LIMITER;
-  if (nativeLimiter && typeof nativeLimiter.limit === 'function') {
-    try {
-      const outcome = await nativeLimiter.limit({ key: bucketKey });
-      if (!outcome || typeof outcome.success !== 'boolean') {
-        throw new Error('RATE_LIMITER returned an invalid result');
-      }
-      recordRateLimitMetric({
-        allowed: outcome.success,
-        backend: 'native',
-        degraded: false,
-        scope,
-        env,
-      });
-      return {
-        allowed: outcome.success,
-        tier: 'anonymous',
-        limit,
-        remaining: outcome.success ? Math.max(0, limit - 1) : 0,
-        resetSec: 60,
-        backend: 'native',
-        degraded: false,
-      };
-    } catch (nativeErr: any) {
-      console.warn(
-        '[Sonic RateLimit] Auth RATE_LIMITER failed, evaluating policy:',
-        redactSensitiveString(nativeErr?.message || nativeErr),
-      );
-    }
-  }
-
-  if (
-    !isSingleNodeEngine &&
-    requireDistributedRateLimit(env) &&
-    isEnvEnabled(env?.SONIC_RATE_LIMIT_FAIL_CLOSED, true)
-  ) {
-    recordRateLimitMetric({
-      allowed: false,
-      backend: 'fail-closed',
-      degraded: true,
-      isFailClosed: true,
-      scope,
-      env,
-    });
-    return {
-      allowed: false,
-      tier: 'anonymous',
-      limit,
-      remaining: 0,
-      resetSec: 60,
-      backend: 'fail-closed',
-      degraded: true,
-    };
-  }
+  const shared = await evaluateSharedRateLimit(bucketKey, 'anonymous', limit, scope, env);
+  if (shared) return shared;
 
   const kv = env?.RATE_LIMIT_KV || env?.KV;
   if (kv && typeof kv.get === 'function' && typeof kv.put === 'function') {
@@ -779,7 +724,7 @@ export function buildRateLimitErrorResponse(decision: RateLimitDecision): Respon
       ? 'AUTH_REQUIRED'
       : 'RATE_LIMITED';
   const message = isFailClosed
-    ? 'Distributed Cloudflare RATE_LIMITER binding is required in strict mode (SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT=1)'
+    ? 'The shared Sonic rate limiter is unavailable'
     : isAuthRequired
       ? 'API key is required (pass X-Sonic-Key or X-CFSolara-Key or Authorization: Bearer)'
       : `Rate limit exceeded for tier '${decision.tier}' (${decision.limit} req/min)`;

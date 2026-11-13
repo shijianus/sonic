@@ -1,8 +1,9 @@
-// Sonic Gateway — Provider HTTP Boundary (leaf module, no sibling imports)
+// Sonic Gateway — Provider HTTP Boundary
 // Every provider/legacy upstream request goes through here: HTTPS-only targets on
 // an authorized host family, per-hop redirect validation, credential stripping on
-// an origin change, and bounded JSON reads. Kept dependency-free so legacy modules
+// an origin change, and bounded JSON reads. Uses only a leaf helper so legacy modules
 // (`music.ts`) can adopt it without creating an import cycle.
+import { fetchWithoutRedirect } from '../fetch-direct';
 
 const PROVIDER_REDIRECT_HOST_SUFFIXES = [
   'music.163.com',
@@ -191,9 +192,8 @@ export async function fetchProviderDirect(
     else signal.addEventListener('abort', onAbort, { once: true });
   }
   try {
-    return await fetch(url.toString(), {
+    return await fetchWithoutRedirect(url.toString(), {
       ...init,
-      redirect: 'error',
       signal: controller.signal,
     });
   } finally {

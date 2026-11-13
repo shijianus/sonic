@@ -3,7 +3,7 @@ import { rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { buildPagesDeploymentTree, deploymentSourceIds, parseDeploymentOrigin, readStagingAcceptance, verifyProductionPagesBinding } from './pages-release-lib.mjs';
+import { buildPagesDeploymentTree, deploymentSourceIds, parseDeploymentOrigin, readStagingAcceptance, verifyAcceptedStableDeployment, verifyProductionPagesBinding } from './pages-release-lib.mjs';
 
 const require = createRequire(import.meta.url);
 
@@ -55,10 +55,11 @@ async function deploy({ preflight }) {
     if (manifest.dirty || manifest.baseCommit !== head) {
       throw new Error('Production promotion requires a clean release manifest for the checked-out commit');
     }
-    readStagingAcceptance(acceptanceFile, manifest, pagesArtifactDigest, {
+    const evidence = readStagingAcceptance(acceptanceFile, manifest, pagesArtifactDigest, {
       production: true, productionSources: deploymentSourceIds(allowedSources),
     });
     await verifyProductionPagesBinding({ pagesOrigin: verifyOrigin, engineOrigin });
+    await verifyAcceptedStableDeployment(evidence, manifest, pagesArtifactDigest);
 
     const verify = (...args) => {
       const result = spawnSync(process.execPath, ['scripts/verify-deployed-release.mjs', ...args], {

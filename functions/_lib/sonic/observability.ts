@@ -18,7 +18,7 @@ export type RouteMetricGroup =
   | 'engine'
   | 'other';
 
-export type RateLimitBackendKind = 'native' | 'kv' | 'memory' | 'auth-gate' | 'fail-closed';
+export type RateLimitBackendKind = 'durable-object' | 'native' | 'kv' | 'memory' | 'auth-gate' | 'fail-closed';
 
 const MAX_LATENCY_SAMPLES = 512;
 const ROUTE_GROUPS: RouteMetricGroup[] = ['overall', 'search', 'stream', 'lyrics', 'recommend', 'auth', 'cover', 'engine', 'other'];
@@ -290,6 +290,7 @@ function createInitialState(): ObservabilityState {
       failClosed503: 0,
       degradedEvents: 0,
       backendCounts: {
+        'durable-object': 0,
         native: 0,
         kv: 0,
         memory: 0,
@@ -591,7 +592,7 @@ export function recordRateLimitMetric(opts: {
           backend: opts.backend,
           scope: opts.scope || 'api',
           degradedEvents: state.rateLimit.degradedEvents,
-          note: 'Cloudflare native RATE_LIMITER binding is absent or degraded; multi-isolate atomicity is not guaranteed',
+          note: 'The shared rate limiter is absent or degraded; check the Durable Object binding and runtime',
         }),
       );
     }

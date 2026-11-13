@@ -1,5 +1,6 @@
 // Sonic Gateway — Pages -> Linux Local Engine Client & 3-State Circuit Breaker
 import type { AppEnv } from '../types';
+import { fetchWithoutRedirect } from '../fetch-direct';
 import { getSonicConfig } from './config';
 import { getPublicClientIp, isValidIpLiteral } from './security';
 import { recordStreamBodyMetric } from './observability';
@@ -139,7 +140,8 @@ export async function fetchWithRuntimeBudget(
   }
   try {
     budget.signal.throwIfAborted();
-    const response = await fetch(input, { ...init, signal: budget.signal });
+    const send = init.redirect === 'error' ? fetchWithoutRedirect : fetch;
+    const response = await send(input, { ...init, signal: budget.signal });
     if (budget.signal.aborted) {
       void response.body?.cancel(budget.signal.reason).catch(() => {});
       throw budget.signal.reason;

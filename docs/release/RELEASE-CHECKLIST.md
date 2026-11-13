@@ -79,7 +79,7 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 | B5 | SSRF 内网/Metadata/重定向/DNS 防护 | PASS（测试） | 11 例；真实 CDN NOT RUN |
 | B6 | 开放代理仅供应商音乐域 | PASS | `45b9a5e`；邮件域/后缀伪装拒绝 |
 | B7 | Engine 不依赖 Host 认证 | PASS | 本地伪造 Host 仍 401 |
-| B8 | 限流/配额全局一致 | PARTIAL | 无 Cloudflare 原生 `RATE_LIMITER` 时为近似限流 |
+| B8 | 限流/配额跨 Pages 实例一致 | 待线上核验 | 本机可验证 `SONIC_RATE_LIMIT_BUCKETS` 的共享计数，发布前需核对环境绑定和线上调用 |
 | B9 | 凭证/密钥未入库 | PASS（本轮范围） | 未提交真实密钥；测试用临时值已清理 |
 | B10 | 路径大小写不能绕过访问/引擎门禁 | PASS（本轮新增） | `canonicalPolicyPath` 覆盖 `requireAccess`/`requiresEngineAuth`；回归用例含 `/API/...` 变体 |
 | B11 | 匿名请求不可投毒全局熔断 | PASS（本轮新增） | 4xx 不再计失败；502 不再立即跳闸；身份配置错误不计熔断 |
@@ -110,7 +110,7 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 - [ ] 邀请码每个至少 16 字符；需要单次使用或服务端撤销时必须配置 `SONIC_ACCESS_DB_PATH`（Engine），Pages-only 签名会话只适合短 TTL 的受控内测。
 - [ ] 撤销邀请码使用 `npm run revoke:invite -- <access.sqlite> <code>`，并在撤销后确认 `revoked:true`；轮换 `SONIC_ACCESS_SECRET` 可让全部已签发会话失效。
 - [ ] Pages 环境不得设置 `SONIC_RUNTIME=linux-engine`；该变量只属于 VPS Engine。
-- [ ] 多 isolate Pages 生产必须绑定 `RATE_LIMITER`；生产默认要求分布式限流，缺失时 API 与 health 会 fail-closed（503），不得依赖 isolate 内存限流。
+- [ ] 多 isolate Pages 生产必须绑定 `SONIC_RATE_LIMIT_BUCKETS` 到 `SonicRateBucket`。绑定缺失或调用失败时 API 和带凭证的健康探针返回 503。正式候选的稳定 Staging 使用同类绑定和严格策略，计数空间与生产隔离。
 - [ ] 交付后真实环境验收按根目录 `CHECKLIST.log` 执行；完整管理员后台、配额/封禁/审计等滥用治理由 Epomail 统一开发并签字。
 - [ ] 设置 `SONIC_DEPLOY_VERIFY_URL`（生产 Pages）和 `SONIC_DEPLOY_VERIFY_ENGINE_URL`（生产 Engine），均为不同的 HTTPS origin。核对 Tunnel connector 在线和 Engine 私有健康检查，并准备读取目标 Pages 项目配置的 Cloudflare 凭据。
 - [ ] 生产/内测环境配置 `SONIC_SECRET`、`SONIC_ENGINE_SECRET`（≥32 字符，随机）。
@@ -126,8 +126,10 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
 
 ### Pages 生产提升
 
+限流 Worker 源码及 SQLite 迁移在 `edge-rate-limiter/`。由运维使用既有 Cloudflare 权限在批准的发布流程中预置 Worker，保持 `workers_dev` 和 `preview_urls` 关闭，为预览、稳定 Staging 和生产使用不同的 Worker 名称及 Durable Object 命名空间。Pages 以 `SONIC_RATE_LIMIT_BUCKETS` 绑定外部 Worker 的 `SonicRateBucket`。稳定 Staging 和生产均配置 `SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT=1`、`SONIC_RATE_LIMIT_FAIL_CLOSED=1`。同一环境的所有 Pages 实例应共用同一命名空间。Work 中可用 `node scripts/verify-local-edge.mjs` 核验编译后的 Pages、共享计数与故障门槛。
+
 1. 在独立预览部署并运行 `verify-staging-live.mjs`，将输出存到仓库外，用 `SONIC_STAGING_ACCEPTANCE_FILE` 指定该记录。用 `prepare-pages-preview.mjs --promote-staging --deploy` 将同一份 `dist/` 提升到稳定 Staging。
-2. 在稳定 Staging 启用 `SONIC_ACCESS_MODE=invite`，用专用测试邀请码运行 `node scripts/verify-staging-live.mjs --stable`。将输出存到 `SONIC_PRODUCTION_ACCEPTANCE_FILE` 指定的仓库外路径。保留生成的 `accessGateMode`、`inviteAccessLiveVerified`、`engineRelease`、`engineErasureRecoveryVersion` 和 `eventEpochLiveVerified`。真实音源验收须在同一产物的邀请制 Staging 上显式配置 `SONIC_STAGING_APPROVED_SOURCES`，并核对 Pages 与 Engine 实际白名单。在 `productionChecks` 下为以下四项分别填写 `{ "ok": true, "evidence": "受控验收记录的位置" }`。记录应对应本次发布的 `baseCommit`、`sourceDigest` 和 `pagesArtifactDigest`。
+2. 在稳定 Staging 启用 `SONIC_ACCESS_MODE=invite`，用专用测试邀请码运行 `node scripts/verify-staging-live.mjs --stable`。将输出存到 `SONIC_PRODUCTION_ACCEPTANCE_FILE` 指定的仓库外路径，保留所有脚本输出字段。真实音源验收须在同一产物上配置 `SONIC_STAGING_APPROVED_SOURCES`，并核对 Pages 与 Engine 的实际白名单。在 `productionChecks` 下为以下每项填写 `{ "ok": true, "file": "<验收记录文件名>.json", "sha256": "<该文件摘要>" }`。文件和验收索引放在同一受控目录。每份 JSON 应包含 `ok: true`、`checkId`、`environment: "staging"`、`reviewer`、`checkedAt`（ISO 时间）、`result`（结果与可复核证据位置），以及与索引相同的 `baseCommit`、`releaseId`、`sourceDigest`、`buildTime`、`pagesArtifactDigest`、`deploymentId`、`stagingEngineImageId`。摘要用于检测错版和更改，签字和原始证据仍由负责人审核。
 
    | 字段 | 验收 |
    | --- | --- |
@@ -135,10 +137,15 @@ node scripts/release-inputs.mjs --verify release.json --index release-files.json
    | `authorizedMediaPlaybackAndSeek` | 获准音源起播、拖动和 `Range 206/416` |
    | `lyricsSync` | 歌词随播放及拖动同步 |
    | `imageAndSqliteRollback` | 使用保留清除保护的配套镜像和可验证快照回滚，确认已清除事件和旧批次保持不可用 |
+   | `capacityAndAlertDelivery` | 以首发流量预算压测并核对真实告警送达 |
+   | `realDevicesAndAccessibility` | 真机、桌面跨浏览器及人工无障碍检查 |
+   | `releaseOwnerApproval` | 负责人批准本次发布范围及逐源授权归档 |
 
-   保留脚本生成的 `stagingContentPolicy`，其中包含 Pages 和 Engine 实测的白名单及运行时启用来源。对生产 `SONIC_ALLOWED_SOURCES` 中每个真实来源，在 `productionChecks.sourceAcceptance` 下用来源 ID 填写 `{ "ok": true, "evidence": "现有验收记录中该来源的条目位置" }`。来源的音频、歌词或目录功能以实际启用能力为准，可引用上表中的同一份记录。生产预检要求这些来源在稳定 Staging 的 Pages 和 Engine 上均列入白名单且实际启用。
+   对生产 `SONIC_ALLOWED_SOURCES` 的每个真实来源，在 `productionChecks.sourceAcceptance` 下按来源 ID 放入同样结构的引用，验收 JSON 的 `checkId` 为 `source:<id>`。记录该源实际启用能力、曲目样本、供应商、授权归档位置和测试结果。生产预检要求每个生产来源在稳定 Staging 的 Pages 和 Engine 均列入白名单且实际启用。
 
 3. 准备候选 Engine 并核对其编译身份和私有健康检查。设置 `CF_PAGES_PROJECT`、`CF_PAGES_BRANCH`、`CLOUDFLARE_ACCOUNT_ID`、`CLOUDFLARE_API_TOKEN` 和上述两个验证 origin。`SONIC_DEPLOY_VERIFY_URL` 使用项目默认 Pages 域名或在该项目已激活的自定义域名。保留已验收的 `dist/`，运行 `npm run deploy -- --preflight` 核对验收记录、域名归属、生产分支、Engine 绑定、访问模式、内容白名单、限流策略和 Engine 健康。该命令仅执行检查，失败输出 `BLOCK` 并以非零状态结束。看到 `GO` 后，可用 `npm run deploy` 提升同一构建，上传前会再次执行这些检查。上传后会重新验证 Engine，并确认实际 Pages 能访问同一 Engine，同时检查访问模式、白名单、分布式限流和匿名鉴权。单独运行 `npm run verify:deployed` 核验生产时同样使用 Cloudflare 项目信息校验目标地址。上传后校验失败时按回滚手册恢复兼容版本。
+
+   同时设置 `SONIC_PRODUCTION_RATE_LIMIT_NAMESPACE_ID` 和独立的 `SONIC_STAGING_ENGINE_SECRET`。预检会核对生产目标绑定，重新读取稳定 Staging 当前部署，并验证其限流、产物和两侧有效来源。生产 Pages/Engine 的允许来源和有效来源应同时匹配批准的生产集合。
 
 ## E. 部署后冒烟（真实 HTTP）
 

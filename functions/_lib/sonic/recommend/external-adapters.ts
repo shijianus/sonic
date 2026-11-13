@@ -4,6 +4,7 @@
 // and gracefully fall back to the built-in SQLite + FTS5 + Hybrid Engine on timeout or error.
 
 import type { AppEnv } from '../../types';
+import { fetchWithoutRedirect } from '../../fetch-direct';
 import { isEnvEnabled } from '../config';
 import type { CanonicalTrack, SonicEventType } from './types';
 
@@ -53,8 +54,7 @@ export async function syncTrackToGorse(track: CanonicalTrack, env?: AppEnv): Pro
   if (env?.SONIC_GORSE_API_KEY) headers['X-API-Key'] = String(env.SONIC_GORSE_API_KEY);
 
   try {
-    const resp = await fetch(`${baseUrl}/api/item`, {
-      redirect: 'error',
+    const resp = await fetchWithoutRedirect(`${baseUrl}/api/item`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
@@ -116,8 +116,8 @@ export async function deleteGorseUserData(subjectKey: string, env?: AppEnv): Pro
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (env?.SONIC_GORSE_API_KEY) headers['X-API-Key'] = String(env.SONIC_GORSE_API_KEY);
     try {
-      const response = await fetch(`${baseUrl}/api/user/${encodeURIComponent(subjectKey)}`, {
-        method: 'DELETE', headers, signal: AbortSignal.timeout(2000), redirect: 'error',
+      const response = await fetchWithoutRedirect(`${baseUrl}/api/user/${encodeURIComponent(subjectKey)}`, {
+        method: 'DELETE', headers, signal: AbortSignal.timeout(2000),
       });
       // Gorse returns RowAffected, including 0 for an already absent user. Do not
       // treat an arbitrary proxy's 200/404, or asynchronous 202, as completion.
@@ -156,13 +156,13 @@ export async function syncFeedbackToGorse(
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (env?.SONIC_GORSE_API_KEY) headers['X-API-Key'] = String(env.SONIC_GORSE_API_KEY);
     try {
-      const resp = await fetch(`${baseUrl}/api/feedback`, {
+      const resp = await fetchWithoutRedirect(`${baseUrl}/api/feedback`, {
         method: 'POST', headers,
         body: JSON.stringify([{
           FeedbackType: feedbackType, UserId: subjectKey, ItemId: canonicalTrackId,
           Timestamp: new Date(timestampMs).toISOString(),
         }]),
-        signal: AbortSignal.timeout(1500), redirect: 'error',
+        signal: AbortSignal.timeout(1500),
       });
       return resp.ok;
     } catch {
@@ -185,9 +185,9 @@ export async function fetchGorseRecommendations(
   if (env?.SONIC_GORSE_API_KEY) headers['X-API-Key'] = String(env.SONIC_GORSE_API_KEY);
 
   try {
-    const resp = await fetch(
+    const resp = await fetchWithoutRedirect(
       `${baseUrl}/api/recommend/${encodeURIComponent(subjectKey)}?n=${Math.min(50, Math.max(1, count))}`,
-      { headers, signal: AbortSignal.timeout(1200), redirect: 'error' },
+      { headers, signal: AbortSignal.timeout(1200) },
     );
     if (!resp.ok) return [];
     const data = await resp.json();
@@ -213,9 +213,9 @@ export async function fetchGorseNeighbors(
   if (env?.SONIC_GORSE_API_KEY) headers['X-API-Key'] = String(env.SONIC_GORSE_API_KEY);
 
   try {
-    const resp = await fetch(
+    const resp = await fetchWithoutRedirect(
       `${baseUrl}/api/item/${encodeURIComponent(canonicalTrackId)}/neighbors?n=${Math.min(40, Math.max(1, count))}`,
-      { headers, signal: AbortSignal.timeout(1200), redirect: 'error' },
+      { headers, signal: AbortSignal.timeout(1200) },
     );
     if (!resp.ok) return [];
     const data = await resp.json();
@@ -260,8 +260,7 @@ export async function indexTracksInMeilisearch(tracks: CanonicalTrack[], env?: A
       edition: t.edition,
       externalPopularity: t.externalPopularity,
     }));
-    const resp = await fetch(`${baseUrl}/indexes/${encodeURIComponent(indexName)}/documents`, {
-      redirect: 'error',
+    const resp = await fetchWithoutRedirect(`${baseUrl}/indexes/${encodeURIComponent(indexName)}/documents`, {
       method: 'POST',
       headers,
       body: JSON.stringify(docs),
@@ -283,8 +282,7 @@ export async function searchMeilisearchIds(query: string, limit = 25, env?: AppE
   }
 
   try {
-    const resp = await fetch(`${baseUrl}/indexes/${encodeURIComponent(indexName)}/search`, {
-      redirect: 'error',
+    const resp = await fetchWithoutRedirect(`${baseUrl}/indexes/${encodeURIComponent(indexName)}/search`, {
       method: 'POST',
       headers,
       body: JSON.stringify({ q: query, limit }),

@@ -347,7 +347,7 @@ node scripts/verify-staging-live.mjs --stable > "$SONIC_PRODUCTION_ACCEPTANCE_FI
 
 在仓库外保存验收文件，并在稳定 Staging 的记录中补齐[发布清单](docs/release/RELEASE-CHECKLIST.md#pages-生产提升)要求的实测证据。保留已验收的 `dist/`，设置生产项目、分支及 Pages 与 Engine 验证地址，再运行 `npm run deploy` 提升同一构建。上传前通过 Cloudflare API 核对生产分支、Pages 默认域名或已激活的自定义域名、Engine 绑定与策略，然后检查 Engine 编译身份及持久存储。上传后再从实际 Pages 核对同一 Engine 和线上安全配置。
 
-Pages 项目、Secret、KV、`RATE_LIMITER`、OAuth 回调和 Tunnel/DNS 需在目标环境配置。
+Pages 项目、Secret、KV、`SONIC_RATE_LIMIT_BUCKETS` Durable Object、OAuth 回调和 Tunnel/DNS 需在目标环境配置。
 
 ### Docker Compose
 
@@ -389,7 +389,7 @@ docker compose logs -f sonic-engine
 | `SONIC_ENABLE_GDSTUDIO`、`SONIC_ENABLE_LYRIVA`、`SONIC_ENABLE_UNBLOCK` | 示例/Compose 显式关闭；GDStudio 空配置默认和音频回退有例外，见下文 |
 | `SONIC_ENABLE_SYNTHETIC_TEST_SOURCE` | 启用合成测试媒体，常规生产配置应显式审查 |
 | `SONIC_REQUIRE_AUTH` | 网关匿名访问策略；有效引擎调用有单独档位，不等于所有路径同时要求用户 key |
-| `SONIC_RATE_LIMIT_ANON_RPM`、`SONIC_RATE_LIMIT_AUTH_RPM` | KV/内存限流预算；不配置原生 `RATE_LIMITER` 的实际阈值 |
+| `SONIC_RATE_LIMIT_ANON_RPM`、`SONIC_RATE_LIMIT_AUTH_RPM` | Durable Object、KV 和内存限流的每分钟配额 |
 | `SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT` | 配合 fail-closed 策略要求边缘绑定原生 limiter，不提供全球强一致保证 |
 | `SONIC_ENGINE_TIMEOUT_MS`、`SONIC_TIMEOUT_MS` | 引擎/上游超时；模板引擎值 4500ms，代码空配置默认 2500ms |
 | `EPOMAIL_BASE_URL`、`EPOMAIL_CLIENT_ID`、`EPOMAIL_CLIENT_SECRET` | OAuth 服务与凭据；未配置时不能完成真实登录 |

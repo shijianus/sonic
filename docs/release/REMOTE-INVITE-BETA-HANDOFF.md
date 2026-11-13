@@ -105,7 +105,7 @@ Cloudflare/Engine 线上验收至少覆盖：
 - Pages -> Tunnel -> Engine 的 `X-Sonic-Engine-Key` 和独立 identity assertion。
 - `GET/POST /api/account/library` 的 Edge/Engine/SQLite 重启持久化。
 - OAuth login/callback/logout/revoke 使用真实测试账号；不能用临时签名 subject 冒充 OAuth 完成。
-- `RATE_LIMITER` binding、外部告警、P95/5xx、磁盘余量和回滚演练。
+- `SONIC_RATE_LIMIT_BUCKETS` Durable Object 绑定、外部告警、P95/5xx、磁盘余量和回滚演练。
 - 只在获得许可的音源上验证 Range/206/416、Seek、歌词和完整播放。
 
 ## 4. 交付限制

@@ -334,9 +334,11 @@ export function transformSong(item: Record<string, unknown>): SongData {
     album: (albumData?.name as string) || '',
     albumId: (albumData?.id as number | string) || 0,
     cover,
-    duration: normalizeDurationMs(
-      (item?.dt as number) ?? (item?.duration as number) ?? (song?.duration as number) ?? 0
-    ),
+    duration: typeof item?.durationMs === 'number' && Number.isFinite(item.durationMs) && item.durationMs >= 0
+      ? item.durationMs
+      : normalizeDurationMs(
+          (item?.dt as number) ?? (item?.duration as number) ?? (song?.duration as number) ?? 0
+        ),
     liked: false,
     mvId: (item?.mv as number | string) || (item?.mvid as number | string) || 0,
     sha: (item?.sha as string) || (song?.sha as string) || '',

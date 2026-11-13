@@ -13,6 +13,7 @@ export const RELEASE_DIRECTORIES = Object.freeze([
 export const REQUIRED_RELEASE_FILES = Object.freeze([
   'package.json', 'package-lock.json', 'tsconfig.json',
   'Dockerfile', 'Dockerfile.ncm', 'docker-compose.yml', '.dockerignore',
+  'edge-rate-limiter/index.mjs', 'edge-rate-limiter/wrangler.jsonc',
   'ncm-sidecar/package.json', 'ncm-sidecar/package-lock.json',
   '.gitattributes', '.gitignore', '.env.example', 'AGENTS.md',
   'README.md', 'CHECKLIST.log', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'favicon.png', 'favicon.svg',
@@ -43,6 +44,7 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
   'scripts/build-staging-release.sh', 'scripts/deploy-staging-engine.py',
   'scripts/verify-staging-candidate.py', 'scripts/verify-staging-live.mjs',
   'scripts/verify-built-release.mjs', 'scripts/verify-engine-smoke.mjs',
+  'scripts/verify-local-edge.mjs',
   'scripts/start-bare-metal-engine.mjs', 'scripts/rollback-production.sh',
   'docs/RUNBOOK-ROLLBACK.md', 'docs/OPERATIONS.md',
   'docs/release/RELEASE-CHECKLIST.md', 'docs/release/REMOTE-INVITE-BETA-HANDOFF.md',

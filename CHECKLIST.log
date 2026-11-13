@@ -33,7 +33,7 @@
 [ ] Pages 项目已绑定自定义域名与 HTTPS；`/release.json`、`X-Sonic-Release` 与构建 manifest 一致。
 [ ] Pages 环境变量已设置：SONIC_ENV=production、SONIC_ACCESS_MODE=open|invite、
     SONIC_CONTENT_POLICY=strict-allowlist、SONIC_ALLOWED_SOURCES=netease,qq,kugou,kuwo,amll,lrclib。
-[ ] Pages 已绑定原生 RATE_LIMITER，并设置 SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT=1；
+[ ] Pages 已绑定 SONIC_RATE_LIMIT_BUCKETS 到 SonicRateBucket，并设置 SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT=1；
     未绑定时 API 必须 fail-closed（503），不得退化为无管理的 isolate 内存限流。
 [ ] Engine 通过 Tunnel 暴露，SONIC_ENGINE_SECRET / SONIC_ENGINE_IDENTITY_SECRET / SONIC_SECRET 均 >=32 字符且互不复用。
 [ ] Engine 数据卷可持久化：recommend/account/access SQLite 重启后数据仍可读。

@@ -12,6 +12,33 @@ import {
 import { assertStagingAcceptance, buildPagesDeploymentTree, parseDeploymentOrigin } from '../scripts/pages-release-lib.mjs';
 
 const repo = resolve(import.meta.dirname, '..');
+const strictRateLimit = { configuredBackend: 'durable-object', requireDistributed: true, distributedAtomic: true, failClosedOnDegrade: true, productionCompliant: true };
+const stagingNamespace = 'e'.repeat(32);
+const stagingImage = `sha256:${'f'.repeat(64)}`;
+const autoChecks = [
+  'Cloudflare confirms the stable staging branch deployment',
+  'invite entry is reachable with noindex and protected API denies anonymous access',
+  'disposable invite redeems into a secure expiring session and invalid Cookie is rejected',
+  'Pages and Engine release identities match and direct Engine health is private and durable',
+  'synthetic search returns real catalog results through the staging Engine',
+  'Engine-backed audio HEAD, RIFF bytes, seek ranges 206 and invalid range 416',
+  'anonymous consent, durable isolation, deduplication and erasure epoch verified through Pages and Engine',
+  'temporary live-test subjects deleted and absence confirmed directly on Engine',
+  'authenticated subject parity, erasure epoch and invalid Engine signature rejection',
+  'credential parity', 'project metadata', 'invite logout',
+].map(name => ({ name, ok: true }));
+const checkIds = ['oauthLoginAndRevocation', 'authorizedMediaPlaybackAndSeek', 'lyricsSync', 'imageAndSqliteRollback',
+  'capacityAndAlertDelivery', 'realDevicesAndAccessibility', 'releaseOwnerApproval'];
+const recordReference = (id: string) => ({ ok: true, file: `${id.replace(':', '-')}.json`, sha256: 'a'.repeat(64) });
+function attachEvidence(root: string, evidence: Record<string, unknown>) {
+  const references = Object.fromEntries([...checkIds, 'source:netease'].map(checkId => {
+    const ref = recordReference(checkId);
+    const record = JSON.stringify({ ...evidence, ok: true, checkId, environment: 'staging', checkedAt: '2026-11-13T00:00:00Z', reviewer: 'Fixture', result: 'Fixture evidence' });
+    put(root, ref.file, record);
+    return [checkId, { ...ref, sha256: createHash('sha256').update(record).digest('hex') }];
+  }));
+  return { ...references, sourceAcceptance: { netease: references['source:netease'] } };
+}
 const directories: string[] = [];
 const metadata = {
   SONIC_RELEASE_COMMIT: 'a'.repeat(40), SONIC_RELEASE_DIRTY: '1',
@@ -123,18 +150,17 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
 
     const stable = {
       ...preview, branch: 'staging', base: 'https://sonic-staging.pages.dev', branchUrl: 'https://sonic-staging.pages.dev',
-      accessGateMode: 'invite', inviteAccessLiveVerified: true,
+      accessGateMode: 'invite', inviteAccessLiveVerified: true, checks: autoChecks,
+      stagingRateLimit: strictRateLimit, stagingRateLimitNamespaceId: stagingNamespace, stagingEngineImageId: stagingImage,
     };
-    const production = { production: true, productionSources: ['netease', 'lrclib'] };
+    const production = { production: true, productionSources: ['netease', 'lrclib'], verifyRecord: () => true };
     expect(() => assertStagingAcceptance(stable, first.manifest, first.pagesArtifactDigest, production)).toThrow(/oauthLoginAndRevocation/);
-    const manualChecks = Object.fromEntries([
-      'oauthLoginAndRevocation', 'authorizedMediaPlaybackAndSeek', 'lyricsSync', 'imageAndSqliteRollback',
-    ].map(name => [name, { ok: true, evidence: `record for ${name}` }]));
+    const manualChecks = Object.fromEntries(checkIds.map(name => [name, recordReference(name)]));
     const evidence = {
       ...stable, stagingContentPolicy: stagingContentPolicy(['synthetic', 'netease', 'lrclib']),
       productionChecks: { ...manualChecks, sourceAcceptance: {
-        netease: { ok: true, evidence: 'media record #netease' },
-        lrclib: { ok: true, evidence: 'lyrics record #lrclib' },
+        netease: recordReference('source:netease'),
+        lrclib: recordReference('source:lrclib'),
       } },
     };
     const verify = (record: unknown, productionSources = production.productionSources) =>
@@ -145,7 +171,8 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
     expect(() => verify({ ...evidence, inviteAccessLiveVerified: undefined })).toThrow(/live product invite/);
     expect(() => verify({ ...evidence, baseCommit: 'b'.repeat(40) })).toThrow(/exact release/);
     expect(() => verify({ ...evidence, stagingContentPolicy: undefined })).toThrow(/live strict source policy/);
-    expect(() => verify({ ...evidence, productionChecks: manualChecks })).toThrow(/passing Staging source evidence for netease/);
+    expect(() => verify({ ...evidence, productionChecks: manualChecks })).toThrow(/passing Staging evidence for source:netease/);
+    expect(() => verify({ ...evidence, productionChecks: { ...evidence.productionChecks, oauthLoginAndRevocation: { ok: true, evidence: 'placeholder' } } })).toThrow(/oauthLoginAndRevocation/);
     expect(() => verify({ ...evidence, stagingContentPolicy: {
       ...evidence.stagingContentPolicy,
       engine: { ...evidence.stagingContentPolicy.engine, effectiveSources: ['synthetic', 'netease'] },
@@ -203,19 +230,14 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
       deploymentId: '01234567-89ab-cdef-0123-456789abcdef', accessGateMode: 'invite', inviteAccessLiveVerified: true,
       engineStorage: 'sqlite', independentIdentityBindingPresent: true, authenticatedIdentityAssertionLiveVerified: true,
       engineRelease: { ...manifest, engineIdentityCompiled: true }, eventEpochLiveVerified: true, engineErasureRecoveryVersion: 1,
-      checks: Array.from({ length: 12 }, (_, index) => ({ name: `check ${index}`, ok: true })),
+      checks: autoChecks, stagingRateLimit: strictRateLimit, stagingRateLimitNamespaceId: stagingNamespace, stagingEngineImageId: stagingImage,
       stagingContentPolicy: stagingContentPolicy(['synthetic', 'netease']),
-      productionChecks: {
-        ...Object.fromEntries(['oauthLoginAndRevocation', 'authorizedMediaPlaybackAndSeek', 'lyricsSync', 'imageAndSqliteRollback']
-          .map(name => [name, { ok: true, evidence: `record for ${name}` }])),
-        sourceAcceptance: { netease: { ok: true, evidence: 'media record #netease' } },
-      },
     };
-    put(control, 'acceptance.json', JSON.stringify(acceptance));
+    put(control, 'acceptance.json', JSON.stringify({ ...acceptance, productionChecks: attachEvidence(control, acceptance) }));
 
     const project = {
       name: 'sonic-prod', production_branch: 'main', subdomain: 'sonic-prod.pages.dev',
-      deployment_configs: { production: { env_vars: Object.fromEntries(Object.entries({
+      deployment_configs: { production: { durable_object_namespaces: { SONIC_RATE_LIMIT_BUCKETS: { namespace_id: 'd'.repeat(32) } }, env_vars: Object.fromEntries(Object.entries({
         SONIC_LOCAL_ENGINE_URL: 'https://engine.example.test', SONIC_ENV: 'production', SONIC_ACCESS_MODE: 'invite',
         SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'netease',
       }).map(([name, value]) => [name, { type: 'plain_text', value }])) } },
@@ -224,21 +246,42 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
       ok: true, runtime: 'linux-engine',
       release: { ...manifest, releaseCommit: manifest.baseCommit, engineIdentityCompiled: true, environment: 'production' },
       readiness: { identity: { ok: true, configured: true, required: true }, access: { mode: 'invite', explicit: true },
-        contentPolicy: { mode: 'strict-allowlist', allowedSources: ['netease'] } },
+        contentPolicy: { ok: true, mode: 'strict-allowlist', allowedSources: ['netease'], effectiveSources: ['netease'] } },
       recommendEngine: { storageKind: 'sqlite', storageHealthy: true, disk: { ok: true }, erasureRecoveryVersion: 1 },
     };
+    const stagingProject = { name: 'sonic-staging', production_branch: 'staging', canonical_deployment: { id: acceptance.deploymentId },
+      deployment_configs: { production: { durable_object_namespaces: { SONIC_RATE_LIMIT_BUCKETS: { namespace_id: stagingNamespace } } } } };
+    const deployment = { id: acceptance.deploymentId, environment: 'production', latest_stage: { status: 'success' },
+      deployment_trigger: { metadata: { branch: 'staging', commit_hash: manifest.baseCommit } } };
+    const stagingRelease = { ...engine.release, environment: 'staging', pagesArtifactDigest };
+    const stagingHealth = { ok: true, runtime: 'cf-pages', release: stagingRelease, rateLimit: strictRateLimit,
+      readiness: { access: { mode: 'invite' }, contentPolicy: acceptance.stagingContentPolicy.pages },
+      enginePeer: { ok: true, release: stagingRelease, contentPolicy: acceptance.stagingContentPolicy.engine } };
     put(control, 'mock-preflight.mjs', `globalThis.fetch = async (input, init = {}) => {
       const { origin, pathname } = new URL(input);
       if (origin === 'https://api.cloudflare.com' && pathname === '/client/v4/accounts/${'a'.repeat(32)}/pages/projects/sonic-prod') {
-        return Response.json({ success: true, result: ${JSON.stringify(project)} });
+        const project = ${JSON.stringify(project)};
+        if (process.env.SONIC_TEST_MISSING_BINDING === '1') delete project.deployment_configs.production.durable_object_namespaces;
+        return Response.json({ success: true, result: project });
+      }
+      if (origin === 'https://api.cloudflare.com' && pathname.endsWith('/projects/sonic-staging')) return Response.json({success:true,result:${JSON.stringify(stagingProject)}});
+      if (origin === 'https://api.cloudflare.com' && pathname.endsWith('/deployments/${acceptance.deploymentId}')) return Response.json({success:true,result:${JSON.stringify(deployment)}});
+      if (origin === 'https://sonic-staging.pages.dev') {
+        if (new Headers(init.headers).get('x-sonic-engine-key') !== '${'t'.repeat(48)}') return new Response(null, {status:401});
+        const health = ${JSON.stringify(stagingHealth)};
+        if (process.env.SONIC_TEST_STAGING_LIMITER_DOWN === '1') health.rateLimit.productionCompliant = false;
+        return Response.json(health,{headers:{'x-sonic-release':${JSON.stringify(manifest.releaseId)}}});
       }
       if (origin !== 'https://engine.example.test' || pathname !== '/api/sonic/engine/health') throw new Error('Unexpected preflight target');
       if (process.env.SONIC_TEST_ENGINE_UNREACHABLE === '1') return new Response(null, { status: 530 });
       if (new Headers(init.headers).get('x-sonic-engine-key') !== '${'s'.repeat(48)}') return new Response(null, { status: 401 });
-      return Response.json(${JSON.stringify(engine)}, { headers: { 'x-sonic-release': ${JSON.stringify(manifest.releaseId)} } });
+      const engine = ${JSON.stringify(engine)};
+      if (process.env.SONIC_TEST_DISABLED_SOURCE === '1') engine.readiness.contentPolicy.effectiveSources = [];
+      return Response.json(engine, { headers: { 'x-sonic-release': ${JSON.stringify(manifest.releaseId)} } });
     };`);
     const env = {
       CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32), CLOUDFLARE_API_TOKEN: 'fixture-api-token',
+      SONIC_PRODUCTION_RATE_LIMIT_NAMESPACE_ID: 'd'.repeat(32), SONIC_STAGING_ENGINE_SECRET: 't'.repeat(48),
       NODE_OPTIONS: `--import=${pathToFileURL(join(control, 'mock-preflight.mjs')).href}`,
     };
     const preflight = run('sonic-prod', ['--preflight'], env);
@@ -255,6 +298,20 @@ describe('complete, secret-safe release source packages', { timeout: 30_000 }, (
     expect(unhealthy.status).toBe(1);
     expect(unhealthy.stderr).toContain('got HTTP 530');
     expect(JSON.parse(unhealthy.stdout)).toMatchObject({ ok: false, decision: 'BLOCK', mode: 'production-preflight' });
+
+    for (const [flag, error] of [
+      ['SONIC_TEST_MISSING_BINDING', 'SONIC_RATE_LIMIT_BUCKETS'],
+      ['SONIC_TEST_STAGING_LIMITER_DOWN', 'working shared limiter'],
+      ['SONIC_TEST_DISABLED_SOURCE', 'effective sources'],
+    ]) {
+      const refused = run('sonic-prod', [], { ...env, [flag]: '1' });
+      expect(refused.status).toBe(1);
+      expect(refused.stderr).toContain(error);
+    }
+    put(control, 'oauthLoginAndRevocation.json', '{"ok":true}');
+    const changedEvidence = run('sonic-prod', [], env);
+    expect(changedEvidence.status).toBe(1);
+    expect(changedEvidence.stderr).toContain('passing Staging evidence for oauthLoginAndRevocation');
     expect(existsSync(marker)).toBe(false);
   });
 

@@ -2,6 +2,7 @@ import type { AppEnv, UserSession } from './types';
 import { sha256Hex } from './sonic/crypto';
 import { isEnvEnabled } from './sonic/config';
 import { redactSensitiveString } from './sonic/observability';
+import { fetchWithoutRedirect } from './fetch-direct';
 
 export function isOAuthEnabled(env?: AppEnv): boolean {
   return isEnvEnabled(env?.SONIC_ENABLE_OAUTH, true);
@@ -342,11 +343,10 @@ export async function exchangeCode(
     ? 'application/x-www-form-urlencoded;charset=UTF-8'
     : 'application/json';
 
-  const response = await fetch(config.tokenUrl, {
+  const response = await fetchWithoutRedirect(config.tokenUrl, {
     method: 'POST',
     cache: 'no-store',
     // A 30x from the token endpoint must never replay the client secret (P2-9).
-    redirect: 'error',
     headers: {
       'Content-Type': contentType,
       Accept: 'application/json',
@@ -390,10 +390,9 @@ export async function fetchUserInfo(
     throw new Error('OAuth userInfo URL not configured');
   }
 
-  const response = await fetch(config.userInfoUrl, {
+  const response = await fetchWithoutRedirect(config.userInfoUrl, {
     cache: 'no-store',
     // A 30x must never replay the bearer access token to another origin (P2-9).
-    redirect: 'error',
     headers: {
       Authorization: `Bearer ${accessToken}`,
       Accept: 'application/json',

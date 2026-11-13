@@ -44,6 +44,7 @@ const productionProject = 'sonic-prod';
 const cloudflarePath = `/client/v4/accounts/${'a'.repeat(32)}/pages/projects/${productionProject}`;
 const productionEnv = {
   CLOUDFLARE_ACCOUNT_ID: 'a'.repeat(32), CLOUDFLARE_API_TOKEN: 'fixture-api-token',
+  SONIC_PRODUCTION_RATE_LIMIT_NAMESPACE_ID: 'd'.repeat(32),
   CF_PAGES_PROJECT: productionProject, CF_PAGES_BRANCH: 'main',
   SONIC_ACCESS_MODE: 'invite', SONIC_ALLOWED_SOURCES: 'netease,qq',
 };
@@ -51,7 +52,7 @@ const productionEnv = {
 function productionProjectResponse(overrides: Record<string, string> = {}) {
   return {
     name: productionProject, production_branch: 'main', subdomain: `${productionProject}.pages.dev`,
-    deployment_configs: { production: { env_vars: Object.fromEntries(Object.entries({
+    deployment_configs: { production: { durable_object_namespaces: { SONIC_RATE_LIMIT_BUCKETS: { namespace_id: 'd'.repeat(32) } }, env_vars: Object.fromEntries(Object.entries({
       SONIC_LOCAL_ENGINE_URL: productionEngine, SONIC_ACCESS_MODE: 'invite', SONIC_ENV: 'production',
       SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'qq, netease', ...overrides,
     }).map(([key, value]) => [key, { type: 'plain_text', value }])) } },
@@ -179,6 +180,15 @@ describe('deployed release verification', () => {
       .rejects.toThrow(reason);
   });
 
+  it('rejects a missing or different Durable Object namespace', async () => {
+    for (const id of [undefined, 'e'.repeat(32)]) {
+      const project = productionProjectResponse();
+      vi.stubGlobal('fetch', async () => Response.json({ success: true, result: project }));
+      await expect(verifyProductionPagesBinding({ engineOrigin: productionEngine, env: { ...productionEnv, SONIC_PRODUCTION_RATE_LIMIT_NAMESPACE_ID: id } }))
+        .rejects.toThrow('SONIC_RATE_LIMIT_BUCKETS');
+    }
+  });
+
   it('treats remote verification as production by default and refuses an unowned origin before sending an Engine key', async () => {
     const { root } = fixture();
     const preload = join(root, 'mock-cloudflare.mjs');
@@ -268,7 +278,7 @@ describe('deployed release verification', () => {
     expect(target).toBe(origin + path);
     expect(headers.get('x-sonic-engine-key')).toBe(key);
     expect(headers.has('cookie')).toBe(false);
-    expect(options.redirect).toBe('error');
+    expect(options.redirect).toBe('manual');
   });
 
   it('accepts a live release whose identity, health and policy match the manifest', async () => {

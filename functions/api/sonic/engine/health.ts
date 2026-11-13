@@ -36,7 +36,10 @@ interface EnginePeerHealth {
   ok?: boolean;
   runtime?: string;
   release?: ReturnType<typeof getReleaseMetadata>;
-  readiness?: { identity?: { ok?: boolean; configured?: boolean; required?: boolean } };
+  readiness?: {
+    identity?: { ok?: boolean; configured?: boolean; required?: boolean };
+    contentPolicy?: ReturnType<typeof getContentPolicyReadiness>;
+  };
   recommendEngine?: { storageKind?: string; storageHealthy?: boolean; disk?: { ok?: boolean }; erasureRecoveryVersion?: number };
 }
 
@@ -60,6 +63,7 @@ async function verifyConfiguredEngine(request: Request, env: AppEnv, engineUrl?:
     origin: target.origin,
     status: probe.status,
     runtime: health?.runtime,
+    contentPolicy: health?.readiness?.contentPolicy,
     release: release && {
       releaseCommit: release.releaseCommit, sourceDigest: release.sourceDigest, releaseId: release.releaseId,
       buildTime: release.buildTime, dirty: release.dirty, environment: release.environment,

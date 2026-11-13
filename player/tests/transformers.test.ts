@@ -32,6 +32,11 @@ describe('normalizeDurationMs', () => {
 })
 
 describe('transformSong 时长单位', () => {
+  it('榜单显式毫秒字段保留短音频时长', () => {
+    const song = transformSong({ id: 1, name: 'Intro', duration: 1.5, dt: 1500, durationMs: 1500 })
+    expect(song.duration).toBe(1500)
+  })
+
   it('dt 字段为毫秒时原样输出（NetEase 歌单/详情接口）', () => {
     const song = transformSong({ id: 1, name: 'A', dt: 221000, ar: [{ id: 9, name: 'X' }] })
     expect(song.duration).toBe(221000)

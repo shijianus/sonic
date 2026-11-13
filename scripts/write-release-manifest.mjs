@@ -72,7 +72,9 @@ if (dirtyValue !== undefined && dirtyValue !== '' && !/^(?:0|1|true|false)$/i.te
 const dirty = dirtyValue === undefined || dirtyValue === '' ? (archived?.dirty ?? gitDirty) : /^(?:1|true)$/i.test(dirtyValue);
 const existing = existsSync(output) ? JSON.parse(readFileSync(output, 'utf8')) : null;
 const stableExisting = existing?.sourceDigest === sourceDigest && existing?.baseCommit === baseCommit && existing?.dirty === dirty;
-const buildTime = String(process.env.SONIC_BUILD_TIME || archived?.buildTime || (stableExisting ? existing.buildTime : new Date().toISOString()));
+const commitTime = !partialDockerStage && !dirty && baseCommit !== 'unknown' ? git('show', '-s', '--format=%cI', baseCommit) : '';
+const buildTime = String(process.env.SONIC_BUILD_TIME || archived?.buildTime || (stableExisting ? existing.buildTime : '') ||
+  (commitTime ? new Date(commitTime).toISOString() : new Date().toISOString()));
 const releaseId = String(process.env.SONIC_RELEASE_ID || archived?.releaseId || (dirty || baseCommit === 'unknown' ? `${baseCommit.slice(0, 12)}-${sourceDigest.slice(0, 12)}` : baseCommit));
 const manifest = validateReleaseManifest({ schemaVersion: 1, baseCommit, sourceDigest, releaseId, buildTime, dirty }, { allowUnknownCommit: true });
 if (!printOnly) {

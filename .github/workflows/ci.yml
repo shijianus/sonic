@@ -100,6 +100,7 @@ jobs:
           npm run build:engine
           node --test tests/bare-metal-engine.test.mjs
           node --experimental-sqlite scripts/verify-built-release.mjs
+          node scripts/verify-local-edge.mjs
           npm run test:load
 
       - name: Root production dependency audit

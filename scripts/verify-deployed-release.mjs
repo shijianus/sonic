@@ -2,7 +2,7 @@
 // Engine preflight: node scripts/verify-deployed-release.mjs --engine-only https://engine.example.com
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { deploymentSourceIds, parseDeploymentOrigin, verifyProductionPagesBinding } from './pages-release-lib.mjs';
+import { deploymentSourceIds, parseDeploymentOrigin, strictEdgeRateLimitReady, verifyProductionPagesBinding } from './pages-release-lib.mjs';
 import { validateReleaseManifest } from './release-inputs.mjs';
 
 const identityFields = ['schemaVersion', 'baseCommit', 'sourceDigest', 'releaseId', 'buildTime', 'dirty'];
@@ -17,8 +17,10 @@ function healthReleaseMatches(release, manifest) {
 }
 
 function sourcesMatch(readiness, expectedSources) {
-  const actualSources = readiness?.contentPolicy?.allowedSources;
-  return Array.isArray(actualSources) && JSON.stringify([...actualSources].sort()) === JSON.stringify(expectedSources);
+  return ['allowedSources', 'effectiveSources'].every(field => {
+    const actual = readiness?.contentPolicy?.[field];
+    return Array.isArray(actual) && JSON.stringify([...actual].sort()) === JSON.stringify(expectedSources);
+  });
 }
 
 async function probe(origin, path, headers) {
@@ -64,8 +66,9 @@ async function verifyEngine(origin, { manifest, secret, production, expectedAcce
   if (expectedAccess && (readiness?.access?.mode !== expectedAccess || readiness.access.explicit !== true)) {
     throw new Error('Engine access mode differs from the expected mode');
   }
-  if (production && (readiness?.contentPolicy?.mode !== 'strict-allowlist' || !sourcesMatch(readiness, expectedSources))) {
-    throw new Error('Engine content policy differs from the expected production source allowlist');
+  if (production && (readiness?.contentPolicy?.ok !== true || readiness.contentPolicy.mode !== 'strict-allowlist' ||
+      !sourcesMatch(readiness, expectedSources))) {
+    throw new Error('Engine allowed or effective sources differ from the expected production sources');
   }
 }
 
@@ -136,17 +139,15 @@ async function verify() {
       peer.erasureRecoveryVersion === 1, 'Pages cannot reach the verified Engine origin with protected persistent SQLite');
     check(healthReleaseMatches(peer?.release, manifest) && peer.release.engineIdentityCompiled === true &&
       (!production || peer.release.environment === 'production'), 'Pages Engine peer release differs from the approved manifest');
+    if (production) check(peer?.contentPolicy?.ok === true && peer.contentPolicy.mode === 'strict-allowlist' &&
+      sourcesMatch({ contentPolicy: peer.contentPolicy }, expectedSources), 'Pages Engine peer allowed or effective sources differ from the expected production sources');
   }
   if (production) {
     check(health?.runtime === 'cf-pages' && release?.environment === 'production', 'live release is not a production Pages deployment');
     check(healthResponse.headers.get('x-sonic-release') === manifest.releaseId, 'health X-Sonic-Release header is missing or stale');
     check(readiness?.contentPolicy?.mode === 'strict-allowlist', 'live content policy must be strict-allowlist');
-    check(sourcesMatch(readiness, expectedSources),
-      'live source allowlist does not match the expected source IDs');
-    const rateLimit = health?.rateLimit;
-    check(rateLimit?.configuredBackend === 'native' && rateLimit.distributedAtomic === true &&
-      rateLimit.requireDistributed === true && rateLimit.failClosedOnDegrade === true && rateLimit.productionCompliant === true,
-    'production Pages must have the native fail-closed distributed rate limiter');
+    check(sourcesMatch(readiness, expectedSources), 'Pages allowed or effective sources differ from the expected production sources');
+    check(strictEdgeRateLimitReady(health?.rateLimit), 'production Pages must have the fail-closed Durable Object rate limiter');
   }
 
   // Pages routing is case-insensitive; anonymous probes test route variants too.
