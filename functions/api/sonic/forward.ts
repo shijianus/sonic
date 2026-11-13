@@ -5,6 +5,7 @@
 import { parseLyricsParams, parseSearchParams, sonicError, handleOptions, LYRICS_CACHE_CONTROL } from '../../_lib/sonic/route-helpers';
 import { resolveNexusLyrics } from '../../_lib/sonic/nexus-lyrics';
 import { searchNexus } from '../../_lib/sonic/nexus-search';
+import { UPSTREAM_TIMEOUT } from '../../_lib/sonic/request-budget';
 import { jsonResponse } from '../../_lib/http';
 import { sonicLinesToLrc, sonicLinesToTtml } from '../../_lib/sonic/utils';
 import { SONIC_UA } from '../../_lib/sonic/config';
@@ -202,7 +203,7 @@ export async function onRequest({ request, env }: any): Promise<Response> {
   // Case 2: Search Forwarding (type=search or q is present without lyrics identifiers)
   const query = url.searchParams.get('q') || url.searchParams.get('keyword');
   if (type === 'search' || (query && !url.searchParams.has('title') && !url.searchParams.has('platformId'))) {
-    const { page, count, nocache } = parseSearchParams(url);
+    const { page, count } = parseSearchParams(url);
     if (!query) {
       return sonicError('MISSING_QUERY', 'Search keyword (q or keyword) is required', 400, {
         provider: 'forward',
@@ -211,8 +212,9 @@ export async function onRequest({ request, env }: any): Promise<Response> {
 
     const startTime = Date.now();
     try {
-      const result = await searchNexus(query, { page, count }, env);
+      const result = await searchNexus(query, { page, count, signal: request.signal }, env);
       const latencyMs = Date.now() - startTime;
+      const timedOut = result.attempts.some(attempt => attempt.errorCode === UPSTREAM_TIMEOUT);
 
       return jsonResponse(
         {
@@ -232,13 +234,14 @@ export async function onRequest({ request, env }: any): Promise<Response> {
           headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-            'Cache-Control': 'public, max-age=3600',
+            'Cache-Control': timedOut ? 'no-store' : 'public, max-age=3600',
             'X-Sonic-Cache': 'MISS',
             'X-Sonic-Provider': 'nexus',
           },
         },
       );
     } catch (err: any) {
+      request.signal.throwIfAborted();
       return sonicError('SEARCH_ERROR', redactSensitiveString(err?.message || 'Search forward failed'), 502, {
         provider: 'forward',
       });

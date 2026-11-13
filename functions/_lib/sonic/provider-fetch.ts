@@ -3,7 +3,7 @@
 // an authorized host family, per-hop redirect validation, credential stripping on
 // an origin change, and bounded JSON reads. Uses only a leaf helper so legacy modules
 // (`music.ts`) can adopt it without creating an import cycle.
-import { fetchWithoutRedirect } from '../fetch-direct';
+import { fetchWithRuntimeBudget } from './request-budget';
 
 const PROVIDER_REDIRECT_HOST_SUFFIXES = [
   'music.163.com',
@@ -81,7 +81,8 @@ export async function fetchProviderUrl(
   timeoutMs = 8000,
   signal?: AbortSignal,
 ): Promise<Response> {
-  const deadline = Date.now() + Math.max(1, timeoutMs);
+  const budgetMs = Math.max(1, timeoutMs);
+  const startedAt = performance.now();
   let currentUrl = new URL(
     typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url,
   );
@@ -94,31 +95,16 @@ export async function fetchProviderUrl(
     if (currentUrl.protocol !== 'https:' || !isAllowedProviderHost(currentUrl.hostname)) {
       throw new Error('Provider request target is not an authorized HTTPS host');
     }
-    const remaining = Math.max(1, deadline - Date.now());
-    const controller = new AbortController();
-    const timer = setTimeout(
-      () => controller.abort(new DOMException('Provider request timeout', 'TimeoutError')),
-      remaining,
-    );
-    const onAbort = () => controller.abort(signal?.reason);
-    if (signal) {
-      if (signal.aborted) onAbort();
-      else signal.addEventListener('abort', onAbort, { once: true });
-    }
-    let response: Response;
-    try {
-      response = await fetch(currentUrl.toString(), {
-        ...init,
-        method,
-        headers,
-        body: method === 'GET' || method === 'HEAD' ? undefined : body,
-        redirect: 'manual',
-        signal: controller.signal,
-      });
-    } finally {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
-    }
+    signal?.throwIfAborted();
+    const remaining = budgetMs - (performance.now() - startedAt);
+    if (remaining <= 0) throw new DOMException('Provider request timeout', 'TimeoutError');
+    const response = await fetchWithRuntimeBudget(currentUrl.toString(), {
+      ...init,
+      method,
+      headers,
+      body: method === 'GET' || method === 'HEAD' ? undefined : body,
+      redirect: 'manual',
+    }, { timeoutMs: Math.ceil(remaining), signals: [signal] });
 
     if (![301, 302, 303, 307, 308].includes(response.status)) return response;
     const location = response.headers.get('location');
@@ -181,23 +167,7 @@ export async function fetchProviderDirect(
   if (url.protocol !== 'https:' || !isAllowedProviderHost(url.hostname)) {
     throw new Error('Provider request target is not an authorized HTTPS host');
   }
-  const controller = new AbortController();
-  const timer = setTimeout(
-    () => controller.abort(new DOMException('Provider request timeout', 'TimeoutError')),
-    Math.max(1, timeoutMs),
-  );
-  const onAbort = () => controller.abort(signal?.reason);
-  if (signal) {
-    if (signal.aborted) onAbort();
-    else signal.addEventListener('abort', onAbort, { once: true });
-  }
-  try {
-    return await fetchWithoutRedirect(url.toString(), {
-      ...init,
-      signal: controller.signal,
-    });
-  } finally {
-    clearTimeout(timer);
-    signal?.removeEventListener('abort', onAbort);
-  }
+  return fetchWithRuntimeBudget(url.toString(), { ...init, redirect: 'error' }, {
+    timeoutMs: Math.max(1, timeoutMs), signals: [signal],
+  });
 }

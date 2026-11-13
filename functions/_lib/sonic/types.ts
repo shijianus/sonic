@@ -30,6 +30,7 @@ export interface SonicAttempt {
   ok: boolean;
   ms: number;
   error?: string;
+  errorCode?: 'UPSTREAM_TIMEOUT';
 }
 
 export interface SonicWord {

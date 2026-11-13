@@ -1,4 +1,4 @@
-import { fetchProviderUrl } from '../native-protocols';
+import { fetchProviderUrl, readBoundedProviderJson } from '../provider-fetch';
 // Sonic Provider — Kugou Music (酷狗音乐)
 // True word-level KRC decryption & search
 
@@ -107,11 +107,11 @@ export const kugouProvider: SonicProviderAdapter = {
       const sRes = await fetchProviderUrl(sUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
       }, config.timeoutMs, options?.signal);
-      if (!sRes.ok) return [];
-      const sJson = await (async () => {
-        try { return await sRes.json(); } catch { return null; }
-      })() as any;
-      if (!sJson) return [];
+      if (!sRes.ok) {
+        void sRes.body?.cancel().catch(() => {});
+        return [];
+      }
+      const sJson = await readBoundedProviderJson(sRes);
       const items = Array.isArray(sJson.data?.info) ? sJson.data.info : [];
       if (!Array.isArray(items)) return [];
 
@@ -165,7 +165,9 @@ export const kugouProvider: SonicProviderAdapter = {
           lyricId: platformId,
         };
       });
-    } catch { options?.signal?.throwIfAborted();
+    } catch (error) {
+      options?.signal?.throwIfAborted();
+      if (error?.name === 'TimeoutError') throw error;
       return [];
     }
   },

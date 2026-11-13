@@ -1,4 +1,4 @@
-import { fetchProviderUrl } from '../native-protocols';
+import { fetchProviderUrl, readBoundedProviderJson } from '../provider-fetch';
 // Sonic Provider — QQ Music (QQ音乐)
 // Direct QRC syllable word-level lyrics & search
 
@@ -145,7 +145,7 @@ export const qqProvider: SonicProviderAdapter = {
       }, config.timeoutMs, options?.signal);
 
       if (h5Res.ok) {
-        const h5Json = (await h5Res.json()) as any;
+        const h5Json = await readBoundedProviderJson(h5Res);
         const songList = h5Json?.data?.song?.list;
         if (Array.isArray(songList) && songList.length > 0) {
           return songList.map((item: any) => {
@@ -185,8 +185,13 @@ export const qqProvider: SonicProviderAdapter = {
             };
           });
         }
+      } else {
+        void h5Res.body?.cancel().catch(() => {});
       }
-    } catch { options?.signal?.throwIfAborted();}
+    } catch (error) {
+      options?.signal?.throwIfAborted();
+      if (error?.name === 'TimeoutError') throw error;
+    }
 
     // 2. Secondary: modern QQ musicu.fcg desktop search API
     try {
@@ -217,7 +222,7 @@ export const qqProvider: SonicProviderAdapter = {
       }, config.timeoutMs, options?.signal);
 
       if (uRes.ok) {
-        const uJson = (await uRes.json()) as any;
+        const uJson = await readBoundedProviderJson(uRes);
         const songList = uJson?.req?.data?.body?.song?.list;
         if (Array.isArray(songList) && songList.length > 0) {
           return songList.map((item: any) => {
@@ -257,8 +262,13 @@ export const qqProvider: SonicProviderAdapter = {
             };
           });
         }
+      } else {
+        void uRes.body?.cancel().catch(() => {});
       }
-    } catch { options?.signal?.throwIfAborted();}
+    } catch (error) {
+      options?.signal?.throwIfAborted();
+      if (error?.name === 'TimeoutError') throw error;
+    }
 
     // 3. Fallback: classic client_search_cp API
     try {
@@ -269,8 +279,11 @@ export const qqProvider: SonicProviderAdapter = {
           Referer: 'https://y.qq.com/',
         },
       }, config.timeoutMs, options?.signal);
-      if (!sRes.ok) return [];
-      const sJson = (await sRes.json()) as any;
+      if (!sRes.ok) {
+        void sRes.body?.cancel().catch(() => {});
+        return [];
+      }
+      const sJson = await readBoundedProviderJson(sRes);
       const list = sJson?.data?.song?.list;
       if (!Array.isArray(list)) return [];
 
@@ -310,7 +323,9 @@ export const qqProvider: SonicProviderAdapter = {
           lyricId: platformId,
         };
       });
-    } catch { options?.signal?.throwIfAborted();
+    } catch (error) {
+      options?.signal?.throwIfAborted();
+      if (error?.name === 'TimeoutError') throw error;
       return [];
     }
   },

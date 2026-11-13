@@ -25,6 +25,8 @@ import { getObservabilitySnapshot, resetObservabilityForTest, getReleaseReadines
 import { onRequest as health } from '../functions/api/sonic/engine/health';
 import { resetRateLimitsForTest } from '../functions/_lib/sonic/security';
 import { handleNexusLyricsRequest } from '../functions/api/sonic/lyrics/nexus';
+import { handleNexusSearchRequest } from '../functions/_lib/sonic/route-helpers';
+import { onRequest as handleSonicForward } from '../functions/api/sonic/forward';
 import { neteaseProvider } from '../functions/_lib/sonic/providers/netease';
 
 const key = 'runtime-test-service-key-32-characters-long';
@@ -203,6 +205,91 @@ describe('backend beta lyrics timeout contract', () => {
     expect(parent.signal.aborted).toBe(false);
     expect(getEventListeners(request.signal, 'abort')).toHaveLength(0);
     if (withPriorLyrics) expect(body.data.syncedLyrics[0].words.length).toBeGreaterThan(0);
+  });
+});
+
+describe('Nexus search deadlines', () => {
+  const env = { SONIC_ENV: 'test', SONIC_TIMEOUT_MS: '500', SONIC_ENABLE_GDSTUDIO: '0' };
+  const request = (signal?: AbortSignal) => new Request('https://sonic.test/api/sonic/search/nexus?q=deadline-test', { signal });
+
+  beforeEach(async () => {
+    await import('../functions/_lib/sonic/nexus-search');
+    vi.useFakeTimers();
+  });
+
+  it.each(['nexus', 'forward'])('%s records each upstream timeout even before the search budget expires', async route => {
+    const fetchMock = vi.fn((input: string) => {
+      const url = new URL(input);
+      if (url.hostname === 'u.y.qq.com' || url.pathname.endsWith('/client_search_cp')) return Promise.resolve(Response.json({}));
+      return new Promise<Response>((_, reject) => {
+        setTimeout(() => reject(new DOMException('provider transport deadline', 'TimeoutError')), 499);
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = route === 'nexus' ? handleNexusSearchRequest(request(), env) :
+      handleSonicForward({ request: new Request('https://sonic.test/api/sonic/forward?q=deadline-test'), env });
+    await vi.advanceTimersByTimeAsync(500);
+    const response = await pending;
+    const { data, meta } = await response.json();
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(data.tracks).toEqual([]);
+    expect(meta.attempts.map(({ provider, ok, errorCode }: any) => [provider, ok, errorCode])).toEqual([
+      ['netease', false, 'UPSTREAM_TIMEOUT'], ['qq', false, 'UPSTREAM_TIMEOUT'], ['kugou', false, 'UPSTREAM_TIMEOUT'],
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps a completed provider when other bodies stall and does not cache the incomplete search', async () => {
+    const cancelled = vi.fn();
+    const fetchMock = vi.fn(async (input: string) => {
+      if (new URL(input).hostname === 'c.y.qq.com') {
+        return Response.json({ data: { song: { list: [{ songmid: 'quick-qq', songname: 'Quick', singer: [] }] } } });
+      }
+      return new Response(new ReadableStream({ cancel: cancelled }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const settled = vi.fn();
+    const pending = handleNexusSearchRequest(request(), env).then(response => { settled(); return response; });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(cancelled).toHaveBeenCalledTimes(2);
+    await vi.waitFor(() => expect(settled).toHaveBeenCalledOnce());
+    const response = await pending;
+    const { data, meta } = await response.json();
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(data.tracks.map((track: any) => track.platformId)).toEqual(['quick-qq']);
+    expect(meta.attempts.map(({ provider, ok, errorCode }: any) => [provider, ok, errorCode])).toEqual([
+      ['netease', false, 'UPSTREAM_TIMEOUT'], ['qq', true, undefined], ['kugou', false, 'UPSTREAM_TIMEOUT'],
+    ]);
+    const retried = handleNexusSearchRequest(request(), env);
+    await vi.advanceTimersByTimeAsync(500);
+    await retried;
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+  });
+
+  it('cancels outstanding provider bodies on client disconnect', async () => {
+    const cancelled = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(new ReadableStream({ cancel: cancelled }))));
+    const parent = new AbortController();
+    const pending = handleNexusSearchRequest(request(parent.signal), env);
+    void pending.catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    parent.abort();
+    expect(cancelled).toHaveBeenCalledTimes(3);
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('records an Engine timeout at the total deadline without launching direct providers', async () => {
+    const fetchMock = vi.fn(async () => new Response(new ReadableStream()));
+    vi.stubGlobal('fetch', fetchMock);
+    const pending = handleNexusSearchRequest(request(), { ...env, ...engineEnv, SONIC_ENGINE_TIMEOUT_MS: '500' });
+    await vi.advanceTimersByTimeAsync(500);
+    const response = await pending;
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect((await response.json()).meta.attempts).toMatchObject([{ provider: 'local-engine', ok: false, errorCode: 'UPSTREAM_TIMEOUT' }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

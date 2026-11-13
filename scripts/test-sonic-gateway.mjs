@@ -135,7 +135,12 @@ async function runTests() {
 
     assert(res.status === 200, `Search returns 200 despite timeouts (got ${res.status})`);
     assert(json.brand === 'Sonic', `Brand is Sonic`);
-    assert(json.meta.attempts.length === 3 && json.meta.attempts.every(a => !a.ok && /timed out|timeout/i.test(a.error)), 'All three upstream timeouts are recorded');
+    const attempts = json.meta?.attempts ?? [];
+    const providers = ['netease', 'qq', 'kugou'];
+    const allTimedOut = attempts.length === providers.length && providers.every(provider => attempts.some(attempt =>
+      attempt.provider === provider && !attempt.ok && attempt.errorCode === 'UPSTREAM_TIMEOUT'));
+    assert(allTimedOut, `All three upstream timeouts are recorded${allTimedOut ? '' : ` (${JSON.stringify(attempts)})`}`);
+    assert(json.data?.tracks?.length === 0 && res.headers.get('Cache-Control') === 'no-store', 'A timed-out search returns no tracks and is not cached');
   }
 
   // Test 8: QQ Desktop Search returns tracks

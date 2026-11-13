@@ -17,7 +17,8 @@ import { gdstudioProvider } from './providers/gdstudio';
 import { neteaseProvider } from './providers/netease';
 import { qqProvider } from './providers/qq';
 import { kugouProvider } from './providers/kugou';
-import { callLocalEngineJson, createRuntimeAbortBudget, type CircuitState } from './local-engine';
+import { callLocalEngineJson, type CircuitState } from './local-engine';
+import { createRuntimeAbortBudget, UPSTREAM_TIMEOUT } from './request-budget';
 import { redactSensitiveString } from './observability';
 
 export interface NexusSearchResult {
@@ -104,6 +105,10 @@ async function searchNexusWithinBudget(
   let degraded = false;
   let degradedReason: string | undefined;
   let circuitState: CircuitState | undefined;
+  const signal = options.signal;
+  const throwIfCancelled = () => {
+    if (signal?.reason?.name !== 'TimeoutError') signal?.throwIfAborted();
+  };
 
   const page = options.page || 1;
   const count = Math.min(50, Math.max(1, options.count || 20));
@@ -125,9 +130,9 @@ async function searchNexusWithinBudget(
     }>(`/api/sonic/search/nexus?${q.toString()}`, env, {
       request: options.request,
       timeoutMs: engineTimeout,
-      signal: options.signal,
+      signal,
     });
-    options.signal?.throwIfAborted();
+    throwIfCancelled();
     circuitState = engineRes.circuitState;
 
     if (engineRes.ok && engineRes.data?.data && Array.isArray(engineRes.data.data.tracks)) {
@@ -156,22 +161,22 @@ async function searchNexusWithinBudget(
       ok: false,
       ms: engineRes.latencyMs,
       error: degradedReason,
+      ...(engineRes.errorCode === UPSTREAM_TIMEOUT ? { errorCode: UPSTREAM_TIMEOUT } : {}),
     });
   }
 
   // 2. Local / Direct Native Providers (Linux Engine primary OR Cloudflare Edge graceful degradation)
-  let activeProviders: SonicProviderAdapter[] = [];
-
-  if (isSinglePlatform) {
-    const single = getProvider(options.platform!);
-    if (single && single.search && single.isEnabled(env)) {
-      activeProviders = [single];
+  const activeProviders: SonicProviderAdapter[] = [];
+  if (!signal?.aborted) {
+    if (isSinglePlatform) {
+      const single = getProvider(options.platform!);
+      if (single?.search && single.isEnabled(env)) activeProviders.push(single);
+    } else {
+      if (config.enableSynthetic && syntheticProvider.search) activeProviders.push(syntheticProvider);
+      if (config.enableNetease && neteaseProvider.search) activeProviders.push(neteaseProvider);
+      if (config.enableQq && qqProvider.search) activeProviders.push(qqProvider);
+      if (config.enableKugou && kugouProvider.search) activeProviders.push(kugouProvider);
     }
-  } else {
-    if (config.enableSynthetic && syntheticProvider.search) activeProviders.push(syntheticProvider);
-    if (config.enableNetease && neteaseProvider.search) activeProviders.push(neteaseProvider);
-    if (config.enableQq && qqProvider.search) activeProviders.push(qqProvider);
-    if (config.enableKugou && kugouProvider.search) activeProviders.push(kugouProvider);
   }
 
   const via = config.runtime === 'linux-engine' ? 'local-engine' : 'cf-direct';
@@ -184,14 +189,15 @@ async function searchNexusWithinBudget(
       const pStart = Date.now();
       const pLabel = formatProviderName(String(provider.name));
       try {
-        options.signal?.throwIfAborted();
+        signal?.throwIfAborted();
         const tracks = await provider.search!(query, {
           page,
           count,
           env,
-          signal: options.signal,
+          signal,
           platform: options.platform,
         });
+        signal?.throwIfAborted();
 
         const attempt: SonicAttempt = {
           provider: pLabel,
@@ -203,20 +209,22 @@ async function searchNexusWithinBudget(
         };
         return { provider: String(provider.name), tracks, attempt };
       } catch (err: any) {
+        const timedOut = err?.name === 'TimeoutError';
         const attempt: SonicAttempt = {
           provider: pLabel,
           via,
           source: via,
           ok: false,
           ms: Date.now() - pStart,
-          error: redactSensitiveString(err?.message || 'Search timeout or network error'),
+          error: timedOut ? 'Upstream search timeout' : redactSensitiveString(err?.message || 'Upstream search failed'),
+          ...(timedOut ? { errorCode: UPSTREAM_TIMEOUT } : {}),
         };
         return { provider: String(provider.name), tracks: [], attempt };
       }
     }),
   );
 
-  if (options.signal?.aborted && options.signal.reason?.name !== 'TimeoutError') options.signal.throwIfAborted();
+  throwIfCancelled();
   // Collect all returned tracks with original provider rank
   interface RankedTrack {
     track: SonicSearchTrack;
@@ -236,7 +244,7 @@ async function searchNexusWithinBudget(
   }
 
   // 3. External Source Fallback: GDStudio
-  if (allRankedTracks.length === 0 && !options.signal?.aborted && config.enableGdstudio && gdstudioProvider.search) {
+  if (allRankedTracks.length === 0 && !signal?.aborted && config.enableGdstudio && gdstudioProvider.search) {
     const gStart = Date.now();
     try {
       const gTracks = await gdstudioProvider.search(query, {
@@ -244,8 +252,9 @@ async function searchNexusWithinBudget(
         count,
         platform: options.platform,
         env,
-        signal: options.signal,
+        signal,
       });
+      signal?.throwIfAborted();
       attempts.push({
         provider: 'gdstudio',
         via: 'third-party',
@@ -258,14 +267,16 @@ async function searchNexusWithinBudget(
         if (t && t.title) allRankedTracks.push({ track: t, rank: idx, provider: 'gdstudio' });
       });
     } catch (err: any) {
-      if (options.signal?.aborted && options.signal.reason?.name !== 'TimeoutError') options.signal.throwIfAborted();
+      throwIfCancelled();
+      const timedOut = err?.name === 'TimeoutError';
       attempts.push({
         provider: 'gdstudio',
         via: 'third-party',
         source: 'third-party',
         ok: false,
         ms: Date.now() - gStart,
-        error: redactSensitiveString(err?.message || 'GDStudio fallback error'),
+        error: timedOut ? 'Upstream search timeout' : redactSensitiveString(err?.message || 'GDStudio fallback error'),
+        ...(timedOut ? { errorCode: UPSTREAM_TIMEOUT } : {}),
       });
     }
   }

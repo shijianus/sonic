@@ -25,11 +25,13 @@ const env = {
   SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'netease', SONIC_ENABLE_LOCAL_ENGINE: '0',
   SONIC_ENGINE_SECRET: key, SONIC_ACCESS_SECRET: randomBytes(32).toString('hex'),
   SONIC_INVITE_CODES: invite, SONIC_ENABLE_OAUTH: '0', SONIC_RATE_LIMIT_ANON_RPM: '50',
+  SONIC_TIMEOUT_MS: '500',
 };
 let runtime;
 let engine;
 const engineCalls = [];
 let redirectEngine = false;
+let providerRequests = 0;
 try {
   const cli = resolve(dirname(require.resolve('wrangler/package.json')), 'bin/wrangler.js');
   execFileSync(process.execPath, [cli, 'pages', 'functions', 'build', 'functions', '--project-directory', '.',
@@ -74,7 +76,13 @@ try {
     serviceBindings: { ASSETS: async () => new Response('Sonic asset') },
     outboundService: async request => {
       const target = new URL(request.url);
-      assert.equal(target.origin, engineBindingOrigin, 'Only the loopback Engine is an allowed upstream');
+      if (target.origin === 'https://music.163.com' && target.pathname === '/api/linux/forward') {
+        providerRequests++;
+        return new Response(new ReadableStream({
+          start(controller) { controller.enqueue(new TextEncoder().encode('{"result":')); },
+        }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      assert.equal(target.origin, engineBindingOrigin, 'Only the local provider fixture and loopback Engine are allowed');
       if (redirectEngine) return new Response(null, { status: 307, headers: { Location: 'https://unused.sonic.test/' } });
       const result = await fetch(`${engineOrigin}${target.pathname}${target.search}`, {
         method: request.method, headers: [...request.headers], redirect: 'error', signal: AbortSignal.timeout(5000),
@@ -114,6 +122,16 @@ try {
   const entered = await redeem(a, invite, '192.0.2.1');
   assert.equal(entered.status, 200);
   assert.match(entered.headers.get('set-cookie'), /HttpOnly/i);
+  const timeout = await a.fetch('http://127.0.0.1/api/sonic/search/nexus?q=local-slow-body', {
+    headers: { Cookie: entered.headers.get('set-cookie').split(';', 1)[0], 'CF-Connecting-IP': '192.0.2.1' },
+  });
+  assert.equal(timeout.status, 200);
+  assert.equal(timeout.headers.get('cache-control'), 'no-store');
+  const timedOut = await timeout.json();
+  assert.deepEqual(timedOut.data.tracks, []);
+  assert.deepEqual(timedOut.meta.attempts.map(({ provider, errorCode }) => ({ provider, errorCode })),
+    [{ provider: 'netease', errorCode: 'UPSTREAM_TIMEOUT' }]);
+  assert.equal(providerRequests, 1);
   assert.equal((await redeem(broken, invite, '192.0.2.1')).status, 503);
   assert.equal((await redeem(backendDown, invite, '192.0.2.1')).status, 503);
 
@@ -164,7 +182,7 @@ try {
     workers: 2, requests: burstSize, allowedToReachInviteCheck: 50, rejected429: 150,
     durationMs: Math.round(performance.now() - start), authRequests: 40, authRejected429: 10,
     missingBinding503: true, backendUnavailable503: true, protectedHealth401: true, pagesToEngineRange206: true,
-    engineRedirectRejected: true, actualPagesBundle: true }));
+    engineRedirectRejected: true, providerBodyTimeout: true, actualPagesBundle: true }));
 } finally {
   try {
     await runtime?.dispose();

@@ -150,8 +150,9 @@ export const neteaseProvider: SonicProviderAdapter = {
       if (native.tracks.length > 0) {
         return native.tracks;
       }
-    } catch (err) { options?.signal?.throwIfAborted();
-      if (options?.signal?.aborted) throw err;
+    } catch (error) {
+      options?.signal?.throwIfAborted();
+      if (error?.name === 'TimeoutError') throw error;
     }
 
     // 2. Optional Last-Resort Fallback: GDStudio (ONLY when explicitly enabled via SONIC_ENABLE_GDSTUDIO=1)
@@ -181,7 +182,10 @@ export const neteaseProvider: SonicProviderAdapter = {
             };
           });
         }
-      } catch { options?.signal?.throwIfAborted();}
+      } catch (error) {
+        options?.signal?.throwIfAborted();
+        if (error?.name === 'TimeoutError') throw error;
+      }
     }
 
     return [];
