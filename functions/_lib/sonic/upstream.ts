@@ -9,7 +9,7 @@ import { callLocalEngineJson, CHART_UPSTREAM_UNAVAILABLE, createRuntimeAbortBudg
 import { UPSTREAM_TIMEOUT } from './request-budget';
 import { hasSearchTimeout } from './search-cache-policy';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse } from './security';
-import { recordLicensingBlockMetric } from './observability';
+import { recordLicensingBlockMetric, redactSensitiveString } from './observability';
 import { callNeteaseLinuxApi as nativeLinuxApi, callNeteaseEapi as nativeEapi, fetchNeteaseRegionalTopSongs } from './native-protocols';
 import { getSonicCachedJson, putSonicCachedJson, withSonicJsonSingleFlight } from './cache';
 import { getRecommendStore } from './recommend/memory-store';
@@ -85,6 +85,48 @@ export function desensitizeData<T>(obj: T): T {
     return copy;
   }
   return obj;
+}
+
+type CloudSearchType = '1' | '10' | '100' | '1000' | '1004';
+
+function isRecord(value: unknown): value is Record<string, any> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isCloudSearchResult(type: CloudSearchType, value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  switch (type) {
+    case '1000': return Array.isArray(value.playlists);
+    case '1004': return Array.isArray(value.mvs);
+    case '100': return Array.isArray(value.artists);
+    case '10': return Array.isArray(value.albums);
+    case '1': return Array.isArray(value.songs);
+  }
+}
+
+function isSuccessfulCloudSearchResponse(type: CloudSearchType, payload: unknown): payload is { result: Record<string, any> } {
+  if (!isRecord(payload)) return false;
+  const code = payload.code;
+  if (code !== undefined && code !== 200 && code !== '200') return false;
+  return isCloudSearchResult(type, payload.result);
+}
+
+function cloudSearchFailure(type: CloudSearchType, attempts: Array<Record<string, unknown>>): Response {
+  const timedOut = attempts.some((attempt) => attempt.errorCode === UPSTREAM_TIMEOUT);
+  const status = timedOut ? 504 : 502;
+  const code = timedOut ? UPSTREAM_TIMEOUT : 'UPSTREAM_INVALID_RESPONSE';
+  return jsonResponse(
+    {
+      code: status,
+      brand: 'Sonic',
+      error: {
+        code,
+        message: timedOut ? 'Search providers timed out' : `Search provider returned an invalid ${type} response`,
+      },
+      meta: { provider: 'netease', attempts },
+    },
+    { status, headers: { 'Cache-Control': 'no-store' } },
+  );
 }
 
 function chartCatalogField(endpoint: string): 'data' | 'list' | undefined {
@@ -1679,6 +1721,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
     const offset = url.searchParams.get('offset') || '0';
 
     if (type === '1000') {
+      const attempts: Array<Record<string, unknown>> = [];
       // Search playlists (LinuxApi / Eapi encrypted protocol bypasses web plaintext AES encryption)
       try {
         const lRes = await callNeteaseLinuxApi(
@@ -1694,7 +1737,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           },
           env,
         );
-        if (lRes && (lRes.code === 200 || lRes.result?.playlists)) {
+        if (isSuccessfulCloudSearchResponse('1000', lRes)) {
           return jsonResponse(
             {
               code: 200,
@@ -1704,7 +1747,11 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch { request.signal.throwIfAborted(); }
+        attempts.push({ provider: 'linuxapi', ok: false, error: 'Invalid playlist search response' });
+      } catch (error: any) {
+        request.signal.throwIfAborted();
+        attempts.push({ provider: 'linuxapi', ok: false, error: redactSensitiveString(error?.message || 'Linux API failed'), ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}) });
+      }
 
       try {
         const eRes = await callNeteaseEapi(
@@ -1717,7 +1764,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           },
           env,
         );
-        if (eRes && (eRes.code === 200 || eRes.result?.playlists)) {
+        if (isSuccessfulCloudSearchResponse('1000', eRes)) {
           return jsonResponse(
             {
               code: 200,
@@ -1727,33 +1774,48 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch { request.signal.throwIfAborted(); }
+        attempts.push({ provider: 'eapi', ok: false, error: 'Invalid playlist search response' });
+      } catch (error: any) {
+        request.signal.throwIfAborted();
+        attempts.push({ provider: 'eapi', ok: false, error: redactSensitiveString(error?.message || 'EAPI failed'), ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}) });
+      }
 
       try {
         const resp = await timedFetch(`https://music.163.com/api/search/get/web?s=${encodeURIComponent(keywords)}&type=1000&limit=${limit}&offset=${offset}`, {
           headers: buildUpstreamHeaders(cfg.realIp),
         });
         const data: any = await resp.json();
-        return jsonResponse(
-          {
-            code: 200,
-            brand: 'Sonic',
-            result: desensitizeData(data.result || { playlists: [], playlistCount: 0 }),
-          },
-          { headers: { 'Cache-Control': 'public, max-age=1800' } },
-        );
-      } catch { request.signal.throwIfAborted(); }
-      return jsonResponse({ code: 200, brand: 'Sonic', result: { playlists: [], playlistCount: 0 } });
+        if (resp.ok && isCloudSearchResult('1000', data?.result)) {
+          return jsonResponse(
+            { code: 200, brand: 'Sonic', result: desensitizeData(data.result) },
+            { headers: { 'Cache-Control': 'public, max-age=1800' } },
+          );
+        }
+        attempts.push({ provider: 'web', ok: false, error: `Invalid playlist search response (HTTP ${resp.status})` });
+      } catch (error: any) {
+        request.signal.throwIfAborted();
+        attempts.push({ provider: 'web', ok: false, error: redactSensitiveString(error?.message || 'Web search failed'), ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}) });
+      }
+      return cloudSearchFailure('1000', attempts);
     }
 
     if (type === '1004') {
-      // Search MVs
+      const attempts: Array<Record<string, unknown>> = [];
       try {
-        const resp = await timedFetch(`https://music.163.com/api/mv/all?limit=${limit}&offset=${offset}`, {
+        const resp = await timedFetch(`https://music.163.com/api/search/get/web?s=${encodeURIComponent(keywords)}&type=1004&limit=${limit}&offset=${offset}`, {
           headers: buildUpstreamHeaders(cfg.realIp),
         });
         const data: any = await resp.json();
-        const mvs = (data.data || []).map((m: any) => ({
+        const rawMvs = Array.isArray(data?.result?.mvs)
+          ? data.result.mvs
+          : Array.isArray(data?.data)
+            ? data.data
+            : null;
+        if (!resp.ok || !Array.isArray(rawMvs)) {
+          attempts.push({ provider: 'web', ok: false, error: `Invalid MV search response (HTTP ${resp.status})` });
+          return cloudSearchFailure('1004', attempts);
+        }
+        const mvs = rawMvs.map((m: any) => ({
           ...m,
           name: m.name || m.title || '',
           artistName: m.artistName || m.artist || '',
@@ -1766,11 +1828,15 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           },
           { headers: { 'Cache-Control': 'public, max-age=1800' } },
         );
-      } catch { request.signal.throwIfAborted(); }
-      return jsonResponse({ code: 200, brand: 'Sonic', result: { mvs: [], mvCount: 0 } });
+      } catch (error: any) {
+        request.signal.throwIfAborted();
+        attempts.push({ provider: 'web', ok: false, error: redactSensitiveString(error?.message || 'MV search failed'), ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}) });
+      }
+      return cloudSearchFailure('1004', attempts);
     }
 
     if (type === '100') {
+      const attempts: Array<Record<string, unknown>> = [];
       // Search artists
       try {
         const lRes = await callNeteaseLinuxApi(
@@ -1786,7 +1852,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           },
           env,
         );
-        if (lRes && (lRes.code === 200 || lRes.result?.artists)) {
+        if (isSuccessfulCloudSearchResponse('100', lRes)) {
           const artists = (lRes.result?.artists || []).map((a: any) => ({
             id: a.id,
             name: a.name,
@@ -1810,7 +1876,11 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch { request.signal.throwIfAborted(); }
+        attempts.push({ provider: 'linuxapi', ok: false, error: 'Invalid artist search response' });
+      } catch (error: any) {
+        request.signal.throwIfAborted();
+        attempts.push({ provider: 'linuxapi', ok: false, error: redactSensitiveString(error?.message || 'Linux API failed'), ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}) });
+      }
 
       try {
         const eRes = await callNeteaseEapi(
@@ -1823,7 +1893,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           },
           env,
         );
-        if (eRes && (eRes.code === 200 || eRes.result?.artists)) {
+        if (isSuccessfulCloudSearchResponse('100', eRes)) {
           const artists = (eRes.result?.artists || []).map((a: any) => ({
             id: a.id,
             name: a.name,
@@ -1847,12 +1917,17 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch { request.signal.throwIfAborted(); }
+        attempts.push({ provider: 'eapi', ok: false, error: 'Invalid artist search response' });
+      } catch (error: any) {
+        request.signal.throwIfAborted();
+        attempts.push({ provider: 'eapi', ok: false, error: redactSensitiveString(error?.message || 'EAPI failed'), ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}) });
+      }
 
-      return jsonResponse({ code: 200, brand: 'Sonic', result: { artists: [], artistCount: 0 } });
+      return cloudSearchFailure('100', attempts);
     }
 
     if (type === '10') {
+      const attempts: Array<Record<string, unknown>> = [];
       // Search albums
       try {
         const lRes = await callNeteaseLinuxApi(
@@ -1868,7 +1943,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           },
           env,
         );
-        if (lRes && (lRes.code === 200 || lRes.result?.albums)) {
+        if (isSuccessfulCloudSearchResponse('10', lRes)) {
           const albums = (lRes.result?.albums || []).map((a: any) => ({
             id: a.id,
             name: a.name,
@@ -1897,7 +1972,11 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch { request.signal.throwIfAborted(); }
+        attempts.push({ provider: 'linuxapi', ok: false, error: 'Invalid album search response' });
+      } catch (error: any) {
+        request.signal.throwIfAborted();
+        attempts.push({ provider: 'linuxapi', ok: false, error: redactSensitiveString(error?.message || 'Linux API failed'), ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}) });
+      }
 
       try {
         const eRes = await callNeteaseEapi(
@@ -1910,7 +1989,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           },
           env,
         );
-        if (eRes && (eRes.code === 200 || eRes.result?.albums)) {
+        if (isSuccessfulCloudSearchResponse('10', eRes)) {
           const albums = (eRes.result?.albums || []).map((a: any) => ({
             id: a.id,
             name: a.name,
@@ -1939,9 +2018,13 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
           );
         }
-      } catch { request.signal.throwIfAborted(); }
+        attempts.push({ provider: 'eapi', ok: false, error: 'Invalid album search response' });
+      } catch (error: any) {
+        request.signal.throwIfAborted();
+        attempts.push({ provider: 'eapi', ok: false, error: redactSensitiveString(error?.message || 'EAPI failed'), ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}) });
+      }
 
-      return jsonResponse({ code: 200, brand: 'Sonic', result: { albums: [], albumCount: 0 } });
+      return cloudSearchFailure('10', attempts);
     }
 
     // Default: Song search fallback via Nexus Search
@@ -1949,6 +2032,9 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       const { searchNexus } = await import('./nexus-search');
       const page = Math.floor(parseInt(offset, 10) / parseInt(limit, 10)) + 1;
       const res = await searchNexus(keywords, { page, count: parseInt(limit, 10), request }, env);
+      if (res.allProvidersFailed && res.data.tracks.length === 0) {
+        return cloudSearchFailure('1', res.attempts as unknown as Array<Record<string, unknown>>);
+      }
       const timedOut = hasSearchTimeout(res.attempts);
       const songs = (res.data?.tracks || []).map((t: any) => ({
         id: t.id,
@@ -1964,13 +2050,20 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
         {
           code: 200,
           brand: 'Sonic',
-          result: { songs, songCount: res.data?.total || songs.length },
+          result: { songs, songCount: res.data?.total || songs.length, songCountKnown: res.data?.totalKnown === true },
           ...(timedOut ? { meta: { attempts: res.attempts } } : {}),
         },
         { headers: { 'Cache-Control': res.noStore || timedOut || bypassSongCache ? 'no-store' : 'public, max-age=1800' } },
       );
-    } catch { request.signal.throwIfAborted(); }
-    return jsonResponse({ code: 200, brand: 'Sonic', result: { songs: [], songCount: 0 } });
+    } catch (error: any) {
+      request.signal.throwIfAborted();
+      return cloudSearchFailure('1', [{
+        provider: 'nexus',
+        ok: false,
+        error: redactSensitiveString(error?.message || 'Nexus search failed'),
+        ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}),
+      }]);
+    }
   }
 
   // Fallback 404 for unknown endpoint

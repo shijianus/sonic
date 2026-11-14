@@ -231,11 +231,17 @@ describe('Nexus search deadlines', () => {
       handleSonicForward({ request: new Request('https://sonic.test/api/sonic/forward?q=deadline-test'), env });
     await vi.advanceTimersByTimeAsync(500);
     const response = await pending;
-    const { data, meta } = await response.json();
-    expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toBe('no-store');
-    expect(data.tracks).toEqual([]);
-    expect(meta.attempts.map(({ provider, ok, errorCode }: any) => [provider, ok, errorCode])).toEqual([
+    const body = await response.json();
+    if (route === 'nexus') {
+      expect(response.status).toBe(504);
+      expect(response.headers.get('cache-control')).toBe('no-store');
+      expect(body.error.code).toBe('UPSTREAM_TIMEOUT');
+      expect(body.meta.attempts).toHaveLength(3);
+    } else {
+      expect(response.status).toBe(200);
+      expect(body.data.tracks).toEqual([]);
+    }
+    expect(body.meta.attempts.map(({ provider, ok, errorCode }: any) => [provider, ok, errorCode])).toEqual([
       ['netease', false, 'UPSTREAM_TIMEOUT'], ['qq', false, 'UPSTREAM_TIMEOUT'], ['kugou', false, 'UPSTREAM_TIMEOUT'],
     ]);
     expect(fetchMock).toHaveBeenCalledTimes(3);
@@ -258,7 +264,7 @@ describe('Nexus search deadlines', () => {
     const response = await pending;
     const { data, meta } = await response.json();
     expect(response.status).toBe(200);
-    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('cache-control')).toContain('no-store');
     expect(data.tracks.map((track: any) => track.platformId)).toEqual(['quick-qq']);
     expect(meta.attempts.map(({ provider, ok, errorCode }: any) => [provider, ok, errorCode])).toEqual([
       ['netease', false, 'UPSTREAM_TIMEOUT'], ['qq', true, undefined], ['kugou', false, 'UPSTREAM_TIMEOUT'],
@@ -287,9 +293,9 @@ describe('Nexus search deadlines', () => {
     const pending = handleNexusSearchRequest(request(), { ...env, ...engineEnv, SONIC_ENGINE_TIMEOUT_MS: '500' });
     await vi.advanceTimersByTimeAsync(500);
     const response = await pending;
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(504);
     expect(response.headers.get('cache-control')).toBe('no-store');
-    expect((await response.json()).meta.attempts).toMatchObject([{ provider: 'local-engine', ok: false, errorCode: 'UPSTREAM_TIMEOUT' }]);
+    expect((await response.json()).error.code).toBe('UPSTREAM_TIMEOUT');
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -302,6 +308,93 @@ describe('Nexus search deadlines', () => {
     expect(response.status).toBe(504);
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect((await response.json()).error.code).toBe('UPSTREAM_TIMEOUT');
+  });
+});
+
+describe('CloudSearch response contract', () => {
+  const env = { SONIC_ENV: 'test', SONIC_ENABLE_GDSTUDIO: '0' };
+
+  it.each([
+    ['1000', 'playlists'],
+    ['1004', 'mvs'],
+  ])('rejects a string result for cloudsearch type %s', async (type) => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ code: 200, result: 'deadbeefcafebabe' })));
+    const url = new URL(`https://sonic.test/api/cloudsearch?keywords=fixture&type=${type}&limit=5`);
+    const response = await handleUpstreamEndpoint('cloudsearch', url, new Request(url), env);
+    const body = await response.json();
+    expect(response.status).toBe(502);
+    expect(body.error.code).toBe('UPSTREAM_INVALID_RESPONSE');
+    expect(body.result).toBeUndefined();
+    expect(body.meta.attempts.length).toBeGreaterThan(0);
+  });
+
+  it('accepts structured playlist results from the native protocol', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      if (target.includes('/api/linux/forward')) {
+        return Response.json({ code: 200, result: { playlists: [{ id: 7, name: 'Fixture playlist' }], playlistCount: 1 } });
+      }
+      throw new Error(`unexpected provider request ${target}`);
+    }));
+    const url = new URL('https://sonic.test/api/cloudsearch?keywords=fixture&type=1000&limit=5');
+    const response = await handleUpstreamEndpoint('cloudsearch', url, new Request(url), env);
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.result.playlists).toHaveLength(1);
+    expect(body.result.playlistCount).toBe(1);
+  });
+
+  it('accepts structured MV results and forwards the keyword to the web search endpoint', async () => {
+    let requested = '';
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      requested = String(input);
+      return Response.json({ code: 200, result: { mvs: [{ id: 9, name: 'Fixture MV', artistName: 'Fixture artist' }], mvCount: 1 } });
+    }));
+    const url = new URL('https://sonic.test/api/cloudsearch?keywords=fixture&type=1004&limit=5');
+    const response = await handleUpstreamEndpoint('cloudsearch', url, new Request(url), env);
+    const body = await response.json();
+    const upstream = new URL(requested);
+    expect(response.status).toBe(200);
+    expect(upstream.pathname).toBe('/api/search/get/web');
+    expect(upstream.searchParams.get('s')).toBe('fixture');
+    expect(upstream.searchParams.get('type')).toBe('1004');
+    expect(body.result.mvs).toHaveLength(1);
+  });
+
+  it('accepts song results from the synthetic Nexus provider through cloudsearch type 1', async () => {
+    const syntheticEnv = {
+      ...env,
+      SONIC_ALLOWED_SOURCES: 'synthetic,netease',
+      SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: '1',
+      SONIC_ENABLE_NETEASE: '1',
+      SONIC_ENABLE_QQ: '0',
+      SONIC_ENABLE_KUGOU: '0',
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+      code: 200,
+      result: {
+        songs: [{ id: 42, name: 'Fixture song', ar: [{ id: 1, name: 'Fixture artist' }], al: { id: 2, name: 'Fixture album' }, dt: 180000 }],
+        songCount: 1,
+      },
+    })));
+    const url = new URL('https://sonic.test/api/cloudsearch?keywords=fixture&type=1&limit=5');
+    const response = await handleUpstreamEndpoint('cloudsearch', url, new Request(url), syntheticEnv);
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.result.songs.length).toBeGreaterThan(0);
+    expect(body.result.songCountKnown).toBe(false);
+  });
+
+  it('returns an observable error when all Nexus providers fail', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('fixture provider unavailable'); }));
+    const response = await handleNexusSearchRequest(
+      new Request('https://sonic.test/api/sonic/search/nexus?q=provider-failure&nocache=1'),
+      { ...env, SONIC_ENABLE_NETEASE: '0', SONIC_ENABLE_QQ: '0', SONIC_ENABLE_KUGOU: '0', SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: '0' },
+    );
+    const body = await response.json();
+    expect(response.status).toBe(502);
+    expect(body.error.code).toBe('SEARCH_UPSTREAM_UNAVAILABLE');
+    expect(body.meta.attempts.every((attempt: any) => attempt.ok === false)).toBe(true);
   });
 });
 

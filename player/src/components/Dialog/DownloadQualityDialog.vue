@@ -8,6 +8,7 @@ import {
   probeSongQualities,
   cancelSongProbe,
   getCachedProbeResult,
+  getProbeTargetKey,
   type SongProbeResult,
   type QualityLevel,
   QUALITY_LEVELS,
@@ -44,8 +45,8 @@ const isProbing = ref(false)
 const runProbe = async (song: any) => {
   if (!song || !song.id) return
 
-  const songId = String(song.id)
-  const cached = getCachedProbeResult(songId)
+  const targetKey = getProbeTargetKey(song)
+  const cached = getCachedProbeResult(song)
   if (cached) {
     probeResult.value = cached
     isProbing.value = false
@@ -57,7 +58,7 @@ const runProbe = async (song: any) => {
   isProbing.value = true
   try {
     const res = await probeSongQualities(song)
-    if (downloadStore.currentDownloadSong && String(downloadStore.currentDownloadSong.id) === songId) {
+    if (downloadStore.currentDownloadSong && getProbeTargetKey(downloadStore.currentDownloadSong) === targetKey) {
       probeResult.value = res
       isProbing.value = false
       adjustSelectedIfUnavailable(res)
@@ -91,15 +92,15 @@ const adjustSelectedIfUnavailable = (res: SongProbeResult) => {
 }
 
 // 记录最近探测中的歌曲 ID，避免弹窗关闭时 currentDownloadSong 被先设为 null 导致无法取消
-const lastProbingSongId = ref<string | null>(null)
+const lastProbingSongKey = ref<string | null>(null)
 
 // 弹窗可见性监听
 watch(
-  () => [downloadStore.dialogVisible, downloadStore.currentDownloadSong?.id] as const,
-  ([visible, songId]) => {
+  () => [downloadStore.dialogVisible, getProbeTargetKey(downloadStore.currentDownloadSong)] as const,
+  ([visible]) => {
     if (visible && downloadStore.currentDownloadSong) {
       coverLoadFailed.value = false
-      lastProbingSongId.value = String(downloadStore.currentDownloadSong.id)
+      lastProbingSongKey.value = getProbeTargetKey(downloadStore.currentDownloadSong)
       selectedLevel.value = 'lossless'
       runProbe(downloadStore.currentDownloadSong)
       nextTick(() => {
@@ -107,9 +108,9 @@ watch(
         if (idx >= 0) radioItemRefs.value[idx]?.focus()
       })
     } else if (!visible) {
-      const idToCancel = songId || lastProbingSongId.value
-      if (idToCancel) {
-        cancelSongProbe(idToCancel)
+      const targetToCancel = downloadStore.currentDownloadSong || lastProbingSongKey.value
+      if (targetToCancel) {
+        cancelSongProbe(targetToCancel)
       }
       isProbing.value = false
     }
@@ -308,7 +309,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (downloadStore.currentDownloadSong) {
-    cancelSongProbe(downloadStore.currentDownloadSong.id)
+    cancelSongProbe(downloadStore.currentDownloadSong)
   }
   window.removeEventListener('keydown', handleKeydown)
 })

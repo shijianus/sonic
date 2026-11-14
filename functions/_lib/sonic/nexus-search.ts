@@ -27,6 +27,8 @@ export interface NexusSearchResult {
   attempts: SonicAttempt[];
   degraded?: boolean;
   degradedReason?: string;
+  /** True when every attempted provider failed before producing a valid response. */
+  allProvidersFailed?: boolean;
   circuitState?: CircuitState;
   noStore?: boolean;
 }
@@ -187,6 +189,17 @@ async function searchNexusWithinBudget(
   const formatProviderName = (rawName: string) =>
     config.runtime === 'linux-engine' ? `local-${rawName}` : rawName;
 
+  if (activeProviders.length === 0 && !isSinglePlatform) {
+    attempts.push({
+      provider: 'nexus',
+      via,
+      source: via,
+      ok: false,
+      ms: 0,
+      error: 'No enabled search providers',
+    });
+  }
+
   // Parallel Execution with timeout isolation & Promise.allSettled
   const results = await Promise.allSettled(
     activeProviders.map(async (provider) => {
@@ -207,9 +220,10 @@ async function searchNexusWithinBudget(
           provider: pLabel,
           via,
           source: via,
-          ok: tracks.length > 0,
+          // An empty array is a valid successful search response. Provider
+          // failures are represented by the catch branch below.
+          ok: true,
           ms: Date.now() - pStart,
-          error: tracks.length === 0 ? 'Empty result set' : undefined,
         };
         return { provider: String(provider.name), tracks, attempt };
       } catch (err: any) {
@@ -263,9 +277,8 @@ async function searchNexusWithinBudget(
         provider: 'gdstudio',
         via: 'third-party',
         source: 'third-party',
-        ok: gTracks.length > 0,
+        ok: true,
         ms: Date.now() - gStart,
-        error: gTracks.length === 0 ? 'Empty third-party fallback result' : undefined,
       });
       gTracks.forEach((t, idx) => {
         if (t && t.title) allRankedTracks.push({ track: t, rank: idx, provider: 'gdstudio' });
@@ -551,6 +564,11 @@ async function searchNexusWithinBudget(
   scoredTracks.sort((a, b) => b.score - a.score);
 
   const finalTracks = scoredTracks.map((item) => item.track);
+  const allProvidersFailed = attempts.length > 0 && attempts.every((attempt) => !attempt.ok);
+  if (allProvidersFailed && finalTracks.length === 0) {
+    degraded = true;
+    degradedReason = degradedReason || 'all_providers_failed';
+  }
 
   // Non-blocking catalog enrichment for local recommendation & smart-search index
   if (finalTracks.length > 0) {
@@ -572,11 +590,13 @@ async function searchNexusWithinBudget(
       page,
       count: finalTracks.length,
       total: finalTracks.length,
+      totalKnown: false,
       tracks: finalTracks,
     },
     attempts,
     degraded: finalTracks.length === 0 && degraded,
     degradedReason: finalTracks.length === 0 ? degradedReason : undefined,
+    allProvidersFailed,
     circuitState,
   };
 }

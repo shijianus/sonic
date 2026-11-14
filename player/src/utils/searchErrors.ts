@@ -1,5 +1,7 @@
 export type SearchErrorKind = 'network' | 'rateLimited' | 'upstream' | 'timeout'
 
+export type SearchResultKind = 'songs' | 'playlists' | 'mvs'
+
 const UPSTREAM_TIMEOUT = 'UPSTREAM_TIMEOUT'
 
 export function hasSearchTimeout(payload: any): boolean {
@@ -19,10 +21,32 @@ export function classifySearchError(error: unknown): SearchErrorKind {
   return 'upstream'
 }
 
-export function checkSearchPayload(payload: any) {
+function invalidPayload(message: string): never {
+  throw Object.assign(new Error(message), {
+    status: 502,
+    code: 'UPSTREAM_INVALID_RESPONSE',
+  })
+}
+
+export function checkSearchPayload(payload: any, expectedResult?: SearchResultKind) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return invalidPayload('Search provider returned a non-object response')
+  }
   if (payload?.error || Number(payload?.code) >= 400) {
     const code = payload?.error?.code
     const status = /rate.limit/i.test(String(code)) ? 429 : Number(payload?.status ?? payload?.code) || 502
     throw Object.assign(new Error('Search provider failed'), { status, code })
+  }
+
+  if (payload.result !== undefined && (!payload.result || typeof payload.result !== 'object' || Array.isArray(payload.result))) {
+    return invalidPayload('Search provider returned a malformed result')
+  }
+
+  if (!expectedResult) return
+
+  const result = payload.result
+  const field = expectedResult === 'songs' ? 'songs' : expectedResult
+  if (!result || !Array.isArray(result[field])) {
+    return invalidPayload(`Search provider response is missing result.${field}`)
   }
 }

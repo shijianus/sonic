@@ -256,6 +256,7 @@ onUnmounted(() => {
 import {
   probeSongQualities,
   getCachedProbeResult,
+  getProbeTargetKey,
   cancelSongProbe,
   qualityLabel,
   qualityReason,
@@ -302,7 +303,7 @@ const effectiveQualityLevel = computed<QualityLevel>(() => {
   return 'standard'
 })
 
-let probingSongId = ''
+let probingSongKey = ''
 
 // 触发音质探测（仅在打开浮层或当前档位非标准需判断降级时触发）
 const triggerProbeIfNeeded = async () => {
@@ -312,13 +313,14 @@ const triggerProbeIfNeeded = async () => {
     return
   }
 
-  const cached = getCachedProbeResult(song.id)
+  const targetKey = getProbeTargetKey(song)
+  const cached = getCachedProbeResult(song)
   if (cached) {
     currentSongProbe.value = cached
     return
   }
 
-  if (probingSongId === String(song.id)) {
+  if (probingSongKey === targetKey) {
     return
   }
 
@@ -328,17 +330,17 @@ const triggerProbeIfNeeded = async () => {
     return
   }
 
-  probingSongId = String(song.id)
+  probingSongKey = targetKey
   try {
     const res = await probeSongQualities(song)
-    if (currentSong.value && String(currentSong.value.id) === String(song.id)) {
+    if (currentSong.value && getProbeTargetKey(currentSong.value) === targetKey) {
       currentSongProbe.value = res
     }
   } catch (e) {
     // 探测异常或中止维持兜底
   } finally {
-    if (probingSongId === String(song.id)) {
-      probingSongId = ''
+    if (probingSongKey === targetKey) {
+      probingSongKey = ''
     }
   }
 }
@@ -347,14 +349,14 @@ const triggerProbeIfNeeded = async () => {
 watch(
   () => currentSong.value,
   (newSong, oldSong) => {
-    if (oldSong?.id && String(oldSong.id) !== String(newSong?.id)) {
-      cancelSongProbe(oldSong.id)
+    if (oldSong?.id && getProbeTargetKey(oldSong) !== getProbeTargetKey(newSong)) {
+      cancelSongProbe(oldSong)
     }
     if (!newSong || !newSong.id) {
       currentSongProbe.value = null
       return
     }
-    const cached = getCachedProbeResult(newSong.id)
+    const cached = getCachedProbeResult(newSong)
     if (cached) {
       currentSongProbe.value = cached
       return

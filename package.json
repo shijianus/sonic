@@ -1,6 +1,7 @@
 {
   "name": "sonic",
   "version": "2.2.0",
+  "packageManager": "pnpm@10.34.5",
   "description": "epocanvas sonic Music Cloud Platform & Aggregation Gateway",
   "private": true,
   "license": "MIT",
@@ -32,6 +33,7 @@
     "test:security": "pnpm --dir player exec vitest run --root .. tests/security-route-hardening.test.ts tests/security.test.ts tests/security-hardening.test.ts tests/security-p0-regression.test.ts tests/oauth-security.test.ts tests/ssrf-security.test.ts tests/engine-static.test.ts tests/frontend-xss.test.ts tests/config-parity.test.ts tests/release-p0-p1-gate.test.ts tests/beta-freeze-hardening.test.ts",
     "test:observability": "jiti scripts/verify-observability-and-alerts.mjs --self-test",
     "test:load": "node --experimental-sqlite scripts/verify-mixed-load.mjs",
+    "test:pressure": "node scripts/verify-public-beta-pressure.mjs",
     "test:recommend": "pnpm --dir player exec vitest run --root .. tests/recommendation-and-search.test.ts tests/multi-entity-recommendation.test.ts",
     "eval:recommend": "jiti scripts/evaluate-recommendation.mjs",
     "eval:multi-entity": "jiti scripts/evaluate-multi-entity.mjs",

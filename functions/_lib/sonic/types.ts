@@ -189,6 +189,8 @@ export interface SonicSearchData {
   page: number;
   count: number;
   total: number;
+  /** Whether total represents the provider catalogue rather than this page. */
+  totalKnown?: boolean;
   tracks: SonicSearchTrack[];
 }
 

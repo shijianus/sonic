@@ -3,6 +3,7 @@ import { cloudSearch } from '@/api'
 import MobileSearchError from '@/components/Search/MobileSearchError.vue'
 import { formatCount } from '@/utils/time'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { checkSearchPayload, classifySearchError, type SearchErrorKind } from '@/utils/searchErrors'
 interface Props {
   keywords: string
   limit?: number
@@ -22,32 +23,14 @@ interface PLResult {
   playCount: number
   creator: string
 }
-type SearchErrorKind = '' | 'network' | 'rateLimited' | 'upstream'
-const state = reactive<{ loading: boolean; results: PLResult[]; errorKind: SearchErrorKind }>({
+type PlaylistSearchErrorKind = '' | SearchErrorKind
+const state = reactive<{ loading: boolean; results: PLResult[]; errorKind: PlaylistSearchErrorKind }>({
   loading: false,
   results: [],
   errorKind: '',
 })
 const { results, loading, errorKind } = toRefs(state)
 
-const classifySearchError = (error: unknown): SearchErrorKind => {
-  const err = error as any
-  const status = Number(err?.response?.status ?? err?.status ?? 0)
-  if (status === 429) return 'rateLimited'
-  if (status > 0) return 'upstream'
-  if (err?.name === 'TypeError' || /failed to fetch|network|offline|timeout/i.test(String(err?.message || ''))) {
-    return 'network'
-  }
-  return 'upstream'
-}
-
-const checkSearchPayload = (payload: any) => {
-  if (payload?.error || Number(payload?.code) >= 400) {
-    const status = Number(payload?.status ?? payload?.code)
-    const rateLimited = /rate.limit/i.test(String(payload?.error?.code || ''))
-    throw Object.assign(new Error('Search provider failed'), { status: rateLimited ? 429 : status || 502 })
-  }
-}
 let requestController: AbortController | null = null
 let requestGeneration = 0
 
@@ -72,7 +55,7 @@ const fetchPlaylists = async () => {
       offset: props.offset ?? 0,
     }, controller.signal)
     if (controller.signal.aborted || generation !== requestGeneration) return
-    checkSearchPayload(res)
+    checkSearchPayload(res, 'playlists')
     const list: any[] = Array.isArray(res?.result?.playlists) ? res.result.playlists : []
     state.results = list.map(pl => ({
       id: pl?.id,

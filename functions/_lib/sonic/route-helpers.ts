@@ -552,6 +552,18 @@ export async function handleNexusSearchRequest(
       }
     }
 
+    if (result.allProvidersFailed && result.data.tracks.length === 0) {
+      const timedOut = hasSearchTimeout(result.attempts);
+      return sonicError(timedOut ? 'UPSTREAM_TIMEOUT' : 'SEARCH_UPSTREAM_UNAVAILABLE', timedOut ? 'Search providers timed out' : 'All configured search providers failed', timedOut ? 504 : 502, {
+        provider: 'nexus',
+        latencyMs,
+        degraded: true,
+        degradedReason: result.degradedReason || 'all_providers_failed',
+        circuitState: result.circuitState,
+        attempts: result.attempts,
+      });
+    }
+
     const response = {
       brand: 'Sonic',
       data: result.data,

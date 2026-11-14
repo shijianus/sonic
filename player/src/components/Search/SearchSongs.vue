@@ -225,7 +225,7 @@ const fetchSongs = async (nocache = false) => {
         ...(nocache ? { nocache: 1 } : {}),
       }, controller.signal)
       if (controller.signal.aborted || generation !== requestGeneration) return
-      checkSearchPayload(res)
+      checkSearchPayload(res, 'songs')
       const { songs, total } = transformSearchSongs(res as Record<string, unknown>)
       if (songs && songs.length > 0) {
         state.results = songs

@@ -133,14 +133,15 @@ async function runTests() {
     const res = await handleNexusSearchRequest(req, { SONIC_TIMEOUT_MS: '500' });
     const json = await res.json();
 
-    assert(res.status === 200, `Search returns 200 despite timeouts (got ${res.status})`);
+    assert(res.status === 504, `Search returns an observable timeout (got ${res.status})`);
     assert(json.brand === 'Sonic', `Brand is Sonic`);
+    assert(json.error?.code === 'UPSTREAM_TIMEOUT', `Timeout error is classified (got ${json.error?.code})`);
     const attempts = json.meta?.attempts ?? [];
     const providers = ['netease', 'qq', 'kugou'];
     const allTimedOut = attempts.length === providers.length && providers.every(provider => attempts.some(attempt =>
       attempt.provider === provider && !attempt.ok && attempt.errorCode === 'UPSTREAM_TIMEOUT'));
     assert(allTimedOut, `All three upstream timeouts are recorded${allTimedOut ? '' : ` (${JSON.stringify(attempts)})`}`);
-    assert(json.data?.tracks?.length === 0 && res.headers.get('Cache-Control') === 'no-store', 'A timed-out search returns no tracks and is not cached');
+    assert(!json.data && res.headers.get('Cache-Control') === 'no-store', 'A timed-out search returns no fabricated tracks and is not cached');
   }
 
   // Test 8: QQ Desktop Search returns tracks

@@ -73,6 +73,7 @@ declare global {
   const getGroupConfig: typeof import('../utils/exploreTags').getGroupConfig
   const getLikedCommentIds: typeof import('../utils/localCommentDB').getLikedCommentIds
   const getLocalMVComments: typeof import('../utils/localCommentDB').getLocalMVComments
+  const getProbeTargetKey: typeof import('../utils/qualityProbe').getProbeTargetKey
   const getProxyCoverUrl: typeof import('../utils/imageUrl').getProxyCoverUrl
   const getRadarBadgeClass: typeof import('../utils/exploreTags').getRadarBadgeClass
   const getTagGroup: typeof import('../utils/exploreTags').getTagGroup
@@ -248,7 +249,7 @@ declare global {
   export type { QualityLevel, QualityChoiceMeta, ProbeQualityItem, SongProbeResult } from '../utils/qualityProbe'
   import('../utils/qualityProbe')
   // @ts-ignore
-  export type { SearchErrorKind } from '../utils/searchErrors'
+  export type { SearchErrorKind, SearchResultKind } from '../utils/searchErrors'
   import('../utils/searchErrors')
   // @ts-ignore
   export type { SonicPocketTrack, SonicPocketPlayback, SonicPocketLyricWord, SonicPocketLyricLine, SonicPocketLyrics, SonicPocketMessage, PocketCommandMessage } from '../utils/sonicBlogBridge'

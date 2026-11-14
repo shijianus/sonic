@@ -44,16 +44,17 @@ export interface ProbeQualityItem {
 
 export interface SongProbeResult {
   songId: string
+  targetKey?: string
   lossless: ProbeQualityItem
   exhigh: ProbeQualityItem
   standard: ProbeQualityItem
   probedAt: number
 }
 
-// 内存缓存: songId -> SongProbeResult
+// 内存缓存: source/platform/id/stream signature -> SongProbeResult
 const probeCache = new Map<string, SongProbeResult>()
 
-// 记录各歌曲进行中的 AbortController
+// 记录各播放目标进行中的 AbortController
 const activeControllers = new Map<string, AbortController>()
 
 // 并发限制器：最大并发 3
@@ -139,33 +140,64 @@ export function buildProbeUrl(song: any, level: QualityLevel): string {
     return found.streamUrl
   }
 
-  const songId = encodeURIComponent(String(song.id || ''))
+  const songId = encodeURIComponent(String(song.resolvedPlatformId || song.platformId || song.id || ''))
   const title = encodeURIComponent(song.name || '')
   const artist = encodeURIComponent(song.artist || '')
+  const directUrl = String(song.streamUrl || song.url || '')
+  if (directUrl) {
+    try {
+      const parsed = new URL(directUrl, typeof window === 'undefined' ? 'http://sonic.local' : window.location.origin)
+      if (parsed.pathname === '/api/music/stream') {
+        parsed.searchParams.set('br', br)
+        if (song.source && !parsed.searchParams.has('source')) parsed.searchParams.set('source', String(song.source))
+        return directUrl.startsWith('/') ? `${parsed.pathname}${parsed.search}` : parsed.toString()
+      }
+    } catch {
+      // Invalid direct URLs fall through to the source-aware gateway URL.
+    }
+    // A provider URL without quality metadata is only a safe standard probe.
+    if (level === 'standard') return directUrl
+    return ''
+  }
+
   // 第一方聚合曲目回退到自身来源，避免命中网关策略禁用的商业源
-  const ownStreamUrl = song.streamUrl || song.url || ''
-  if (ownStreamUrl) return ownStreamUrl
   const fallbackSource = song.sources?.[0]?.platform || 'netease'
   return `/api/music/stream?id=${songId}&source=${encodeURIComponent(fallbackSource)}&br=${br}&title=${title}&artist=${artist}`
+}
+
+/** 返回播放来源的稳定身份，用于缓存和取消请求去重。 */
+export function getProbeTargetKey(songOrId: any): string {
+  if (typeof songOrId === 'string' && (songOrId.startsWith('source:') || songOrId.startsWith('id:'))) return songOrId
+  if (!songOrId || typeof songOrId !== 'object') return `id:${String(songOrId || '')}`
+  const source = String(songOrId.resolvedSource || songOrId.source || songOrId.sources?.[0]?.platform || '')
+  const platformId = String(songOrId.resolvedPlatformId || songOrId.platformId || songOrId.id || '')
+  const directUrl = String(songOrId.streamUrl || songOrId.url || '')
+  const qualities = Array.isArray(songOrId.qualities)
+    ? songOrId.qualities
+      .map((item: any) => `${String(item?.level || '')}=${String(item?.streamUrl || '')}`)
+      .sort()
+      .join('|')
+    : ''
+  return `source:${source}|platform:${platformId}|url:${directUrl}|qualities:${qualities}`
 }
 
 /**
  * 中止指定歌曲正在进行的探测请求
  */
-export function cancelSongProbe(songId: string | number): void {
-  const idStr = String(songId)
-  const ctrl = activeControllers.get(idStr)
+export function cancelSongProbe(song: any): void {
+  const key = getProbeTargetKey(song)
+  const ctrl = activeControllers.get(key)
   if (ctrl) {
     ctrl.abort()
-    activeControllers.delete(idStr)
+    activeControllers.delete(key)
   }
 }
 
 /**
  * 获取指定歌曲的缓存探测结果（若有）
  */
-export function getCachedProbeResult(songId: string | number): SongProbeResult | null {
-  return probeCache.get(String(songId)) || null
+export function getCachedProbeResult(song: any): SongProbeResult | null {
+  return probeCache.get(getProbeTargetKey(song)) || null
 }
 
 /**
@@ -187,6 +219,19 @@ async function probeTier(
 }> {
   const release = await acquireSlot()
   const streamUrl = buildProbeUrl(song, level)
+
+  if (!streamUrl) {
+    release()
+    return {
+      level,
+      status: null,
+      contentType: '',
+      totalBytes: null,
+      actualBitrateKbps: null,
+      timedOut: false,
+      error: new Error('No quality-specific stream URL is available'),
+    }
+  }
 
   // 8 秒超时控制与中止级联
   const timeoutCtrl = new AbortController()
@@ -275,16 +320,17 @@ export async function probeSongQualities(
   }
 
   const songId = String(song.id)
+  const targetKey = getProbeTargetKey(song)
 
-  if (!options.forceRefresh && probeCache.has(songId)) {
-    return probeCache.get(songId)!
+  if (!options.forceRefresh && probeCache.has(targetKey)) {
+    return probeCache.get(targetKey)!
   }
 
   // 中止此前的探测
-  cancelSongProbe(songId)
+  cancelSongProbe(song)
 
   const parentCtrl = new AbortController()
-  activeControllers.set(songId, parentCtrl)
+  activeControllers.set(targetKey, parentCtrl)
 
   // 级联外部中止信号
   if (options.signal) {
@@ -445,15 +491,16 @@ export async function probeSongQualities(
 
     const result: SongProbeResult = {
       songId,
+      targetKey,
       lossless: losslessItem,
       exhigh: exhighItem,
       standard: standardItem,
       probedAt: Date.now(),
     }
 
-    probeCache.set(songId, result)
+    probeCache.set(targetKey, result)
     return result
   } finally {
-    activeControllers.delete(songId)
+    activeControllers.delete(targetKey)
   }
 }

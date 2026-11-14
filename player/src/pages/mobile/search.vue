@@ -303,7 +303,7 @@ const fetchSongs = async (signal: AbortSignal, generation: number, nocache: bool
       ...(nocache ? { nocache: 1 } : {}),
     }, signal)
     if (signal.aborted || generation !== searchGeneration) return
-    checkSearchPayload(res)
+    checkSearchPayload(res, 'songs')
     const { songs, total } = transformSearchSongs(res as Record<string, unknown>)
     state.songs = songs
     state.songTotal = total
@@ -328,7 +328,7 @@ const fetchPlaylists = async (signal: AbortSignal, generation: number) => {
       offset: (state.playlistPage - 1) * state.playlistPageSize,
     }, signal)
     if (signal.aborted || generation !== searchGeneration) return
-    checkSearchPayload(res)
+    checkSearchPayload(res, 'playlists')
     const { playlists, total } = transformSearchPlaylists(res as Record<string, unknown>)
     state.playlists = playlists
     state.playlistTotal = total
@@ -350,7 +350,7 @@ const fetchMVs = async (signal: AbortSignal, generation: number) => {
       offset: (state.mvPage - 1) * state.mvPageSize,
     }, signal)
     if (signal.aborted || generation !== searchGeneration) return
-    checkSearchPayload(res)
+    checkSearchPayload(res, 'mvs')
     const { mvs, total } = transformSearchMVs(res as Record<string, unknown>)
     state.mvs = mvs
     state.mvTotal = total
