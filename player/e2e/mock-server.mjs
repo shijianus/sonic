@@ -196,6 +196,19 @@ async function handleApi(req, res, url) {
       res.destroy()
       return
     }
+    const emptySearchKey = {
+      1000: ['playlists', 'playlistCount'],
+      1004: ['mvs', 'mvCount'],
+      100: ['artists', 'artistCount'],
+      10: ['albums', 'albumCount'],
+    }[Number(q.get('type') || 1)]
+    if (emptySearchKey) {
+      const [listKey, countKey] = emptySearchKey
+      return sendJson(res, {
+        result: { [listKey]: [], [countKey]: 0 },
+        code: 200,
+      })
+    }
     const ids =
       term === 'empty' || term === 'malformed'
         ? []
