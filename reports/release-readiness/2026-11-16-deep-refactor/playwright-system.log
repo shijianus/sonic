@@ -1,0 +1,1072 @@
+[1A[2K[WebServer] (node:37) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+
+Running 123 tests using 1 worker
+
+[1A[2K(node:45) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:45) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[1/123] [desktop-chromium] › e2e/specs/a11y.spec.ts:5:3 › 基础可访问性 › 搜索、播放控制与进度条具备可访问名称
+[1A[2K(node:58) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:58) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[2/123] [desktop-chromium] › e2e/specs/a11y.spec.ts:5:3 › 基础可访问性 › 搜索、播放控制与进度条具备可访问名称 (retry #1)
+[1A[2K  1) [desktop-chromium] › e2e/specs/a11y.spec.ts:5:3 › 基础可访问性 › 搜索、播放控制与进度条具备可访问名称 ─────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/a11y-基础可访问性-搜索、播放控制与进度条具备可访问名称-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/a11y-基础可访问性-搜索、播放控制与进度条具备可访问名称-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/a11y-基础可访问性-搜索、播放控制与进度条具备可访问名称-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/a11y-基础可访问性-搜索、播放控制与进度条具备可访问名称-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:71) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:71) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[3/123] [desktop-chromium] › e2e/specs/a11y.spec.ts:23:3 › 基础可访问性 › 所有可见按钮都有可访问名称
+[1A[2K(node:84) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:84) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[4/123] [desktop-chromium] › e2e/specs/a11y.spec.ts:23:3 › 基础可访问性 › 所有可见按钮都有可访问名称 (retry #1)
+[1A[2K  2) [desktop-chromium] › e2e/specs/a11y.spec.ts:23:3 › 基础可访问性 › 所有可见按钮都有可访问名称 ─────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/a11y-基础可访问性-所有可见按钮都有可访问名称-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/a11y-基础可访问性-所有可见按钮都有可访问名称-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/a11y-基础可访问性-所有可见按钮都有可访问名称-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/a11y-基础可访问性-所有可见按钮都有可访问名称-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:97) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:97) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[5/123] [desktop-chromium] › e2e/specs/a11y.spec.ts:41:3 › 基础可访问性 › 键盘可聚焦搜索框并提交查询
+[1A[2K(node:110) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:110) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[6/123] [desktop-chromium] › e2e/specs/a11y.spec.ts:41:3 › 基础可访问性 › 键盘可聚焦搜索框并提交查询 (retry #1)
+[1A[2K  3) [desktop-chromium] › e2e/specs/a11y.spec.ts:41:3 › 基础可访问性 › 键盘可聚焦搜索框并提交查询 ─────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/a11y-基础可访问性-键盘可聚焦搜索框并提交查询-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/a11y-基础可访问性-键盘可聚焦搜索框并提交查询-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/a11y-基础可访问性-键盘可聚焦搜索框并提交查询-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/a11y-基础可访问性-键盘可聚焦搜索框并提交查询-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:123) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:123) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[7/123] [desktop-chromium] › e2e/specs/charts-degradation.spec.ts:3:1 › desktop Trending labels a New Songs fallback only after a failure and retries the selected window
+[1A[2K(node:136) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:136) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[8/123] [desktop-chromium] › e2e/specs/charts-degradation.spec.ts:3:1 › desktop Trending labels a New Songs fallback only after a failure and retries the selected window (retry #1)
+[1A[2K  4) [desktop-chromium] › e2e/specs/charts-degradation.spec.ts:3:1 › desktop Trending labels a New Songs fallback only after a failure and retries the selected window 
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/charts-degradation-desktop-0a988-retries-the-selected-window-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/charts-degradation-desktop-0a988-retries-the-selected-window-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/charts-degradation-desktop-0a988-retries-the-selected-window-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/charts-degradation-desktop-0a988-retries-the-selected-window-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:149) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:149) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[9/123] [desktop-chromium] › e2e/specs/charts-degradation.spec.ts:61:1 › desktop official chart clears obsolete tracks, reports upstream failure and retries the selected chart
+[1A[2K(node:162) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:162) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[10/123] [desktop-chromium] › e2e/specs/charts-degradation.spec.ts:61:1 › desktop official chart clears obsolete tracks, reports upstream failure and retries the selected chart (retry #1)
+[1A[2K  5) [desktop-chromium] › e2e/specs/charts-degradation.spec.ts:61:1 › desktop official chart clears obsolete tracks, reports upstream failure and retries the selected chart 
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/charts-degradation-desktop-edd25--retries-the-selected-chart-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/charts-degradation-desktop-edd25--retries-the-selected-chart-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/charts-degradation-desktop-edd25--retries-the-selected-chart-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/charts-degradation-desktop-edd25--retries-the-selected-chart-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:175) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:175) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[11/123] [desktop-chromium] › e2e/specs/charts-official.spec.ts:24:1 › desktop official charts: 25 entries stay inside their slot and tabs remain clickable
+[1A[2K(node:188) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:188) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[12/123] [desktop-chromium] › e2e/specs/charts-official.spec.ts:24:1 › desktop official charts: 25 entries stay inside their slot and tabs remain clickable (retry #1)
+[1A[2K  6) [desktop-chromium] › e2e/specs/charts-official.spec.ts:24:1 › desktop official charts: 25 entries stay inside their slot and tabs remain clickable 
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/charts-official-desktop-of-dcf51-t-and-tabs-remain-clickable-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/charts-official-desktop-of-dcf51-t-and-tabs-remain-clickable-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/charts-official-desktop-of-dcf51-t-and-tabs-remain-clickable-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/charts-official-desktop-of-dcf51-t-and-tabs-remain-clickable-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:201) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:201) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[13/123] [desktop-chromium] › e2e/specs/charts-race.spec.ts:41:3 › desktop Trending: an older response cannot replace the selected filter
+[1A[2K(node:214) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:214) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[14/123] [desktop-chromium] › e2e/specs/charts-race.spec.ts:41:3 › desktop Trending: an older response cannot replace the selected filter (retry #1)
+[1A[2K  7) [desktop-chromium] › e2e/specs/charts-race.spec.ts:41:3 › desktop Trending: an older response cannot replace the selected filter 
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/charts-race-desktop-Trendi-44d67-replace-the-selected-filter-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/charts-race-desktop-Trendi-44d67-replace-the-selected-filter-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/charts-race-desktop-Trendi-44d67-replace-the-selected-filter-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/charts-race-desktop-Trendi-44d67-replace-the-selected-filter-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:227) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:227) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[15/123] [desktop-chromium] › e2e/specs/charts-race.spec.ts:41:3 › desktop New Songs: an older response cannot replace the selected filter
+[1A[2K(node:240) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:240) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[16/123] [desktop-chromium] › e2e/specs/charts-race.spec.ts:41:3 › desktop New Songs: an older response cannot replace the selected filter (retry #1)
+[1A[2K  8) [desktop-chromium] › e2e/specs/charts-race.spec.ts:41:3 › desktop New Songs: an older response cannot replace the selected filter 
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/charts-race-desktop-New-So-ed89a-replace-the-selected-filter-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/charts-race-desktop-New-So-ed89a-replace-the-selected-filter-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/charts-race-desktop-New-So-ed89a-replace-the-selected-filter-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/charts-race-desktop-New-So-ed89a-replace-the-selected-filter-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:253) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:253) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[17/123] [desktop-chromium] › e2e/specs/core.spec.ts:8:3 › 核心播放路径 › 首页加载：布局、搜索入口与播放器控制可见，无横向溢出
+[1A[2K(node:266) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:266) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[18/123] [desktop-chromium] › e2e/specs/core.spec.ts:8:3 › 核心播放路径 › 首页加载：布局、搜索入口与播放器控制可见，无横向溢出 (retry #1)
+[1A[2K  9) [desktop-chromium] › e2e/specs/core.spec.ts:8:3 › 核心播放路径 › 首页加载：布局、搜索入口与播放器控制可见，无横向溢出 ─────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-首页加载：布局、搜索入口与播放器控制可见，无横向溢出-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-首页加载：布局、搜索入口与播放器控制可见，无横向溢出-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-首页加载：布局、搜索入口与播放器控制可见，无横向溢出-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-首页加载：布局、搜索入口与播放器控制可见，无横向溢出-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:279) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:279) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[19/123] [desktop-chromium] › e2e/specs/core.spec.ts:18:3 › 核心播放路径 › 搜索 → 播放 → 暂停 → 恢复
+[1A[2K(node:292) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:292) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[20/123] [desktop-chromium] › e2e/specs/core.spec.ts:18:3 › 核心播放路径 › 搜索 → 播放 → 暂停 → 恢复 (retry #1)
+[1A[2K  10) [desktop-chromium] › e2e/specs/core.spec.ts:18:3 › 核心播放路径 › 搜索 → 播放 → 暂停 → 恢复 ────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-搜索-→-播放-→-暂停-→-恢复-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-搜索-→-播放-→-暂停-→-恢复-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-搜索-→-播放-→-暂停-→-恢复-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-搜索-→-播放-→-暂停-→-恢复-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:305) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:305) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[21/123] [desktop-chromium] › e2e/specs/core.spec.ts:41:3 › 核心播放路径 › 切歌与快速连点下一首：最终只播放最后一次选择
+[1A[2K(node:318) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:318) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[22/123] [desktop-chromium] › e2e/specs/core.spec.ts:41:3 › 核心播放路径 › 切歌与快速连点下一首：最终只播放最后一次选择 (retry #1)
+[1A[2K  11) [desktop-chromium] › e2e/specs/core.spec.ts:41:3 › 核心播放路径 › 切歌与快速连点下一首：最终只播放最后一次选择 ───────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-切歌与快速连点下一首：最终只播放最后一次选择-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-切歌与快速连点下一首：最终只播放最后一次选择-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-切歌与快速连点下一首：最终只播放最后一次选择-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-切歌与快速连点下一首：最终只播放最后一次选择-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:331) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:331) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[23/123] [desktop-chromium] › e2e/specs/core.spec.ts:60:3 › 核心播放路径 › Seek：点击进度条 50% 后真实音频时间跳转并继续播放
+[1A[2K(node:344) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:344) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[24/123] [desktop-chromium] › e2e/specs/core.spec.ts:60:3 › 核心播放路径 › Seek：点击进度条 50% 后真实音频时间跳转并继续播放 (retry #1)
+[1A[2K  12) [desktop-chromium] › e2e/specs/core.spec.ts:60:3 › 核心播放路径 › Seek：点击进度条 50% 后真实音频时间跳转并继续播放 ────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-Seek：点击进度条-50-后真实音频时间跳转并继续播放-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-Seek：点击进度条-50-后真实音频时间跳转并继续播放-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-Seek：点击进度条-50-后真实音频时间跳转并继续播放-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-Seek：点击进度条-50-后真实音频时间跳转并继续播放-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:357) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:357) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[25/123] [desktop-chromium] › e2e/specs/core.spec.ts:87:3 › 核心播放路径 › 歌词：随当前歌曲加载并高亮推进，切歌后歌词同步切换
+[1A[2K(node:370) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:370) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[26/123] [desktop-chromium] › e2e/specs/core.spec.ts:87:3 › 核心播放路径 › 歌词：随当前歌曲加载并高亮推进，切歌后歌词同步切换 (retry #1)
+[1A[2K  13) [desktop-chromium] › e2e/specs/core.spec.ts:87:3 › 核心播放路径 › 歌词：随当前歌曲加载并高亮推进，切歌后歌词同步切换 ────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-歌词：随当前歌曲加载并高亮推进，切歌后歌词同步切换-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-歌词：随当前歌曲加载并高亮推进，切歌后歌词同步切换-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-歌词：随当前歌曲加载并高亮推进，切歌后歌词同步切换-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-歌词：随当前歌曲加载并高亮推进，切歌后歌词同步切换-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:383) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:383) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[27/123] [desktop-chromium] › e2e/specs/core.spec.ts:111:3 › 核心播放路径 › 收藏：喜欢后进入收藏页可见，刷新后保持
+[1A[2K(node:396) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:396) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[28/123] [desktop-chromium] › e2e/specs/core.spec.ts:111:3 › 核心播放路径 › 收藏：喜欢后进入收藏页可见，刷新后保持 (retry #1)
+[1A[2K  14) [desktop-chromium] › e2e/specs/core.spec.ts:111:3 › 核心播放路径 › 收藏：喜欢后进入收藏页可见，刷新后保持 ─────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-收藏：喜欢后进入收藏页可见，刷新后保持-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-收藏：喜欢后进入收藏页可见，刷新后保持-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-收藏：喜欢后进入收藏页可见，刷新后保持-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-收藏：喜欢后进入收藏页可见，刷新后保持-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:409) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:409) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[29/123] [desktop-chromium] › e2e/specs/core.spec.ts:131:3 › 核心播放路径 › 播放历史：播过的歌曲进入最近播放并刷新后保持
+[1A[2K(node:422) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:422) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[30/123] [desktop-chromium] › e2e/specs/core.spec.ts:131:3 › 核心播放路径 › 播放历史：播过的歌曲进入最近播放并刷新后保持 (retry #1)
+[1A[2K  15) [desktop-chromium] › e2e/specs/core.spec.ts:131:3 › 核心播放路径 › 播放历史：播过的歌曲进入最近播放并刷新后保持 ──────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-播放历史：播过的歌曲进入最近播放并刷新后保持-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-播放历史：播过的歌曲进入最近播放并刷新后保持-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-播放历史：播过的歌曲进入最近播放并刷新后保持-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-播放历史：播过的歌曲进入最近播放并刷新后保持-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:435) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:435) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[31/123] [desktop-chromium] › e2e/specs/core.spec.ts:142:3 › 核心播放路径 › 歌词降级：纯音乐与无歌词返回明确提示而不是崩溃
+[1A[2K(node:448) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:448) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[32/123] [desktop-chromium] › e2e/specs/core.spec.ts:142:3 › 核心播放路径 › 歌词降级：纯音乐与无歌词返回明确提示而不是崩溃 (retry #1)
+[1A[2K  16) [desktop-chromium] › e2e/specs/core.spec.ts:142:3 › 核心播放路径 › 歌词降级：纯音乐与无歌词返回明确提示而不是崩溃 ─────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-歌词降级：纯音乐与无歌词返回明确提示而不是崩溃-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-歌词降级：纯音乐与无歌词返回明确提示而不是崩溃-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/core-核心播放路径-歌词降级：纯音乐与无歌词返回明确提示而不是崩溃-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/core-核心播放路径-歌词降级：纯音乐与无歌词返回明确提示而不是崩溃-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:461) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:461) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[33/123] [desktop-chromium] › e2e/specs/csp.spec.ts:8:1 › the deployed CSP allows the built app without violations
+[1A[2K(node:474) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:474) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[34/123] [desktop-chromium] › e2e/specs/csp.spec.ts:8:1 › the deployed CSP allows the built app without violations (retry #1)
+[1A[2K  17) [desktop-chromium] › e2e/specs/csp.spec.ts:8:1 › the deployed CSP allows the built app without violations 
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/csp-the-deployed-CSP-allows-the-built-app-without-violations-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/csp-the-deployed-CSP-allows-the-built-app-without-violations-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/csp-the-deployed-CSP-allows-the-built-app-without-violations-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/csp-the-deployed-CSP-allows-the-built-app-without-violations-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:487) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:487) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[35/123] [desktop-chromium] › e2e/specs/desktop-navigation.spec.ts:2:1 › desktop sidebar navigation renders each page with reduced motion
+[1A[2K(node:500) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:500) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[36/123] [desktop-chromium] › e2e/specs/desktop-navigation.spec.ts:2:1 › desktop sidebar navigation renders each page with reduced motion (retry #1)
+[1A[2K  18) [desktop-chromium] › e2e/specs/desktop-navigation.spec.ts:2:1 › desktop sidebar navigation renders each page with reduced motion 
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/desktop-navigation-desktop-3a4a5-ch-page-with-reduced-motion-desktop-chromium/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/desktop-navigation-desktop-3a4a5-ch-page-with-reduced-motion-desktop-chromium/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: browserType.launch: Executable doesn't exist at /home/agent/.cache/ms-playwright/chromium_headless_shell-1194/chrome-linux/headless_shell
+    ╔═════════════════════════════════════════════════════════════════════════╗
+    ║ Looks like Playwright Test or Playwright was just installed or updated. ║
+    ║ Please run the following command to download new browsers:              ║
+    ║                                                                         ║
+    ║     pnpm exec playwright install                                        ║
+    ║                                                                         ║
+    ║ <3 Playwright Team                                                      ║
+    ╚═════════════════════════════════════════════════════════════════════════╝
+
+    attachment #1: trace (application/zip) ─────────────────────────────────────────────────────────
+    e2e-results/desktop-navigation-desktop-3a4a5-ch-page-with-reduced-motion-desktop-chromium-retry1/trace.zip
+    Usage:
+
+        pnpm exec playwright show-trace e2e-results/desktop-navigation-desktop-3a4a5-ch-page-with-reduced-motion-desktop-chromium-retry1/trace.zip
+
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+
+[1A[2K(node:513) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+

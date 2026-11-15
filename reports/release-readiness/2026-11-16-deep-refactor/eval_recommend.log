@@ -1,0 +1,91 @@
+$ npm run eval:recommend
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> sonic@2.2.0 eval:recommend
+> jiti scripts/evaluate-recommendation.mjs
+
+{
+  "schemaVersion": 2,
+  "datasetType": "Synthetic Multi-Persona Holdout & Query Benchmark (Offline Reproducible)",
+  "catalogSize": 58,
+  "eligibleCatalogSize": 58,
+  "checks": {
+    "holdoutExcludesTrainingAndHasUniqueCatalogItems": true,
+    "everyPersonaFindsAtLeastOneRelevantHoldoutItem": true,
+    "knownQueriesMatchWithinTopFive": true,
+    "unknownQueriesReceiveFallback": true
+  },
+  "personaResults": [
+    {
+      "id": "anon:eval_jay_rnb",
+      "name": "华语 R&B 与周杰伦/林俊杰深度听众",
+      "relevantHoldoutCount": 17,
+      "hitsAtK": 7,
+      "passed": true
+    },
+    {
+      "id": "anon:eval_cantopop",
+      "name": "粤语经典与港乐爱好者",
+      "relevantHoldoutCount": 7,
+      "hitsAtK": 7,
+      "passed": true
+    },
+    {
+      "id": "anon:eval_rock_indie",
+      "name": "华语摇滚与独立民谣听众",
+      "relevantHoldoutCount": 17,
+      "hitsAtK": 5,
+      "passed": true
+    },
+    {
+      "id": "anon:eval_western_pop",
+      "name": "欧美流行与合成器电子听众",
+      "relevantHoldoutCount": 32,
+      "hitsAtK": 10,
+      "passed": true
+    },
+    {
+      "id": "anon:eval_jpop_anime",
+      "name": "日音 J-Pop 与二次元原声听众",
+      "relevantHoldoutCount": 2,
+      "hitsAtK": 1,
+      "passed": true
+    },
+    {
+      "id": "anon:eval_ballad_female",
+      "name": "华语抒情女声与都市慢歌听众",
+      "relevantHoldoutCount": 22,
+      "hitsAtK": 7,
+      "passed": true
+    }
+  ],
+  "recommendationMetrics": {
+    "Precision@10": 0.6167,
+    "Recall@10": 0.4728,
+    "NDCG@10": 0.7729,
+    "CatalogCoverage": 0.7069,
+    "IntraListDiversity_ILD": 0.7972,
+    "Novelty_Bits": 0.1056
+  },
+  "searchMetrics": {
+    "Top1_HitRate": 1,
+    "Top5_HitRate": 1,
+    "ExpectedFallbackSuccessRate": 1,
+    "ZeroResultRate_AfterFallback": 0,
+    "MetadataDeclaredAvailableTrackRatio": 0,
+    "metadataStreamTypes": {
+      "full": 0,
+      "trial": 0,
+      "unavailable": 0,
+      "unknown": 55
+    },
+    "livePlaybackVerified": false
+  },
+  "performanceMetrics": {
+    "recommendLatency_p50_ms": 6.34,
+    "recommendLatency_p95_ms": 11.43,
+    "searchLatency_p50_ms": 2.57,
+    "searchLatency_p95_ms": 5.45,
+    "processRssMemory_MB": 92.3
+  }
+}

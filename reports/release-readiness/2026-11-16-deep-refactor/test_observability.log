@@ -1,0 +1,15 @@
+$ npm run test:observability
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> sonic@2.2.0 test:observability
+> jiti scripts/verify-observability-and-alerts.mjs --self-test
+
+{
+  "ok": true,
+  "mode": "self-test",
+  "fullGate": false,
+  "stubDeliveryVerified": true,
+  "failingDeliveryRejected": true,
+  "missingWebhookRejected": true,
+  "redactionVerified": true
+}

@@ -202,7 +202,17 @@ const syncQueryToUrl = (term: string) => {
 let suppressPagingFetch = false
 let searchAbort: AbortController | null = null
 let searchGeneration = 0
+const invalidateSearchRequest = () => {
+  searchAbort?.abort()
+  searchAbort = null
+  searchGeneration += 1
+  state.loading = false
+}
 const resetResults = () => {
+  // A route/tag change can leave the old request in flight even when no new
+  // search is started. Invalidate it before clearing state so a late response
+  // cannot repopulate hidden results or overwrite the next query.
+  invalidateSearchRequest()
   suppressPagingFetch = true
   searchErrors.song = ''
   searchErrors.playlist = ''
@@ -364,9 +374,7 @@ const fetchMVs = async (signal: AbortSignal, generation: number) => {
 
 const searchAll = async (nocache = false) => {
   if (!state.q.trim()) {
-    searchAbort?.abort()
-    searchGeneration += 1
-    state.loading = false
+    invalidateSearchRequest()
     return
   }
   searchAbort?.abort()
@@ -455,8 +463,7 @@ const handleSuggestClick = (s: string) => {
 }
 
 const clearQuery = () => {
-  searchAbort?.abort()
-  searchGeneration += 1
+  invalidateSearchRequest()
   state.q = ''
   selectedTags.value = []
   state.suggestVisible = false

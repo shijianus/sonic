@@ -1,0 +1,13 @@
+
+ RUN  v5.0.5 /workspace/scratch/f2e94de409da/sonic/player
+
+
+ Test Files  3 passed (3)
+      Tests  54 passed (54)
+   Start at  15:31:14
+   Duration  6.17s (tests 41%, environment 36%, import 20%, transform 4%)
+
+Environment  jsdom was created 3 times · 2.05s total, 36% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+

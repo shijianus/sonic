@@ -1,0 +1,22 @@
+
+> sonic-music-player@2.2.0 test /workspace/scratch/f2e94de409da/sonic/player
+> vitest run
+
+
+ RUN  v5.0.5 /workspace/scratch/f2e94de409da/sonic/player
+
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+Not implemented: HTMLMediaElement's load() method
+
+ Test Files  22 passed (22)
+      Tests  178 passed (178)
+   Start at  15:31:21
+   Duration  5.30s (environment 71%, tests 12%, import 12%, transform 4%)
+
+Environment  jsdom was created 22 times · 20.84s total, 71% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+

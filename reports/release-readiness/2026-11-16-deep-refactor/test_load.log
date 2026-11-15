@@ -1,0 +1,71 @@
+$ npm run test:load
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> sonic@2.2.0 test:load
+> node --experimental-sqlite scripts/verify-mixed-load.mjs
+
+{
+  "ok": true,
+  "releaseId": "752911f0c2d6-be0bd32f3d50",
+  "sourceDigest": "be0bd32f3d508a65ca8ec5d08c0efd14e3e6d986e8c8f151cb3e8b701e7d3a1b",
+  "target": "isolated-local-synthetic-engine",
+  "workers": 8,
+  "requests": 600,
+  "durationMs": 1440,
+  "requestsPerSecond": 416.67,
+  "latency": {
+    "p50Ms": 17.53,
+    "p95Ms": 38.05,
+    "maxMs": 93.38
+  },
+  "byKind": {
+    "search": {
+      "p50Ms": 8.39,
+      "p95Ms": 28.98,
+      "maxMs": 72.67
+    },
+    "range": {
+      "p50Ms": 7.63,
+      "p95Ms": 21.85,
+      "maxMs": 35.32
+    },
+    "write": {
+      "p50Ms": 20.24,
+      "p95Ms": 36.29,
+      "maxMs": 43.06
+    },
+    "profile": {
+      "p50Ms": 24.68,
+      "p95Ms": 41.96,
+      "maxMs": 93.38
+    },
+    "feed": {
+      "p50Ms": 21.59,
+      "p95Ms": 48.62,
+      "maxMs": 87.64
+    }
+  },
+  "privacyIsolation": true,
+  "temporarySubjectsDeleted": true,
+  "webhookReceived": 1,
+  "alertVerification": {
+    "ok": true,
+    "mode": "live",
+    "fullGate": true,
+    "failures": [],
+    "metricsStatus": 200,
+    "releaseValid": true,
+    "overallP95Ms": 28,
+    "rollingRequests": 618,
+    "rollingErrorRate5xx": 0,
+    "alertConfigured": true,
+    "healthStatus": 200,
+    "alertResult": {
+      "sent": true,
+      "reason": "delivered",
+      "httpStatus": 200,
+      "webhookStatus": 204
+    }
+  },
+  "limitation": "Bounded local synthetic acceptance only; not production capacity or external webhook/provider availability."
+}

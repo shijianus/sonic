@@ -247,3 +247,31 @@ it('mini loading uses an enabled Cancel button and delegates to the existing tog
   expect(button.getAttribute('aria-label')).toBe('player.play')
   expect(button.getAttribute('aria-busy')).toBe('false')
 })
+
+it('mobile route changes invalidate an in-flight search before the next query', async () => {
+  let resolveStale!: (value: unknown) => void
+  const staleResponse = new Promise(resolve => { resolveStale = resolve })
+  const staleTrack = { ...boundTrack, id: 'stale', title: 'Stale result' }
+  const freshTrack = { ...boundTrack, id: 'fresh', title: 'Fresh result' }
+  fetchMock.mockImplementationOnce(() => staleResponse)
+  fetchMock.mockResolvedValueOnce({
+    ok: true,
+    json: async () => ({ data: { tracks: [freshTrack], total: 1 } }),
+  })
+
+  const root = mount(MobileSearch)
+  await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce())
+
+  route.query.q = ''
+  await Vue.nextTick()
+  route.query.q = 'fresh query'
+  await vi.waitFor(() => expect(root.textContent).toContain(freshTrack.title))
+
+  resolveStale({
+    ok: true,
+    json: async () => ({ data: { tracks: [staleTrack], total: 1 } }),
+  })
+  await Vue.nextTick()
+  expect(root.textContent).toContain(freshTrack.title)
+  expect(root.textContent).not.toContain(staleTrack.title)
+})

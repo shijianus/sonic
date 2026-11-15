@@ -1849,26 +1849,68 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             : null;
         if (!resp.ok || !upstreamCodeOk || !Array.isArray(rawMvs)) {
           attempts.push({ provider: 'web', ok: false, error: `Invalid MV search response (HTTP ${resp.status})` });
-          return cloudSearchFailure('1004', attempts);
+        } else {
+          const mvs = rawMvs.map((m: any) => ({
+            ...m,
+            name: m.name || m.title || '',
+            artistName: m.artistName || m.artist || '',
+          }));
+          const rawTotal = data?.result?.mvCount ?? data?.result?.count ?? data?.mvCount ?? data?.count;
+          const total = Number.isSafeInteger(Number(rawTotal)) && Number(rawTotal) >= 0 ? Number(rawTotal) : mvs.length;
+          return jsonResponse(
+            {
+              code: 200,
+              brand: 'Sonic',
+              result: { mvs: desensitizeData(mvs), mvCount: total },
+            },
+            { headers: { 'Cache-Control': 'public, max-age=1800' } },
+          );
         }
-        const mvs = rawMvs.map((m: any) => ({
-          ...m,
-          name: m.name || m.title || '',
-          artistName: m.artistName || m.artist || '',
-        }));
-        const rawTotal = data?.result?.mvCount ?? data?.result?.count ?? data?.mvCount ?? data?.count;
-        const total = Number.isSafeInteger(Number(rawTotal)) && Number(rawTotal) >= 0 ? Number(rawTotal) : mvs.length;
-        return jsonResponse(
-          {
-            code: 200,
-            brand: 'Sonic',
-            result: { mvs: desensitizeData(mvs), mvCount: total },
-          },
-          { headers: { 'Cache-Control': 'public, max-age=1800' } },
-        );
       } catch (error: any) {
         request.signal.throwIfAborted();
         attempts.push({ provider: 'web', ok: false, error: redactSensitiveString(error?.message || 'MV search failed'), ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}) });
+      }
+
+      // The web endpoint is the compatibility path, but it occasionally returns
+      // an HTML challenge or a provider-specific envelope. Keep MV search useful
+      // by falling back to the same native protocols used by playlist search.
+      for (const [provider, fetchNative] of [
+        ['linuxapi', () => callNeteaseLinuxApi({
+          method: 'POST',
+          url: 'http://music.163.com/api/cloudsearch/pc',
+          params: { s: keywords, type: 1004, limit, offset },
+        }, env)],
+        ['eapi', () => callNeteaseEapi('/api/cloudsearch/pc', {
+          s: keywords,
+          type: 1004,
+          limit,
+          offset,
+        }, env)],
+      ] as const) {
+        try {
+          const nativeResult = await fetchNative();
+          if (isSuccessfulCloudSearchResponse('1004', nativeResult)) {
+            const mvs = (nativeResult.result.mvs || []).map((m: any) => ({
+              ...m,
+              name: m.name || m.title || '',
+              artistName: m.artistName || m.artist || '',
+            }));
+            const rawTotal = nativeResult.result.mvCount ?? nativeResult.result.count;
+            const total = Number.isSafeInteger(Number(rawTotal)) && Number(rawTotal) >= 0 ? Number(rawTotal) : mvs.length;
+            return jsonResponse(
+              {
+                code: 200,
+                brand: 'Sonic',
+                result: { mvs: desensitizeData(mvs), mvCount: total },
+              },
+              { headers: { 'Cache-Control': 'public, max-age=1800' } },
+            );
+          }
+          attempts.push({ provider, ok: false, error: 'Invalid MV search response' });
+        } catch (error: any) {
+          request.signal.throwIfAborted();
+          attempts.push({ provider, ok: false, error: redactSensitiveString(error?.message || `${provider} failed`), ...(error?.name === 'TimeoutError' ? { errorCode: UPSTREAM_TIMEOUT } : {}) });
+        }
       }
       return cloudSearchFailure('1004', attempts);
     }

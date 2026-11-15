@@ -199,6 +199,33 @@ describe('release follow-up playback source pairing', () => {
     expect(asUrl(target.url!).searchParams.get('id')).toBe('bounded')
     expect(store.audio.isLoading).toBe(false)
   })
+
+  it('resets the retry budget after a later source starts successfully', async () => {
+    const target = song('retry-budget-reset', {
+      sources: [
+        { platform: 'netease', platformId: '1001' },
+        { platform: 'qq', platformId: '2002' },
+      ],
+    })
+    const { store, audio } = ready(target)
+    vi.mocked(audio.play)
+      .mockRejectedValueOnce(new Error('first source unavailable'))
+      .mockRejectedValueOnce(new Error('second source unavailable'))
+      .mockRejectedValueOnce(new Error('third source unavailable'))
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('later transient failure'))
+      .mockResolvedValueOnce(undefined)
+
+    await store.playSong(target, 0, true)
+    expect(audio.play).toHaveBeenCalledTimes(4)
+
+    // The first episode consumed every fallback slot, but it ended in a
+    // successful start.  A later independent failure must receive a fresh
+    // bounded budget instead of being reported immediately as exhausted.
+    await store.playSong(target, 0, true)
+    expect(audio.play).toHaveBeenCalledTimes(6)
+    expect(store.audio.error).toBeNull()
+  })
 })
 
 describe('release follow-up stream metadata generations', () => {

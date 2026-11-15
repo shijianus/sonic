@@ -1,0 +1,68 @@
+{
+  "ok": true,
+  "manifest": {
+    "schemaVersion": 1,
+    "baseCommit": "5cfeb865f90ea24d2bb81ba4d0751db75f5c63fe",
+    "sourceDigest": "be0bd32f3d508a65ca8ec5d08c0efd14e3e6d986e8c8f151cb3e8b701e7d3a1b",
+    "releaseId": "5cfeb865f90ea24d2bb81ba4d0751db75f5c63fe",
+    "buildTime": "2026-11-15T21:19:06.000Z",
+    "dirty": false
+  },
+  "runtime": "v24.22.1",
+  "temporaryDatabase": "/tmp/sonic-release-http-tTEDAF/recommend.sqlite",
+  "checks": [
+    {
+      "name": "compiled engine reports matching release identity",
+      "ok": true
+    },
+    {
+      "name": "served frontend manifest matches backend release",
+      "ok": true
+    },
+    {
+      "name": "engine key enforced for equivalent paths",
+      "ok": true
+    },
+    {
+      "name": "HEAD and valid/invalid media ranges",
+      "ok": true,
+      "head": 200,
+      "range": 206,
+      "invalid": 416
+    },
+    {
+      "name": "subject-scoped idempotency over real HTTP",
+      "ok": true
+    },
+    {
+      "name": "online backup contains persisted events and a digest",
+      "ok": true,
+      "events": 2,
+      "sha256": "c5afc5665e785cdf90b53a6ca2510deda911769529bf343dd3da123a72653bfa"
+    },
+    {
+      "name": "restore refuses the live database",
+      "ok": true
+    },
+    {
+      "name": "events survive process restart",
+      "ok": true
+    },
+    {
+      "name": "authoritative DELETE removes only the current subject",
+      "ok": true
+    },
+    {
+      "name": "erasure marker survives restart and fences held writes over HTTP",
+      "ok": true
+    },
+    {
+      "name": "offline restore refuses pre-erasure snapshots and keeps the erased profile empty and its old batches fenced",
+      "ok": true
+    },
+    {
+      "name": "production refuses the synthetic source even when its flag is enabled",
+      "ok": true
+    }
+  ]
+}

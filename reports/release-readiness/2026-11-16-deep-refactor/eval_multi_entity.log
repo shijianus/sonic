@@ -1,0 +1,176 @@
+$ npm run eval:multi-entity
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> sonic@2.2.0 eval:multi-entity
+> jiti scripts/evaluate-multi-entity.mjs
+
+{
+  "schemaVersion": 2,
+  "benchmarkName": "Sonic Multi-Entity Mixed Feed Benchmark (Reproducible)",
+  "checks": {
+    "propagationWithFeedback": true,
+    "mixedFeedDistributionMatchesReturnedItems": true,
+    "explicitlyRequestedTypesAreAvailable": true
+  },
+  "personaResults": [
+    {
+      "id": "jay_multi",
+      "acceptedEvents": 2,
+      "distribution": {
+        "track": 11,
+        "album": 6,
+        "playlist": 0,
+        "mv": 1
+      },
+      "relevantItemCount": 2,
+      "personalized": true,
+      "passed": true
+    },
+    {
+      "id": "cantopop_multi",
+      "acceptedEvents": 2,
+      "distribution": {
+        "track": 11,
+        "album": 5,
+        "playlist": 1,
+        "mv": 1
+      },
+      "relevantItemCount": 3,
+      "personalized": true,
+      "passed": true
+    },
+    {
+      "id": "rnb_soul_multi",
+      "acceptedEvents": 2,
+      "distribution": {
+        "track": 11,
+        "album": 6,
+        "playlist": 0,
+        "mv": 1
+      },
+      "relevantItemCount": 3,
+      "personalized": true,
+      "passed": true
+    },
+    {
+      "id": "cold_start",
+      "acceptedEvents": 0,
+      "distribution": {
+        "track": 11,
+        "album": 6,
+        "playlist": 0,
+        "mv": 1
+      },
+      "relevantItemCount": null,
+      "personalized": false,
+      "passed": true
+    }
+  ],
+  "typeProbes": [
+    {
+      "type": "track",
+      "passed": true
+    },
+    {
+      "type": "album",
+      "passed": true
+    },
+    {
+      "type": "playlist",
+      "passed": true
+    },
+    {
+      "type": "mv",
+      "passed": true
+    }
+  ],
+  "catalogStats": {
+    "canonicalTracks": 58,
+    "albums": 57,
+    "playlists": 3,
+    "mvs": 2,
+    "totalCatalogEntities": 120
+  },
+  "mixedFeedDistribution": {
+    "trackRatio": 0.6111,
+    "albumPlaylistRatio": 0.3333,
+    "mvRatio": 0.0556,
+    "typeShannonEntropy": 1.2775
+  },
+  "relevanceAndDiversity": {
+    "relevantItemRatioAt18": 0.1481,
+    "intraListDiversity_ILD": 0.7942,
+    "propagationValid": true,
+    "propagation": [
+      {
+        "name": "albumToTrack",
+        "acceptedEvents": 1,
+        "comparisons": [
+          {
+            "type": "track",
+            "baselineScore": 0,
+            "scoreWithFeedback": 1.6
+          }
+        ],
+        "unrelatedScore": 0,
+        "passed": true
+      },
+      {
+        "name": "playlistToTrack",
+        "acceptedEvents": 1,
+        "comparisons": [
+          {
+            "type": "track",
+            "baselineScore": 0,
+            "scoreWithFeedback": 1.4
+          }
+        ],
+        "unrelatedScore": 0,
+        "passed": true
+      },
+      {
+        "name": "mvToTrack",
+        "acceptedEvents": 1,
+        "comparisons": [
+          {
+            "type": "track",
+            "baselineScore": 0,
+            "scoreWithFeedback": 1.125
+          }
+        ],
+        "unrelatedScore": 0,
+        "passed": true
+      },
+      {
+        "name": "trackToEntities",
+        "acceptedEvents": 1,
+        "comparisons": [
+          {
+            "type": "album",
+            "baselineScore": 0,
+            "scoreWithFeedback": 0.75
+          },
+          {
+            "type": "playlist",
+            "baselineScore": 0,
+            "scoreWithFeedback": 0.625
+          },
+          {
+            "type": "mv",
+            "baselineScore": 0,
+            "scoreWithFeedback": 0.875
+          }
+        ],
+        "unrelatedScore": 0,
+        "passed": true
+      }
+    ]
+  },
+  "performanceMetrics": {
+    "p50_latency_ms": 7.09,
+    "p95_latency_ms": 9.89,
+    "sampleCount": 60,
+    "p95LatencyBudgetMs": null,
+    "processRssMemory_MB": 122
+  }
+}

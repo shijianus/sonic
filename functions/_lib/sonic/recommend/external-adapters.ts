@@ -17,6 +17,11 @@ function cleanBaseUrl(raw?: string): string {
   if (!s) return '';
   try {
     const u = new URL(s);
+    // Credentials and query fragments must never be accepted in an operator
+    // supplied service base URL.  API keys are sent explicitly in headers;
+    // accepting userinfo/query values here would make them part of every
+    // outbound request URL and potentially expose them through logs/proxies.
+    if (u.username || u.password || u.search || u.hash) return '';
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
     // A remote collaborative-filtering/search service receives the API key and
     // catalog data: plain HTTP is only acceptable for loopback deployments.
@@ -25,6 +30,44 @@ function cleanBaseUrl(raw?: string): string {
   } catch {
     return '';
   }
+}
+
+const EXTERNAL_JSON_MAX_BYTES = 4 * 1024 * 1024;
+
+/**
+ * Read optional-adapter JSON with a hard byte ceiling.  Gorse/Meilisearch and
+ * ListenBrainz are operator-configured integrations, but a broken or hostile
+ * service must not be able to force an unbounded `response.json()` allocation.
+ */
+async function readBoundedJson<T = unknown>(response: Response, maxBytes = EXTERNAL_JSON_MAX_BYTES): Promise<T> {
+  const declared = Number(response.headers.get('content-length') || '');
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error('External adapter response exceeds size limit');
+  }
+  if (!response.body) return {} as T;
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error('External adapter response exceeds size limit');
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(merged)) as T;
 }
 
 // ── 1. Optional Gorse Adapter (Collaborative Filtering & Item-to-Item Neighbors) ──
@@ -123,7 +166,7 @@ export async function deleteGorseUserData(subjectKey: string, env?: AppEnv): Pro
       // treat an arbitrary proxy's 200/404, or asynchronous 202, as completion.
       if (response.status === 204) return 'deleted';
       if (response.status !== 200) return 'failed';
-      const body = await response.json() as { RowAffected?: unknown };
+      const body = await readBoundedJson<{ RowAffected?: unknown }>(response, 64 * 1024);
       return Number.isSafeInteger(body?.RowAffected) && Number(body.RowAffected) >= 0 ? 'deleted' : 'failed';
     } catch {
       return 'failed';
@@ -190,7 +233,7 @@ export async function fetchGorseRecommendations(
       { headers, signal: AbortSignal.timeout(1200) },
     );
     if (!resp.ok) return [];
-    const data = await resp.json();
+    const data = await readBoundedJson(resp);
     if (Array.isArray(data)) {
       return data
         .map((item: any) => (typeof item === 'string' ? item : item?.Id || ''))
@@ -218,7 +261,7 @@ export async function fetchGorseNeighbors(
       { headers, signal: AbortSignal.timeout(1200) },
     );
     if (!resp.ok) return [];
-    const data = await resp.json();
+    const data = await readBoundedJson(resp);
     if (Array.isArray(data)) {
       return data
         .map((x: any) => ({ id: String(x?.Id || ''), score: Number(x?.Score || 0.5) }))
@@ -289,7 +332,7 @@ export async function searchMeilisearchIds(query: string, limit = 25, env?: AppE
       signal: AbortSignal.timeout(1200),
     });
     if (!resp.ok) return [];
-    const data: any = await resp.json();
+    const data: any = await readBoundedJson(resp);
     if (Array.isArray(data?.hits)) {
       return data.hits.map((h: any) => String(h?.id || '')).filter(Boolean);
     }
@@ -330,7 +373,7 @@ export async function fetchListenBrainzSimilarArtists(artistName: string, env?: 
       },
     );
     if (!mbResp.ok) return [];
-    const mbData: any = await mbResp.json();
+    const mbData: any = await readBoundedJson(mbResp);
     const mbid = mbData?.artists?.[0]?.id;
     if (!mbid) return [];
 
@@ -345,7 +388,7 @@ export async function fetchListenBrainzSimilarArtists(artistName: string, env?: 
       },
     );
     if (!simResp.ok) return [];
-    const simData: any = await simResp.json();
+    const simData: any = await readBoundedJson(simResp);
     const list: string[] = Array.isArray(simData)
       ? simData
           .slice(0, 8)

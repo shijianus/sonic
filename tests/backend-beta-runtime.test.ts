@@ -405,6 +405,28 @@ describe('CloudSearch response contract', () => {
     expect(body.result.mvCount).toBe(1);
   });
 
+  it('falls back to the native MV protocol when the web response is malformed', async () => {
+    const requests: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const target = String(input);
+      requests.push(target);
+      if (target.includes('/api/search/get/web')) {
+        return Response.json({ code: 200, result: 'provider-envelope-not-supported' });
+      }
+      if (target.includes('/api/linux/forward')) {
+        return Response.json({ code: 200, result: { mvs: [{ id: 11, name: 'Native MV', artistName: 'Native artist' }], mvCount: 1 } });
+      }
+      throw new Error(`unexpected provider request ${target}`);
+    }));
+    const url = new URL('https://sonic.test/api/cloudsearch?keywords=native-fixture&type=1004&limit=5');
+    const response = await handleUpstreamEndpoint('cloudsearch', url, new Request(url), env);
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.result.mvs).toEqual([expect.objectContaining({ id: 11, name: 'Native MV', artistName: 'Native artist' })]);
+    expect(requests.some(target => target.includes('/api/search/get/web'))).toBe(true);
+    expect(requests.some(target => target.includes('/api/linux/forward'))).toBe(true);
+  });
+
   it('accepts song results from the synthetic Nexus provider through cloudsearch type 1', async () => {
     const syntheticEnv = {
       ...env,

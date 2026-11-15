@@ -26,6 +26,7 @@ declare global {
   const calibrateWordsInterludeIsolation: typeof import('../utils/lyricsWordSync').calibrateWordsInterludeIsolation
   const cancelSongProbe: typeof import('../utils/qualityProbe').cancelSongProbe
   const checkSearchPayload: typeof import('../utils/searchErrors').checkSearchPayload
+  const clampPage: typeof import('../utils/pagination').clampPage
   const classifyPlaybackError: typeof import('../stores/modules/audio').classifyPlaybackError
   const classifySearchError: typeof import('../utils/searchErrors').classifySearchError
   const computed: typeof import('vue').computed
@@ -81,6 +82,7 @@ declare global {
   const getRadarBadgeClass: typeof import('../utils/exploreTags').getRadarBadgeClass
   const getTagGroup: typeof import('../utils/exploreTags').getTagGroup
   const getTagItem: typeof import('../utils/exploreTags').getTagItem
+  const getTotalPages: typeof import('../utils/pagination').getTotalPages
   const groupColorConfigs: typeof import('../utils/exploreTags').groupColorConfigs
   const groupOrder: typeof import('../utils/exploreTags').groupOrder
   const h: typeof import('vue').h
@@ -113,6 +115,7 @@ declare global {
   const nextTick: typeof import('vue').nextTick
   const normalizeDurationMs: typeof import('../utils/transformers').normalizeDurationMs
   const normalizeLyricWord: typeof import('../utils/lyricsWordSync').normalizeLyricWord
+  const normalizePaginationTotal: typeof import('../utils/pagination').normalizePaginationTotal
   const normalizeSongSource: typeof import('../utils/audioUtils').normalizeSongSource
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount

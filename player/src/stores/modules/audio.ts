@@ -174,6 +174,15 @@ function bindListeningSource(song: Song | null, audio: HTMLAudioElement) {
 const MAX_SOURCE_RETRIES = 4
 const songSourceAttemptMap = new Map<string, number>()
 const sourceRetryLimit = (song: Song) => Math.min(MAX_SOURCE_RETRIES, Math.max(3, songSourceCandidates(song).length + 1))
+/**
+ * Retry budgets are scoped to a single failure episode.  Keeping a consumed
+ * budget after a later successful start made a subsequent, unrelated network
+ * hiccup look as if all fallbacks had already been exhausted.  Reset only
+ * after the media element has accepted a fresh source and play() resolved.
+ */
+const resetSourceAttempts = (song: Song | null | undefined) => {
+  if (song) songSourceAttemptMap.delete(songPlaybackKey(song))
+}
 /** 媒体错误监听器最近一次上报的歌曲与时间，避免 play() 拒绝后重复上报、互相覆盖 */
 let lastMediaErrorReport: { songKey: string; at: number } | null = null
 
@@ -857,6 +866,7 @@ export const useAudioStore = defineStore('audio', {
         this._probeStreamMetadata(this.audio.currentSong)
         await this.audio.audio.play()
         if (generation !== playbackGeneration || songPlaybackKey(this.audio.currentSong) !== targetSongKey) return
+        resetSourceAttempts(this.audio.currentSong)
         clearStartupWatchdog()
 
         // 添加到播放历史
@@ -961,6 +971,7 @@ export const useAudioStore = defineStore('audio', {
         this._loadAudioSrc(this.audio.currentSong.url, true)
         await this.audio.audio.play()
         if (generation !== playbackGeneration || songPlaybackKey(this.audio.currentSong) !== targetSongKey) return
+        resetSourceAttempts(this.audio.currentSong)
         clearStartupWatchdog()
         this.audio.error = null
         this._dismissPlaybackErrorToast()
@@ -1706,6 +1717,7 @@ export const useAudioStore = defineStore('audio', {
           queuedSong.url = newUrl
           queuedSong.qualityBadge = nextBadge
         }
+        resetSourceAttempts(song)
         this.audio.error = null
         this._probeStreamMetadata(song)
         return true

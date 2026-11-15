@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import Button from '@/components/Ui/Button.vue'
+import { clampPage, getTotalPages } from '@/utils/pagination'
 
 const { t } = useI18n()
 
@@ -17,14 +18,24 @@ const props = withDefaults(
 const emit = defineEmits<{ (e: 'update:modelValue', v: number): void }>()
 
 const page = computed({
-  get: () => props.modelValue || 1,
+  get: () => clampPage(props.modelValue, props.total, props.pageSize),
   set: v => emit('update:modelValue', Math.max(1, v)),
 })
-const totalPages = computed(() =>
-  Math.max(1, Math.ceil((props.total || 0) / (props.pageSize || 1)))
-)
+const totalPages = computed(() => getTotalPages(props.total, props.pageSize))
 const canPrev = computed(() => page.value > 1)
 const canNext = computed(() => page.value < totalPages.value)
+
+// Totals can shrink after a refresh or a provider-side catalog update. Emit a
+// bounded page so the parent fetches a real page instead of staying on a
+// now-invalid offset with an empty result.
+watch(
+  [() => props.modelValue, totalPages],
+  () => {
+    const bounded = clampPage(props.modelValue, props.total, props.pageSize)
+    if (props.modelValue !== bounded) emit('update:modelValue', bounded)
+  },
+  { immediate: true },
+)
 
 const pageNumbers = computed(() => {
   const max = props.maxButtons
