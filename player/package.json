@@ -84,14 +84,5 @@
   "engines": {
     "node": ">=22.13.0",
     "pnpm": ">=10"
-  },
-  "pnpm": {
-    "overrides": {
-      "braces": ">=3.0.3"
-    },
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "@parcel/watcher"
-    ]
   }
 }
