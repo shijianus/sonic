@@ -1,0 +1,167 @@
+======================================================================
+SONIC LOCAL VPS PRESSURE, STABILITY & BETA AUDIT — RAW OUTPUT LOG
+Baseline: 1c03ce4acc36d4b28f31cba83fcd25086714650a
+Sanitization: All test secrets, X-Sonic-Engine-Key, X-Sonic-Verified-Identity,
+Cookie, and Authorization values redacted.
+======================================================================
+
+[1] GIT BASELINE CHECK
+$ git fetch origin --prune
+$ git rev-parse HEAD origin/main origin/codex/refactor-public-beta
+1c03ce4acc36d4b28f31cba83fcd25086714650a
+1c03ce4acc36d4b28f31cba83fcd25086714650a
+1c03ce4acc36d4b28f31cba83fcd25086714650a
+$ git status --short --branch
+## main...origin/main
+$ git log -8 --oneline --decorate
+1c03ce4 (HEAD -> main, origin/main, origin/codex/refactor-public-beta, codex/refactor-public-beta) fix(player): keep pnpm frozen installs portable
+ab6ceef docs: align public beta report with verified remote branch baseline
+f314ae6 fix(e2e): return type-matched empty search fields in mock server
+2554f4c refactor: close public beta search and playback contracts
+f64cb4a (origin/rc/sonic-20261031, rc/sonic-20261031) Require durable Pages invitations for release promotion
+b61f359 chore: track pending patches and audit scratch artifacts
+88365fa Keep Sonic search recoverable after upstream timeouts
+998940f Keep Sonic search deadlines through provider response bodies
+Exit codes: all 0
+
+[2] TOOL VERSIONS & CLEAN INSTALL
+$ node -v && npm -v && corepack pnpm -v
+v22.18.0
+10.9.3
+10.34.5
+
+$ rm -rf node_modules player/node_modules dist dist-server
+Exit code: 0
+
+$ CI=true npm ci
+added 77 packages in 8s
+Exit code: 0
+
+$ CI=true pnpm --dir player install --frozen-lockfile
+Packages: +705
+Done in 3.2s using pnpm v10.34.5
+Exit code: 0
+
+[3] SEQUENTIAL BUILD & RELEASE VERIFICATION
+$ CI=true npm run build
+✓ 659 modules transformed.
+[build] copied /home/shijian/projects/sonic/player/dist -> /home/shijian/projects/sonic/dist
+Exit code: 0
+
+$ npm run build:engine
+Exit code: 0
+
+$ node scripts/release-inputs.mjs --verify dist/release.json
+{"ok":true,"verification":"full-source","sourceDigest":"af33ace2ff5fe969f321c0f8f9939c131b937781c5b9e837ec26b40e85abec8e","releaseId":"1c03ce4acc36d4b28f31cba83fcd25086714650a","fileCount":478,"indexVerified":false}
+Exit code: 0
+
+$ npm run verify:pages-deploy
+{"ok":true,"stagingRoot":"/tmp/sonic-pages-deploy-H5k5DM","releaseId":"1c03ce4acc36d4b28f31cba83fcd25086714650a","sourceDigest":"af33ace2ff5fe969f321c0f8f9939c131b937781c5b9e837ec26b40e85abec8e","pagesArtifactDigest":"4f3e1ef00f35408084538169e93bbc4462af8868ce96a7ce7d3e8a48d1016502","compiledRelease":true}
+Exit code: 0
+
+$ mkdir -p /tmp/sonic-test-tmp && TMPDIR=/tmp/sonic-test-tmp node --experimental-sqlite scripts/verify-built-release.mjs
+12 HTTP release acceptance checks: all ok=true
+temporaryDatabase="/tmp/sonic-test-tmp/sonic-release-http-y5I5H2/recommend.sqlite"
+Exit code: 0
+
+$ cat dist/release.json
+{
+  "schemaVersion": 1,
+  "baseCommit": "1c03ce4acc36d4b28f31cba83fcd25086714650a",
+  "sourceDigest": "af33ace2ff5fe969f321c0f8f9939c131b937781c5b9e837ec26b40e85abec8e",
+  "releaseId": "1c03ce4acc36d4b28f31cba83fcd25086714650a",
+  "buildTime": "2026-11-15T07:14:34.000Z",
+  "dirty": false
+}
+
+[4] EXISTING PRESSURE, LOAD & OBSERVABILITY SCRIPTS
+$ SONIC_PRESSURE_WORKERS=8 SONIC_PRESSURE_REQUESTS_PER_WORKER=75 CI=true npm run test:pressure
+Exit code: 0
+ok=true, verifiedAt="2026-11-15T15:44:03.285Z", target="127.0.0.1 loopback Engine"
+releaseId="1c03ce4acc36d4b28f31cba83fcd25086714650a"
+sourceDigest="af33ace2ff5fe969f321c0f8f9939c131b937781c5b9e837ec26b40e85abec8e"
+workers=8, requestsPerWorker=75, totalRequests=605, elapsedMs=1373.84, throughputRequestsPerSecond=440.37
+latency={count: 605, p50Ms: 14.21, p95Ms: 41.14, maxMs: 84.73} (script does not compute p99Ms)
+byKind:
+  search: count=121 (p50=11.76ms, p95=25.79ms, max=38.15ms)
+  stream-200: count=1 (17.67ms)
+  stream-206: count=1 (4.75ms)
+  stream-416: count=1 (3.58ms)
+  stream-404: count=1 (3.19ms)
+  range: count=120 (p50=6.11ms, p95=21.3ms, max=42.35ms)
+  error: count=120 (p50=7.52ms, p95=17.99ms, max=44.28ms)
+  event: count=120 (p50=20.96ms, p95=42.32ms, max=58.87ms)
+  profile: count=120 (p50=27.59ms, p95=63.03ms, max=84.73ms)
+cancellationChecks=16
+privacy=8 subjects, each totalEvents=15, isolated=true
+eventStoreEmptyAfterCleanup=true
+externalNetwork=false
+
+$ SONIC_LOAD_WORKERS=8 SONIC_LOAD_REQUESTS_PER_WORKER=75 CI=true npm run test:load
+Exit code: 0
+ok=true, target="isolated-local-synthetic-engine", workers=8, requests=600, durationMs=1458, requestsPerSecond=411.62
+latency={p50Ms: 18.43, p95Ms: 41.74, maxMs: 61.07} (script does not compute p99Ms)
+byKind: search (7.46/25.26/55.48), range (6.25/27.04/57.81), write (18.83/40.4/51.13), profile (27.34/45.79/61.07), feed (25.49/39.82/57.05)
+privacyIsolation=true, temporarySubjectsDeleted=true, webhookReceived=1
+alertVerification={ok: true, mode: "live", fullGate: true, failures: [], metricsStatus: 200, releaseValid: true, overallP95Ms: 30, rollingRequests: 618, rollingErrorRate5xx: 0, alertConfigured: true, healthStatus: 200, alertResult: {sent: true, reason: "delivered", httpStatus: 200, webhookStatus: 204}}
+
+$ CI=true npm run test:observability
+Exit code: 0
+{"ok":true,"mode":"self-test","fullGate":false,"stubDeliveryVerified":true,"failingDeliveryRejected":true,"missingWebhookRejected":true,"redactionVerified":true}
+
+[5] LOOPBACK BARE-METAL ENGINE PREFLIGHT CHECKS
+$ node --env-file=/tmp/sonic-pressure-staging.env scripts/start-bare-metal-engine.mjs --check
+{"ok":true,"releaseId":"1c03ce4acc36d4b28f31cba83fcd25086714650a","sourceDigest":"af33ace2ff5fe969f321c0f8f9939c131b937781c5b9e837ec26b40e85abec8e","host":"127.0.0.1","port":19080}
+Exit code: 0
+
+$ node --env-file=/tmp/sonic-pressure-production.env scripts/start-bare-metal-engine.mjs --check
+{"ok":true,"releaseId":"1c03ce4acc36d4b28f31cba83fcd25086714650a","sourceDigest":"af33ace2ff5fe969f321c0f8f9939c131b937781c5b9e837ec26b40e85abec8e","host":"127.0.0.1","port":19081}
+Exit code: 0
+
+[6] FULL LOCAL VPS PRESSURE MATRIX & FAULT/RECOVERY AUDIT
+$ rm -f /tmp/sonic-pressure-staging/* /tmp/sonic-pressure-production/* /tmp/sonic-pressure-staging.log /tmp/sonic-pressure-production.log && node --experimental-sqlite /root/.gemini/antigravity-cli/brain/2001e7fa-b656-423d-8f78-ba236dfb7d87/scratch/run-vps-pressure-audit.mjs
+[phase:baseline] total=100 rps=331.76 p50=1.77ms p95=7.69ms p99=8.71ms max=12.06ms unexpected=0 5xx=0
+[phase:normal] total=800 rps=509.84 p50=14.28ms p95=33.9ms p99=47.5ms max=62.56ms unexpected=0 5xx=0
+[phase:burst] total=3200 rps=567.11 p50=35.29ms p95=138.36ms p99=182.33ms max=569.18ms unexpected=0 5xx=0
+[phase:high] total=6400 rps=612.75 p50=62.33ms p95=239.66ms p99=386.5ms max=1699.18ms unexpected=0 5xx=0
+{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+AUDIT_COMPLETE_OK {"urlChecks":27,"resourceSamples":7,"stagingLeak":false,"prodLeak":false,"stagingLogErrors":0,"prodLogErrors":0}
+exit_vps_audit=0
+
+$ ss -Htan '( sport = :19080 or sport = :19081 )'
+TIME-WAIT    0         0             127.0.0.1:19080         127.0.0.1:53442
+TIME-WAIT    0         0             127.0.0.1:19080         127.0.0.1:38848
+TIME-WAIT    0         0             127.0.0.1:19080         127.0.0.1:36120
+TIME-WAIT    0         0             127.0.0.1:19080         127.0.0.1:53444
+(No LISTEN sockets remaining after clean shutdown)
+
+Fault/Recovery Summary JSON excerpt:
+searchCancellation: {"ok":true,"cancelledCount":20}
+rapidSearchSwitch: {"ok":true,"earlierOutcomes":["aborted","aborted","aborted","aborted"],"finalQuery":"Sonic","finalTracks":3}
+rapidTrackSwitchAndSlotRelease: {"ok":true,"abortedStreams":20,"finalStatus":200,"finalBytes":240044}
+streamConcurrencyLimit429: {"ok":true,"heldCount":4,"fifthStatus":429,"errorCode":"STREAM_CONCURRENCY_LIMIT","recoveredStatus":200}
+gatewayRateLimit429: {"ok":true,"allowed200":600,"rejected429":50,"first429":{"code":"RATE_LIMITED","limit":"600","remaining":"0","retryAfter":"60"}}
+engineIdentity503: {"ok":true,"searchStatus":503,"searchCode":"ENGINE_IDENTITY_UNAVAILABLE","streamStatus":503,"streamCode":"ENGINE_IDENTITY_UNAVAILABLE"}
+edgeSearchFaults: {"ok":true,"timeout":{"status":504,"errorCode":"UPSTREAM_TIMEOUT","attemptErrorCode":"UPSTREAM_TIMEOUT"},"upstream503":{"status":502,"errorCode":"SEARCH_UPSTREAM_UNAVAILABLE","attemptError":"Engine HTTP 503"},"networkRefused":{"firstStatus":502,"firstErrorCode":"SEARCH_UPSTREAM_UNAVAILABLE","stateAfter1Failure":"CLOSED","consecutiveAfter1":1,"stateAfter3Failures":"OPEN","consecutiveAfter3":3,"fourthAttemptError":"Circuit OPEN (fetch failed)"}}
+persistenceAndRecovery: {"ok":true,"duplicateAcceptedFirst":1,"duplicateDeduplicatedSecond":1,"subjectBIsolatedDuringDeleteA":true,"gracefulStop":{"cleanExit":true,"elapsedMs":3296,"inflightDrainStatus":504},"restartedOk":true,"erasedSubjectEmptyAfterRestart":true,"retainedSubjectPreservedAfterRestart":true,"staleBatchStatusAfterRestart":409,"staleBatchCodeAfterRestart":"EVENT_EPOCH_MISMATCH","freshBatchWithEpochAccepted":1,"finalEventCountAfterCleanup":0}
+finalStopStaging: {"cleanExit":true,"elapsedMs":67}
+finalStopProd: {"cleanExit":true,"elapsedMs":61}
+stagingLogAudit: {"errorCount":0,"status5xxCount":9,"leakDetected":false,"lineCount":11464}
+prodLogAudit: {"errorCount":0,"status5xxCount":0,"leakDetected":false,"lineCount":11}
+
+$ grep -E '"error"|unhandled|secret|Authorization|Cookie' /tmp/sonic-pressure-staging.log /tmp/sonic-pressure-production.log | wc -l
+0
+
+[7] PLAYWRIGHT E2E VERIFICATION
+# Attempt A (exact command requested; .local-browsers absent after clean rm -rf player/node_modules)
+$ PLAYWRIGHT_BROWSERS_PATH=0 CI=true corepack pnpm --dir player exec playwright test --reporter=list
+Running 123 tests using 1 worker
+  Error: browserType.launch: Executable doesn't exist at /home/shijian/projects/sonic/player/node_modules/.pnpm/playwright-core@1.56.1/node_modules/playwright-core/.local-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell
+  123 failed
+exit_pw_path0=1
+
+# Attempt B (system-cached /root/.cache/ms-playwright/chromium_headless_shell-1194)
+$ CI=true corepack pnpm --dir player exec playwright test --reporter=list
+Running 123 tests using 1 worker
+  123 passed (7.7m)
+exit_pw_cache=0

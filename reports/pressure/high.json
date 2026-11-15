@@ -1,0 +1,154 @@
+{
+  "ok": true,
+  "phase": "high",
+  "verifiedAt": "2026-11-15T15:52:30.302Z",
+  "target": "http://127.0.0.1:19080",
+  "releaseId": "1c03ce4acc36d4b28f31cba83fcd25086714650a",
+  "sourceDigest": "af33ace2ff5fe969f321c0f8f9939c131b937781c5b9e837ec26b40e85abec8e",
+  "workers": 64,
+  "requestsPerWorker": 100,
+  "totalRequests": 6400,
+  "elapsedMs": 10444.69,
+  "throughputRequestsPerSecond": 612.75,
+  "latency": {
+    "count": 6400,
+    "p50Ms": 62.33,
+    "p95Ms": 239.66,
+    "p99Ms": 386.5,
+    "maxMs": 1699.18,
+    "statusCounts": {
+      "200": 4032,
+      "206": 832,
+      "404": 768,
+      "416": 768
+    },
+    "count4xx": 1536,
+    "count5xx": 0
+  },
+  "byKind": {
+    "search-nexus": {
+      "count": 832,
+      "p50Ms": 74.58,
+      "p95Ms": 235.88,
+      "p99Ms": 859.29,
+      "maxMs": 1109.1,
+      "statusCounts": {
+        "200": 832
+      },
+      "count4xx": 0,
+      "count5xx": 0
+    },
+    "search-music": {
+      "count": 832,
+      "p50Ms": 40.85,
+      "p95Ms": 145.72,
+      "p99Ms": 1386.48,
+      "maxMs": 1678.68,
+      "statusCounts": {
+        "200": 832
+      },
+      "count4xx": 0,
+      "count5xx": 0
+    },
+    "stream-full": {
+      "count": 832,
+      "p50Ms": 49.43,
+      "p95Ms": 128.44,
+      "p99Ms": 265.75,
+      "maxMs": 600.78,
+      "statusCounts": {
+        "200": 832
+      },
+      "count4xx": 0,
+      "count5xx": 0
+    },
+    "stream-range-206": {
+      "count": 832,
+      "p50Ms": 41.85,
+      "p95Ms": 109.82,
+      "p99Ms": 137.97,
+      "maxMs": 195.01,
+      "statusCounts": {
+        "206": 832
+      },
+      "count4xx": 0,
+      "count5xx": 0
+    },
+    "stream-range-416": {
+      "count": 768,
+      "p50Ms": 44.75,
+      "p95Ms": 125.24,
+      "p99Ms": 164.55,
+      "maxMs": 1481.36,
+      "statusCounts": {
+        "416": 768
+      },
+      "count4xx": 768,
+      "count5xx": 0
+    },
+    "stream-missing-404": {
+      "count": 768,
+      "p50Ms": 44.3,
+      "p95Ms": 79.52,
+      "p99Ms": 128.67,
+      "maxMs": 230.89,
+      "statusCounts": {
+        "404": 768
+      },
+      "count4xx": 768,
+      "count5xx": 0
+    },
+    "events-post": {
+      "count": 384,
+      "p50Ms": 168.64,
+      "p95Ms": 322.31,
+      "p99Ms": 376.3,
+      "maxMs": 1699.18,
+      "statusCounts": {
+        "200": 384
+      },
+      "count4xx": 0,
+      "count5xx": 0
+    },
+    "recommend-for-you": {
+      "count": 768,
+      "p50Ms": 186.02,
+      "p95Ms": 337.51,
+      "p99Ms": 386.5,
+      "maxMs": 1084.1,
+      "statusCounts": {
+        "200": 768
+      },
+      "count4xx": 0,
+      "count5xx": 0
+    },
+    "events-get": {
+      "count": 384,
+      "p50Ms": 172.73,
+      "p95Ms": 330.96,
+      "p99Ms": 375.26,
+      "maxMs": 1392.56,
+      "statusCounts": {
+        "200": 384
+      },
+      "count4xx": 0,
+      "count5xx": 0
+    }
+  },
+  "unexpectedStatuses": 0,
+  "privacyIsolation": true,
+  "privacySampleCount": 64,
+  "eventStoreEmptyAfterCleanup": true,
+  "healthBeforeEventCount": 0,
+  "metricsDelta": {
+    "requestsDelta": 6532,
+    "status5xxDelta": 0,
+    "rateLimitRejected429Delta": 0
+  },
+  "externalNetwork": false,
+  "limitations": [
+    "Loopback 127.0.0.1 only",
+    "Synthetic first-party media source only",
+    "Workers send distinct X-Sonic-Client-IP (198.51.100.1..N) to simulate independent client sessions"
+  ]
+}
