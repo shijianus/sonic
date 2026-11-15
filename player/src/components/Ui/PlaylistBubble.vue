@@ -3,6 +3,7 @@ import { useAudio } from '@/composables/useAudio'
 import { formatDuration } from '@/utils/time'
 import Button from '@/components/Ui/Button.vue'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { songIdentityKey } from '@/utils/songIdentity'
 
 const props = withDefaults(
   defineProps<{
@@ -165,7 +166,7 @@ const doClearAll = () => {
   Object.keys(selected).forEach(k => (selected[k as any] = false))
 }
 
-const isCurrent = (s: any) => currentSong.value?.id === s.id
+const isCurrent = (s: any) => Boolean(currentSong.value && songIdentityKey(currentSong.value) === songIdentityKey(s))
 
 const totalDuration = computed(() => {
   return playlist.value.reduce((acc, s) => acc + (s.duration || 0), 0)
@@ -338,14 +339,14 @@ const totalDuration = computed(() => {
                       <button
                         class="item-action-btn"
                         :title="$t('playlistBubble.actions.queueNext')"
-                        @click.stop="queueNext(s.id as any)"
+                        @click.stop="queueNext(songIdentityKey(s))"
                       >
                         <span class="icon-[mdi--playlist-plus] h-5 w-5"></span>
                       </button>
                       <button
                         class="item-action-btn item-action-btn--danger"
                         :title="$t('playlistBubble.actions.delete')"
-                        @click.stop="removeSong(s.id as any)"
+                        @click.stop="removeSong(songIdentityKey(s))"
                       >
                         <span class="icon-[mdi--delete-outline] h-5 w-5"></span>
                       </button>

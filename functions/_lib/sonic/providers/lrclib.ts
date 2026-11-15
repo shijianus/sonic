@@ -1,4 +1,4 @@
-import { fetchProviderUrl } from '../native-protocols';
+import { fetchProviderUrl, readBoundedProviderJson } from '../native-protocols';
 // Sonic Provider — LRCLIB (lrclib.net)
 // Community-driven synced LRC lyrics with instrumental detection & search
 
@@ -56,7 +56,7 @@ export const lrclibProvider: SonicProviderAdapter = {
         headers: { 'User-Agent': SONIC_UA },
       }, config.timeoutMs, signal);
       if (!resp.ok) return null;
-      const json = (await resp.json()) as any;
+      const json = (await readBoundedProviderJson(resp)) as any;
 
       let item: LrclibTrackItem | null = null;
       if (Array.isArray(json)) {
@@ -210,7 +210,7 @@ export const lrclibProvider: SonicProviderAdapter = {
         headers: { 'User-Agent': SONIC_UA },
       }, config.timeoutMs, signal);
       if (!resp.ok) return [];
-      const items = (await resp.json()) as LrclibTrackItem[];
+      const items = (await readBoundedProviderJson(resp)) as LrclibTrackItem[];
       if (!Array.isArray(items)) return [];
 
       return items.slice(0, options?.count || 20).map((item) => {

@@ -157,7 +157,7 @@ const handleToggleTag = (tag: ExploreTagItem) => {
   state.q = selectedTagQuery.value
   state.hasSearched = false
   if (route.query.q) {
-    router.replace({ path: '/mobile/search' })
+    router.replace({ path: '/search' })
   }
 }
 
@@ -501,6 +501,9 @@ const mapToStoreSong = (s: SongData): Song => ({
   streamUrl: s.streamUrl,
   qualities: s.qualities,
   sources: s.sources,
+  source: s.source,
+  platform: s.platform,
+  platformId: s.platformId,
   sha: s.sha,
   streamType: s.streamType,
   trialDuration: s.trialDuration,

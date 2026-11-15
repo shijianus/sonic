@@ -5,24 +5,24 @@
 // (`music.ts`) can adopt it without creating an import cycle.
 import { fetchWithRuntimeBudget } from './request-budget';
 
-const PROVIDER_REDIRECT_HOST_SUFFIXES = [
-  'music.163.com',
-  '163.com',
-  '126.net',
-  'qq.com',
-  'gtimg.cn',
-  'kugou.com',
-  'kuwo.cn',
-  'lrclib.net',
-  'amll.dev',
-  'musixmatch.com',
-  'gdstudio.xyz',
-  'lyriva.xyz',
+const PROVIDER_REDIRECT_HOSTS = new Set([
+  'music.163.com', 'interface3.music.163.com',
+  'c.y.qq.com', 'u.y.qq.com', 'y.qq.com', 'y.gtimg.cn', 'ws.stream.qqmusic.qq.com',
+  'mobilecdn.kugou.com', 'm.kugou.com', 'www.kugou.com',
+  'search.kuwo.cn', 'antiserver.kuwo.cn', 'm.kuwo.cn', 'www.kuwo.cn',
+  'lrclib.net', 'api.amll.dev', 'musixmatch.com',
+  'gdstudio.xyz', 'music-api.gdstudio.xyz', 'lyriva.xyz', 'api.lyriva.xyz',
+]);
+
+const PROVIDER_CDN_PATTERNS = [
+  /^[a-z0-9-]+\.music\.126\.net$/i,
+  /^[a-z0-9-]+\.vod\.126\.net$/i,
+  /^[a-z0-9-]+\.qqmusic\.qq\.com$/i,
 ];
 
 export function isAllowedProviderHost(hostname: string): boolean {
   const h = hostname.toLowerCase().replace(/\.+$/, '');
-  return PROVIDER_REDIRECT_HOST_SUFFIXES.some((suffix) => h === suffix || h.endsWith(`.${suffix}`));
+  return PROVIDER_REDIRECT_HOSTS.has(h) || PROVIDER_CDN_PATTERNS.some((pattern) => pattern.test(h));
 }
 
 const PROVIDER_JSON_MAX_BYTES = 8 * 1024 * 1024;
@@ -45,26 +45,28 @@ export async function readBoundedProviderJson(response: Response, maxBytes = PRO
   }
   const chunks: Uint8Array[] = [];
   let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    total += value.byteLength;
-    if (total > maxBytes) {
-      try {
-        await reader.cancel();
-      } catch {}
-      throw new Error('Provider response exceeds size limit');
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > maxBytes) throw new Error('Provider response exceeds size limit');
+      chunks.push(value);
     }
-    chunks.push(value);
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder().decode(merged));
+  } catch (error) {
+    try { await reader.cancel(error); } catch {}
+    throw error;
+  } finally {
+    reader.releaseLock();
   }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return JSON.parse(new TextDecoder().decode(merged));
 }
 
 /**

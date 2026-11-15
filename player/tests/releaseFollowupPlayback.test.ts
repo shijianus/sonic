@@ -182,8 +182,8 @@ describe('release follow-up playback source pairing', () => {
     expect(songUrlV1Mock).toHaveBeenCalledTimes(2)
     pending.resolve({ data: [] })
     await Promise.all([a, b, c])
-    expect(first.url).toBeUndefined()
-    expect(copy.url).toBeUndefined()
+    expect(asUrl(first.url!).searchParams.get('id')).toBe('6001')
+    expect(asUrl(copy.url!).searchParams.get('id')).toBe('6001')
     expect(asUrl(other.url!).searchParams.get('id')).toBe('6002')
   })
 

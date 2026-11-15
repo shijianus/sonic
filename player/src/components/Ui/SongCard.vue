@@ -6,6 +6,7 @@ import { useAudio } from '@/composables/useAudio'
 import { formatCoverUrl } from '@/utils/imageUrl'
 import type { Song as StoreSong } from '@/stores/interface'
 import { prefersReducedMotion } from '@/utils/motion'
+import { songIdentityKey } from '@/utils/songIdentity'
 
 interface Props {
   song: {
@@ -19,6 +20,14 @@ interface Props {
     streamUrl?: string
     qualities?: Array<{ level: string; label: string; bitrate: string; streamUrl?: string; format?: string; desc?: string }>
     sources?: Array<{ platform: string; platformId: string | number; duration?: number }>
+    source?: string
+    platform?: string
+    platformId?: string | number
+    resolvedSource?: string
+    resolvedId?: string | number
+    resolvedPlatformId?: string | number
+    resolvedTitle?: string
+    resolvedArtist?: string
     streamType?: 'full' | 'trial' | 'unavailable'
     qualityBadge?: string
     sha?: string
@@ -36,7 +45,7 @@ const { playAfterCurrent, currentSong, isPlaying } = useAudio()
 const isCurrent = computed(() => {
   const current = currentSong.value
   if (!current) return false
-  return String(current.id) === String(props.song.id)
+  return songIdentityKey(current) === songIdentityKey(props.song)
 })
 
 // 播放歌曲并执行封面飞行动画：保留现有队列，插入到当前播放之后
@@ -66,8 +75,12 @@ const handleClick = async (_event: MouseEvent) => {
     streamType: rawSong.streamType,
     sha: rawSong.sha,
     qualityBadge: rawSong.qualityBadge,
+    source: rawSong.source,
+    platform: rawSong.platform,
+    platformId: rawSong.platformId,
     resolvedSource: rawSong.resolvedSource,
     resolvedId: rawSong.resolvedId,
+    resolvedPlatformId: rawSong.resolvedPlatformId,
     resolvedTitle: rawSong.resolvedTitle,
     resolvedArtist: rawSong.resolvedArtist,
   }

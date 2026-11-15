@@ -5,6 +5,7 @@ import type { Song } from '@/stores/interface'
 import { formatDurationOrDash } from '@/utils/time'
 import { formatCoverUrl } from '@/utils/imageUrl'
 import { useI18n } from 'vue-i18n'
+import { songIdentityKey } from '@/utils/songIdentity'
 
 const { t } = useI18n()
 
@@ -33,7 +34,7 @@ const { currentSong, isPlaying } = useAudio()
 const isCurrent = (s: Song) => {
   const cur = currentSong.value
   if (!cur) return false
-  return String(s.id) === String(cur.id)
+  return songIdentityKey(s) === songIdentityKey(cur)
 }
 
 const handleClick = (_song: Song, i: number) => {
@@ -76,7 +77,7 @@ const getQualityBadgeInfo = (song: Song) => {
   <div v-if="variant === 'card'" class="space-y-2">
     <button
       v-for="(song, index) in songs"
-      :key="song.id + '-' + index"
+      :key="songIdentityKey(song) || index"
       type="button"
       :data-testid="`song-row-${song.id ?? index}`"
       class="group flex w-full items-center gap-3 rounded-2xl p-3 text-left transition-all duration-300"
@@ -137,7 +138,7 @@ const getQualityBadgeInfo = (song: Song) => {
   <div v-else class="overflow-hidden py-2">
     <button
       v-for="(song, index) in songs"
-      :key="song.id"
+      :key="songIdentityKey(song) || index"
       type="button"
       :data-testid="`song-row-${song.id ?? index}`"
       class="song-item-compact group flex w-full items-center gap-3 rounded-xl p-2.5 text-left transition-all duration-200"

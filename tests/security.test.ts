@@ -314,7 +314,7 @@ describe('Task 3: OAuth State CSRF & Security', () => {
 
     // 1. Missing state in query param
     const reqNoState = new Request('https://sonic.epocanvas.tech/api/auth/callback?code=mock_code', {
-      headers: { Cookie: 'sonic_oauth_state=valid_random_state_123' },
+      headers: { Cookie: '__Host-sonic_oauth_state=valid_random_state_123' },
     });
     const resNoState = await handleAuthCallback({ request: reqNoState, env });
     expect(resNoState.status).toBe(400);
@@ -326,7 +326,7 @@ describe('Task 3: OAuth State CSRF & Security', () => {
 
     // 3. Mismatched state (attacker forged request)
     const reqMismatch = new Request('https://sonic.epocanvas.tech/api/auth/callback?code=mock_code&state=attacker_state', {
-      headers: { Cookie: 'sonic_oauth_state=victim_legit_state' },
+      headers: { Cookie: '__Host-sonic_oauth_state=victim_legit_state' },
     });
     const resMismatch = await handleAuthCallback({ request: reqMismatch, env });
     expect(resMismatch.status).toBe(400);

@@ -227,6 +227,11 @@ const toSongList = (items: typeof downloads.value): Song[] => {
     const badge = meta.isLossless ? 'SQ' : meta.displayTag.includes('320') ? 'HQ' : t('quality.standard')
     return {
       id: d.id,
+      source: d.source,
+      platform: d.platform,
+      platformId: d.platformId,
+      resolvedSource: d.resolvedSource,
+      resolvedPlatformId: d.resolvedPlatformId,
       name: d.name,
       artist: d.artist,
       album: d.album,
@@ -276,6 +281,7 @@ const playSingle = (_item: DownloadedSong, index: number) => {
 const isCurrentOffline = (item: DownloadedSong) => {
   const cur = currentSong.value
   if (!cur || String(cur.id) !== String(item.id)) return false
+  if (item.platformId && cur.platformId && String(item.platformId) !== String(cur.platformId)) return false
   return Boolean(cur.isLocal === true || cur.url?.startsWith('blob:'))
 }
 
@@ -330,7 +336,7 @@ const confirmDeleteAction = async () => {
   if (isClearAllConfirm.value) {
     await downloadStore.clearDownloads()
   } else if (itemToDelete.value) {
-    await downloadStore.deleteDownload(itemToDelete.value.id)
+    await downloadStore.deleteDownload(itemToDelete.value)
   }
   closeDeleteModal()
 }

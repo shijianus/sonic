@@ -1,9 +1,26 @@
 import { defineStore } from 'pinia'
-import { downloadedMusicDB, type DownloadedSong } from '@/utils/indexedDB'
+import {
+  buildDownloadStreamUrl,
+  buildDownloadKey,
+  downloadSourcePair,
+  downloadedMusicDB,
+  type DownloadedSong,
+} from '@/utils/indexedDB'
 import type { Song } from '../interface'
 import { useAudioStore } from './audio'
 import { useToastStore } from './toast'
 import i18n from '@/languages'
+
+const activeDownloadKeys = new Set<string>()
+
+const sameDownloadIdentity = (left: DownloadedSong, right: Song): boolean => {
+  const leftPair = downloadSourcePair(left)
+  const rightPair = downloadSourcePair(right)
+  if (leftPair && rightPair) {
+    return leftPair.platform === rightPair.platform && leftPair.platformId === rightPair.platformId
+  }
+  return String(left.id) === String(right.id)
+}
 
 export interface QualityChoice {
   level: string // 'lossless' | 'exhigh' | 'standard'
@@ -69,8 +86,17 @@ export const useDownloadStore = defineStore('download', {
       if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
       return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
     },
-    isSongDownloaded: (state) => (id: string | number) => {
-      return state.downloadedList.some((item) => String(item.id) === String(id))
+    isSongDownloaded: (state) => (songOrId: Song | string | number, qualityLevel?: string) => {
+      if (typeof songOrId === 'object') {
+        if (qualityLevel) {
+          const downloadKey = buildDownloadKey(songOrId, qualityLevel)
+          return state.downloadedList.some(item => item.downloadKey === downloadKey)
+        }
+        return state.downloadedList.some(item => sameDownloadIdentity(item, songOrId))
+      }
+      return state.downloadedList.some(item =>
+        String(item.id) === String(songOrId) && (!qualityLevel || item.qualityLevel === qualityLevel),
+      )
     },
   },
 
@@ -104,11 +130,16 @@ export const useDownloadStore = defineStore('download', {
 
     /** 查询同一首歌是否已下载过指定音质 */
     async findDownloadedByQuality(
-      id: string | number,
+      songOrId: Song | string | number,
       qualityLevel: string
     ): Promise<DownloadedSong | null> {
+      const downloadKey = typeof songOrId === 'object'
+        ? buildDownloadKey(songOrId, qualityLevel)
+        : null
       const inMemory = this.downloadedList.find(
-        item => String(item.id) === String(id) && item.qualityLevel === qualityLevel
+        item => downloadKey
+          ? item.downloadKey === downloadKey
+          : String(item.id) === String(songOrId) && item.qualityLevel === qualityLevel
       )
       if (inMemory) return inMemory
       try {
@@ -116,7 +147,9 @@ export const useDownloadStore = defineStore('download', {
         this.downloadedList = list.sort((a, b) => (b.downloadTime || 0) - (a.downloadTime || 0))
         return (
           this.downloadedList.find(
-            item => String(item.id) === String(id) && item.qualityLevel === qualityLevel
+            item => downloadKey
+              ? item.downloadKey === downloadKey
+              : String(item.id) === String(songOrId) && item.qualityLevel === qualityLevel
           ) || null
         )
       } catch {
@@ -202,12 +235,10 @@ export const useDownloadStore = defineStore('download', {
       options: { overwrite?: boolean } = {}
     ) {
       if (!song || this.isDownloading) return
-      const existing = await this.findDownloadedByQuality(song.id, qualityChoice.level)
-      if (existing && !options.overwrite) {
-        const err = new Error('DUPLICATE_DOWNLOAD')
-        err.name = 'DuplicateDownloadError'
-        throw err
-      }
+      const downloadKey = buildDownloadKey(song, qualityChoice.level)
+      const identityPair = downloadSourcePair(song)
+      if (activeDownloadKeys.has(downloadKey)) return
+      activeDownloadKeys.add(downloadKey)
 
       const controller = new AbortController()
       this.abortController = controller
@@ -219,26 +250,17 @@ export const useDownloadStore = defineStore('download', {
       this.totalBytes = 0
 
       try {
-        const brMap: Record<string, string> = {
-          lossless: 'lossless',
-          exhigh: '320',
-          standard: '128',
+        const existing = await this.findDownloadedByQuality(song, qualityChoice.level)
+        if (existing && !options.overwrite) {
+          const err = new Error('DUPLICATE_DOWNLOAD')
+          err.name = 'DuplicateDownloadError'
+          throw err
         }
-        const br = brMap[qualityChoice.level] || '320'
 
-        // 优先使用歌曲自带对应音质的 streamUrl
-        let streamUrl = ''
-        const found = song.qualities?.find((q) => q.level === qualityChoice.level)
-        if (found && found.streamUrl) {
-          streamUrl = found.streamUrl
-        } else {
-          // 第一方聚合曲目回退到自身来源，避免命中网关策略禁用的商业源
-          const ownStreamUrl = song.streamUrl || song.url || ''
-          const fallbackSource = song.sources?.[0]?.platform || 'netease'
-          streamUrl =
-            ownStreamUrl ||
-            `/api/music/stream?id=${encodeURIComponent(String(song.id))}&source=${encodeURIComponent(fallbackSource)}&br=${br}&title=${encodeURIComponent(song.name || '')}&artist=${encodeURIComponent(song.artist || '')}`
-        }
+        // Prefer a URL explicitly bound to the requested tier. A generic
+        // song.url/streamUrl may belong to another tier, so remote fallback
+        // always goes through the verified source-aware gateway.
+        const streamUrl = buildDownloadStreamUrl(song, qualityChoice.level)
 
         // 1. 获取音频二进制 Blob（带进度，可取消）
         const blob = await this._fetchBlobWithProgress(
@@ -270,6 +292,7 @@ export const useDownloadStore = defineStore('download', {
         // 3. 持久化存储至 IndexedDB
         const downloadedSong: DownloadedSong = {
           id: song.id,
+          downloadKey,
           name: song.name,
           artist: song.artist,
           album: song.album || '',
@@ -283,13 +306,18 @@ export const useDownloadStore = defineStore('download', {
           file: blob,
           downloadTime: Date.now(),
           streamUrl,
+          source: identityPair?.platform || song.source,
+          platform: identityPair?.platform || song.platform,
+          platformId: identityPair?.platformId || song.platformId,
+          resolvedSource: song.resolvedSource || identityPair?.platform,
+          resolvedPlatformId: song.resolvedPlatformId ?? song.resolvedId ?? identityPair?.platformId,
         }
 
         await downloadedMusicDB.add(downloadedSong)
 
         // 4. 更新内存状态
         const existingIdx = this.downloadedList.findIndex(
-          (item) => String(item.id) === String(song.id)
+          (item) => item.downloadKey === downloadKey
         )
         if (existingIdx >= 0) {
           this.downloadedList.splice(existingIdx, 1, downloadedSong)
@@ -340,6 +368,7 @@ export const useDownloadStore = defineStore('download', {
         useToastStore().show({ message: this.errorMsg, type: 'error', duration: 5000 })
         throw err
       } finally {
+        activeDownloadKeys.delete(downloadKey)
         this.isDownloading = false
         this.downloadingId = null
         this.abortController = null
@@ -347,23 +376,39 @@ export const useDownloadStore = defineStore('download', {
     },
 
     /** 从本地下载列表删除单个 */
-    async deleteDownload(id: string | number) {
+    async deleteDownload(target: string | number | DownloadedSong) {
       try {
-        await downloadedMusicDB.delete(id)
-        this.downloadedList = this.downloadedList.filter((item) => String(item.id) !== String(id))
+        let item: DownloadedSong | undefined
+        if (typeof target === 'object') {
+          item = target
+        } else {
+          const matches = this.downloadedList.filter(candidate => String(candidate.id) === String(target))
+          // v3 permits several providers and qualities per numeric ID. A bare
+          // ID is ambiguous and must never remove an arbitrary item.
+          if (matches.length > 1) {
+            console.warn('[DownloadStore] Refusing ambiguous download deletion', target)
+            return
+          }
+          item = matches[0]
+        }
+        if (item) {
+          await downloadedMusicDB.delete(item)
+          this.downloadedList = this.downloadedList.filter(candidate => candidate.downloadKey !== item.downloadKey)
+        } else {
+          await downloadedMusicDB.delete(target)
+          this.downloadedList = this.downloadedList.filter(candidate => String(candidate.id) !== String(target))
+        }
       } catch (err) {
         console.error('[DownloadStore] Failed to delete download:', err)
       }
     },
 
     /** 批量删除多个已下载项目 */
-    async deleteMultiple(ids: (string | number)[]) {
-      const idSet = new Set(ids.map((id) => String(id)))
+    async deleteMultiple(ids: (string | number | DownloadedSong)[]) {
       try {
-        for (const id of ids) {
-          await downloadedMusicDB.delete(id)
+        for (const target of ids) {
+          await this.deleteDownload(target)
         }
-        this.downloadedList = this.downloadedList.filter((item) => !idSet.has(String(item.id)))
       } catch (err) {
         console.error('[DownloadStore] Failed to batch delete downloads:', err)
       }
@@ -392,6 +437,11 @@ export const useDownloadStore = defineStore('download', {
         cover: downloadedSong.cover,
         url: blobUrl,
         isLocal: true,
+        source: downloadedSong.source,
+        platform: downloadedSong.platform,
+        platformId: downloadedSong.platformId,
+        resolvedSource: downloadedSong.resolvedSource,
+        resolvedPlatformId: downloadedSong.resolvedPlatformId,
         qualityBadge: downloadedSong.qualityBadge,
         qualities: [
           {

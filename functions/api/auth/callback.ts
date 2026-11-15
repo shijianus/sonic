@@ -13,6 +13,8 @@ import {
   shouldUseSecureCookie,
   SONIC_OAUTH_STATE_COOKIE,
   SONIC_OAUTH_VERIFIER_COOKIE,
+  SONIC_OAUTH_STATE_COOKIE_HOST_PREFIXED,
+  SONIC_OAUTH_VERIFIER_COOKIE_HOST_PREFIXED,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import { recordOAuthMetric, redactSensitiveString } from '../../_lib/sonic/observability';
@@ -30,9 +32,14 @@ function clearOAuthCookies(requestUrl: URL): Headers {
     Pragma: 'no-cache',
   });
   const secureAttr = shouldUseSecureCookie(requestUrl) ? '; Secure' : '';
-  const suffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-  headers.append('Set-Cookie', `${SONIC_OAUTH_STATE_COOKIE}=${suffix}`);
-  headers.append('Set-Cookie', `${SONIC_OAUTH_VERIFIER_COOKIE}=${suffix}`);
+  const legacySuffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+  const hostSuffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+  if (shouldUseSecureCookie(requestUrl)) {
+    headers.append('Set-Cookie', `${SONIC_OAUTH_STATE_COOKIE_HOST_PREFIXED}=${hostSuffix}`);
+    headers.append('Set-Cookie', `${SONIC_OAUTH_VERIFIER_COOKIE_HOST_PREFIXED}=${hostSuffix}`);
+  }
+  headers.append('Set-Cookie', `${SONIC_OAUTH_STATE_COOKIE}=${legacySuffix}`);
+  headers.append('Set-Cookie', `${SONIC_OAUTH_VERIFIER_COOKIE}=${legacySuffix}`);
   return headers;
 }
 
@@ -90,7 +97,10 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   }
 
   // 1. Verify OAuth state (CSRF) using the HttpOnly transaction cookie
-  const cookieState = readCookie(request, SONIC_OAUTH_STATE_COOKIE);
+  const secure = shouldUseSecureCookie(url);
+  const stateCookie = secure ? SONIC_OAUTH_STATE_COOKIE_HOST_PREFIXED : SONIC_OAUTH_STATE_COOKIE;
+  const verifierCookie = secure ? SONIC_OAUTH_VERIFIER_COOKIE_HOST_PREFIXED : SONIC_OAUTH_VERIFIER_COOKIE;
+  const cookieState = readCookie(request, stateCookie);
   if (
     !state ||
     !OAUTH_STATE_REGEX.test(state) ||
@@ -108,7 +118,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
 
   // 2. PKCE is mandatory: login always issues a verifier; a missing/malformed verifier
   // must never silently downgrade the authorization-code exchange.
-  const codeVerifier = readCookie(request, SONIC_OAUTH_VERIFIER_COOKIE);
+  const codeVerifier = readCookie(request, verifierCookie);
   if (!codeVerifier || !PKCE_VERIFIER_REGEX.test(codeVerifier)) {
     return oauthFailure(
       '缺少或无效的 PKCE code_verifier，登录事务已拒绝',

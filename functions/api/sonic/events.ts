@@ -56,7 +56,12 @@ function nextUtcMidnight(now: number): number {
   return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
 }
 
-function getEventQuotaBucket(buckets: Map<string, EventQuotaBucket>, key: string, now: number, resetAt: number): EventQuotaBucket {
+function getEventQuotaBucket(
+  buckets: Map<string, EventQuotaBucket>,
+  key: string,
+  now: number,
+  resetAt: number,
+): EventQuotaBucket | null {
   const active = buckets.get(key);
   if (active && now < active.resetAt) return active;
   if (active) buckets.delete(key);
@@ -64,8 +69,10 @@ function getEventQuotaBucket(buckets: Map<string, EventQuotaBucket>, key: string
     for (const [candidate, value] of buckets) {
       if (now >= value.resetAt) buckets.delete(candidate);
     }
-    const oldest = buckets.keys().next().value;
-    if (buckets.size >= MAX_EVENT_QUOTA_BUCKETS && oldest !== undefined) buckets.delete(oldest);
+    // Never evict a live identity bucket. Eviction would let an attacker rotate
+    // anonymous identities until an older subject loses its quota state. New
+    // identities are rejected until a bucket expires naturally.
+    if (buckets.size >= MAX_EVENT_QUOTA_BUCKETS) return null;
   }
   const bucket = { count: 0, resetAt };
   buckets.set(key, bucket);
@@ -88,14 +95,18 @@ function consumeEventQuota(request: Request, env: AppEnv, subjectKey: string, co
   const ip = extractClientIp(request, env);
   const minute = now + EVENT_QUOTA_WINDOW_MS;
   const minuteIp = getEventQuotaBucket(minuteIpBuckets, ip, now, minute);
+  if (!minuteIp) return 'EVENT_QUOTA_EXCEEDED';
   if (minuteIp.count + count > EVENT_QUOTA_PER_IP) return 'EVENT_QUOTA_EXCEEDED';
   const minuteSubject = getEventQuotaBucket(minuteSubjectBuckets, subjectKey, now, minute);
+  if (!minuteSubject) return 'EVENT_QUOTA_EXCEEDED';
   if (minuteSubject.count + count > EVENT_QUOTA_PER_SUBJECT) return 'EVENT_QUOTA_EXCEEDED';
 
   const daily = nextUtcMidnight(now);
   const dailyIp = getEventQuotaBucket(dailyIpBuckets, ip, now, daily);
+  if (!dailyIp) return 'EVENT_DAILY_QUOTA_EXCEEDED';
   if (dailyIp.count + count > dailyQuotaLimit(env.SONIC_EVENTS_DAILY_PER_IP, DEFAULT_DAILY_EVENT_QUOTA_PER_IP)) return 'EVENT_DAILY_QUOTA_EXCEEDED';
   const dailySubject = getEventQuotaBucket(dailySubjectBuckets, subjectKey, now, daily);
+  if (!dailySubject) return 'EVENT_DAILY_QUOTA_EXCEEDED';
   if (dailySubject.count + count > dailyQuotaLimit(env.SONIC_EVENTS_DAILY_PER_SUBJECT, DEFAULT_DAILY_EVENT_QUOTA_PER_SUBJECT)) {
     return 'EVENT_DAILY_QUOTA_EXCEEDED';
   }

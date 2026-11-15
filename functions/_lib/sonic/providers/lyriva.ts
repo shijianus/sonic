@@ -1,4 +1,4 @@
-import { fetchProviderUrl } from '../native-protocols';
+import { fetchProviderUrl, readBoundedProviderJson } from '../native-protocols';
 // Sonic Provider — Lyriva (https://lyriva.xyz / https://api.lyriva.xyz)
 // Unified lyrics infrastructure with word-level & line-level sync
 
@@ -63,7 +63,7 @@ export const lyrivaProvider: SonicProviderAdapter = {
         return null;
       }
 
-      const json = (await resp.json()) as any;
+      const json = (await readBoundedProviderJson(resp)) as any;
       if (!json || typeof json !== 'object') {
         return null;
       }

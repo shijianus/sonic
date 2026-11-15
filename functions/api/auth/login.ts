@@ -5,8 +5,10 @@ import {
   isOAuthEnabled,
   OAUTH_TRANSACTION_MAX_AGE_SEC,
   shouldUseSecureCookie,
-  SONIC_OAUTH_STATE_COOKIE,
-  SONIC_OAUTH_VERIFIER_COOKIE,
+  SONIC_OAUTH_STATE_COOKIE_LEGACY,
+  SONIC_OAUTH_VERIFIER_COOKIE_LEGACY,
+  SONIC_OAUTH_STATE_COOKIE_HOST_PREFIXED,
+  SONIC_OAUTH_VERIFIER_COOKIE_HOST_PREFIXED,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import { recordOAuthMetric } from '../../_lib/sonic/observability';
@@ -89,15 +91,19 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     return errorResponse(err?.message || '构建授权跳转链接失败', 500);
   }
 
-  const secureAttr = shouldUseSecureCookie(url) ? '; Secure' : '';
-  const cookieSuffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=/api/auth; Max-Age=${OAUTH_TRANSACTION_MAX_AGE_SEC}`;
+  const secure = shouldUseSecureCookie(url);
+  const secureAttr = secure ? '; Secure' : '';
+  const cookiePath = secure ? '/' : '/api/auth';
+  const stateCookie = secure ? SONIC_OAUTH_STATE_COOKIE_HOST_PREFIXED : SONIC_OAUTH_STATE_COOKIE_LEGACY;
+  const verifierCookie = secure ? SONIC_OAUTH_VERIFIER_COOKIE_HOST_PREFIXED : SONIC_OAUTH_VERIFIER_COOKIE_LEGACY;
+  const cookieSuffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=${cookiePath}; Max-Age=${OAUTH_TRANSACTION_MAX_AGE_SEC}`;
   const headers = new Headers({
     'Cache-Control': 'no-store',
     'Referrer-Policy': 'no-referrer',
     Pragma: 'no-cache',
   });
-  headers.append('Set-Cookie', `${SONIC_OAUTH_STATE_COOKIE}=${state}${cookieSuffix}`);
-  headers.append('Set-Cookie', `${SONIC_OAUTH_VERIFIER_COOKIE}=${codeVerifier}${cookieSuffix}`);
+  headers.append('Set-Cookie', `${stateCookie}=${state}${cookieSuffix}`);
+  headers.append('Set-Cookie', `${verifierCookie}=${codeVerifier}${cookieSuffix}`);
   recordOAuthMetric('login_started');
 
   if (redirectMode === 'json') {

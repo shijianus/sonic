@@ -180,7 +180,7 @@ const handleConfirm = async () => {
   const choice = buildChoice()
   isConfirming.value = true
   try {
-    const existing = await downloadStore.findDownloadedByQuality(song.id, choice.level)
+    const existing = await downloadStore.findDownloadedByQuality(song, choice.level)
     if (existing) {
       pendingChoice.value = choice
       showOverwriteConfirm.value = true

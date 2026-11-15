@@ -111,6 +111,27 @@ function isSuccessfulCloudSearchResponse(type: CloudSearchType, payload: unknown
   return isCloudSearchResult(type, payload.result);
 }
 
+function isCloudSearchType(value: string): value is CloudSearchType {
+  return value === '1' || value === '10' || value === '100' || value === '1000' || value === '1004';
+}
+
+function parseCloudSearchPagination(url: URL): { limit: number; offset: number } | Response {
+  const rawLimit = url.searchParams.get('limit') ?? '30';
+  const rawOffset = url.searchParams.get('offset') ?? '0';
+  const parsedLimit = Number(rawLimit);
+  const parsedOffset = Number(rawOffset);
+  if (!Number.isSafeInteger(parsedLimit) || parsedLimit < 1 || !Number.isSafeInteger(parsedOffset) || parsedOffset < 0) {
+    return jsonResponse(
+      { code: 400, brand: 'Sonic', error: { code: 'INVALID_SEARCH_PAGINATION', message: 'limit must be a positive integer and offset must be a non-negative integer' } },
+      { status: 400, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
+  return {
+    limit: Math.min(50, parsedLimit),
+    offset: Math.min(100_000, parsedOffset),
+  };
+}
+
 function cloudSearchFailure(type: CloudSearchType, attempts: Array<Record<string, unknown>>): Response {
   const timedOut = attempts.some((attempt) => attempt.errorCode === UPSTREAM_TIMEOUT);
   const status = timedOut ? 504 : 502;
@@ -123,7 +144,7 @@ function cloudSearchFailure(type: CloudSearchType, attempts: Array<Record<string
         code,
         message: timedOut ? 'Search providers timed out' : `Search provider returned an invalid ${type} response`,
       },
-      meta: { provider: 'netease', attempts },
+      meta: { provider: type === '1' ? 'nexus' : 'netease', attempts },
     },
     { status, headers: { 'Cache-Control': 'no-store' } },
   );
@@ -195,7 +216,7 @@ export async function handleUpstreamEndpoint(
       if (isMvCatalog || isMvSearch) {
         const payload = await response.clone().json().catch(() => null);
         const entries = isMvSearch ? payload?.result?.mvs : Array.isArray(payload?.data) ? payload.data : Array.isArray(payload?.mvs) ? payload.mvs : Array.isArray(payload?.result) ? payload.result : normalized === 'mv/detail' && payload?.data ? [payload.data] : [];
-        if (entries.length) {
+        if (Array.isArray(entries) && entries.length) {
           try { ingestVerifiedMvCatalog(entries, getRecommendStore(env)); }
           catch { /* Catalog enrichment must not turn a valid provider response into a playback error. */ }
         }
@@ -281,6 +302,15 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
   };
   const normEndpoint = endpoint.replace(/^\/+|\/+$/g, '').toLowerCase();
   const chartField = chartCatalogField(normEndpoint);
+  const compatibilitySearch = ['cloudsearch', 'search'].includes(normEndpoint);
+  const compatibilityType = compatibilitySearch ? (url.searchParams.get('type') || '1') : '';
+  const compatibilityCloudType = isCloudSearchType(compatibilityType) ? compatibilityType : undefined;
+  if (compatibilitySearch && !compatibilityCloudType) {
+    return jsonResponse(
+      { code: 400, brand: 'Sonic', error: { code: 'UNSUPPORTED_SEARCH_TYPE', message: `Unsupported search type '${compatibilityType}'` } },
+      { status: 400, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
   const bypassSongCache = ['cloudsearch', 'search'].includes(normEndpoint) &&
     (url.searchParams.get('type') || '1') === '1' && url.searchParams.has('nocache');
 
@@ -298,7 +328,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
 
   // Server-side content authorization gate: commercial NetEase catalog routes are blocked
   // whenever `netease` is disabled by policy (e.g. SONIC_CONTENT_POLICY=strict-allowlist).
-  if (!cfg.enableNetease) {
+  const requiresNeteaseCatalog = !compatibilitySearch || compatibilityCloudType !== '1';
+  if (!cfg.enableNetease && requiresNeteaseCatalog) {
     recordLicensingBlockMetric('netease');
     return jsonResponse(
       {
@@ -330,7 +361,10 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       request,
       timeoutMs: cfg.engineTimeoutMs,
     });
-    if (engineRes.ok && engineRes.data && (!chartField || chartCatalogList(engineRes.data, chartField))) {
+    const enginePayloadValid = compatibilitySearch
+      ? Boolean(compatibilityCloudType && isSuccessfulCloudSearchResponse(compatibilityCloudType, engineRes.data))
+      : (!chartField || chartCatalogList(engineRes.data, chartField));
+    if (engineRes.ok && engineRes.data && enginePayloadValid) {
       const engineCache = String(engineRes.cacheControl || '').trim();
       const engineCacheLower = engineCache.toLowerCase();
       // Never synthesize a public policy for an engine payload. Only relay an
@@ -813,8 +847,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             params: {
               s: '现场',
               type: 1004,
-              limit: parseInt(limit, 10),
-              offset: parseInt(offset, 10),
+              limit,
+              offset,
             },
           },
           env,
@@ -833,8 +867,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             params: {
               s: '官方版',
               type: 1004,
-              limit: parseInt(limit, 10),
-              offset: parseInt(offset, 10),
+              limit,
+              offset,
             },
           },
           env,
@@ -1717,8 +1751,9 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
   if (normEndpoint === 'cloudsearch' || normEndpoint === 'search') {
     const keywords = url.searchParams.get('keywords') || url.searchParams.get('keyword') || url.searchParams.get('s') || '';
     const type = url.searchParams.get('type') || '1';
-    const limit = url.searchParams.get('limit') || '30';
-    const offset = url.searchParams.get('offset') || '0';
+    const pagination = parseCloudSearchPagination(url);
+    if (pagination instanceof Response) return pagination;
+    const { limit, offset } = pagination;
 
     if (type === '1000') {
       const attempts: Array<Record<string, unknown>> = [];
@@ -1731,8 +1766,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             params: {
               s: keywords,
               type: 1000,
-              limit: parseInt(limit, 10),
-              offset: parseInt(offset, 10),
+              limit,
+              offset,
             },
           },
           env,
@@ -1759,8 +1794,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           {
             s: keywords,
             type: 1000,
-            limit: parseInt(limit, 10),
-            offset: parseInt(offset, 10),
+            limit,
+            offset,
           },
           env,
         );
@@ -1785,7 +1820,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           headers: buildUpstreamHeaders(cfg.realIp),
         });
         const data: any = await resp.json();
-        if (resp.ok && isCloudSearchResult('1000', data?.result)) {
+        if (resp.ok && isSuccessfulCloudSearchResponse('1000', data)) {
           return jsonResponse(
             { code: 200, brand: 'Sonic', result: desensitizeData(data.result) },
             { headers: { 'Cache-Control': 'public, max-age=1800' } },
@@ -1806,12 +1841,13 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           headers: buildUpstreamHeaders(cfg.realIp),
         });
         const data: any = await resp.json();
+        const upstreamCodeOk = data?.code === undefined || data.code === 200 || data.code === '200';
         const rawMvs = Array.isArray(data?.result?.mvs)
           ? data.result.mvs
           : Array.isArray(data?.data)
             ? data.data
             : null;
-        if (!resp.ok || !Array.isArray(rawMvs)) {
+        if (!resp.ok || !upstreamCodeOk || !Array.isArray(rawMvs)) {
           attempts.push({ provider: 'web', ok: false, error: `Invalid MV search response (HTTP ${resp.status})` });
           return cloudSearchFailure('1004', attempts);
         }
@@ -1820,11 +1856,13 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           name: m.name || m.title || '',
           artistName: m.artistName || m.artist || '',
         }));
+        const rawTotal = data?.result?.mvCount ?? data?.result?.count ?? data?.mvCount ?? data?.count;
+        const total = Number.isSafeInteger(Number(rawTotal)) && Number(rawTotal) >= 0 ? Number(rawTotal) : mvs.length;
         return jsonResponse(
           {
             code: 200,
             brand: 'Sonic',
-            result: { mvs: desensitizeData(mvs), mvCount: mvs.length },
+            result: { mvs: desensitizeData(mvs), mvCount: total },
           },
           { headers: { 'Cache-Control': 'public, max-age=1800' } },
         );
@@ -1846,8 +1884,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             params: {
               s: keywords,
               type: 100,
-              limit: parseInt(limit, 10),
-              offset: parseInt(offset, 10),
+              limit,
+              offset,
             },
           },
           env,
@@ -1888,8 +1926,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           {
             s: keywords,
             type: 100,
-            limit: parseInt(limit, 10),
-            offset: parseInt(offset, 10),
+            limit,
+            offset,
           },
           env,
         );
@@ -1937,8 +1975,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
             params: {
               s: keywords,
               type: 10,
-              limit: parseInt(limit, 10),
-              offset: parseInt(offset, 10),
+              limit,
+              offset,
             },
           },
           env,
@@ -1984,8 +2022,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
           {
             s: keywords,
             type: 10,
-            limit: parseInt(limit, 10),
-            offset: parseInt(offset, 10),
+            limit,
+            offset,
           },
           env,
         );
@@ -2030,8 +2068,8 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
     // Default: Song search fallback via Nexus Search
     try {
       const { searchNexus } = await import('./nexus-search');
-      const page = Math.floor(parseInt(offset, 10) / parseInt(limit, 10)) + 1;
-      const res = await searchNexus(keywords, { page, count: parseInt(limit, 10), request }, env);
+      const page = Math.floor(offset / limit) + 1;
+      const res = await searchNexus(keywords, { page, count: limit, request }, env);
       if (res.allProvidersFailed && res.data.tracks.length === 0) {
         return cloudSearchFailure('1', res.attempts as unknown as Array<Record<string, unknown>>);
       }
@@ -2045,6 +2083,19 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
         mv: 0,
         sha: t.sha,
         qualityBadge: t.qualityBadge,
+        platform: t.platform,
+        platformId: t.platformId,
+        source: t.source,
+        sources: t.sources,
+        streamUrl: t.streamUrl,
+        qualities: t.qualities,
+        streamType: t.streamType,
+        trialDuration: t.trialDuration,
+        resolvedSource: t.resolvedSource,
+        resolvedId: t.resolvedId,
+        resolvedPlatformId: t.resolvedPlatformId,
+        resolvedTitle: t.resolvedTitle,
+        resolvedArtist: t.resolvedArtist,
       }));
       return jsonResponse(
         {

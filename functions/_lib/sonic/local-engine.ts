@@ -143,8 +143,13 @@ export interface LocalEngineCallResult<T> {
 function buildEngineHeaders(secret?: string, request?: Request, clientIp?: string): Record<string, string> {
   const headers: Record<string, string> = { 'User-Agent': 'Sonic-Edge-Gateway/2.2' };
   if (secret) headers['X-Sonic-Engine-Key'] = secret;
-  if (request) headers['X-Sonic-Client-IP'] = getPublicClientIp(request);
-  else if (clientIp && isValidIpLiteral(clientIp)) headers['X-Sonic-Client-IP'] = clientIp;
+  if (request) {
+    const requestIp = getPublicClientIp(request);
+    if (requestIp !== 'unknown') headers['X-Sonic-Client-IP'] = requestIp;
+    else if (clientIp && isValidIpLiteral(clientIp)) headers['X-Sonic-Client-IP'] = clientIp;
+  } else if (clientIp && isValidIpLiteral(clientIp)) {
+    headers['X-Sonic-Client-IP'] = clientIp;
+  }
   return headers;
 }
 

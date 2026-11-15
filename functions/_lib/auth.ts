@@ -25,8 +25,16 @@ export function readCookieWithHostPrefix(request: Request, legacyName: string, h
   return readCookie(request, hostPrefixedName) ?? readCookie(request, legacyName);
 }
 export const SONIC_SESSION_MAX_AGE_SEC = 30 * 86400;
+// OAuth transaction cookies use the __Host- prefix on HTTPS deployments. The
+// browser then rejects Domain-scoped sibling-subdomain cookies and requires
+// Path=/, preventing login-CSRF via cookie shadowing. HTTP keeps the legacy
+// host-only name for local development where Secure cookies are not accepted.
 export const SONIC_OAUTH_STATE_COOKIE = 'sonic_oauth_state';
 export const SONIC_OAUTH_VERIFIER_COOKIE = 'sonic_oauth_verifier';
+export const SONIC_OAUTH_STATE_COOKIE_HOST_PREFIXED = `__Host-${SONIC_OAUTH_STATE_COOKIE}`;
+export const SONIC_OAUTH_VERIFIER_COOKIE_HOST_PREFIXED = `__Host-${SONIC_OAUTH_VERIFIER_COOKIE}`;
+export const SONIC_OAUTH_STATE_COOKIE_LEGACY = SONIC_OAUTH_STATE_COOKIE;
+export const SONIC_OAUTH_VERIFIER_COOKIE_LEGACY = SONIC_OAUTH_VERIFIER_COOKIE;
 export const OAUTH_TRANSACTION_MAX_AGE_SEC = 600;
 export const OAUTH_STATE_REGEX = /^[A-Za-z0-9_-]{43}$/;
 export const PKCE_VERIFIER_REGEX = /^[A-Za-z0-9_-]{43,128}$/;

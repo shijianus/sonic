@@ -1,4 +1,4 @@
-import { fetchProviderUrl } from '../native-protocols';
+import { fetchProviderUrl, readBoundedProviderJson } from '../native-protocols';
 // Sonic Provider — AMLL TTML (api.amll.dev)
 // High-precision Timed Text Markup Language Word-Level Lyrics
 
@@ -80,7 +80,7 @@ export async function fetchAmllByIds(
       headers: { 'User-Agent': SONIC_UA, Accept: 'application/json' },
     }, 6000, signal);
     if (!resp.ok) return null;
-    const json = (await resp.json()) as AmllGetResponse;
+    const json = (await readBoundedProviderJson(resp)) as AmllGetResponse;
     const rawTtml = json.data?.lyrics || json.data?.ttml;
     if (!rawTtml) return null;
 
@@ -123,7 +123,7 @@ export async function fetchAmllBySearch(
       headers: { 'User-Agent': SONIC_UA, Accept: 'application/json' },
     }, 6000, signal);
     if (!searchResp.ok) return null;
-    const searchJson = (await searchResp.json()) as AmllSearchResponse;
+    const searchJson = (await readBoundedProviderJson(searchResp)) as AmllSearchResponse;
     const results = Array.isArray(searchJson.data)
       ? searchJson.data
       : searchJson.data && Array.isArray((searchJson.data as any).items)
@@ -167,7 +167,7 @@ export async function fetchAmllBySearch(
       headers: { 'User-Agent': SONIC_UA, Accept: 'application/json' },
     }, 6000, signal);
     if (!getResp.ok) return null;
-    const getJson = (await getResp.json()) as AmllGetResponse;
+    const getJson = (await readBoundedProviderJson(getResp)) as AmllGetResponse;
     const rawTtml = getJson.data?.lyrics || getJson.data?.ttml;
     if (!rawTtml) return null;
 

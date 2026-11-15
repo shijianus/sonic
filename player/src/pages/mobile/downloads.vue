@@ -99,6 +99,11 @@ const toSongList = (items: typeof downloads.value): Song[] => {
     const badge = meta.isLossless ? 'SQ' : meta.displayTag.includes('320') ? 'HQ' : t('quality.standard')
     return {
       id: d.id,
+      source: d.source,
+      platform: d.platform,
+      platformId: d.platformId,
+      resolvedSource: d.resolvedSource,
+      resolvedPlatformId: d.resolvedPlatformId,
       name: d.name,
       artist: d.artist,
       album: d.album,
@@ -133,7 +138,10 @@ const playSingle = (_item: any, index: number) => {
 }
 
 const isCurrentPlaying = (item: any) => {
-  return String(audioStore.currentSong?.id || '') === String(item.id || '')
+  const current = audioStore.currentSong
+  if (String(current?.id || '') !== String(item.id || '')) return false
+  if (item.platformId && current?.platformId && String(item.platformId) !== String(current.platformId)) return false
+  return true
 }
 
 const handleExport = (item: any) => {
@@ -170,7 +178,7 @@ useDialogA11y({
 const confirmDelete = async () => {
   const target = itemToDelete.value
   closeDeleteConfirm()
-  if (target) await downloadStore.deleteDownload(target.id)
+  if (target) await downloadStore.deleteDownload(target)
 }
 </script>
 

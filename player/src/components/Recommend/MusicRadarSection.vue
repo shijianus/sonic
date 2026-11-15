@@ -7,6 +7,7 @@ import { useRecommendStore } from '@/stores/modules/recommend'
 import { fetchRecommendForYou, type RecommendSongItem } from '@/api/recommend'
 import SongCard from '@/components/Ui/SongCard.vue'
 import MobileSongList from '@/components/Mobile/MobileSongList.vue'
+import { songIdentityKey } from '@/utils/songIdentity'
 
 const props = withDefaults(
   defineProps<{
@@ -165,7 +166,7 @@ onMounted(() => {
       <div class="grid md:grid-cols-2">
         <SongCard
           v-for="(song, idx) in visibleTracks"
-          :key="song.id"
+          :key="songIdentityKey(song)"
           :song="song"
           :index="idx"
           :to="`/song/${song.id}`"

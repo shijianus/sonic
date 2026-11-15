@@ -54,13 +54,19 @@ export class MemoryRecommendStore implements RecommendStore {
   private queryContributions = new Map<string, { norm: string; display: string; count: number; createdAt: number }>();
   private cooccurrenceContributions = new Map<string, { createdAt: number; edges: Map<string, { a: string; b: string; weight: number }> }>();
   private retentionDays: number;
+  private anonRetentionDays: number;
   private maxEntities: number;
   private maxEntityRelations: number;
   private writeCounter = 0;
   private lastRetentionAt = Date.now();
 
-  constructor(retentionDays: number | string = 90, caps?: { entities?: number; entityRelations?: number }) {
+  constructor(
+    retentionDays: number | string = 90,
+    caps?: { entities?: number; entityRelations?: number },
+    anonRetentionDays: number | string = 7,
+  ) {
     this.retentionDays = normalizeRecommendRetentionDays(retentionDays);
+    this.anonRetentionDays = Math.min(this.retentionDays, normalizeRecommendRetentionDays(anonRetentionDays));
     this.maxEntities = Math.max(1, Math.floor(caps?.entities ?? DEFAULT_MAX_ENTITIES));
     this.maxEntityRelations = Math.max(1, Math.floor(caps?.entityRelations ?? DEFAULT_MAX_ENTITY_RELATIONS));
   }
@@ -70,6 +76,14 @@ export class MemoryRecommendStore implements RecommendStore {
     if (days !== this.retentionDays) this.pruneRetention(days);
   }
 
+  setAnonRetentionDays(retentionDays: number | string): void {
+    const days = normalizeRecommendRetentionDays(retentionDays);
+    if (days !== this.anonRetentionDays) {
+      this.anonRetentionDays = Math.min(this.retentionDays, days);
+      this.pruneRetention();
+    }
+  }
+
   private beforeWrite(): void {
     if (++this.writeCounter >= 1500 || Date.now() - this.lastRetentionAt >= 3600_000) this.pruneRetention();
   }
@@ -77,7 +91,10 @@ export class MemoryRecommendStore implements RecommendStore {
   pruneRetention(retentionDays = this.retentionDays): void {
     this.retentionDays = normalizeRecommendRetentionDays(retentionDays);
     const cutoff = Date.now() - this.retentionDays * DAY_MS;
-    this.events = this.events.filter((e) => e.createdAt >= cutoff);
+    const anonCutoff = Date.now() - this.anonRetentionDays * DAY_MS;
+    const retainedEvent = (subjectKey: string, createdAt: number) =>
+      createdAt >= (subjectKey.startsWith('anon_') ? anonCutoff : cutoff);
+    this.events = this.events.filter((e) => retainedEvent(e.subjectKey, e.createdAt));
     this.eventIds.clear();
     this.userEventsIndex.clear();
     for (const e of this.events) {
@@ -88,7 +105,7 @@ export class MemoryRecommendStore implements RecommendStore {
     }
     this.entityFeedbackIds.clear();
     for (const [subject, list] of this.userEntityFeedbacks) {
-      const retained = list.filter((f) => f.createdAt >= cutoff);
+      const retained = list.filter((f) => retainedEvent(f.subjectKey, f.createdAt));
       if (retained.length) this.userEntityFeedbacks.set(subject, retained);
       else this.userEntityFeedbacks.delete(subject);
       for (const f of retained) this.entityFeedbackIds.add(subjectEventKey(subject, f.feedbackId));
@@ -135,7 +152,11 @@ export class MemoryRecommendStore implements RecommendStore {
 
     if (!this.tracks.has(finalTrack.canonicalTrackId) && this.tracks.size >= MAX_TRACKS) {
       const oldestKey = this.tracks.keys().next().value;
-      if (oldestKey) this.tracks.delete(oldestKey);
+      if (oldestKey) {
+        const oldest = this.tracks.get(oldestKey);
+        this.tracks.delete(oldestKey);
+        if (oldest) this.removeTrackIndexes(oldestKey, oldest);
+      }
     }
 
     this.tracks.set(finalTrack.canonicalTrackId, finalTrack);
@@ -156,6 +177,28 @@ export class MemoryRecommendStore implements RecommendStore {
           this.platformIndex.set(pid, finalTrack.canonicalTrackId);
         }
       }
+    }
+  }
+
+  private removeTrackIndexes(trackId: string, track: CanonicalTrack): void {
+    const titleKey = `${track.cleanTitle}:::${compactNormalize(track.canonicalArtist)}:::${track.edition}`;
+    if (this.titleArtistIndex.get(titleKey) === trackId) this.titleArtistIndex.delete(titleKey);
+    const providerKeys = new Set<string>();
+    if (track.provider && track.providerTrackId) {
+      providerKeys.add(`${track.provider}:${track.providerTrackId}`);
+      providerKeys.add(track.providerTrackId);
+    }
+    for (const [platform, platformId] of Object.entries(track.sourceIds || {})) {
+      if (platform && platformId) {
+        providerKeys.add(`${platform}:${platformId}`);
+        providerKeys.add(platformId);
+      }
+    }
+    for (const key of providerKeys) {
+      if (this.platformIndex.get(key) === trackId) this.platformIndex.delete(key);
+    }
+    for (const [relationId, relation] of this.entityRelations) {
+      if (relation.parentId === trackId || relation.childId === trackId) this.entityRelations.delete(relationId);
     }
   }
 
@@ -471,7 +514,12 @@ export class MemoryRecommendStore implements RecommendStore {
     this.beforeWrite();
     if (!this.entities.has(entity.id) && this.entities.size >= this.maxEntities) {
       const oldestKey = this.entities.keys().next().value;
-      if (oldestKey) this.entities.delete(oldestKey);
+      if (oldestKey) {
+        this.entities.delete(oldestKey);
+        for (const [relationId, relation] of this.entityRelations) {
+          if (relation.parentId === oldestKey || relation.childId === oldestKey) this.entityRelations.delete(relationId);
+        }
+      }
     }
     this.entities.set(entity.id, entity);
   }
@@ -620,6 +668,7 @@ export function getRecommendStore(env?: AppEnv): RecommendStore {
   }
   const store = getMemoryRecommendStore();
   if (env?.SONIC_RECOMMEND_RETENTION_DAYS !== undefined) store.setRetentionDays(env.SONIC_RECOMMEND_RETENTION_DAYS);
+  if (env?.SONIC_ANON_EVENT_RETENTION_DAYS !== undefined) store.setAnonRetentionDays(env.SONIC_ANON_EVENT_RETENTION_DAYS);
   return store;
 }
 

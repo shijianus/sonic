@@ -29,6 +29,7 @@ import { handleNexusSearchRequest } from '../functions/_lib/sonic/route-helpers'
 import { onRequest as handleSonicForward } from '../functions/api/sonic/forward';
 import { onRequest as handleSmartSearch } from '../functions/api/sonic/search/smart';
 import { neteaseProvider } from '../functions/_lib/sonic/providers/netease';
+import { songSourceCandidates } from '../player/src/utils/audioUtils';
 
 const key = 'runtime-test-service-key-32-characters-long';
 const engineEnv = { SONIC_LOCAL_ENGINE_URL: 'https://engine.example.com', SONIC_ENGINE_SECRET: key, SONIC_CB_FAILURE_THRESHOLD: '1', SONIC_CB_COOLDOWN_MS: '100' };
@@ -328,6 +329,48 @@ describe('CloudSearch response contract', () => {
     expect(body.meta.attempts.length).toBeGreaterThan(0);
   });
 
+  it('rejects an upstream HTTP 200 response whose provider code is an error', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ code: 500, result: { mvs: [{ id: 9 }] } })));
+    const url = new URL('https://sonic.test/api/cloudsearch?keywords=fixture&type=1004&limit=5');
+    const response = await handleUpstreamEndpoint('cloudsearch', url, new Request(url), env);
+    const body = await response.json();
+    expect(response.status).toBe(502);
+    expect(body.error.code).toBe('UPSTREAM_INVALID_RESPONSE');
+  });
+
+  it('rejects malformed pagination and clamps oversized CloudSearch values', async () => {
+    const fetchMock = vi.fn(async () => Response.json({ code: 200, result: { mvs: [] } }));
+    vi.stubGlobal('fetch', fetchMock);
+    const negative = new URL('https://sonic.test/api/cloudsearch?keywords=fixture&type=1004&limit=5&offset=-1');
+    const invalid = await handleUpstreamEndpoint('cloudsearch', negative, new Request(negative), { ...env, SONIC_ENABLE_NETEASE: '1' });
+    expect(invalid.status).toBe(400);
+    expect((await invalid.json()).error.code).toBe('INVALID_SEARCH_PAGINATION');
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    const oversized = new URL('https://sonic.test/api/cloudsearch?keywords=fixture&type=1004&limit=999&offset=999999');
+    const oversizedResponse = await handleUpstreamEndpoint('cloudsearch', oversized, new Request(oversized), { ...env, SONIC_ENABLE_NETEASE: '1' });
+    expect(oversizedResponse.status).toBe(200);
+    const requested = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(requested.searchParams.get('limit')).toBe('50');
+    expect(requested.searchParams.get('offset')).toBe('100000');
+  });
+
+  it('does not relay malformed CloudSearch data from the local Engine', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ code: 200, result: 'deadbeef' })));
+    const url = new URL('https://sonic.test/api/cloudsearch?keywords=fixture&type=1&limit=5');
+    const response = await handleUpstreamEndpoint('cloudsearch', url, new Request(url), {
+      ...env,
+      ...engineEnv,
+      SONIC_ENABLE_NETEASE: '0',
+      SONIC_ENABLE_QQ: '0',
+      SONIC_ENABLE_KUGOU: '0',
+      SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: '0',
+      SONIC_ENABLE_GDSTUDIO: '0',
+    });
+    expect(response.status).toBe(502);
+    expect((await response.json()).error.code).toBe('UPSTREAM_INVALID_RESPONSE');
+  });
+
   it('accepts structured playlist results from the native protocol', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const target = String(input);
@@ -359,6 +402,7 @@ describe('CloudSearch response contract', () => {
     expect(upstream.searchParams.get('s')).toBe('fixture');
     expect(upstream.searchParams.get('type')).toBe('1004');
     expect(body.result.mvs).toHaveLength(1);
+    expect(body.result.mvCount).toBe(1);
   });
 
   it('accepts song results from the synthetic Nexus provider through cloudsearch type 1', async () => {
@@ -383,6 +427,18 @@ describe('CloudSearch response contract', () => {
     expect(response.status).toBe(200);
     expect(body.result.songs.length).toBeGreaterThan(0);
     expect(body.result.songCountKnown).toBe(false);
+    expect(body.result.songs[0].platform).toBeTruthy();
+    expect(body.result.songs[0].platformId).toBeTruthy();
+    expect(body.result.songs[0].sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ platform: expect.any(String), platformId: expect.any(String) }),
+    ]));
+    expect(songSourceCandidates({
+      id: body.result.songs[0].id,
+      source: body.result.songs[0].source,
+      platform: body.result.songs[0].platform,
+      platformId: body.result.songs[0].platformId,
+      sources: body.result.songs[0].sources,
+    })).not.toHaveLength(0);
   });
 
   it('returns an observable error when all Nexus providers fail', async () => {

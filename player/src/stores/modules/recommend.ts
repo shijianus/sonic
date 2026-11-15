@@ -494,6 +494,17 @@ export const useRecommendStore = defineStore('recommend', {
         cover: seedSong.cover || '',
         duration: seedSong.duration || 0,
         url: seedSong.url,
+        streamUrl: seedSong.streamUrl,
+        source: seedSong.source,
+        platform: seedSong.platform,
+        platformId: seedSong.platformId,
+        sources: seedSong.sources,
+        qualities: seedSong.qualities,
+        resolvedSource: seedSong.resolvedSource,
+        resolvedId: seedSong.resolvedId,
+        resolvedPlatformId: seedSong.resolvedPlatformId,
+        resolvedTitle: seedSong.resolvedTitle,
+        resolvedArtist: seedSong.resolvedArtist,
       }
       const radioQueue: Song[] = [seedPlayable, ...res.tracks]
       audioStore.setPlaylist(radioQueue, 0)

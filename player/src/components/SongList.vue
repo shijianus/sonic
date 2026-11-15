@@ -10,6 +10,7 @@ import { formatCoverUrl } from '@/utils/imageUrl'
 import { useDownloadStore } from '@/stores/modules/download'
 import { useLibraryStore } from '@/stores/modules/library'
 import { prefersReducedMotion } from '@/utils/motion'
+import { songIdentityKey } from '@/utils/songIdentity'
 
 interface Props {
   songs: Song[]
@@ -53,7 +54,7 @@ const playSongWithAnimation = (song: Song, index: number, event?: MouseEvent) =>
   emit('play', song, index)
 
   if (prefersReducedMotion()) return
-  const sourceCover = document.getElementById(`song-cover-${song.id}`)
+  const sourceCover = document.getElementById(`song-cover-${songIdentityKey(song)}`)
   const targetCover = document.getElementById('footer-cover')
   const container = sourceCover?.closest<HTMLElement>('.song-item')
   if (event && container) createRipple(event, container, 'rgba(56,189,248, 0.3)')
@@ -71,7 +72,7 @@ const playSongWithAnimation = (song: Song, index: number, event?: MouseEvent) =>
 const isCurrent = (s: Song) => {
   const cur = currentSong.value
   if (!cur) return false
-  return String(s.id ?? '') === String(cur.id ?? '')
+  return songIdentityKey(s) === songIdentityKey(cur)
 }
 
 // 整行单击即播放；行内链接/按钮保留各自行为
@@ -322,7 +323,7 @@ const getQualityBadgeInfo = (song: Song) => {
       >
         <div
           v-for="(song, index) in songs"
-          :key="song.id || index"
+          :key="songIdentityKey(song) || index"
           :data-testid="`song-row-${song.id ?? index}`"
           class="song-item group relative flex cursor-pointer items-center rounded-xl p-2 border transition-colors duration-150 overflow-hidden"
           :class="[
@@ -372,7 +373,7 @@ const getQualityBadgeInfo = (song: Song) => {
           <div class="song-grid grid min-w-0 flex-1 grid-cols-12 items-center gap-4">
             <div class="song-col-song col-span-5 flex items-center space-x-4 min-w-0">
               <div
-                :id="`song-cover-${song.id}`"
+                :id="`song-cover-${songIdentityKey(song)}`"
                 class="relative h-12 w-12 shrink-0 overflow-hidden rounded-lg shadow-md transition-shadow group-hover:shadow-lg"
               >
                 <LazyImage

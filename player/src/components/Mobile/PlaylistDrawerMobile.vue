@@ -7,6 +7,7 @@ import MobileDrawer from './MobileDrawer.vue'
 import Button from '@/components/Ui/Button.vue'
 import 'swiper/css'
 import 'swiper/css/effect-creative'
+import { songIdentityKey } from '@/utils/songIdentity'
 
 const creativeEffect = {
   prev: {
@@ -82,7 +83,7 @@ const handleHistoryPlay = (song: any) => {
   // 确保歌曲在播放列表中
   addSong(song)
   // 查找歌曲在播放列表中的索引
-  const index = playlist.value.findIndex(s => s.id === song.id)
+  const index = playlist.value.findIndex(s => songIdentityKey(s) === songIdentityKey(song))
   if (index !== -1) {
     play(song, index)
   }
@@ -177,14 +178,14 @@ const handleClear = () => {
             <div v-if="playlist.length > 0" class="h-full w-full overflow-y-auto px-2 py-2">
               <div
                 v-for="(song, index) in playlist"
-                :key="song.id"
+                :key="songIdentityKey(song)"
                 class="group mb-1 flex items-center justify-between rounded-xl px-3 py-2 transition-all active:scale-[0.99] active:bg-white/5"
-                :class="{ 'bg-white/10': currentSong?.id === song.id }"
+                :class="{ 'bg-white/10': currentSong && songIdentityKey(currentSong) === songIdentityKey(song) }"
                 @click="handlePlay(song, index)"
               >
                 <div class="flex flex-1 items-center gap-3 overflow-hidden">
                   <span
-                    v-if="currentSong?.id === song.id"
+                  v-if="currentSong && songIdentityKey(currentSong) === songIdentityKey(song)"
                     class="icon-[mdi--poll] h-4 w-4 text-sky-500"
                   ></span>
                   <span v-else class="text-primary/40 w-4 text-center text-xs">{{
@@ -194,14 +195,14 @@ const handleClear = () => {
                   <div class="flex flex-col overflow-hidden">
                     <span
                       class="truncate text-sm font-medium"
-                      :class="currentSong?.id === song.id ? 'text-sky-500' : 'text-primary'"
+                      :class="currentSong && songIdentityKey(currentSong) === songIdentityKey(song) ? 'text-sky-500' : 'text-primary'"
                     >
                       {{ song.name }}
                     </span>
                     <span
                       class="truncate text-xs"
                       :class="
-                        currentSong?.id === song.id ? 'text-sky-400/70' : 'text-primary/50'
+                        currentSong && songIdentityKey(currentSong) === songIdentityKey(song) ? 'text-sky-400/70' : 'text-primary/50'
                       "
                     >
                       {{ song.artist }}
@@ -216,7 +217,7 @@ const handleClear = () => {
                   icon="icon-[mdi--close]"
                   :aria-label="t('common.delete')"
                   icon-class="text-primary/40 hover:text-primary h-4 w-4"
-                  @click.stop="removeSong(song.id)"
+                  @click.stop="removeSong(songIdentityKey(song))"
                 />
               </div>
             </div>
@@ -234,9 +235,9 @@ const handleClear = () => {
             <div v-if="playHistory.length > 0" class="h-full w-full overflow-y-auto px-2 py-2">
               <div
                 v-for="song in playHistory"
-                :key="song.id"
+                :key="songIdentityKey(song)"
                 class="group mb-1 flex items-center justify-between rounded-xl px-3 py-2 transition-all active:scale-[0.99] active:bg-white/5"
-                :class="{ 'bg-white/10': currentSong?.id === song.id }"
+                :class="{ 'bg-white/10': currentSong && songIdentityKey(currentSong) === songIdentityKey(song) }"
                 @click="handleHistoryPlay(song)"
               >
                 <div class="flex flex-1 items-center gap-3 overflow-hidden">
@@ -246,14 +247,14 @@ const handleClear = () => {
                   <div class="flex flex-col overflow-hidden">
                     <span
                       class="truncate text-sm font-medium"
-                      :class="currentSong?.id === song.id ? 'text-sky-500' : 'text-primary'"
+                      :class="currentSong && songIdentityKey(currentSong) === songIdentityKey(song) ? 'text-sky-500' : 'text-primary'"
                     >
                       {{ song.name }}
                     </span>
                     <span
                       class="truncate text-xs"
                       :class="
-                        currentSong?.id === song.id ? 'text-sky-400/70' : 'text-primary/50'
+                        currentSong && songIdentityKey(currentSong) === songIdentityKey(song) ? 'text-sky-400/70' : 'text-primary/50'
                       "
                     >
                       {{ song.artist }}

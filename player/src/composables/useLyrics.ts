@@ -1,6 +1,7 @@
 import { reactive, ref, computed, toRefs } from 'vue'
 import { useAudioStore } from '@/stores/modules/audio'
 import { resolvedSongSource, songPlaybackSource, songSourcePair } from '@/utils/audioUtils'
+import { songIdentityKey } from '@/utils/songIdentity'
 import i18n from '@/languages'
 import {
   type LyricWord,
@@ -301,6 +302,7 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
     const album = String(targetSong?.album?.name || targetSong?.album || targetSong?.al?.name || '').trim()
     const duration = targetSong?.duration || targetSong?.dt || 0
     const identitySong = targetSong || { id: rawId }
+    const requestedSongKey = songIdentityKey(identitySong)
     const resolvedPair = resolvedSongSource(identitySong)
     const effectivePair = songPlaybackSource(identitySong)
     const effectiveSource = effectivePair?.platform || ''
@@ -314,8 +316,7 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
       return JSON.stringify([pair?.platform, pair?.platformId])
     }
     const requestedSourceKey = sourceKey(identitySong)
-
-    const cacheKey = JSON.stringify([String(rawId), effectiveSource, effectiveId, effectiveTitle, effectiveArtist, album, duration])
+    const cacheKey = JSON.stringify([requestedSongKey, requestedSourceKey, effectiveTitle, effectiveArtist, album, duration])
     // Deduplicate only the same source-bound request, never another source of the same song.
     if (!force && inFlightKey === cacheKey && inFlightPromise) return await inFlightPromise
     if (!force && lastCacheKey.value === cacheKey) {
@@ -545,11 +546,16 @@ export const useLyrics = () => {
 if (typeof window !== 'undefined') {
   window.addEventListener('sonic:stream-resolved', (e: any) => {
     const detail = e?.detail
-    if (!detail?.songId) return
+    if (!detail?.songId && !detail?.songKey) return
     try {
       const audioStore = useAudioStore()
       const cur = audioStore.getCurrentSong
-      if (cur && String(cur.id) === String(detail.songId) && (!detail.url || cur.url === detail.url)) {
+      const currentKey = songIdentityKey(cur)
+      const eventKey = String(detail.songKey || '')
+      const eventPair = songSourcePair(detail.resolvedSource, detail.resolvedPlatformId ?? detail.resolvedId)
+      const currentPair = cur ? songPlaybackSource(cur) : undefined
+      const pairMatches = !eventPair || !currentPair || (eventPair.platform === currentPair.platform && eventPair.platformId === currentPair.platformId)
+      if (cur && pairMatches && (!eventKey || currentKey === eventKey) && (!detail.songId || String(cur.id) === String(detail.songId)) && (!detail.url || cur.url === detail.url)) {
         fetchLyrics(cur)
       }
     } catch {}

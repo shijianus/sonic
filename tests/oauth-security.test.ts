@@ -110,10 +110,10 @@ describe('OAuth login: state + PKCE transaction', () => {
       expect(cookie).toContain('HttpOnly');
       expect(cookie).toContain('Secure');
       expect(cookie).toContain('SameSite=Lax');
-      expect(cookie).toContain('Path=/api/auth');
+      expect(cookie).toContain('Path=/');
     }
-    expect(cookies.some((c) => c.startsWith('sonic_oauth_state='))).toBe(true);
-    expect(cookies.some((c) => c.startsWith('sonic_oauth_verifier='))).toBe(true);
+    expect(cookies.some((c) => c.startsWith('__Host-sonic_oauth_state='))).toBe(true);
+    expect(cookies.some((c) => c.startsWith('__Host-sonic_oauth_verifier='))).toBe(true);
   });
 
   it('rejects a non-HTTPS OAuth base URL instead of sending the client secret in cleartext', async () => {
@@ -130,8 +130,8 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
     const { calls } = mockOAuthProvider();
     const res = await handleAuthCallback({
       request: callbackRequest(`code=authorization_code_123&state=${STATE}`, [
-        `sonic_oauth_state=${STATE}`,
-        `sonic_oauth_verifier=${VERIFIER}`,
+        `__Host-sonic_oauth_state=${STATE}`,
+        `__Host-sonic_oauth_verifier=${VERIFIER}`,
       ].join('; ')),
       env: env() as any,
     });
@@ -161,8 +161,8 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
     expect(sessionCookie).toContain('HttpOnly');
     expect(sessionCookie).toContain('Secure');
     expect(sessionCookie).toContain('SameSite=Lax');
-    expect(cookies.some((c) => c.startsWith('sonic_oauth_state=;'))).toBe(true);
-    expect(cookies.some((c) => c.startsWith('sonic_oauth_verifier=;'))).toBe(true);
+    expect(cookies.some((c) => c.startsWith('__Host-sonic_oauth_state=;'))).toBe(true);
+    expect(cookies.some((c) => c.startsWith('__Host-sonic_oauth_verifier=;'))).toBe(true);
 
     const token = sessionCookie!.split(';')[0].split('=').slice(1).join('=');
     const auth = await verifyAuth(
@@ -179,7 +179,7 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
   it('fails closed when the PKCE verifier cookie is missing', async () => {
     const { fetchMock } = mockOAuthProvider();
     const res = await handleAuthCallback({
-      request: callbackRequest(`code=authorization_code_123&state=${STATE}`, `sonic_oauth_state=${STATE}`),
+      request: callbackRequest(`code=authorization_code_123&state=${STATE}`, `__Host-sonic_oauth_state=${STATE}`),
       env: env() as any,
     });
     expect(res.status).toBe(400);
@@ -191,7 +191,7 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
   it('rejects a mismatched state without contacting the provider', async () => {
     const { fetchMock } = mockOAuthProvider();
     const res = await handleAuthCallback({
-      request: callbackRequest(`code=abc&state=${STATE}`, `sonic_oauth_state=${'C'.repeat(43)}; sonic_oauth_verifier=${VERIFIER}`),
+      request: callbackRequest(`code=abc&state=${STATE}`, `__Host-sonic_oauth_state=${'C'.repeat(43)}; __Host-sonic_oauth_verifier=${VERIFIER}`),
       env: env() as any,
     });
     expect(res.status).toBe(400);
@@ -203,8 +203,8 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
     const { fetchMock } = mockOAuthProvider();
     const req = () =>
       callbackRequest(`code=authorization_code_123&state=${STATE}`, [
-        `sonic_oauth_state=${STATE}`,
-        `sonic_oauth_verifier=${VERIFIER}`,
+        `__Host-sonic_oauth_state=${STATE}`,
+        `__Host-sonic_oauth_verifier=${VERIFIER}`,
       ].join('; '));
 
     const first = await handleAuthCallback({ request: req(), env: env() as any });
@@ -226,7 +226,7 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
     expect(res.status).toBe(400);
     const cookies = setCookies(res);
     expect(cookies.some((c) => c.startsWith('__Host-sonic_session=') || c.startsWith('sonic_session='))).toBe(false);
-    expect(cookies.some((c) => c.startsWith('sonic_oauth_state=;'))).toBe(true);
+    expect(cookies.some((c) => c.startsWith('__Host-sonic_oauth_state=;'))).toBe(true);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -247,8 +247,8 @@ describe('OAuth callback: state, PKCE, code exchange and session delivery', () =
 
     const res = await handleAuthCallback({
       request: callbackRequest(`code=authorization_code_123&state=${STATE}`, [
-        `sonic_oauth_state=${STATE}`,
-        `sonic_oauth_verifier=${VERIFIER}`,
+        `__Host-sonic_oauth_state=${STATE}`,
+        `__Host-sonic_oauth_verifier=${VERIFIER}`,
       ].join('; ')),
       env: env() as any,
     });
@@ -263,8 +263,8 @@ describe('Session-backed API key management', () => {
     mockOAuthProvider();
     const res = await handleAuthCallback({
       request: callbackRequest(`code=authorization_code_123&state=${STATE}`, [
-        `sonic_oauth_state=${STATE}`,
-        `sonic_oauth_verifier=${VERIFIER}`,
+        `__Host-sonic_oauth_state=${STATE}`,
+        `__Host-sonic_oauth_verifier=${VERIFIER}`,
       ].join('; ')),
       env: env() as any,
     });

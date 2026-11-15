@@ -19,6 +19,8 @@ declare global {
   const acceptHMRUpdate: typeof import('pinia').acceptHMRUpdate
   const adaptColorForTheme: typeof import('../utils/colorThemeAdapter').adaptColorForTheme
   const adaptColorsForTheme: typeof import('../utils/colorThemeAdapter').adaptColorsForTheme
+  const buildDownloadKey: typeof import('../utils/indexedDB').buildDownloadKey
+  const buildDownloadStreamUrl: typeof import('../utils/indexedDB').buildDownloadStreamUrl
   const buildProbeUrl: typeof import('../utils/qualityProbe').buildProbeUrl
   const buildProcessedWords: typeof import('../utils/lyricsWordSync').buildProcessedWords
   const calibrateWordsInterludeIsolation: typeof import('../utils/lyricsWordSync').calibrateWordsInterludeIsolation
@@ -37,6 +39,7 @@ declare global {
   const defineStore: typeof import('pinia').defineStore
   const deleteMusicDatabase: typeof import('../utils/indexedDB').deleteMusicDatabase
   const dismissGatewayBanner: typeof import('../utils/gatewayHealth').dismissGatewayBanner
+  const downloadSourcePair: typeof import('../utils/indexedDB').downloadSourcePair
   const downloadedMusicDB: typeof import('../utils/indexedDB').downloadedMusicDB
   const effectScope: typeof import('vue').effectScope
   const escapeHtmlAttribute: typeof import('../utils/escapeHtml').escapeHtmlAttribute
@@ -148,6 +151,7 @@ declare global {
   const shallowReactive: typeof import('vue').shallowReactive
   const shallowReadonly: typeof import('vue').shallowReadonly
   const shallowRef: typeof import('vue').shallowRef
+  const songIdentityKey: typeof import('../utils/songIdentity').songIdentityKey
   const songPlaybackSource: typeof import('../utils/audioUtils').songPlaybackSource
   const songSourceCandidates: typeof import('../utils/audioUtils').songSourceCandidates
   const songSourcePair: typeof import('../utils/audioUtils').songSourcePair
@@ -237,7 +241,7 @@ declare global {
   export type { BannerData, PlaylistData, SongData, ArtistData, MVData, AlbumData, PlaylistDetailData } from '../utils/transformers'
   import('../utils/transformers')
   // @ts-ignore
-  export type { LocalMusicDB, DownloadedMusicDB, LocalMusic, DownloadedSong } from '../utils/indexedDB'
+  export type { LocalMusicDB, DownloadedMusicDB, LocalMusic, DownloadedSong, DownloadSourcePair } from '../utils/indexedDB'
   import('../utils/indexedDB')
   // @ts-ignore
   export type { ListeningCoverage } from '../utils/listeningCoverage'

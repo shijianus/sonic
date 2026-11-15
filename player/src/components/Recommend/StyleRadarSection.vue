@@ -7,6 +7,7 @@ import { fetchRecommendDiscover, type RecommendSongItem } from '@/api/recommend'
 import SongCard from '@/components/Ui/SongCard.vue'
 import MobileSongList from '@/components/Mobile/MobileSongList.vue'
 import { getRadarBadgeClass } from '@/utils/exploreTags'
+import { songIdentityKey } from '@/utils/songIdentity'
 
 interface Props {
   compact?: boolean
@@ -179,7 +180,7 @@ defineExpose({
       <div class="grid md:grid-cols-2">
         <SongCard
           v-for="(song, idx) in visibleTracks"
-          :key="`${song.canonicalTrackId || song.id}-${idx}`"
+          :key="songIdentityKey(song) || idx"
           :song="song"
           :index="idx"
           :to="`/song/${song.id}`"

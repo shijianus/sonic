@@ -179,7 +179,7 @@ async function seedMusicDatabase(page: Page) {
   await page.goto('/api/sonic/engine/health')
   return page.evaluateHandle(async ({ dbName, track }) => {
     const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(dbName, 2)
+      const request = indexedDB.open(dbName, 3)
       request.onupgradeneeded = () => {
         request.result.createObjectStore('local_music', { keyPath: 'id' })
         request.result.createObjectStore('downloaded_music', { keyPath: 'id' })
@@ -236,7 +236,7 @@ test('local data clearing closes another app tab’s music database and lets it 
   await other.getByRole('link', { name: 'Downloads', exact: true }).click()
   await expect.poll(() => hasMusicDatabase(other)).toBe(true)
   const localCount = await other.evaluate(name => new Promise<number>((resolve, reject) => {
-    const open = indexedDB.open(name, 2)
+    const open = indexedDB.open(name, 3)
     open.onerror = () => reject(open.error)
     open.onsuccess = () => {
       const db = open.result

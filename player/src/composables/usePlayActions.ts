@@ -33,8 +33,12 @@ export function mapToStoreSong(song: SongData): StoreSong {
     streamType: song.streamType,
     trialDuration: song.trialDuration,
     sources: song.sources,
+    source: song.source,
+    platform: song.platform,
+    platformId: song.platformId,
     resolvedSource: (song as any).resolvedSource,
     resolvedId: (song as any).resolvedId,
+    resolvedPlatformId: (song as any).resolvedPlatformId,
     resolvedTitle: (song as any).resolvedTitle,
     resolvedArtist: (song as any).resolvedArtist,
   }

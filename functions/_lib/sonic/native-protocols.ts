@@ -969,8 +969,21 @@ async function resolvePlayableStreamWithinBudget(
   }
   if (cleanSource === 'tencent') cleanSource = 'qq';
   if (cleanSource === 'syn' || cleanSource === 'test') cleanSource = 'synthetic';
-  if (cleanSource === 'ncm' || cleanSource === 'sonic') {
-    cleanSource = !cfg.enableNetease && cfg.enableSynthetic ? 'synthetic' : 'netease';
+  if (cleanSource === 'ncm') cleanSource = 'netease';
+  if (cleanSource === 'sonic') {
+    const fallback = cfg.enableNetease
+      ? 'netease'
+      : cfg.enableSynthetic
+        ? 'synthetic'
+        : cfg.enableQq
+          ? 'qq'
+          : cfg.enableKugou
+            ? 'kugou'
+            : cfg.enableKuwo
+              ? 'kuwo'
+              : '';
+    if (!fallback) return null;
+    cleanSource = fallback;
   }
 
   const quality = String(opts.quality || '320').toLowerCase();

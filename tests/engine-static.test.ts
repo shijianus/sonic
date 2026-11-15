@@ -93,8 +93,8 @@ describe('Node static server hardening', () => {
     expect(res.status).toBe(302);
     const cookies = (res.headers as any).getSetCookie();
     expect(cookies).toHaveLength(2);
-    expect(cookies.some((c: string) => c.startsWith('sonic_oauth_state='))).toBe(true);
-    expect(cookies.some((c: string) => c.startsWith('sonic_oauth_verifier='))).toBe(true);
+    expect(cookies.some((c: string) => c.startsWith('__Host-sonic_oauth_state='))).toBe(true);
+    expect(cookies.some((c: string) => c.startsWith('__Host-sonic_oauth_verifier='))).toBe(true);
   });
 
   it('reports not-ready when a persistent DB path is configured but the store is in memory', async () => {

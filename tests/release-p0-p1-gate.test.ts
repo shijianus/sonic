@@ -78,7 +78,7 @@ describe('P0-A: OAuth Feature Gate, CSRF Consistency & Token Content-Type Intero
 
     const cbResp = await handleAuthCallback({
       request: cfReq('https://sonic.epocanvas.tech/api/auth/callback?code=abc&state=xyz', {
-        headers: { Cookie: 'sonic_oauth_state=xyz; sonic_oauth_verifier=ver123' },
+        headers: { Cookie: '__Host-sonic_oauth_state=xyz; __Host-sonic_oauth_verifier=ver123' },
       }),
       env,
     });
@@ -179,7 +179,7 @@ describe('P0-A: OAuth Feature Gate, CSRF Consistency & Token Content-Type Intero
         `https://sonic.epocanvas.tech/api/auth/callback?code=oauth_code_xyz&state=${stateVal}`,
         {
           headers: {
-            Cookie: `sonic_oauth_state=${stateVal}; sonic_oauth_verifier=${verifier}`,
+            Cookie: `__Host-sonic_oauth_state=${stateVal}; __Host-sonic_oauth_verifier=${verifier}`,
           },
         },
       ),

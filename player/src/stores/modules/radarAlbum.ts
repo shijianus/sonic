@@ -33,6 +33,15 @@ export interface RadarTrack {
   cover: string
   duration: number
   url?: string
+  streamUrl?: string
+  source?: string
+  platform?: string
+  platformId?: string | number
+  sources?: Array<{ platform: string; platformId: string | number; duration?: number }>
+  qualities?: Array<{ level: string; label: string; bitrate: string; streamUrl?: string; format?: string }>
+  resolvedSource?: string
+  resolvedId?: string | number
+  resolvedPlatformId?: string | number
   description?: string
   playCount?: string | number
   publishTime?: string
@@ -287,6 +296,15 @@ export const useRadarAlbumStore = defineStore('radarAlbum', {
                 cover: s.cover || '',
                 duration: s.duration || 0,
                 url: (s as any).url || '',
+                streamUrl: (s as any).streamUrl || '',
+                source: (s as any).source,
+                platform: (s as any).platform,
+                platformId: (s as any).platformId,
+                sources: (s as any).sources,
+                qualities: (s as any).qualities,
+                resolvedSource: (s as any).resolvedSource,
+                resolvedId: (s as any).resolvedId,
+                resolvedPlatformId: (s as any).resolvedPlatformId,
                 description: (s as any).description || (s as any).desc || `${s.artist} 精彩单曲`,
                 playCount: (s as any).playCount || 10000,
                 publishTime: (s as any).publishTime || '',
@@ -310,6 +328,15 @@ export const useRadarAlbumStore = defineStore('radarAlbum', {
               cover: s.cover || '',
               duration: s.duration || 0,
               url: (s as any).url || '',
+              streamUrl: (s as any).streamUrl || '',
+              source: (s as any).source,
+              platform: (s as any).platform,
+              platformId: (s as any).platformId,
+              sources: (s as any).sources,
+              qualities: (s as any).qualities,
+              resolvedSource: (s as any).resolvedSource,
+              resolvedId: (s as any).resolvedId,
+              resolvedPlatformId: (s as any).resolvedPlatformId,
               description: `${s.artist} 精彩单曲`,
               playCount: 15000,
               publishTime: '',
@@ -334,6 +361,16 @@ export const useRadarAlbumStore = defineStore('radarAlbum', {
                 artist: m.artist || m.artistName || '',
                 cover: m.cover || m.coverImg || m.picUrl || '',
                 duration: m.duration || 0,
+                url: m.url || m.streamUrl || '',
+                streamUrl: m.streamUrl || '',
+                source: m.source,
+                platform: m.platform,
+                platformId: m.platformId,
+                sources: m.sources,
+                qualities: m.qualities,
+                resolvedSource: m.resolvedSource,
+                resolvedId: m.resolvedId,
+                resolvedPlatformId: m.resolvedPlatformId,
                 description: m.description || m.desc || m.briefDesc || `${m.artist || ''} 官方音乐视频`,
                 playCount: m.playCount || 20000,
                 publishTime: m.publishTime || '',
@@ -503,6 +540,15 @@ export const useRadarAlbumStore = defineStore('radarAlbum', {
         cover: t.cover,
         duration: t.duration,
         url: t.url,
+        streamUrl: t.streamUrl,
+        source: t.source,
+        platform: t.platform,
+        platformId: t.platformId,
+        sources: t.sources,
+        qualities: t.qualities,
+        resolvedSource: t.resolvedSource,
+        resolvedId: t.resolvedId,
+        resolvedPlatformId: t.resolvedPlatformId,
       }))
 
       audioStore.setPlaylist(playableSongs, startIndex)
