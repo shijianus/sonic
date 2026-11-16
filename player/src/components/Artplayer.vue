@@ -38,13 +38,15 @@ const emit = defineEmits<{
 const playerRef = useTemplateRef('playerRef')
 let player: Artplayer | null = null
 const { pause: pauseAudio } = useAudio()
+const isHlsUrl = (url?: string) => /\.m3u8(\?|$)/i.test(String(url || '').trim())
 
 const initPlayer = () => {
   if (!playerRef.value) return
+  const srcUrl = props.src ?? ''
 
   const defaultOptions: Option = {
     container: playerRef.value,
-    url: props.src ?? '',
+    url: srcUrl,
     poster: props.poster,
     autoplay: props.autoplay,
     muted: props.muted,
@@ -61,28 +63,24 @@ const initPlayer = () => {
     backdrop: true,
     playbackRate: true,
     aspectRatio: true,
-    plugins: [
-      artplayerPluginHlsControl({
-        quality: {
-          // Show qualitys in control
-          control: true,
-          // Show qualitys in setting
-          setting: true,
-          // I18n
-          title: 'Quality',
-          auto: 'Auto',
-        },
-        audio: {
-          // Show audios in control
-          control: true,
-          // Show audios in setting
-          setting: true,
-          // I18n
-          title: 'Audio',
-          auto: 'Auto',
-        },
-      }),
-    ],
+    plugins: isHlsUrl(srcUrl)
+      ? [
+          artplayerPluginHlsControl({
+            quality: {
+              control: true,
+              setting: true,
+              title: 'Quality',
+              auto: 'Auto',
+            },
+            audio: {
+              control: true,
+              setting: true,
+              title: 'Audio',
+              auto: 'Auto',
+            },
+          }),
+        ]
+      : [],
     customType: {
       m3u8: function playM3u8(video: HTMLVideoElement, url: string, art: any) {
         if (Hls.isSupported()) {
@@ -176,8 +174,14 @@ const switchQuality = (url: string) => {
 
 watch(
   () => props.src,
-  newSrc => {
-    if (newSrc && player) switchUrl(newSrc)
+  (newSrc, oldSrc) => {
+    if (!newSrc || !player) return
+    if (isHlsUrl(newSrc) !== isHlsUrl(oldSrc)) {
+      destroyPlayer()
+      initPlayer()
+      return
+    }
+    switchUrl(newSrc)
   }
 )
 

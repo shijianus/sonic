@@ -302,6 +302,8 @@ const effectiveQualityLevel = computed<QualityLevel>(() => {
 })
 
 let probingSongKey = ''
+let pendingQualitySelection: symbol | undefined
+const pendingQualityLevel = ref<string | null>(null)
 
 // 触发音质探测（仅在打开浮层或当前档位非标准需判断降级时触发）
 const triggerProbeIfNeeded = async () => {
@@ -545,9 +547,6 @@ const handleQualityMenuKeydown = (e: KeyboardEvent) => {
     closeQualityMenuAndRestoreFocus()
   }
 }
-
-let pendingQualitySelection: symbol | undefined
-const pendingQualityLevel = ref<string | null>(null)
 
 const selectQuality = async (level: string) => {
   const target = availableQualities.value.find((q) => q.level === level)

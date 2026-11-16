@@ -28,8 +28,8 @@ const globalStore = useGlobalStore()
 const recommendStore = useRecommendStore()
 const { searchHistory } = storeToRefs(globalStore)
 
-// 当前搜索关键词（来自路由查询参数）
-const q = computed(() => String(route.query.q || '').trim())
+// 当前搜索关键词（来自路由查询参数，兼容 keyword 参数）
+const q = computed(() => String(route.query.q || route.query.keyword || '').trim())
 
 // 页面本地状态
 const state = reactive({
@@ -129,6 +129,29 @@ watch(page, () => {
   state.isLoading = activeType.value !== 1 && !!q.value
 })
 
+// 获取热门搜索
+const fetchHotSearch = async () => {
+  state.loadingHot = true
+  try {
+    const res: any = await searchHotDetail()
+    state.hotSearches = res?.data || []
+  } catch {
+    state.hotSearches = []
+  } finally {
+    state.loadingHot = false
+  }
+}
+
+// 获取默认搜索词作为 placeholder
+const fetchPlaceholder = async () => {
+  try {
+    const res: any = await searchDefault()
+    placeholder.value = res?.data?.showKeyword || res?.data?.realkeyword || ''
+  } catch {
+    // 忽略
+  }
+}
+
 // 监听路由关键词同步输入框与选中标签
 watch(
   q,
@@ -208,29 +231,6 @@ const handleClearInput = () => {
 // 清除搜索历史
 const clearHistory = () => {
   globalStore.clearSearchHistory()
-}
-
-// 获取热门搜索
-const fetchHotSearch = async () => {
-  state.loadingHot = true
-  try {
-    const res: any = await searchHotDetail()
-    state.hotSearches = res?.data || []
-  } catch {
-    state.hotSearches = []
-  } finally {
-    state.loadingHot = false
-  }
-}
-
-// 获取默认搜索词作为 placeholder
-const fetchPlaceholder = async () => {
-  try {
-    const res: any = await searchDefault()
-    placeholder.value = res?.data?.showKeyword || res?.data?.realkeyword || ''
-  } catch {
-    // 忽略
-  }
 }
 
 onMounted(() => {
