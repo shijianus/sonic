@@ -8,6 +8,7 @@ import * as Vue from 'vue'
 import * as searchSuggestions from '@/composables/useSearchSuggestions'
 import * as transformers from '@/utils/transformers'
 import * as searchErrors from '@/utils/searchErrors'
+import * as paginationUtils from '@/utils/pagination'
 
 // Compile only the components under test: the shared Vitest config intentionally has no
 // Vue/auto-import plugins. No generated files or changes to the shared config are needed.
@@ -59,6 +60,7 @@ const dependencies: Record<string, unknown> = {
   '@/stores/modules/recommend': { useRecommendStore: () => recommendStore },
   '@/utils/transformers': transformers,
   '@/utils/searchErrors': searchErrors,
+  '@/utils/pagination': paginationUtils,
   '@/utils/time': { formatCount: (n: number) => String(n) },
   '@/utils/imageUrl': { formatCoverUrl: () => '' },
   '@/utils/exploreTags': { exploreTags: [], groupOrder: {}, groupColorConfigs: {} },

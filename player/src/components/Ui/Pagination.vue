@@ -68,6 +68,7 @@ const goNext = () => {
       rounded="lg"
       class="h-8 w-8 sm:h-9 sm:w-auto sm:gap-1.5 sm:px-3"
       :disabled="!canPrev"
+      :aria-label="t('components.pagination.prev')"
       @click="goPrev"
     >
       <span class="icon-[mdi--chevron-left] h-5 w-5" />
@@ -81,11 +82,13 @@ const goNext = () => {
           class="hidden px-1 text-primary/40 sm:inline"
         >...</span>
         <button
+          type="button"
           class="flex h-8 w-8 items-center justify-center rounded-lg text-sm font-medium transition-all"
           :class="p === page
             ? 'bg-linear-to-br from-sky-500 to-blue-600 text-white shadow-lg shadow-sky-500/25'
             : 'glass-card text-primary/70 hover:bg-hover-glass hover:text-primary'"
-          @click="page = p"
+          :aria-current="p === page ? 'page' : undefined"
+          @click="p !== page && (page = p)"
         >
           {{ p }}
         </button>
@@ -102,6 +105,7 @@ const goNext = () => {
       rounded="lg"
       class="h-8 w-8 sm:h-9 sm:w-auto sm:gap-1.5 sm:px-3"
       :disabled="!canNext"
+      :aria-label="t('components.pagination.next')"
       @click="goNext"
     >
       <span class="hidden text-sm font-medium sm:inline">{{ t('components.pagination.next') }}</span>

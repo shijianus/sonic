@@ -25,6 +25,7 @@ import {
   type MVData,
 } from '@/utils/transformers'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { clampPage, normalizePaginationTotal } from '@/utils/pagination'
 import { checkSearchPayload, classifySearchError, hasSearchTimeout, type SearchErrorKind } from '@/utils/searchErrors'
 
 const creativeEffect = {
@@ -243,6 +244,21 @@ const runSearch = async (keyword: string) => {
   await searchAll()
 }
 
+const applyPageTotal = (
+  totalKey: 'songTotal' | 'playlistTotal' | 'mvTotal',
+  pageKey: 'songPage' | 'playlistPage' | 'mvPage',
+  pageSize: number,
+  rawTotal: unknown,
+  fallback = 0
+) => {
+  const total = normalizePaginationTotal(rawTotal, fallback)
+  state[totalKey] = total
+  // v-if hides <Pagination> when total <= pageSize; clamp here so shrinking totals
+  // never leave state on an empty page >= 2.
+  const bounded = clampPage(state[pageKey], total, pageSize)
+  if (state[pageKey] !== bounded) state[pageKey] = bounded
+}
+
 const fetchSongs = async (signal: AbortSignal, generation: number, nocache: boolean) => {
   const term = state.q.trim()
   if (!term) {
@@ -294,10 +310,18 @@ const fetchSongs = async (signal: AbortSignal, generation: number, nocache: bool
         resolvedArtist: t.resolvedArtist,
         liked: false,
       }))
-      state.songTotal = sonicRes?.data?.total || tracks.length
+      applyPageTotal('songTotal', 'songPage', state.songPageSize, sonicRes?.data?.total || tracks.length, tracks.length)
       return
     }
-    if (hasSearchTimeout(sonicRes)) lastError = 'timeout'
+    if (hasSearchTimeout(sonicRes)) {
+      lastError = 'timeout'
+    } else {
+      const nexusTotal = normalizePaginationTotal(sonicRes?.data?.total)
+      if (nexusTotal > 0 && clampPage(state.songPage, nexusTotal, state.songPageSize) < state.songPage) {
+        applyPageTotal('songTotal', 'songPage', state.songPageSize, nexusTotal)
+        return
+      }
+    }
   } catch (err) {
     if (signal.aborted || generation !== searchGeneration) return
     lastError = classifySearchError(err)
@@ -316,9 +340,17 @@ const fetchSongs = async (signal: AbortSignal, generation: number, nocache: bool
     checkSearchPayload(res, 'songs')
     const { songs, total } = transformSearchSongs(res as Record<string, unknown>)
     state.songs = songs
-    state.songTotal = total
-    if (songs.length > 0) return
-    if (hasSearchTimeout(res)) lastError = 'timeout'
+    if (songs.length > 0) {
+      applyPageTotal('songTotal', 'songPage', state.songPageSize, total)
+      return
+    }
+    if (hasSearchTimeout(res)) {
+      lastError = 'timeout'
+    } else if (!lastError) {
+      applyPageTotal('songTotal', 'songPage', state.songPageSize, total)
+    } else {
+      state.songTotal = 0
+    }
   } catch (err) {
     if (signal.aborted || generation !== searchGeneration) return
     state.songs = []
@@ -341,7 +373,7 @@ const fetchPlaylists = async (signal: AbortSignal, generation: number) => {
     checkSearchPayload(res, 'playlists')
     const { playlists, total } = transformSearchPlaylists(res as Record<string, unknown>)
     state.playlists = playlists
-    state.playlistTotal = total
+    applyPageTotal('playlistTotal', 'playlistPage', state.playlistPageSize, total)
   } catch (err) {
     if (signal.aborted || generation !== searchGeneration) return
     state.playlists = []
@@ -363,7 +395,7 @@ const fetchMVs = async (signal: AbortSignal, generation: number) => {
     checkSearchPayload(res, 'mvs')
     const { mvs, total } = transformSearchMVs(res as Record<string, unknown>)
     state.mvs = mvs
-    state.mvTotal = total
+    applyPageTotal('mvTotal', 'mvPage', state.mvPageSize, total)
   } catch (err) {
     if (signal.aborted || generation !== searchGeneration) return
     state.mvs = []

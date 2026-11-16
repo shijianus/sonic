@@ -11,6 +11,7 @@ import { useAudio } from '@/composables/useAudio'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { transformSearchSongs, normalizeDurationMs, type SongData } from '@/utils/transformers'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { getTotalPages, normalizePaginationTotal } from '@/utils/pagination'
 import { checkSearchPayload, classifySearchError, hasSearchTimeout, type SearchErrorKind } from '@/utils/searchErrors'
 
 interface Props {
@@ -92,6 +93,11 @@ const applySuggestion = (text: string) => {
   router.push({ path: '/search', query: { q: text.trim() } })
 }
 
+const outOfRangeTotal = (rawTotal: unknown, currentPage: number, size: number): number => {
+  const normalized = normalizePaginationTotal(rawTotal)
+  return normalized > 0 && currentPage > getTotalPages(normalized, size) ? normalized : 0
+}
+
 const fetchSongs = async (nocache = false) => {
   const generation = ++requestGeneration
   requestController?.abort()
@@ -155,6 +161,13 @@ const fetchSongs = async (nocache = false) => {
         emit('loaded', 0)
         emit('total', 0)
         return
+      } else {
+        const shrunkTotal = outOfRangeTotal(smartRes.total, page, count)
+        if (shrunkTotal > 0) {
+          emit('loaded', 0)
+          emit('total', shrunkTotal)
+          return
+        }
       }
     } catch (smartErr) {
       if (controller.signal.aborted || generation !== requestGeneration) return
@@ -211,7 +224,16 @@ const fetchSongs = async (nocache = false) => {
         emit('total', sonicRes?.data?.total || state.results.length)
         return
       }
-      if (hasSearchTimeout(sonicRes)) noteError('timeout')
+      if (hasSearchTimeout(sonicRes)) {
+        noteError('timeout')
+      } else {
+        const shrunkTotal = outOfRangeTotal(sonicRes?.data?.total, page, count)
+        if (shrunkTotal > 0) {
+          emit('loaded', 0)
+          emit('total', shrunkTotal)
+          return
+        }
+      }
     } catch (err) {
       if (controller.signal.aborted || generation !== requestGeneration) return
       noteError(classifySearchError(err))
@@ -238,7 +260,16 @@ const fetchSongs = async (nocache = false) => {
         emit('total', total)
         return
       }
-      if (hasSearchTimeout(res)) noteError('timeout')
+      if (hasSearchTimeout(res)) {
+        noteError('timeout')
+      } else {
+        const shrunkTotal = outOfRangeTotal(total, page, count)
+        if (shrunkTotal > 0) {
+          emit('loaded', 0)
+          emit('total', shrunkTotal)
+          return
+        }
+      }
     } catch (err) {
       if (controller.signal.aborted || generation !== requestGeneration) return
       noteError(classifySearchError(err))

@@ -13,6 +13,7 @@ import { useSearchSuggestions } from '@/composables/useSearchSuggestions'
 import { useGlobalStore } from '@/stores/modules/global'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { storeToRefs } from 'pinia'
+import { clampPage, getTotalPages, normalizePaginationTotal } from '@/utils/pagination'
 import {
   exploreTags,
   type ExploreTagItem,
@@ -99,15 +100,21 @@ const activeComp = computed(() => tabs.find(t => t.key === activeType.value)?.co
 
 // 每页数量按类型自适应
 const pageSize = computed(() => (activeType.value === 1 ? 40 : activeType.value === 1000 ? 30 : 24))
+const totalPages = computed(() => getTotalPages(state.total, pageSize.value))
 
 // 子组件回调：记录当前页加载数量
 const onLoaded = (count: number) => {
   state.lastLoadedCount = count
   state.isLoading = false
 }
-// 子组件回调：记录总条数
+// 子组件回调：记录总条数（当上游总数收缩时自动回退到有效页码）
 const onTotal = (n: number) => {
-  state.total = n
+  const normalized = normalizePaginationTotal(n)
+  state.total = normalized
+  if (normalized > 0) {
+    const bounded = clampPage(state.page, normalized, pageSize.value)
+    if (state.page !== bounded) state.page = bounded
+  }
 }
 
 // 切换类型或关键词时重置分页与总数
@@ -474,6 +481,7 @@ const maxScore = computed(() => {
               <div v-if="total > 0" class="flex items-center gap-2">
                 <div class="flex items-center gap-1 rounded-xl bg-button-glass border border-glass-subtle p-1">
                   <button
+                    type="button"
                     class="flex h-9 w-9 items-center justify-center rounded-lg transition-all"
                     :class="
                       page > 1 ? 'text-primary hover:bg-hover-glass' : 'text-primary/30 cursor-not-allowed'
@@ -485,18 +493,19 @@ const maxScore = computed(() => {
                     <span class="icon-[mdi--chevron-left] h-5 w-5" />
                   </button>
                   <span class="text-primary/80 min-w-[50px] text-center text-xs font-medium">
-                    {{ page }} / {{ Math.ceil(total / pageSize) || 1 }}
+                    {{ page }} / {{ totalPages }}
                   </span>
                   <button
+                    type="button"
                     class="flex h-9 w-9 items-center justify-center rounded-lg transition-all"
                     :class="
-                      page < Math.ceil(total / pageSize)
+                      page < totalPages
                         ? 'text-primary hover:bg-hover-glass'
                         : 'text-primary/30 cursor-not-allowed'
                     "
-                    :disabled="page >= Math.ceil(total / pageSize)"
+                    :disabled="page >= totalPages"
                     :aria-label="$t('components.pagination.next')"
-                    @click="page < Math.ceil(total / pageSize) && page++"
+                    @click="page < totalPages && page++"
                   >
                     <span class="icon-[mdi--chevron-right] h-5 w-5" />
                   </button>

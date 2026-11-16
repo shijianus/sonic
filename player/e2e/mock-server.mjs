@@ -22,8 +22,8 @@ const HOST = '127.0.0.1'
 // ── 音频夹具：20s / 8kHz / 8-bit mono PCM WAV，正弦波 ───────────────────────
 const WAV_SECONDS = 20
 const SAMPLE_RATE = 8000
-function makeWav(seconds) {
-  const dataSize = seconds * SAMPLE_RATE
+function makeWav(seconds, sampleRate = SAMPLE_RATE) {
+  const dataSize = seconds * sampleRate
   const audio = Buffer.alloc(44 + dataSize)
   audio.write('RIFF', 0)
   audio.writeUInt32LE(36 + dataSize, 4)
@@ -32,20 +32,22 @@ function makeWav(seconds) {
   audio.writeUInt32LE(16, 16)
   audio.writeUInt16LE(1, 20) // PCM
   audio.writeUInt16LE(1, 22) // mono
-  audio.writeUInt32LE(SAMPLE_RATE, 24)
-  audio.writeUInt32LE(SAMPLE_RATE, 28)
+  audio.writeUInt32LE(sampleRate, 24)
+  audio.writeUInt32LE(sampleRate, 28)
   audio.writeUInt16LE(1, 32)
   audio.writeUInt16LE(8, 34)
   audio.write('data', 36)
   audio.writeUInt32LE(dataSize, 40)
   for (let i = 0; i < dataSize; i++) {
-    audio[44 + i] = Math.round(128 + 32 * Math.sin((2 * Math.PI * 440 * i) / SAMPLE_RATE))
+    audio[44 + i] = Math.round(128 + 32 * Math.sin((2 * Math.PI * 440 * i) / sampleRate))
   }
   return audio
 }
-const wav = makeWav(WAV_SECONDS)
+const wav = makeWav(WAV_SECONDS, SAMPLE_RATE)
+const wav320 = makeWav(WAV_SECONDS, SAMPLE_RATE * 2)
+const wavLossless = makeWav(WAV_SECONDS, SAMPLE_RATE * 3)
 // The long mobile layout test takes screenshots while a real audio element plays.
-const longLayoutWav = makeWav(120)
+const longLayoutWav = makeWav(120, SAMPLE_RATE)
 
 // ── 曲目夹具 ───────────────────────────────────────────────────────────────
 const SONG_META = {
@@ -259,7 +261,15 @@ async function handleApi(req, res, url) {
       })
     }
     if (id === '9001') await sleep(600)
-    return sendAudio(req, res, id === '9400' ? longLayoutWav : wav)
+    const br = q.get('br') || ''
+    const audio = id === '9400'
+      ? longLayoutWav
+      : br === 'lossless'
+        ? wavLossless
+        : br === '320'
+          ? wav320
+          : wav
+    return sendAudio(req, res, audio)
   }
 
   if (p === '/api/sonic/lyrics/nexus') {

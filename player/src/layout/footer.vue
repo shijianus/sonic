@@ -345,10 +345,14 @@ const triggerProbeIfNeeded = async () => {
   }
 }
 
-// 监听当前歌曲变化，切歌时取消旧歌未完成探测
+// 监听当前歌曲变化，切歌时取消旧歌未完成探测及音质切换加载态
 watch(
   () => currentSong.value,
   (newSong, oldSong) => {
+    if (!oldSong || !newSong || getProbeTargetKey(oldSong) !== getProbeTargetKey(newSong)) {
+      pendingQualitySelection = undefined
+      pendingQualityLevel.value = null
+    }
     if (oldSong?.id && getProbeTargetKey(oldSong) !== getProbeTargetKey(newSong)) {
       cancelSongProbe(oldSong)
     }
@@ -500,10 +504,13 @@ const openAndFocusQualityMenu = () => {
 }
 
 const closeQualityMenuAndRestoreFocus = () => {
+  const wasOpen = showQualityMenu.value
   showQualityMenu.value = false
-  nextTick(() => {
-    qualityBtnRef.value?.focus()
-  })
+  if (wasOpen) {
+    nextTick(() => {
+      qualityBtnRef.value?.focus()
+    })
+  }
 }
 
 const toggleQualityMenu = () => {
@@ -542,10 +549,12 @@ const handleQualityMenuKeydown = (e: KeyboardEvent) => {
 }
 
 let pendingQualitySelection: symbol | undefined
+const pendingQualityLevel = ref<string | null>(null)
 
 const selectQuality = async (level: string) => {
   const target = availableQualities.value.find((q) => q.level === level)
   if (target && !target.isAvailable) return
+  if (pendingQualitySelection && pendingQualityLevel.value === level) return
   if (level === currentQualityLevel.value && !pendingQualitySelection) {
     closeQualityMenuAndRestoreFocus()
     return
@@ -553,6 +562,7 @@ const selectQuality = async (level: string) => {
 
   const selection = Symbol()
   pendingQualitySelection = selection
+  pendingQualityLevel.value = level
   try {
     if (!(await audioStore.switchQuality(level)) || pendingQualitySelection !== selection) return
   } catch {
@@ -565,7 +575,10 @@ const selectQuality = async (level: string) => {
     })
     return
   } finally {
-    if (pendingQualitySelection === selection) pendingQualitySelection = undefined
+    if (pendingQualitySelection === selection) {
+      pendingQualitySelection = undefined
+      pendingQualityLevel.value = null
+    }
   }
 
   closeQualityMenuAndRestoreFocus()
@@ -795,12 +808,19 @@ const emit = defineEmits(['show'])
             @keydown.up.prevent="openAndFocusQualityMenu"
             aria-haspopup="true"
             :aria-expanded="showQualityMenu"
+            :aria-busy="Boolean(pendingQualityLevel)"
             aria-controls="quality-menu-panel"
             class="footer-quality-pill group flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1 rounded-full text-xs font-bold transition-all duration-300 border border-glass bg-[var(--glass-interactive-hover-muted)] hover:bg-[var(--glass-interactive-hover)] text-primary hover:border-[var(--glass-accent-border)] select-none shadow-sm cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80"
             :title="activeQualityTooltip"
             :aria-label="activeQualityTooltip"
           >
             <span
+              v-if="pendingQualityLevel"
+              class="icon-[mdi--loading] animate-spin text-xs text-sky-400"
+              aria-hidden="true"
+            ></span>
+            <span
+              v-else
               class="w-1.5 h-1.5 rounded-full"
               :class="isDegradedQuality ? 'bg-amber-400' : isLosslessActive ? 'bg-sky-400 animate-pulse shadow-[0_0_6px_#38bdf8]' : 'bg-cyan-400'"
             ></span>
@@ -827,7 +847,7 @@ const emit = defineEmits(['show'])
                 right: `${menuCoords.right}px`,
                 zIndex: 60,
               }"
-              class="quality-panel-popover w-64 overflow-hidden rounded-2xl select-none"
+              class="quality-panel-popover min-w-72 w-auto max-w-[min(26rem,calc(100vw-2rem))] overflow-hidden rounded-2xl select-none"
               @keydown="handleQualityMenuKeydown"
             >
               <!-- 顶部标题 -->
@@ -852,12 +872,13 @@ const emit = defineEmits(['show'])
                   role="radio"
                   :aria-checked="effectiveQualityLevel === q.level && q.isAvailable"
                   :aria-disabled="!q.isAvailable"
+                  :aria-busy="pendingQualityLevel === q.level ? 'true' : undefined"
                   :disabled="!q.isAvailable"
                   :tabindex="q.isAvailable ? (focusedQualityIndex === index ? 0 : -1) : -1"
                   @click.stop="q.isAvailable && selectQuality(q.level)"
                   @keydown.enter.prevent.stop="q.isAvailable && selectQuality(q.level)"
                   @keydown.space.prevent.stop="q.isAvailable && selectQuality(q.level)"
-                  class="w-full min-h-11 py-1.5 flex items-center justify-between px-2.5 rounded-xl text-left transition-all duration-150 group outline-none"
+                  class="w-full min-h-11 py-1.5 flex items-center justify-between gap-3 px-2.5 rounded-xl text-left transition-all duration-150 group outline-none"
                   :class="[
                     !q.isAvailable
                       ? 'opacity-45 cursor-not-allowed border border-transparent'
@@ -878,6 +899,11 @@ const emit = defineEmits(['show'])
                     >
                       {{ q.label }}
                     </span>
+                    <span
+                      v-if="pendingQualityLevel === q.level"
+                      class="icon-[mdi--loading] animate-spin text-xs text-sky-400 shrink-0"
+                      aria-hidden="true"
+                    ></span>
                     <!-- “当前” 标记：当且仅当该档位为实际生效且可用档位时显示 -->
                     <span
                       v-if="effectiveQualityLevel === q.level && q.isAvailable"
