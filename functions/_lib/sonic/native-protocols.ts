@@ -82,16 +82,20 @@ export async function callNeteaseLinuxApi(
     cookieParts.push(String(env.NETEASE_COOKIE).trim());
   }
 
+  const reqHeaders: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    Referer: 'https://music.163.com/',
+    Cookie: cookieParts.join('; '),
+  };
+  if (cfg.realIp) {
+    reqHeaders['X-Real-IP'] = cfg.realIp;
+    reqHeaders['X-Forwarded-For'] = cfg.realIp;
+  }
+
   const resp = await nativeFetch('https://music.163.com/api/linux/forward', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
-      Referer: 'https://music.163.com/',
-      'X-Real-IP': cfg.realIp,
-      'X-Forwarded-For': cfg.realIp,
-      Cookie: cookieParts.join('; '),
-    },
+    headers: reqHeaders,
     body: `eparams=${eparams}`,
   }, cfg.timeoutMs, signal);
   if (!resp.ok) {
@@ -123,16 +127,19 @@ export async function callNeteaseEapi(
   }
 
   const eapiEndpoint = `https://interface3.music.163.com/eapi${apiPath.replace(/^\/api/, '')}`;
+  const reqHeaders: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'User-Agent': `${DESKTOP_UA} NeteaseMusicDesktop/2.9.7.199711`,
+    Referer: 'https://music.163.com/',
+    Cookie: cookieParts.join('; '),
+  };
+  if (cfg.realIp) {
+    reqHeaders['X-Real-IP'] = cfg.realIp;
+    reqHeaders['X-Forwarded-For'] = cfg.realIp;
+  }
   const resp = await nativeFetch(eapiEndpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': `${DESKTOP_UA} NeteaseMusicDesktop/2.9.7.199711`,
-      Referer: 'https://music.163.com/',
-      'X-Real-IP': cfg.realIp,
-      'X-Forwarded-For': cfg.realIp,
-      Cookie: cookieParts.join('; '),
-    },
+    headers: reqHeaders,
     body: `params=${params}`,
   }, cfg.timeoutMs, signal);
   if (!resp.ok) {
@@ -146,17 +153,20 @@ export async function fetchNeteaseRegionalTopSongs(areaId: number, env?: AppEnv,
   const cfg = getSonicConfig(env);
   // Match the pinned NCM sidecar 4.41.1 top_song module's WEAPI contract.
   const envelope = await buildNeteaseWeapiParams({ areaId, total: true, e_r: false, csrf_token: '' });
+  const reqHeaders: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'User-Agent': DESKTOP_UA,
+    Referer: 'https://music.163.com/',
+    Cookie: 'os=pc; appver=2.9.7;',
+  };
+  if (cfg.realIp) {
+    reqHeaders['X-Real-IP'] = cfg.realIp;
+  }
   const response = await fetchWithRuntimeBudget('https://music.163.com/weapi/v1/discovery/new/songs', {
     method: 'POST',
     // A redirect could discard the form body and silently remove the region.
     redirect: 'error',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent': DESKTOP_UA,
-      Referer: 'https://music.163.com/',
-      'X-Real-IP': cfg.realIp,
-      Cookie: 'os=pc; appver=2.9.7;',
-    },
+    headers: reqHeaders,
     body: new URLSearchParams(envelope).toString(),
   }, { timeoutMs: cfg.timeoutMs, signals: [signal] });
   if (!response.ok) {
@@ -226,7 +236,7 @@ export async function searchNeteaseNative(
     try {
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (env?.NETEASE_COOKIE) headers.Cookie = String(env.NETEASE_COOKIE).trim();
-      const u = `${cfg.ncmApiUrl}/cloudsearch?keywords=${encodeURIComponent(query)}&type=1&limit=${count}&offset=${offset}&realIP=${encodeURIComponent(cfg.realIp)}`;
+      const u = `${cfg.ncmApiUrl}/cloudsearch?keywords=${encodeURIComponent(query)}&type=1&limit=${count}&offset=${offset}${cfg.realIp ? `&realIP=${encodeURIComponent(cfg.realIp)}` : ''}`;
       const res = await nativeFetch(u, {
         headers,
         signal,
@@ -272,7 +282,7 @@ export async function resolveNeteaseCoverUrl(id: string, env?: AppEnv, signal?: 
 
   if (cfg.ncmApiUrl) {
     try {
-      const res = await nativeFetch(`${cfg.ncmApiUrl}/song/detail?ids=${encodeURIComponent(cleanId)}&realIP=${encodeURIComponent(cfg.realIp)}`, {
+      const res = await nativeFetch(`${cfg.ncmApiUrl}/song/detail?ids=${encodeURIComponent(cleanId)}${cfg.realIp ? `&realIP=${encodeURIComponent(cfg.realIp)}` : ''}`, {
         signal,
       }, 4500);
       if (res.ok) {
@@ -562,7 +572,7 @@ async function resolveNeteaseSingleStream(
     try {
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (env?.NETEASE_COOKIE) headers.Cookie = String(env.NETEASE_COOKIE).trim();
-      const u = `${cfg.ncmApiUrl}/song/url/v1?id=${encodeURIComponent(cleanId)}&level=${encodeURIComponent(level)}&realIP=${encodeURIComponent(cfg.realIp)}`;
+      const u = `${cfg.ncmApiUrl}/song/url/v1?id=${encodeURIComponent(cleanId)}&level=${encodeURIComponent(level)}${cfg.realIp ? `&realIP=${encodeURIComponent(cfg.realIp)}` : ''}`;
       const res = await nativeFetch(u, { headers, signal }, cfg.timeoutMs);
       if (res.ok) {
         const json = (await res.json()) as any;
@@ -1458,21 +1468,29 @@ async function resolvePlayableStreamWithinBudget(
       try {
         const timeoutRemaining = Math.min(3000, Math.max(500, budgetMs - (Date.now() - matchStart)));
         const kgRes = await nativeFetch(
-          `https://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword=${encodeURIComponent(searchKeywords)}&page=1&pagesize=5&showtype=1`,
+          `https://songsearch.kugou.com/song_search_v2?keyword=${encodeURIComponent(searchKeywords)}&page=1&pagesize=5&clientver=&platform=WebFilter`,
           { headers: { 'User-Agent': DESKTOP_UA }, signal }, timeoutRemaining);
         if (kgRes.ok) {
           const kgJson = (await kgRes.json()) as any;
-          const freeItem = (kgJson?.data?.info || []).find(
-            (it: any) =>
-              (it.privilege === 0 || it.privilege === 8) &&
-              titlesMatchStrictly(trackTitle, String(it.songname || '')) &&
-              artistsMatchStrictly(trackArtist, String(it.singername || ''), cfg.crossMatchArtistSimilarity) &&
-              (!opts.durationSec || !it.duration || Math.abs(it.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec),
-          );
-          if (freeItem?.hash) {
-            const kgStream = await resolveKugouSingleStream(freeItem.hash, env, signal);
+          const items = kgJson?.data?.lists || kgJson?.data?.info || [];
+          const freeItem = items.find((it: any) => {
+            const priv = it.Privilege ?? it.privilege;
+            const sName = String(it.SongName || it.songname || '').replace(/<\/?em>/gi, '');
+            const aName = String(it.SingerName || it.singername || '').replace(/<\/?em>/gi, '');
+            const dur = it.Duration ?? it.duration;
+            return (
+              (priv === 0 || priv === 8) &&
+              titlesMatchStrictly(trackTitle, sName) &&
+              artistsMatchStrictly(trackArtist, aName, cfg.crossMatchArtistSimilarity) &&
+              (!opts.durationSec || !dur || Math.abs(dur - opts.durationSec) <= cfg.crossMatchDurationToleranceSec)
+            );
+          });
+          const freeHash = freeItem?.FileHash || freeItem?.hash;
+          if (freeItem && freeHash) {
+            const kgStream = await resolveKugouSingleStream(freeHash, env, signal);
             if (kgStream?.url) {
-              const probe = await probeStreamPhysicalQuality(kgStream.url, 'https://m.kugou.com/', 2000, freeItem.duration || opts.durationSec, nominalBr, signal, env);
+              const itemDur = freeItem.Duration ?? freeItem.duration;
+              const probe = await probeStreamPhysicalQuality(kgStream.url, 'https://m.kugou.com/', 2000, itemDur || opts.durationSec, nominalBr, signal, env);
               if (probe.streamType === 'full') {
                 attempts.push({ provider: label, via: `${kgStream.via}:free-match`, ok: true, ms: Date.now() - sStart });
                 const out: ResolvedStreamInfo = {
@@ -1489,9 +1507,9 @@ async function resolvePlayableStreamWithinBudget(
                   circuitState,
                   attempts,
                   resolvedSource: 'kugou',
-                  resolvedId: freeItem.hash,
-                  resolvedTitle: String(freeItem.songname || trackTitle),
-                  resolvedArtist: String(freeItem.singername || trackArtist),
+                  resolvedId: freeHash,
+                  resolvedTitle: String(freeItem.SongName || freeItem.songname || trackTitle).replace(/<\/?em>/gi, ''),
+                  resolvedArtist: String(freeItem.SingerName || freeItem.singername || trackArtist).replace(/<\/?em>/gi, ''),
                 };
                 signal?.throwIfAborted();
           await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);

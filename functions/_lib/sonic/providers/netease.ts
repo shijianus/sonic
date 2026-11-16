@@ -31,7 +31,7 @@ async function fetchNeteaseLyricWithLocalFirst(songId: string, env?: AppEnv, sig
       // The NCM sidecar is a trusted internal hop, but it must never redirect
       // us anywhere: NETEASE_COOKIE rides on this request (audit P1-2).
       const res = await fetchWithRuntimeBudget(
-        `${cfg.ncmApiUrl}/lyric/new?id=${encodeURIComponent(songId)}&realIP=${encodeURIComponent(cfg.realIp)}`,
+        `${cfg.ncmApiUrl}/lyric/new?id=${encodeURIComponent(songId)}${cfg.realIp ? `&realIP=${encodeURIComponent(cfg.realIp)}` : ''}`,
         { headers, signal: signal, redirect: 'error' }, { timeoutMs: cfg.timeoutMs });
       if (res.ok) {
         const { readBoundedProviderJson } = await import('../provider-fetch');

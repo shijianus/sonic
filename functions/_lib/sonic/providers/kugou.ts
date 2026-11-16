@@ -101,9 +101,9 @@ export const kugouProvider: SonicProviderAdapter = {
     const page = options?.page || 1;
 
     try {
-      // HTTPS-only via the provider boundary: the legacy plaintext HTTP endpoint
-      // allowed trivial MITM injection of search results (audit P1-2).
-      const sUrl = `https://mobilecdn.kugou.com/api/v3/search/song?keyword=${encodeURIComponent(query)}&page=${page}&pagesize=${count}`;
+      // HTTPS-only via the provider boundary (`songsearch.kugou.com` supports valid TLS,
+      // unlike `mobilecdn.kugou.com` whose certificate fails hostname verification).
+      const sUrl = `https://songsearch.kugou.com/song_search_v2?keyword=${encodeURIComponent(query)}&page=${page}&pagesize=${count}&clientver=&platform=WebFilter`;
       const sRes = await fetchProviderUrl(sUrl, {
         headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
       }, config.timeoutMs, options?.signal);
@@ -112,16 +112,22 @@ export const kugouProvider: SonicProviderAdapter = {
         return [];
       }
       const sJson = await readBoundedProviderJson(sRes);
-      const items = Array.isArray(sJson.data?.info) ? sJson.data.info : [];
+      const items = Array.isArray(sJson.data?.lists)
+        ? sJson.data.lists
+        : Array.isArray(sJson.data?.info)
+          ? sJson.data.info
+          : [];
       if (!Array.isArray(items)) return [];
 
       return items.map((item: any) => {
-        const platformId = String(item.hash || item.FileHash || '');
-        const durationSec = typeof item.duration === 'number' ? item.duration : 0;
-        const songName = item.songname || item.SongName || '未知歌曲';
-        const singerName = item.singername || item.SingerName || '未知歌手';
+        const platformId = String(item.FileHash || item.hash || '');
+        const rawDur = item.Duration ?? item.duration;
+        const durationSec = typeof rawDur === 'number' ? rawDur : 0;
+        const songName = String(item.SongName || item.songname || '未知歌曲').replace(/<\/?em>/gi, '');
+        const singerName = String(item.SingerName || item.singername || '未知歌手').replace(/<\/?em>/gi, '');
 
         const rawCover =
+          item.Image ||
           item.trans_param?.union_cover ||
           item.album_sizable_cover ||
           item.img ||
@@ -147,7 +153,7 @@ export const kugouProvider: SonicProviderAdapter = {
           title: songName,
           name: songName,
           artist: singerName,
-          album: item.album_name || '',
+          album: String(item.AlbumName || item.album_name || ''),
           duration: durationSec,
           cover,
           coverUrl: cover,

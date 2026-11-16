@@ -453,7 +453,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
   if (cfg.ncmApiUrl && (regionalTopSongs || ncmDirectEndpoints.has(normEndpoint))) {
     try {
       const qs = regionalTopSongs ? new URLSearchParams({ type: topSongType }) : new URLSearchParams(url.searchParams);
-      qs.set('realIP', cfg.realIp);
+      if (cfg.realIp) qs.set('realIP', cfg.realIp);
       const headers: Record<string, string> = { Accept: 'application/json' };
       if (env?.NETEASE_COOKIE) headers.Cookie = String(env.NETEASE_COOKIE).trim();
       const ncmResp = await timedFetch(`${cfg.ncmApiUrl}/${normEndpoint}?${qs.toString()}`, {
@@ -1434,7 +1434,7 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       if (!p && cfg.ncmApiUrl) {
         try {
           const resp = await timedFetch(
-            `${cfg.ncmApiUrl}/playlist/detail?id=${encodeURIComponent(id)}&realIP=${encodeURIComponent(cfg.realIp)}`,
+            `${cfg.ncmApiUrl}/playlist/detail?id=${encodeURIComponent(id)}${cfg.realIp ? `&realIP=${encodeURIComponent(cfg.realIp)}` : ''}`,
           );
           if (resp.ok) {
             const data: any = await resp.json();

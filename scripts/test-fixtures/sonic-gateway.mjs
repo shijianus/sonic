@@ -98,7 +98,7 @@ export function respondToSonicGatewayProvider(url, init) {
       return Response.json({ data: { song: { list: [] } } });
     case 'POST https://u.y.qq.com/cgi-bin/musicu.fcg':
       return qqDesktopFixture(init);
-    case 'GET https://mobilecdn.kugou.com/api/v3/search/song': {
+    case 'GET https://songsearch.kugou.com/song_search_v2': {
       const keyword = query.get('keyword');
       if (keyword === timedOutQuery) return waitForTimeout(init.signal);
       const info = [sharedTitle, '起风了'].includes(keyword)

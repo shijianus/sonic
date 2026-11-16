@@ -111,7 +111,7 @@ export function getSonicConfig(env?: AppEnv): SonicConfig {
     engineSecret: e.SONIC_ENGINE_SECRET ? String(e.SONIC_ENGINE_SECRET) : undefined,
     // Do not allow sidecar NCM calls when NetEase source is disabled by licensing policy
     ncmApiUrl: contentFlags.enableNetease ? ncmApiUrl : undefined,
-    realIp: e.SONIC_REAL_IP ? String(e.SONIC_REAL_IP).trim() : '203.0.113.10',
+    realIp: e.SONIC_REAL_IP ? String(e.SONIC_REAL_IP).trim() : '',
     upstreamLyriva: normalizeUpstream(e.SONIC_UPSTREAM_LYRIVA, 'https://api.lyriva.xyz'),
     upstreamGdstudio: normalizeUpstream(
       e.SONIC_UPSTREAM_GDSTUDIO || e.MUSIC_API_BASE,

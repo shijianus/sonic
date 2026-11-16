@@ -254,7 +254,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     if (cfg.ncmApiUrl) {
       try {
         const aRes = await fetch(
-          `${cfg.ncmApiUrl}/cloudsearch?keywords=${encodeURIComponent(cleanArtist)}&type=100&limit=1&realIP=${encodeURIComponent(cfg.realIp)}`,
+          `${cfg.ncmApiUrl}/cloudsearch?keywords=${encodeURIComponent(cleanArtist)}&type=100&limit=1${cfg.realIp ? `&realIP=${encodeURIComponent(cfg.realIp)}` : ''}`,
           { signal: AbortSignal.timeout(4000) },
         );
         if (aRes.ok) {

@@ -1241,10 +1241,9 @@ async function crawlKugouBySearch(
 
     const collectedCandidates: RawCandidate[] = [];
 
-    // 渠道 1：通过酷狗 master song search (mobilecdn + song_search_v2) 获取录音室母带版本与哈希值
+    // 渠道 1：通过酷狗 song_search_v2 获取录音室母带版本与哈希值
     try {
       const searchApis = [
-        `https://mobilecdn.kugou.com/api/v3/search/song?keyword=${encodeURIComponent(query)}&page=1&pagesize=5`,
         `https://songsearch.kugou.com/song_search_v2?keyword=${encodeURIComponent(query)}&page=1&pagesize=5&clientver=&platform=WebFilter`,
       ];
       for (const sUrl of searchApis) {

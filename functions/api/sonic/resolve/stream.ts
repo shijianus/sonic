@@ -77,7 +77,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
         brand: 'Sonic',
         ok: false,
         error: { code: 'STREAM_NOT_FOUND', message: 'No playable stream resolved on local engine' },
-        attempts: [],
+        attempts: resolved?.attempts || [],
       },
       { status: 404, headers: { 'Cache-Control': 'no-store' } },
     );

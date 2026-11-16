@@ -8,7 +8,7 @@ import { fetchWithRuntimeBudget } from './request-budget';
 const PROVIDER_REDIRECT_HOSTS = new Set([
   'music.163.com', 'interface3.music.163.com',
   'c.y.qq.com', 'u.y.qq.com', 'y.qq.com', 'y.gtimg.cn', 'ws.stream.qqmusic.qq.com',
-  'mobilecdn.kugou.com', 'm.kugou.com', 'www.kugou.com',
+  'mobilecdn.kugou.com', 'songsearch.kugou.com', 'm.kugou.com', 'www.kugou.com',
   'search.kuwo.cn', 'antiserver.kuwo.cn', 'm.kuwo.cn', 'www.kuwo.cn',
   'lrclib.net', 'api.amll.dev', 'musixmatch.com',
   'gdstudio.xyz', 'music-api.gdstudio.xyz', 'lyriva.xyz', 'api.lyriva.xyz',
