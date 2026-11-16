@@ -569,7 +569,7 @@ onUnmounted(() => {
     aria-modal="true"
     :aria-label="t('player.fullPlayerAria')"
     tabindex="-1"
-    class="bg-overlay/95 absolute inset-0 z-50 flex backdrop-blur-md backdrop-filter outline-none"
+    class="bg-overlay/95 absolute inset-0 z-50 flex outline-none"
   >
     <div v-show="useCoverBg" class="absolute inset-0 -z-10 overflow-hidden">
       <div ref="bgARef" class="bg-layer absolute inset-0 opacity-0" :style="bgAStyle"></div>
@@ -596,6 +596,7 @@ onUnmounted(() => {
           :bar-gap="1"
           :gradient-colors="visualizerGradient"
           :height="180"
+          :active="isPlaying && isOpen"
           class="h-full"
         />
       </div>
@@ -781,6 +782,7 @@ onUnmounted(() => {
             :bar-count="128"
             :gradient-colors="visualizerGradient"
             :height="384"
+            :active="isPlaying && isOpen"
             class="h-full w-full"
           />
           <!-- 中心封面 - 带翻转动画 -->
@@ -1104,10 +1106,7 @@ onUnmounted(() => {
 }
 
 .bg-layer {
-  transform: scale(1.5);
-  filter: blur(48px) saturate(1.3);
-  transition: filter 0.3s ease;
-  will-change: transform, opacity;
+  will-change: opacity;
 }
 
 /* 暗角效果 */
@@ -1126,7 +1125,7 @@ onUnmounted(() => {
 
 /* 控制按钮 hover 效果 */
 .ctrl-btn {
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.15s ease;
 }
 .ctrl-btn:hover {
   background: rgba(255, 255, 255, 0.08);
@@ -1199,7 +1198,6 @@ onUnmounted(() => {
   -webkit-text-fill-color: transparent;
   color: transparent;
   transition: transform 0.08s cubic-bezier(0.2, 0, 0, 1);
-  will-change: transform, --fill;
   cursor: pointer;
 }
 
@@ -1281,7 +1279,9 @@ onUnmounted(() => {
 /* 拖动提示框动画 */
 .fade-scale-enter-active,
 .fade-scale-leave-active {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    opacity 0.2s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.2s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .fade-scale-enter-from,

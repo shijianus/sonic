@@ -104,23 +104,23 @@ onUnmounted(() => {
           <LazyImage
             :src="formatCoverUrl(mv.cover, { size: 400 })"
             :alt="mv.title"
-            img-class="h-full w-full object-cover transition-all duration-500 group-hover:scale-110"
+            img-class="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
           />
           <div class="absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent" />
           <div
-            class="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[11px] text-white backdrop-blur-sm"
+            class="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-slate-950/75 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums"
           >
             <span class="icon-[mdi--play] h-3 w-3" />
             {{ formatCount(mv.playCount) }}
           </div>
           <div
-            class="absolute right-2 bottom-2 rounded bg-black/60 px-2 py-1 text-xs text-white backdrop-blur-sm"
+            class="absolute right-2 bottom-2 rounded bg-slate-950/75 px-2 py-0.5 text-xs text-white tabular-nums"
           >
             {{ formatSec(mv.duration) }}
           </div>
           <div class="absolute inset-0 flex items-center justify-center">
             <div
-              class="flex h-14 w-14 scale-75 items-center justify-center rounded-full bg-white/20 opacity-0 backdrop-blur-md transition-all duration-300 group-hover:scale-100 group-hover:opacity-100"
+              class="flex h-13 w-13 scale-90 items-center justify-center rounded-full bg-slate-950/60 opacity-0 transition-[transform,opacity] duration-150 group-hover:scale-100 group-hover:opacity-100"
             >
               <span class="icon-[mdi--play] h-7 w-7 text-white" />
             </div>

@@ -608,7 +608,7 @@ const totalDuration = computed(() => {
   border-radius: 8px;
   color: var(--glass-text-secondary);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease;
 }
 
 .item-action-btn:hover {
@@ -641,19 +641,22 @@ const totalDuration = computed(() => {
    ═══════════════════════════════════ */
 .playing-bars .bar {
   width: 3px;
+  height: 16px;
   border-radius: 2px;
+  transform-origin: bottom;
   background: linear-gradient(180deg, #38bdf8, #3b82f6);
   animation: playing 0.8s ease-in-out infinite;
+  will-change: transform;
 }
 
-.playing-bars .bar:nth-child(1) { height: 10px; animation-delay: 0s; }
-.playing-bars .bar:nth-child(2) { height: 16px; animation-delay: 0.15s; }
-.playing-bars .bar:nth-child(3) { height: 12px; animation-delay: 0.3s; }
-.playing-bars .bar:nth-child(4) { height: 14px; animation-delay: 0.45s; }
+.playing-bars .bar:nth-child(1) { animation-delay: 0s; }
+.playing-bars .bar:nth-child(2) { animation-delay: 0.15s; }
+.playing-bars .bar:nth-child(3) { animation-delay: 0.3s; }
+.playing-bars .bar:nth-child(4) { animation-delay: 0.45s; }
 
 @keyframes playing {
-  0%, 100% { height: 4px; }
-  50% { height: 18px; }
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
 }
 
 /* ═══════════════════════════════════

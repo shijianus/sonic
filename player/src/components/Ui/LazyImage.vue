@@ -1,6 +1,32 @@
 <script setup lang="ts">
-import { useIntersectionObserver } from '@vueuse/core'
+import { nextTick, onMounted, onUnmounted } from 'vue'
 import { formatCoverUrl, getProxyCoverUrl, DEFAULT_COVER_DATA_URI } from '@/utils/imageUrl'
+
+// 模块级共享 IntersectionObserver，避免 100+ 封面组件各自创建监听器
+const observerCallbacks = new WeakMap<Element, () => void>()
+let sharedObserver: IntersectionObserver | null = null
+
+const getSharedObserver = (): IntersectionObserver | null => {
+  if (typeof window === 'undefined' || typeof IntersectionObserver === 'undefined') return null
+  if (!sharedObserver) {
+    sharedObserver = new IntersectionObserver(
+      entries => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const cb = observerCallbacks.get(entry.target)
+            if (cb) {
+              observerCallbacks.delete(entry.target)
+              sharedObserver?.unobserve(entry.target)
+              cb()
+            }
+          }
+        }
+      },
+      { rootMargin: '300px' }
+    )
+  }
+  return sharedObserver
+}
 
 interface Props {
   src?: string
@@ -47,6 +73,7 @@ const gradientPalette = computed(() => {
 })
 
 const el = ref<HTMLElement | null>(null)
+const imgRef = ref<HTMLImageElement | null>(null)
 const isIntersected = ref(false)
 const activeSrc = ref<string>('')
 const isLoading = ref(false)
@@ -59,7 +86,7 @@ const resolveInitialSrc = () => {
     attemptStage.value = 'primary'
     activeSrc.value = primary
     hasError.value = false
-    isLoading.value = true
+    isLoading.value = !primary.startsWith('data:')
     return
   }
   const fallback = formatCoverUrl(props.fallbackSrc)
@@ -67,7 +94,7 @@ const resolveInitialSrc = () => {
     attemptStage.value = 'fallback'
     activeSrc.value = fallback
     hasError.value = false
-    isLoading.value = true
+    isLoading.value = !fallback.startsWith('data:')
     return
   }
   activeSrc.value = ''
@@ -75,16 +102,32 @@ const resolveInitialSrc = () => {
   isLoading.value = false
 }
 
-useIntersectionObserver(
-  el,
-  ([entry]) => {
-    if (entry.isIntersecting && !isIntersected.value) {
-      isIntersected.value = true
-      resolveInitialSrc()
-    }
-  },
-  { rootMargin: '300px' }
-)
+const triggerVisible = () => {
+  if (!isIntersected.value) {
+    isIntersected.value = true
+    resolveInitialSrc()
+  }
+}
+
+onMounted(() => {
+  const target = el.value
+  if (!target) return
+  const obs = getSharedObserver()
+  if (!obs) {
+    triggerVisible()
+    return
+  }
+  observerCallbacks.set(target, triggerVisible)
+  obs.observe(target)
+})
+
+onUnmounted(() => {
+  const target = el.value
+  if (target) {
+    observerCallbacks.delete(target)
+    sharedObserver?.unobserve(target)
+  }
+})
 
 // Watch for prop changes to update activeSrc immediately
 watch(
@@ -95,6 +138,14 @@ watch(
     }
   }
 )
+
+watch(activeSrc, async () => {
+  await nextTick()
+  if (imgRef.value?.complete && imgRef.value.naturalWidth > 0) {
+    isLoading.value = false
+    hasError.value = false
+  }
+})
 
 const handleLoad = () => {
   isLoading.value = false
@@ -150,9 +201,10 @@ const handleError = () => {
   <div ref="el" :class="['relative h-full w-full select-none overflow-hidden', wrapperClass]">
     <img
       v-if="activeSrc && !hasError"
+      ref="imgRef"
       :src="activeSrc"
       :alt="alt"
-      :class="imgClass"
+      :class="[imgClass, 'transition-opacity duration-150', isLoading && !activeSrc.startsWith('data:') ? 'opacity-0' : 'opacity-100']"
       loading="lazy"
       decoding="async"
       referrerpolicy="no-referrer"
@@ -170,12 +222,10 @@ const handleError = () => {
       </span>
       <span v-else class="icon-[mdi--music-note] text-white/50 h-5 w-5"></span>
     </div>
-    <!-- 加载中骨架指示器 -->
+    <!-- 轻量静态骨架底衬（移除每图 animate-pulse 与旋转图标） -->
     <div
       v-if="isLoading && !activeSrc.startsWith('data:')"
-      class="absolute inset-0 flex items-center justify-center bg-white/10 animate-pulse"
-    >
-      <div class="h-3 w-3 rounded-full border border-sky-400/60 border-t-transparent animate-spin"></div>
-    </div>
+      class="pointer-events-none absolute inset-0 bg-[var(--glass-skeleton)]"
+    ></div>
   </div>
 </template>

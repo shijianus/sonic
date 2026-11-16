@@ -1,11 +1,9 @@
 <script setup lang="ts">
-import { gsap } from 'gsap'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import { formatCount } from '@/utils/time'
 import { formatCoverUrl } from '@/utils/imageUrl'
-import { escapeHtmlAttribute } from '@/utils/escapeHtml'
 import { useI18n } from 'vue-i18n'
-import { prefersReducedMotion } from '@/utils/motion'
+import { useCardTilt } from '@/composables/useCardTilt'
 
 interface Props {
   id: number | string
@@ -41,283 +39,21 @@ const handlePlayClick = (e: MouseEvent) => {
 const router = useRouter()
 const { t } = useI18n()
 const cardRef = ref<HTMLElement | null>(null)
-const isAnimating = ref(false)
 const resolvedHref = computed(() => router.resolve(props.to).href)
 
-// Tilt 效果相关
-const tiltConfig = {
-  max: 12,
-  scale: 1.03,
-  speed: 400,
-  glareMax: 0.15,
-}
-
-// 创建光泽层
-const glareRef = ref<HTMLElement | null>(null)
-
-onMounted(() => {
-  if (props.enableTilt && cardRef.value) {
-    // 创建光泽层
-    const glareEl = document.createElement('div')
-    glareEl.className = 'tilt-glare'
-    glareEl.style.cssText = `
-      position: absolute;
-      inset: 0;
-      border-radius: inherit;
-      pointer-events: none;
-      background: linear-gradient(
-        135deg,
-        rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0) 50%,
-        rgba(255, 255, 255, ${tiltConfig.glareMax}) 100%
-      );
-      opacity: 0;
-      transition: opacity ${tiltConfig.speed}ms ease;
-      z-index: 10;
-    `
-    const innerCard = cardRef.value.querySelector('.hero-card-inner')
-    if (innerCard) {
-      ;(innerCard as HTMLElement).style.overflow = 'hidden'
-      innerCard.appendChild(glareEl)
-      glareRef.value = glareEl
-    }
-  }
+const {
+  onMouseEnter: handleMouseEnter,
+  onMouseMove: handleMouseMove,
+  onMouseLeave: handleMouseLeave,
+} = useCardTilt(cardRef, {
+  enabled: () => props.enableTilt,
 })
 
-onUnmounted(() => {
-  glareRef.value?.remove()
-})
-
-// Hero 展开动画
-const handleClick = async (event: MouseEvent) => {
-  // 保留 Ctrl/Cmd/中键在新标签页打开的原生行为
+// 即时路由跳转，去除阻塞式全屏克隆展开动画
+const handleClick = (event: MouseEvent) => {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
   event.preventDefault()
-  if (isAnimating.value) return
-  if (!cardRef.value) {
-    router.push(props.to)
-    return
-  }
-  if (prefersReducedMotion()) {
-    router.push(props.to)
-    return
-  }
-
-  isAnimating.value = true
-  const card = cardRef.value
-  const rect = card.getBoundingClientRect()
-  const cleanCover = escapeHtmlAttribute(formatCoverUrl(props.coverUrl, { size: 400 }))
-
-  // 创建克隆元素用于动画
-  const clone = document.createElement('div')
-  clone.className = 'hero-card-clone'
-  clone.innerHTML = `
-    <div class="hero-clone-bg" style="
-      position: absolute;
-      inset: 0;
-      background-image: url(${cleanCover});
-      background-size: cover;
-      background-position: center;
-      filter: blur(40px) saturate(1.5);
-      transform: scale(1.5);
-      opacity: 0.4;
-    "></div>
-    <div class="hero-clone-content" style="
-      position: relative;
-      z-index: 10;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      padding: 24px;
-      opacity: 0;
-    ">
-      <img src="${cleanCover}" referrerpolicy="no-referrer" style="
-        width: 200px;
-        height: 200px;
-        border-radius: 16px;
-        box-shadow: 0 20px 60px rgba(0,0,0,0.4);
-        object-fit: cover;
-      " />
-      <h2 class="hero-clone-title" style="
-        margin-top: 24px;
-        font-size: 24px;
-        font-weight: bold;
-        color: white;
-        text-align: center;
-        max-width: 80%;
-      "></h2>
-      <p class="hero-clone-subtitle" style="margin-top: 8px; font-size: 14px; color: rgba(255,255,255,0.7);"></p>
-    </div>
-  `
-  // CSP blocks inline onerror attributes; attach the same fallback in script.
-  clone.querySelectorAll('img').forEach((img) => {
-    img.addEventListener('error', () => {
-      img.style.display = 'none'
-    }, { once: true })
-  })
-  const cloneTitle = clone.querySelector('.hero-clone-title')
-  if (cloneTitle) cloneTitle.textContent = props.title
-  const cloneSubtitle = clone.querySelector('.hero-clone-subtitle') as HTMLElement | null
-  if (cloneSubtitle) {
-    cloneSubtitle.textContent = props.subtitle || ''
-    cloneSubtitle.hidden = !props.subtitle
-  }
-  clone.style.cssText = `
-    position: fixed;
-    z-index: 9999;
-    width: ${rect.width}px;
-    height: ${rect.height}px;
-    left: ${rect.left}px;
-    top: ${rect.top}px;
-    border-radius: 16px;
-    background: rgba(0,0,0,0.9);
-    backdrop-filter: blur(20px);
-    overflow: hidden;
-    pointer-events: none;
-    will-change: transform, width, height, left, top, border-radius;
-  `
-
-  // 创建背景遮罩
-  const overlay = document.createElement('div')
-  overlay.className = 'hero-card-overlay'
-  overlay.style.cssText = `
-    position: fixed;
-    z-index: 9998;
-    inset: 0;
-    background: rgba(0,0,0,0);
-    pointer-events: none;
-  `
-
-  document.body.appendChild(overlay)
-  document.body.appendChild(clone)
-
-  // 隐藏原始卡片
-  card.style.opacity = '0'
-
-  const content = clone.querySelector('.hero-clone-content') as HTMLElement
-
-  // 创建动画时间线
-  const tl = gsap.timeline({
-    onComplete: () => {
-      // 动画完成后跳转
-      router.push(props.to)
-
-      // 延迟清理
-      setTimeout(() => {
-        clone.remove()
-        overlay.remove()
-        card.style.opacity = '1'
-        isAnimating.value = false
-      }, 0)
-    },
-  })
-
-  // 背景遮罩淡入
-  tl.to(overlay, {
-    background: 'rgba(0,0,0,0.6)',
-    duration: 0.12,
-    ease: 'power2.out',
-  }, 0)
-
-  // 卡片展开到屏幕中央
-  tl.to(clone, {
-    width: Math.min(600, window.innerWidth - 48),
-    height: Math.min(500, window.innerHeight - 100),
-    left: (window.innerWidth - Math.min(600, window.innerWidth - 48)) / 2,
-    top: (window.innerHeight - Math.min(500, window.innerHeight - 100)) / 2,
-    borderRadius: '24px',
-    duration: 0.18,
-    ease: 'power3.out',
-  }, 0)
-
-  // 内容淡入
-  tl.to(content, {
-    opacity: 1,
-    duration: 0.1,
-    ease: 'power2.out',
-  }, 0.06)
-
-  // 短暂停留后淡出
-  tl.to(clone, {
-    opacity: 0,
-    scale: 1.02,
-    duration: 0.05,
-    ease: 'power2.in',
-  }, '+=0.01')
-
-  tl.to(overlay, {
-    background: 'rgba(0,0,0,0)',
-    duration: 0.05,
-    ease: 'power2.in',
-  }, '-=0.05')
-}
-
-// 3D Tilt 悬停效果
-const handleMouseMove = (e: MouseEvent) => {
-  if (!props.enableTilt || !cardRef.value || prefersReducedMotion()) return
-
-  const card = cardRef.value
-  const rect = card.getBoundingClientRect()
-  const centerX = rect.left + rect.width / 2
-  const centerY = rect.top + rect.height / 2
-
-  // 计算鼠标相对于中心的位置 (-1 到 1)
-  const mouseX = (e.clientX - centerX) / (rect.width / 2)
-  const mouseY = (e.clientY - centerY) / (rect.height / 2)
-
-  // 计算旋转角度
-  const rotateX = -mouseY * tiltConfig.max
-  const rotateY = mouseX * tiltConfig.max
-
-  gsap.to(card, {
-    rotateX,
-    rotateY,
-    scale: tiltConfig.scale,
-    duration: 0.1,
-    ease: 'power2.out',
-    transformPerspective: 1000,
-  })
-
-  // 更新光泽
-  if (glareRef.value) {
-    const angle = Math.atan2(mouseY, mouseX) * (180 / Math.PI) + 135
-    const intensity = Math.sqrt(mouseX ** 2 + mouseY ** 2)
-    glareRef.value.style.background = `linear-gradient(${angle}deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, ${tiltConfig.glareMax * intensity}) 100%)`
-    glareRef.value.style.opacity = '1'
-  }
-}
-
-const handleMouseEnter = () => {
-  if (prefersReducedMotion()) return
-  if (!props.enableTilt && cardRef.value) {
-    // 如果没有启用 tilt，使用简单的悬停效果
-    gsap.to(cardRef.value, {
-      scale: 1.02,
-      y: -4,
-      duration: 0.3,
-      ease: 'power2.out',
-    })
-  }
-}
-
-const handleMouseLeave = () => {
-  if (prefersReducedMotion()) return
-  if (cardRef.value) {
-    gsap.to(cardRef.value, {
-      rotateX: 0,
-      rotateY: 0,
-      scale: 1,
-      y: 0,
-      duration: 0.5,
-      ease: 'elastic.out(1, 0.5)',
-      transformPerspective: 1000,
-    })
-  }
-  if (glareRef.value) {
-    glareRef.value.style.opacity = '0'
-  }
+  router.push(props.to)
 }
 </script>
 
@@ -325,30 +61,30 @@ const handleMouseLeave = () => {
   <a
     ref="cardRef"
     :href="resolvedHref"
-    class="hero-card group block cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70"
+    class="hero-card group block cursor-pointer rounded-2xl outline-none transition-transform duration-150 ease-out active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-sky-400/70"
     @click="handleClick"
     @mousemove="handleMouseMove"
     @mouseenter="handleMouseEnter"
     @mouseleave="handleMouseLeave"
   >
     <div
-      class="hero-card-inner relative overflow-hidden rounded-2xl shadow-lg transition-shadow duration-300 group-hover:shadow-xl"
+      class="hero-card-inner border-glass/60 relative overflow-hidden rounded-2xl border shadow-lg transition-[border-color,box-shadow] duration-200 group-hover:border-sky-400/35 group-hover:shadow-xl"
       :class="aspectRatio === 'video' ? 'aspect-video' : 'aspect-square'"
     >
       <LazyImage
         :src="formatCoverUrl(coverUrl, { size: 300 })"
         :alt="title"
-        img-class="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110"
+        img-class="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
         wrapper-class="h-full w-full"
       />
 
       <!-- 渐变遮罩 -->
-      <div class="absolute inset-0 bg-linear-to-t from-black/70 via-black/20 to-transparent" />
+      <div class="absolute inset-0 bg-linear-to-t from-black/75 via-black/20 to-transparent" />
 
-      <!-- 播放量标签 -->
+      <!-- 播放量标签（不使用 backdrop-blur-sm 以避免密集列表模糊层） -->
       <div
         v-if="playCount"
-        class="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-black/50 px-2 py-1 text-[11px] text-white backdrop-blur-sm"
+        class="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-slate-950/75 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums border border-sky-400/20"
       >
         <span class="icon-[mdi--headphones] h-3 w-3" />
         {{ formatCount(playCount) }}
@@ -367,11 +103,11 @@ const handleMouseLeave = () => {
 
       <!-- 悬停播放按钮 -->
       <div
-        class="hero-hover-play absolute inset-0 flex items-center justify-center bg-black/25 opacity-0 backdrop-blur-[2px] transition-all duration-300 group-hover:opacity-100"
+        class="hero-hover-play absolute inset-0 flex items-center justify-center bg-black/25 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
       >
         <button
           type="button"
-          class="flex h-12 w-12 scale-75 items-center justify-center rounded-full bg-linear-to-br from-[#2563eb] to-[#38bdf8] text-white shadow-[0_10px_30px_rgba(37,99,235,0.6)] transition-all duration-300 hover:scale-110 active:scale-95 group-hover:scale-100 ring-1 ring-white/40 cursor-pointer"
+          class="flex h-12 w-12 scale-90 items-center justify-center rounded-full bg-linear-to-br from-[#2563eb] to-[#38bdf8] text-white shadow-[0_8px_24px_rgba(37,99,235,0.55)] transition-transform duration-150 ease-out hover:scale-105 active:scale-95 group-hover:scale-100 ring-1 ring-white/40 cursor-pointer"
           :title="t('actions.playAll')"
           :aria-label="t('actions.playAll')"
           @click.stop.prevent="handlePlayClick"
@@ -388,7 +124,6 @@ const handleMouseLeave = () => {
 <style scoped>
 .hero-card {
   min-width: 140px;
-  will-change: transform;
   transform-origin: center center;
   transform-style: preserve-3d;
 }

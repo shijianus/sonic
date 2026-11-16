@@ -154,12 +154,6 @@ const resumeAfterInteraction = () => {
 
 watch(prefersReduced, syncAutoplay)
 
-const activeBannerIndex = ref(0)
-const onBannerSlideChange = (sw: any) => {
-  activeBannerIndex.value = sw.realIndex ?? 0
-}
-const activeBanner = computed(() => state.banners[activeBannerIndex.value] || state.banners[0])
-
 const isBannerActiveSong = (item: BannerData) => {
   if (item.targetType !== 1 || !item.targetId) return false
   return String(currentSong.value?.id ?? '') === String(item.targetId)
@@ -325,22 +319,16 @@ const handleBannerClick = (item: BannerData) => {
           @focusin="pauseForInteraction"
           @focusout="resumeAfterInteraction"
         >
-          <!-- 动态海报氛围光晕背景 -->
+          <!-- 轻量径向辉光背景（移除移动端全宽 blur-2xl 海报滤镜） -->
           <div
-            class="pointer-events-none absolute -inset-2 -z-10 overflow-hidden rounded-3xl opacity-30 blur-2xl transition-opacity duration-700 ease-out"
+            class="pointer-events-none absolute -inset-2 -z-10 rounded-3xl"
+            style="background: radial-gradient(75% 80% at 50% 45%, rgba(56, 189, 248, 0.16), transparent 80%);"
             aria-hidden="true"
-          >
-            <img
-              v-if="activeBanner?.coverImgUrl"
-              :src="activeBanner.coverImgUrl"
-              class="h-full w-full object-cover scale-125 filter transition-all duration-700 ease-out"
-              alt=""
-            />
-          </div>
+          ></div>
 
           <button
             type="button"
-            class="absolute top-4 right-6 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-glass bg-[var(--glass-bg-overlay)] text-primary shadow-lg backdrop-blur-md transition-colors active:scale-95"
+            class="absolute top-4 right-6 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-glass bg-[var(--glass-bg-overlay)] text-primary shadow-lg transition-colors active:scale-95"
             :aria-label="autoplayPaused ? t('home.playCarousel') : t('home.pauseCarousel')"
             :title="autoplayPaused ? t('home.playCarousel') : t('home.pauseCarousel')"
             @click="toggleAutoplay"
@@ -354,7 +342,6 @@ const handleBannerClick = (item: BannerData) => {
             :speed="prefersReduced ? 0 : 300"
             :autoplay="prefersReduced ? false : { delay: 4000, disableOnInteraction: false }"
             @swiper="onBannerSwiper"
-            @slideChange="onBannerSlideChange"
             :pagination="{ clickable: true }"
             class="home-swiper w-full aspect-[1080/400] max-h-[45vh] overflow-visible rounded-2xl shadow-lg"
           >
@@ -376,12 +363,12 @@ const handleBannerClick = (item: BannerData) => {
                   class="absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent"
                 ></div>
 
-                <!-- 悬浮微交互：中央大号半透明磨砂播放按钮 -->
+                <!-- 悬浮微交互：中央播放按钮 -->
                 <div
-                  class="absolute inset-0 flex items-center justify-center transition-all duration-300 pointer-events-none"
+                  class="absolute inset-0 flex items-center justify-center transition-opacity duration-150 pointer-events-none"
                 >
                   <div
-                    class="flex h-11 w-11 items-center justify-center rounded-full border border-white/40 bg-black/45 text-white shadow-xl backdrop-blur-md transition-transform"
+                    class="flex h-11 w-11 items-center justify-center rounded-full border border-white/40 bg-slate-950/65 text-white shadow-xl transition-transform"
                     :class="isBannerPlaying(item) ? 'scale-105' : 'opacity-85'"
                   >
                     <span
@@ -403,14 +390,14 @@ const handleBannerClick = (item: BannerData) => {
                   <div class="flex items-center gap-1.5 text-[10px] text-white/80">
                     <span
                       v-if="item.targetType === 1"
-                      class="inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 backdrop-blur-sm"
+                      class="inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5"
                     >
                       <span class="icon-[mdi--headphones] h-2.5 w-2.5 text-sky-300" />
                       {{ isBannerPlaying(item) ? t('home.bannerNowPlaying') : t('home.bannerQuickPlay') }}
                     </span>
                     <span
                       v-else-if="item.targetType === 10"
-                      class="inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 backdrop-blur-sm"
+                      class="inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5"
                     >
                       <span class="icon-[mdi--album] h-2.5 w-2.5 text-amber-300" />
                       {{ t('home.bannerPlayAll') }}
@@ -418,10 +405,10 @@ const handleBannerClick = (item: BannerData) => {
                   </div>
                 </div>
 
-                <!-- 右下角特色角标 (贴合卡片边缘) -->
+                <!-- 右下角特色角标 -->
                 <div class="pointer-events-none absolute right-0 bottom-0 z-10">
                   <div
-                    class="inline-flex items-center gap-1 rounded-tl-xl px-2.5 py-1 text-[11px] font-semibold text-white shadow-md backdrop-blur-md bg-linear-to-r"
+                    class="inline-flex items-center gap-1 rounded-tl-xl px-2.5 py-1 text-[11px] font-semibold text-white shadow-md bg-linear-to-r"
                     :class="getBannerTagMeta(item).gradientClass"
                   >
                     <span v-if="isBannerPlaying(item)" class="flex items-end gap-0.5 h-3 pb-0.5">
@@ -443,13 +430,13 @@ const handleBannerClick = (item: BannerData) => {
           <MusicRadarSection :compact="true" />
         </div>
 
-        <section class="mb-6 px-4">
+        <section v-if="playlists.length" class="mb-6 px-4">
           <div class="mb-4 flex items-center justify-between">
             <h2 class="section-title">
               <span
                 class="flex h-7 w-7 items-center justify-center rounded-lg bg-linear-to-br from-sky-500 to-blue-600"
               >
-                <span class="icon-[mdi--playlist-star] text-primary h-4 w-4"></span>
+                <span class="icon-[mdi--playlist-star] text-[var(--glass-text-accent)] h-4 w-4"></span>
               </span>
               {{ t('home.recommendPlaylists') }}
             </h2>
@@ -465,13 +452,13 @@ const handleBannerClick = (item: BannerData) => {
                 <LazyImage
                   :src="formatCoverUrl(pl.coverImgUrl, { size: 200 })"
                   :alt="pl.name"
-                  imgClass="h-full w-full object-cover transition-transform duration-300 group-active:scale-105"
+                  imgClass="h-full w-full object-cover transition-transform duration-200 group-active:scale-105"
                 />
                 <div
                   class="absolute inset-0 bg-linear-to-t from-black/50 via-transparent to-transparent"
                 ></div>
                 <div
-                  class="bg-overlay/50 text-primary absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] backdrop-blur-sm"
+                  class="bg-slate-950/75 text-[var(--glass-text-accent)] absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium tabular-nums"
                 >
                   <span class="icon-[mdi--play] h-2.5 w-2.5"></span>
                   {{ formatCount(pl.playCount) }}
@@ -495,7 +482,7 @@ const handleBannerClick = (item: BannerData) => {
               <span
                 class="flex h-7 w-7 items-center justify-center rounded-lg bg-linear-to-br from-sky-500 to-blue-600"
               >
-                <span class="icon-[mdi--account-music] text-primary h-4 w-4"></span>
+                <span class="icon-[mdi--account-music] text-[var(--glass-text-accent)] h-4 w-4"></span>
               </span>
               {{ t('components.discover.hotArtists') }}
             </h2>
@@ -521,13 +508,13 @@ const handleBannerClick = (item: BannerData) => {
           </div>
         </section>
 
-        <section class="mb-6 px-4">
+        <section v-if="newSongs.length" class="mb-6 px-4">
           <div class="mb-4 flex items-center justify-between">
             <h2 class="section-title">
               <span
                 class="flex h-7 w-7 items-center justify-center rounded-lg bg-linear-to-br from-cyan-500 to-blue-600"
               >
-                <span class="icon-[mdi--music-note-plus] text-primary h-4 w-4"></span>
+                <span class="icon-[mdi--music-note-plus] text-[var(--glass-text-accent)] h-4 w-4"></span>
               </span>
               {{ t('components.discover.newSongs') }}
             </h2>
@@ -541,7 +528,7 @@ const handleBannerClick = (item: BannerData) => {
               <span
                 class="flex h-7 w-7 items-center justify-center rounded-lg bg-linear-to-br from-cyan-500 to-blue-600"
               >
-                <span class="icon-[mdi--video] text-primary h-4 w-4"></span>
+                <span class="icon-[mdi--video] text-[var(--glass-text-accent)] h-4 w-4"></span>
               </span>
               {{ t('components.discover.recommendMv') }}
             </h2>
@@ -552,32 +539,32 @@ const handleBannerClick = (item: BannerData) => {
           </div>
           <div class="grid grid-cols-2 gap-3">
             <router-link v-for="mv in mvs" :key="mv.id" :to="`/mv-player/${mv.id}`" class="group">
-              <div class="mv-cover relative aspect-video overflow-hidden rounded-xl">
+              <div class="mv-cover relative aspect-video overflow-hidden rounded-xl border border-glass/60">
                 <LazyImage
                   :src="formatCoverUrl(mv.cover, { size: 320 })"
                   :alt="mv.name"
-                  imgClass="h-full w-full object-cover transition-transform duration-300 group-active:scale-105"
+                  imgClass="h-full w-full object-cover transition-transform duration-200 group-active:scale-105"
                 />
                 <div
-                  class="absolute inset-0 bg-linear-to-t from-black/70 via-transparent to-transparent"
+                  class="absolute inset-0 bg-linear-to-t from-black/55 via-transparent to-transparent"
                 ></div>
                 <div
-                  class="bg-overlay/50 text-primary absolute top-2 right-2 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] backdrop-blur-sm"
+                  class="bg-slate-950/75 text-[var(--glass-text-accent)] absolute top-1.5 right-1.5 flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[11px] font-medium tabular-nums"
                 >
                   <span class="icon-[mdi--play] h-2.5 w-2.5"></span>
                   {{ formatCount(mv.playCount ?? 0) }}
                 </div>
                 <div class="absolute inset-0 flex items-center justify-center">
                   <div
-                    class="flex h-10 w-10 items-center justify-center rounded-full bg-white/20 backdrop-blur-sm"
+                    class="flex h-9 w-9 items-center justify-center rounded-full bg-slate-950/60 shadow-md ring-1 ring-sky-400/35"
                   >
-                    <span class="icon-[mdi--play] text-primary h-5 w-5"></span>
+                    <span class="icon-[mdi--play] text-[var(--glass-text-accent)] h-5 w-5"></span>
                   </div>
                 </div>
-                <div class="absolute right-0 bottom-0 left-0 p-2">
-                  <p class="text-primary truncate text-xs font-medium">{{ mv.name }}</p>
-                  <p class="text-primary/60 truncate text-[11px]">{{ mv.artist }}</p>
-                </div>
+              </div>
+              <div class="mt-1.5 min-w-0 px-0.5">
+                <p class="text-primary line-clamp-1 text-xs font-semibold leading-tight">{{ mv.name }}</p>
+                <p class="text-primary/60 mt-0.5 line-clamp-1 text-[11px]">{{ mv.artist }}</p>
               </div>
             </router-link>
           </div>
@@ -597,7 +584,7 @@ const handleBannerClick = (item: BannerData) => {
   height: 6px;
   background: rgba(255, 255, 255, 0.4);
   opacity: 1;
-  transition: all 0.3s;
+  transition: width 0.2s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.2s ease;
 }
 
 .home-swiper :deep(.swiper-pagination-bullet-active) {

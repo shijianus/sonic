@@ -1,11 +1,10 @@
 <script setup lang="ts">
-import { gsap } from 'gsap'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import { formatDurationOrDash } from '@/utils/time'
 import { useAudio } from '@/composables/useAudio'
+import { useSharedElement } from '@/composables/useSharedElement'
 import { formatCoverUrl } from '@/utils/imageUrl'
 import type { Song as StoreSong } from '@/stores/interface'
-import { prefersReducedMotion } from '@/utils/motion'
 import { songIdentityKey } from '@/utils/songIdentity'
 
 interface Props {
@@ -41,6 +40,7 @@ const router = useRouter()
 const cardRef = ref<HTMLElement | null>(null)
 const coverRef = ref<HTMLElement | null>(null)
 const { playAfterCurrent, currentSong, isPlaying } = useAudio()
+const { flyTo } = useSharedElement()
 
 const isCurrent = computed(() => {
   const current = currentSong.value
@@ -57,7 +57,6 @@ const handleClick = async (_event: MouseEvent) => {
 
   const coverEl = coverRef.value
   const footerCover = document.getElementById('footer-cover')
-  const rect = coverEl.getBoundingClientRect()
 
   // 播放歌曲
   const rawSong = props.song as any
@@ -86,141 +85,13 @@ const handleClick = async (_event: MouseEvent) => {
   }
   playAfterCurrent(storeSong)
 
-  if (prefersReducedMotion()) return
-
-  // 如果能找到 footer 封面，执行抛物线飞行动画
   if (footerCover && props.song.cover) {
-    const targetRect = footerCover.getBoundingClientRect()
-
-    // 计算起点和终点中心
-    const startX = rect.left + rect.width / 2
-    const startY = rect.top + rect.height / 2
-    const endX = targetRect.left + targetRect.width / 2
-    const endY = targetRect.top + targetRect.height / 2
-
-    const deltaX = endX - startX
-    const deltaY = endY - startY
-    // 抛物线高度（向上弯曲）
-    const arcHeight = Math.min(Math.abs(deltaX) * 0.5, 120) * -1
-
-    // 创建飞行克隆
-    const clone = document.createElement('div')
-    clone.className = 'song-cover-clone'
-    clone.style.cssText = `
-      position: fixed;
-      z-index: 10000;
-      width: ${rect.width}px;
-      height: ${rect.height}px;
-      left: ${rect.left}px;
-      top: ${rect.top}px;
-      border-radius: 12px;
-      background-image: url(${formatCoverUrl(props.song.cover, { size: 100, artist: props.song.artist })});
-      background-size: cover;
-      background-position: center;
-      pointer-events: none;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.3);
-      will-change: transform, width, height, left, top;
-    `
-    document.body.appendChild(clone)
-
-    // 添加涟漪效果
-    const ripple = document.createElement('div')
-    ripple.style.cssText = `
-      position: fixed;
-      z-index: 9999;
-      width: ${rect.width}px;
-      height: ${rect.height}px;
-      left: ${rect.left}px;
-      top: ${rect.top}px;
-      border-radius: 12px;
-      border: 2px solid rgba(56,189,248, 0.6);
-      pointer-events: none;
-    `
-    document.body.appendChild(ripple)
-
-    // 涟漪扩散
-    gsap.to(ripple, {
-      scale: 1.5,
-      opacity: 0,
-      duration: 0.5,
-      ease: 'power2.out',
-      onComplete: () => ripple.remove(),
-    })
-
-    // 抛物线飞行动画
-    const progress = { t: 0 }
-    gsap.to(progress, {
-      t: 1,
-      duration: 0.55,
-      ease: 'power2.out',
-      onUpdate: () => {
-        const t = progress.t
-
-        // 线性插值 X 和尺寸
-        const currentX = startX + deltaX * t
-        const currentWidth = rect.width + (targetRect.width - rect.width) * t
-        const currentHeight = rect.height + (targetRect.height - rect.height) * t
-
-        // 抛物线 Y：4*t*(1-t) 在 t=0.5 时达到最大值 1
-        const parabola = 4 * t * (1 - t)
-        const currentY = startY + deltaY * t + arcHeight * parabola
-
-        // 旋转角度（增加动感）
-        const rotation = (1 - t) * (deltaX > 0 ? 12 : -12)
-
-        clone.style.left = `${currentX - currentWidth / 2}px`
-        clone.style.top = `${currentY - currentHeight / 2}px`
-        clone.style.width = `${currentWidth}px`
-        clone.style.height = `${currentHeight}px`
-        clone.style.transform = `rotate(${rotation}deg)`
-        clone.style.borderRadius = `${12 + (8 - 12) * t}px`
-      },
-      onComplete: () => {
-        gsap.to(clone, {
-          opacity: 0,
-          scale: 0.8,
-          duration: 0.15,
-          onComplete: () => clone.remove(),
-        })
-      },
-    })
-  }
-}
-
-// 悬停效果
-const handleMouseEnter = () => {
-  if (prefersReducedMotion()) return
-  if (cardRef.value) {
-    gsap.to(cardRef.value, {
-      x: 4,
-      duration: 0.2,
-      ease: 'power2.out',
-    })
-  }
-  if (coverRef.value) {
-    gsap.to(coverRef.value, {
-      scale: 1.1,
-      duration: 0.3,
-      ease: 'power2.out',
-    })
-  }
-}
-
-const handleMouseLeave = () => {
-  if (prefersReducedMotion()) return
-  if (cardRef.value) {
-    gsap.to(cardRef.value, {
-      x: 0,
-      duration: 0.2,
-      ease: 'power2.out',
-    })
-  }
-  if (coverRef.value) {
-    gsap.to(coverRef.value, {
-      scale: 1,
-      duration: 0.3,
-      ease: 'power2.out',
-    })
+    void flyTo(
+      coverEl,
+      footerCover,
+      formatCoverUrl(props.song.cover, { size: 100, artist: props.song.artist }),
+      { duration: 0.35 }
+    )
   }
 }
 </script>
@@ -229,11 +100,9 @@ const handleMouseLeave = () => {
   <button
     ref="cardRef"
     type="button"
-    class="song-card group flex w-full cursor-pointer items-center gap-4 rounded-2xl p-3.5 text-left transition-all duration-200 outline-none hover:bg-white/10 focus-visible:ring-2 focus-visible:ring-sky-400/70"
+    class="song-card group flex w-full cursor-pointer items-center gap-4 rounded-2xl p-3.5 text-left transition-colors duration-150 outline-none hover:bg-white/10 active:scale-[0.99] focus-visible:ring-2 focus-visible:ring-sky-400/70"
     :aria-current="isCurrent ? 'true' : undefined"
     @click="handleClick"
-    @mouseenter="handleMouseEnter"
-    @mouseleave="handleMouseLeave"
   >
     <!-- 排名 -->
     <span
@@ -253,10 +122,10 @@ const handleMouseLeave = () => {
         :src="formatCoverUrl(song.cover, { size: 100, artist: song.artist })"
         :fallback-src="formatCoverUrl('', { artist: song.artist })"
         alt="cover"
-        img-class="h-full w-full object-cover"
+        img-class="h-full w-full object-cover transition-transform duration-200 ease-out group-hover:scale-105"
       />
       <div
-        class="songcard-hover-play absolute inset-0 flex items-center justify-center transition-all"
+        class="songcard-hover-play absolute inset-0 flex items-center justify-center transition-[opacity,background-color] duration-150"
         :class="isCurrent ? 'bg-black/45 opacity-100' : 'bg-black/0 opacity-0 group-hover:bg-black/40 group-hover:opacity-100'"
       >
         <span
@@ -276,7 +145,7 @@ const handleMouseLeave = () => {
     <div class="min-w-0 flex-1">
       <p
         class="line-clamp-1 text-sm font-semibold transition-colors group-hover:text-[#60a5fa]"
-        :class="isCurrent ? 'text-sky-300' : 'text-primary'"
+        :class="isCurrent ? 'text-[#2563eb] dark:text-sky-300' : 'text-primary'"
       >
         {{ song.name }}
       </p>
@@ -291,10 +160,6 @@ const handleMouseLeave = () => {
 </template>
 
 <style scoped>
-.song-card {
-  will-change: transform;
-}
-
 @media (hover: none) {
   .songcard-hover-play {
     opacity: 1;

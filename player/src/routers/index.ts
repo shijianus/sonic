@@ -24,17 +24,27 @@ const getHistory = () => {
 // desktopLoader 与 mobileLoader 为对应组件的动态导入函数
 // 横屏手机（如 844×390）高度不足 500px，即使宽度超过平板阈值也使用移动布局；
 // 820×700 平板仍使用桌面布局并启用紧凑底栏。
-const responsive = (desktopLoader: () => Promise<any>, mobileLoader: () => Promise<any>) =>
-  defineComponent({
+// 共享断点监听与提升后的异步组件定义，避免每次路由切换重复创建 wrapper
+let sharedIsMobile: ReturnType<typeof useMediaQuery> | null = null
+const getSharedIsMobile = () => {
+  if (!sharedIsMobile) {
+    sharedIsMobile = useMediaQuery('(max-width: 819px), (max-height: 499px)')
+  }
+  return sharedIsMobile
+}
+
+const responsive = (desktopLoader: () => Promise<any>, mobileLoader: () => Promise<any>) => {
+  const Desktop = defineAsyncComponent(desktopLoader)
+  const Mobile = defineAsyncComponent(mobileLoader)
+
+  return defineComponent({
     name: 'ResponsiveRouteComponent',
     setup() {
-      const isMobile = useMediaQuery('(max-width: 819px), (max-height: 499px)')
-      // 异步组件定义，按需加载对应端的页面组件
-      const Desktop = defineAsyncComponent(desktopLoader)
-      const Mobile = defineAsyncComponent(mobileLoader)
+      const isMobile = getSharedIsMobile()
       return () => h(isMobile.value ? Mobile : Desktop)
     },
   })
+}
 
 const router = createRouter({
   history: getHistory(),

@@ -228,7 +228,7 @@ onMounted(() => {
               <LazyImage
                 :src="formatCoverUrl(mv.cover, { size: 480 })"
                 :alt="mv.title || t('mvList.alt.cover')"
-                imgClass="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                imgClass="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
                 wrapperClass="h-full w-full"
               />
               <div
@@ -237,7 +237,7 @@ onMounted(() => {
               <!-- 左上角分类真实 Tag 徽标 -->
               <div v-if="mv.tag" class="absolute top-2 left-2 z-10">
                 <span
-                  class="inline-flex items-center gap-1 rounded-md bg-black/65 px-2 py-0.5 text-[11px] font-semibold text-sky-300 backdrop-blur-md border border-glass shadow-sm"
+                  class="inline-flex items-center gap-1 rounded-md bg-slate-950/75 px-2 py-0.5 text-[11px] font-semibold text-sky-300 border border-glass shadow-sm"
                 >
                   <span class="h-1.5 w-1.5 rounded-full bg-sky-400"></span>
                   {{ mv.tag }}
@@ -245,7 +245,7 @@ onMounted(() => {
               </div>
               <!-- 右上角悬浮快捷操作（喜欢与分享） -->
               <div
-                class="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-lg bg-black/60 p-1 opacity-0 backdrop-blur-md transition-opacity duration-200 group-hover:opacity-100"
+                class="absolute top-2 right-2 z-10 flex items-center gap-1 rounded-lg bg-slate-950/75 p-1 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
               >
                 <button
                   type="button"
@@ -277,16 +277,16 @@ onMounted(() => {
               <!-- 右下角时长徽标 -->
               <span
                 v-if="mv.duration > 0"
-                class="absolute right-2 bottom-2 z-10 rounded-md bg-black/80 px-1.5 py-0.5 text-[11px] font-medium text-white backdrop-blur-md"
+                class="absolute right-2 bottom-2 z-10 rounded-md bg-slate-950/80 px-1.5 py-0.5 text-[11px] font-medium text-white tabular-nums"
               >
                 {{ formatSec(mv.duration) }}
               </span>
               <!-- 悬停播放微动效 -->
               <div
-                class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 transition-opacity duration-300 group-hover:opacity-100"
+                class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
               >
                 <div
-                  class="flex h-11 w-11 items-center justify-center rounded-full bg-sky-500/95 text-white shadow-xl backdrop-blur-sm transition-transform duration-300 group-hover:scale-110"
+                  class="flex h-11 w-11 items-center justify-center rounded-full bg-sky-500/95 text-white shadow-xl transition-transform duration-150 group-hover:scale-105"
                 >
                   <span class="icon-[mdi--play] h-6 w-6"></span>
                 </div>

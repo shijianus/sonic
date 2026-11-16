@@ -13,8 +13,17 @@ const state = reactive({
   dragVolume: null as number | null,
   showVolumePreview: false,
   previewVolume: 0,
-  previewPosition: 0,
+  previewPercent: 0,
 })
+
+let cachedRect: DOMRect | null = null
+const getBarRect = () => {
+  if (!volumeBarRef.value) return null
+  if (!cachedRect) {
+    cachedRect = volumeBarRef.value.getBoundingClientRect()
+  }
+  return cachedRect
+}
 
 const volumeIcon = computed(() => {
   if (isMuted.value || volume.value === 0) return 'icon-[mdi--volume-off]'
@@ -26,21 +35,25 @@ const volumeIcon = computed(() => {
 const handleVolumeHover = (event: MouseEvent) => {
   if (!volumeBarRef.value) return
   const rect = volumeBarRef.value.getBoundingClientRect()
+  cachedRect = rect
+  if (!rect.width) return
   const hoverX = event.clientX - rect.left
   const hoverVolume = Math.max(0, Math.min(1, hoverX / rect.width))
 
   state.previewVolume = hoverVolume
-  state.previewPosition = hoverX
+  state.previewPercent = hoverVolume * 100
   state.showVolumePreview = true
 }
 
 const handleVolumeLeave = () => {
   state.showVolumePreview = false
+  if (!state.isDragging) cachedRect = null
 }
 
 const handleVolumeDrag = (clientX: number) => {
-  if (!state.isDragging || !volumeBarRef.value) return
-  const rect = volumeBarRef.value.getBoundingClientRect()
+  if (!state.isDragging) return
+  const rect = getBarRect()
+  if (!rect || !rect.width) return
   const x = clientX - rect.left
   const newVolume = Math.max(0, Math.min(1, x / rect.width))
   state.dragVolume = newVolume
@@ -48,7 +61,7 @@ const handleVolumeDrag = (clientX: number) => {
   setVolume(newVolume)
 
   state.previewVolume = newVolume
-  state.previewPosition = x
+  state.previewPercent = newVolume * 100
 }
 
 const startDrag = (event: MouseEvent | TouchEvent) => {
@@ -57,6 +70,7 @@ const startDrag = (event: MouseEvent | TouchEvent) => {
   } else {
     event.preventDefault()
   }
+  cachedRect = volumeBarRef.value?.getBoundingClientRect() ?? null
   state.isDragging = true
   state.dragVolume = volume.value
   document.body.style.userSelect = 'none'
@@ -68,6 +82,7 @@ const startDrag = (event: MouseEvent | TouchEvent) => {
 const stopDrag = () => {
   state.isDragging = false
   state.dragVolume = null
+  cachedRect = null
   document.body.style.userSelect = ''
 }
 
@@ -87,6 +102,7 @@ const handleTouchMove = (event: TouchEvent) => {
 const handleVolumeClick = (event: MouseEvent) => {
   if (!volumeBarRef.value) return
   const rect = volumeBarRef.value.getBoundingClientRect()
+  if (!rect.width) return
   const clickX = event.clientX - rect.left
   const newVolume = Math.max(0, Math.min(1, clickX / rect.width))
   setVolume(newVolume)
@@ -101,13 +117,12 @@ const displayVolume = computed(() => {
   return (state.isDragging && state.dragVolume !== null ? state.dragVolume : volume.value) * 100
 })
 
+const volumeScaleStyle = computed(() => ({
+  transform: `scaleX(${Math.max(0, Math.min(1, displayVolume.value / 100))})`,
+}))
+
 const previewPositionPercent = computed(() => {
-  if (state.isDragging) {
-    return displayVolume.value
-  }
-  if (!volumeBarRef.value) return 0
-  const width = volumeBarRef.value.getBoundingClientRect().width
-  return width > 0 ? (state.previewPosition / width) * 100 : 0
+  return state.isDragging ? displayVolume.value : state.previewPercent
 })
 
 const previewVolumeText = computed(() => {
@@ -176,12 +191,12 @@ const handleVolumeKeydown = (event: KeyboardEvent) => {
       </Transition>
 
       <div
-        class="progress-track absolute top-1/2 right-0 left-0 h-1 -translate-y-1/2 rounded-full transition-all group-hover:h-1.5"
-        :class="state.isDragging ? 'h-1.5' : ''"
+        class="progress-track absolute top-1/2 right-0 left-0 h-1 -translate-y-1/2 overflow-hidden rounded-full transition-transform duration-150 group-hover:scale-y-150"
+        :class="state.isDragging ? 'scale-y-150' : ''"
       >
         <div
-          class="progress-fill absolute inset-y-0 left-0 rounded-full"
-          :style="{ width: `${displayVolume}%` }"
+          class="progress-fill absolute inset-0 origin-left rounded-full will-change-transform"
+          :style="volumeScaleStyle"
         ></div>
       </div>
     </div>
@@ -202,7 +217,6 @@ const handleVolumeKeydown = (event: KeyboardEvent) => {
 .progress-fill {
   background: linear-gradient(90deg, #38bdf8, #2563eb);
   box-shadow: 0 0 10px rgba(56,189,248, 0.25);
-  transition: width 0.05s linear;
 }
 
 .volume-preview {

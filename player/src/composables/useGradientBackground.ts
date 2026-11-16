@@ -75,34 +75,10 @@ export function useGradientBackground(options: GradientBackgroundOptions) {
   })
 
   /**
-   * 开始背景呼吸动画
+   * 保留导出签名以兼容调用方；渐变背景本身已足够平滑，避免大面积连续呼吸重绘
    */
   const startBackgroundBreathing = () => {
     stopBackgroundBreathing()
-
-    if (bgARef.value && parseFloat(getComputedStyle(bgARef.value).opacity) > 0) {
-      const tween = gsap.to(bgARef.value, {
-        scale: '+=0.05',
-        opacity: '+=0.05',
-        duration: 2,
-        repeat: -1,
-        yoyo: true,
-        ease: 'sine.inOut',
-      })
-      bgBreathingTweens.push(tween)
-    }
-
-    if (bgBRef.value && parseFloat(getComputedStyle(bgBRef.value).opacity) > 0) {
-      const tween = gsap.to(bgBRef.value, {
-        scale: '+=0.05',
-        opacity: '+=0.05',
-        duration: 2,
-        repeat: -1,
-        yoyo: true,
-        ease: 'sine.inOut',
-      })
-      bgBreathingTweens.push(tween)
-    }
   }
 
   /**
@@ -132,14 +108,11 @@ export function useGradientBackground(options: GradientBackgroundOptions) {
       if (state.bgAGradient.length === 0 && state.bgBGradient.length === 0) {
         state.bgAGradient = palette.gradient
         if (bgARef.value) {
-          gsap.set(bgARef.value, { opacity: 0, scale: 1.6 })
-          gsap.to(bgARef.value, {
-            opacity: 0.55,
-            scale: 1.5,
-            duration: 1.2,
-            ease: 'power2.out',
-           
-          })
+          gsap.fromTo(
+            bgARef.value,
+            { opacity: 0 },
+            { opacity: 0.55, duration: 0.45, ease: 'power2.out' }
+          )
         }
         state.bgActive = 'A'
         return
@@ -156,20 +129,17 @@ export function useGradientBackground(options: GradientBackgroundOptions) {
       }
 
       if (incomingRef.value) {
-        gsap.set(incomingRef.value, { opacity: 0, scale: 1.6 })
-        gsap.to(incomingRef.value, {
-          opacity: 0.55,
-          scale: 1.5,
-          duration: 1.4,
-          ease: 'power2.inOut',
-        })
+        gsap.fromTo(
+          incomingRef.value,
+          { opacity: 0 },
+          { opacity: 0.55, duration: 0.5, ease: 'power2.inOut' }
+        )
       }
 
       if (outgoingRef.value) {
         gsap.to(outgoingRef.value, {
           opacity: 0,
-          scale: 1.45,
-          duration: 1.4,
+          duration: 0.5,
           ease: 'power2.inOut',
         })
       }

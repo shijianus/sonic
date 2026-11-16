@@ -1,10 +1,8 @@
 <script setup lang="ts">
-import { gsap } from 'gsap'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import { formatCount } from '@/utils/time'
 import { formatCoverUrl } from '@/utils/imageUrl'
-import { escapeHtmlAttribute } from '@/utils/escapeHtml'
-import { prefersReducedMotion } from '@/utils/motion'
+import { useCardTilt } from '@/composables/useCardTilt'
 
 interface Props {
   id: number | string
@@ -22,308 +20,21 @@ const props = withDefaults(defineProps<Props>(), {
 
 const router = useRouter()
 const cardRef = ref<HTMLElement | null>(null)
-const isHovering = ref(false)
-const isAnimating = ref(false)
 const resolvedHref = computed(() => router.resolve(props.to).href)
 
-// Tilt 效果配置
-const tiltConfig = {
-  max: 15,
-  scale: 1.04,
-  speed: 400,
-  glareMax: 0.2,
-}
-
-// 光泽层
-const glareRef = ref<HTMLElement | null>(null)
-
-onMounted(() => {
-  if (props.enableTilt && cardRef.value && !prefersReducedMotion()) {
-    const glareEl = document.createElement('div')
-    glareEl.className = 'tilt-glare'
-    glareEl.style.cssText = `
-      position: absolute;
-      inset: 0;
-      border-radius: inherit;
-      pointer-events: none;
-      background: linear-gradient(
-        135deg,
-        rgba(255, 255, 255, 0) 0%,
-        rgba(255, 255, 255, 0) 50%,
-        rgba(255, 255, 255, ${tiltConfig.glareMax}) 100%
-      );
-      opacity: 0;
-      transition: opacity ${tiltConfig.speed}ms ease;
-      z-index: 20;
-    `
-    const innerCard = cardRef.value.querySelector('.mv-card-inner')
-    if (innerCard) {
-      innerCard.appendChild(glareEl)
-      glareRef.value = glareEl
-    }
-  }
+const {
+  onMouseEnter: handleMouseEnter,
+  onMouseMove: handleMouseMove,
+  onMouseLeave: handleMouseLeave,
+} = useCardTilt(cardRef, {
+  enabled: () => props.enableTilt,
 })
 
-onUnmounted(() => {
-  glareRef.value?.remove()
-})
-
-// 3D Tilt 鼠标移动
-const handleMouseMove = (e: MouseEvent) => {
-  if (!cardRef.value || prefersReducedMotion()) return
-
-  const card = cardRef.value
-  const rect = card.getBoundingClientRect()
-  const centerX = rect.left + rect.width / 2
-  const centerY = rect.top + rect.height / 2
-
-  const mouseX = (e.clientX - centerX) / (rect.width / 2)
-  const mouseY = (e.clientY - centerY) / (rect.height / 2)
-
-  if (props.enableTilt) {
-    const rotateX = -mouseY * tiltConfig.max
-    const rotateY = mouseX * tiltConfig.max
-
-    gsap.to(card, {
-      rotateX,
-      rotateY,
-      scale: tiltConfig.scale,
-      duration: 0.1,
-      ease: 'power2.out',
-      transformPerspective: 1000,
-    })
-
-    // 更新光泽
-    if (glareRef.value) {
-      const angle = Math.atan2(mouseY, mouseX) * (180 / Math.PI) + 135
-      const intensity = Math.sqrt(mouseX ** 2 + mouseY ** 2)
-      glareRef.value.style.background = `linear-gradient(${angle}deg, rgba(255, 255, 255, 0) 0%, rgba(255, 255, 255, ${tiltConfig.glareMax * intensity}) 100%)`
-      glareRef.value.style.opacity = '1'
-    }
-  }
-}
-
-// 悬停效果
-const handleMouseEnter = () => {
-  if (!cardRef.value || prefersReducedMotion()) return
-  isHovering.value = true
-
-  if (!props.enableTilt) {
-    // 如果没有启用 tilt，使用原来的效果
-    gsap.to(cardRef.value, {
-      scale: 1.03,
-      y: -6,
-      duration: 0.3,
-      ease: 'power2.out',
-    })
-  }
-
-  // 播放按钮出现动画
-  const playBtn = cardRef.value.querySelector('.play-button')
-  if (playBtn) {
-    gsap.to(playBtn, {
-      scale: 1,
-      opacity: 1,
-      duration: 0.3,
-      ease: 'back.out(1.7)',
-    })
-  }
-
-  // 播放图标脉冲
-  const playIcon = cardRef.value.querySelector('.play-icon')
-  if (playIcon) {
-    gsap.to(playIcon, {
-      scale: 1.1,
-      duration: 0.6,
-      yoyo: true,
-      repeat: -1,
-      ease: 'power1.inOut',
-    })
-  }
-}
-
-const handleMouseLeave = () => {
-  if (!cardRef.value || prefersReducedMotion()) return
-  isHovering.value = false
-
-  gsap.to(cardRef.value, {
-    rotateX: 0,
-    rotateY: 0,
-    scale: 1,
-    y: 0,
-    duration: 0.5,
-    ease: 'elastic.out(1, 0.5)',
-    transformPerspective: 1000,
-  })
-
-  if (glareRef.value) {
-    glareRef.value.style.opacity = '0'
-  }
-
-  const playBtn = cardRef.value.querySelector('.play-button')
-  if (playBtn) {
-    gsap.to(playBtn, {
-      scale: 0.8,
-      opacity: 0,
-      duration: 0.2,
-      ease: 'power2.in',
-    })
-  }
-
-  const playIcon = cardRef.value.querySelector('.play-icon')
-  if (playIcon) {
-    gsap.killTweensOf(playIcon)
-    gsap.set(playIcon, { scale: 1 })
-  }
-}
-
-// 点击动画
-const handleClick = async (event: MouseEvent) => {
+// 即时导航，去除阻塞式点击克隆与无限脉冲动画
+const handleClick = (event: MouseEvent) => {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
   event.preventDefault()
-  if (isAnimating.value) return
-  if (!cardRef.value) {
-    router.push(props.to)
-    return
-  }
-  if (prefersReducedMotion()) {
-    router.push(props.to)
-    return
-  }
-
-  isAnimating.value = true
-  const card = cardRef.value
-  const rect = card.getBoundingClientRect()
-
-  // 创建展开遮罩
-  const overlay = document.createElement('div')
-  overlay.style.cssText = `
-    position: fixed;
-    z-index: 9998;
-    inset: 0;
-    background: rgba(0,0,0,0);
-    pointer-events: none;
-  `
-  document.body.appendChild(overlay)
-
-  const clone = document.createElement('div')
-  const cleanCover = escapeHtmlAttribute(
-    formatCoverUrl(props.cover, { width: 800, height: 450, artist: props.artist })
-  )
-  clone.innerHTML = `
-    <div style="
-      position: absolute;
-      inset: 0;
-      background-image: url(${cleanCover});
-      background-size: cover;
-      background-position: center;
-    "></div>
-    <div style="
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      background: rgba(0,0,0,0.4);
-    ">
-      <div style="
-        width: 80px;
-        height: 80px;
-        border-radius: 50%;
-        background: rgba(255,255,255,0.2);
-        backdrop-filter: blur(10px);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-      ">
-        <div style="
-          width: 0;
-          height: 0;
-          border-left: 24px solid white;
-          border-top: 14px solid transparent;
-          border-bottom: 14px solid transparent;
-          margin-left: 6px;
-        "></div>
-      </div>
-      <p class="mv-clone-name" style="
-        margin-top: 20px;
-        font-size: 18px;
-        font-weight: 600;
-        color: white;
-        text-align: center;
-        max-width: 80%;
-      "></p>
-      <p class="mv-clone-artist" style="
-        margin-top: 8px;
-        font-size: 14px;
-        color: rgba(255,255,255,0.7);
-      "></p>
-    </div>
-  `
-  const cloneName = clone.querySelector('.mv-clone-name')
-  if (cloneName) cloneName.textContent = props.name
-  const cloneArtist = clone.querySelector('.mv-clone-artist')
-  if (cloneArtist) cloneArtist.textContent = props.artist
-  clone.style.cssText = `
-    position: fixed;
-    z-index: 9999;
-    width: ${rect.width}px;
-    height: ${rect.height}px;
-    left: ${rect.left}px;
-    top: ${rect.top}px;
-    border-radius: 16px;
-    overflow: hidden;
-    pointer-events: none;
-    will-change: transform, width, height, left, top;
-  `
-  document.body.appendChild(clone)
-
-  // 隐藏原始卡片
-  card.style.opacity = '0'
-
-  // 目标尺寸（16:9 比例）
-  const targetWidth = Math.min(800, window.innerWidth - 48)
-  const targetHeight = targetWidth * 9 / 16
-  const targetLeft = (window.innerWidth - targetWidth) / 2
-  const targetTop = (window.innerHeight - targetHeight) / 2
-
-  const tl = gsap.timeline({
-    onComplete: () => {
-      router.push(props.to)
-      setTimeout(() => {
-        clone.remove()
-        overlay.remove()
-        card.style.opacity = '1'
-        isAnimating.value = false
-      }, 0)
-    },
-  })
-
-  // 背景淡入
-  tl.to(overlay, {
-    background: 'rgba(0,0,0,0.7)',
-    duration: 0.12,
-    ease: 'power2.out',
-  }, 0)
-
-  // 卡片展开
-  tl.to(clone, {
-    width: targetWidth,
-    height: targetHeight,
-    left: targetLeft,
-    top: targetTop,
-    borderRadius: '20px',
-    duration: 0.18,
-    ease: 'power3.out',
-  }, 0)
-
-  // 短暂停留后淡出
-  tl.to([clone, overlay], {
-    opacity: 0,
-    duration: 0.05,
-    ease: 'power2.in',
-  }, '+=0.01')
+  router.push(props.to)
 }
 </script>
 
@@ -331,28 +42,28 @@ const handleClick = async (event: MouseEvent) => {
   <a
     ref="cardRef"
     :href="resolvedHref"
-    class="mv-card group block cursor-pointer rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70"
+    class="mv-card group block cursor-pointer rounded-2xl outline-none transition-transform duration-150 ease-out active:scale-[0.98] focus-visible:ring-2 focus-visible:ring-sky-400/70"
     @click="handleClick"
     @mousemove="handleMouseMove"
     @mouseenter="handleMouseEnter"
     @mouseleave="handleMouseLeave"
   >
-    <div class="mv-card-inner relative aspect-video overflow-hidden rounded-2xl shadow-xl">
+    <div class="mv-card-inner border-glass/60 relative aspect-video overflow-hidden rounded-2xl border shadow-xl transition-[border-color,box-shadow] duration-200 group-hover:border-sky-400/40">
       <LazyImage
         :src="formatCoverUrl(cover, { width: 400, height: 225, artist })"
         :fallback-src="formatCoverUrl('', { artist })"
         :alt="name"
-        img-class="h-full w-full object-cover transition-all duration-700 group-hover:scale-110 group-hover:brightness-75"
+        img-class="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
         wrapper-class="h-full w-full"
       />
 
       <!-- 渐变遮罩 -->
       <div class="absolute inset-0 bg-linear-to-t from-black/80 via-black/20 to-transparent" />
 
-      <!-- 播放量 -->
+      <!-- 播放量（移除 backdrop-blur-sm 消除滚动合成开销） -->
       <div
         v-if="playCount"
-        class="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-black/60 px-2 py-1 text-[11px] text-white backdrop-blur-sm"
+        class="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-slate-950/75 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums border border-sky-400/20"
       >
         <span class="icon-[mdi--play] h-3 w-3" />
         {{ formatCount(playCount) }}
@@ -360,11 +71,10 @@ const handleClick = async (event: MouseEvent) => {
 
       <!-- 悬停播放按钮 -->
       <div
-        ref="overlayRef"
-        class="absolute inset-0 flex items-center justify-center"
+        class="pointer-events-none absolute inset-0 flex items-center justify-center"
       >
         <div
-          class="play-button flex h-14 w-14 scale-80 items-center justify-center rounded-full bg-gradient-to-br from-[#2563eb] to-[#38bdf8] text-white opacity-0 shadow-[0_10px_30px_rgba(37,99,235,0.65)] ring-1 ring-white/40 transition-transform hover:scale-90"
+          class="play-button flex h-13 w-13 scale-90 items-center justify-center rounded-full bg-gradient-to-br from-[#2563eb] to-[#38bdf8] text-white opacity-0 shadow-[0_8px_24px_rgba(37,99,235,0.6)] ring-1 ring-white/40 transition-[transform,opacity] duration-150 ease-out group-hover:scale-100 group-hover:opacity-100"
         >
           <span class="play-icon icon-[mdi--play] h-7 w-7 text-white" />
         </div>
@@ -375,24 +85,12 @@ const handleClick = async (event: MouseEvent) => {
         <p class="truncate text-sm font-medium text-white">{{ name }}</p>
         <p class="mt-0.5 truncate text-[11px] text-white/70">{{ artist }}</p>
       </div>
-
-      <!-- 悬停时的彩色边框动画 -->
-      <div
-        class="absolute inset-0 rounded-2xl opacity-0 transition-opacity duration-300 group-hover:opacity-100"
-        style="
-          background: linear-gradient(135deg, #2563eb, #38bdf8, #3b82f6);
-          mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-          mask-composite: exclude;
-          padding: 2px;
-        "
-      />
     </div>
   </a>
 </template>
 
 <style scoped>
 .mv-card {
-  will-change: transform;
   transform-origin: center center;
   transform-style: preserve-3d;
 }

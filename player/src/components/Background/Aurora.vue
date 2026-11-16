@@ -3,8 +3,9 @@
 </template>
 
 <script setup lang="ts">
-import { type CSSProperties, useTemplateRef } from 'vue'
+import { type CSSProperties, onMounted, onUnmounted, useTemplateRef, watch } from 'vue'
 import { Renderer, Program, Mesh, Color, Triangle } from 'ogl'
+import { useAmbientMotion } from '@/composables/useAmbientMotion'
 
 interface AuroraProps {
   colorStops?: string[]
@@ -141,8 +142,20 @@ void main() {
 }
 `
 
+const { shouldAnimate } = useAmbientMotion()
+
 let renderer: Renderer | null = null
+let program: Program | null = null
+let mesh: Mesh | null = null
 let animateId = 0
+let resizeHandler: (() => void) | null = null
+let stopMotionWatch: (() => void) | null = null
+
+const parseColorStops = (stops: string[]) =>
+  stops.map(hex => {
+    const c = new Color(hex)
+    return [c.r, c.g, c.b]
+  })
 
 const initAurora = () => {
   const container = containerRef.value
@@ -151,7 +164,8 @@ const initAurora = () => {
   renderer = new Renderer({
     alpha: true,
     premultipliedAlpha: true,
-    antialias: true,
+    antialias: false,
+    dpr: Math.min(window.devicePixelRatio || 1, 1.25),
   })
 
   const gl = renderer.gl
@@ -160,10 +174,8 @@ const initAurora = () => {
   gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA)
   gl.canvas.style.backgroundColor = 'transparent'
 
-  let program: Program | undefined
-
   const resize = () => {
-    if (!container) return
+    if (!container || !renderer) return
 
     const parentWidth =
       container.parentElement?.offsetWidth || container.offsetWidth || window.innerWidth
@@ -173,12 +185,13 @@ const initAurora = () => {
     const width = Math.max(parentWidth, 300)
     const height = Math.max(parentHeight, 300)
 
-    renderer!.setSize(width, height)
+    renderer.setSize(width, height)
     if (program) {
       program.uniforms.uResolution.value = [width, height]
     }
   }
 
+  resizeHandler = resize
   window.addEventListener('resize', resize)
 
   const geometry = new Triangle(gl)
@@ -186,18 +199,13 @@ const initAurora = () => {
     delete geometry.attributes.uv
   }
 
-  const colorStopsArray = props.colorStops.map(hex => {
-    const c = new Color(hex)
-    return [c.r, c.g, c.b]
-  })
-
   program = new Program(gl, {
     vertex: VERT,
     fragment: FRAG,
     uniforms: {
       uTime: { value: 0 },
       uAmplitude: { value: props.amplitude },
-      uColorStops: { value: colorStopsArray },
+      uColorStops: { value: parseColorStops(props.colorStops) },
       uResolution: {
         value: [
           Math.max(
@@ -216,7 +224,7 @@ const initAurora = () => {
     },
   })
 
-  const mesh = new Mesh(gl, { geometry, program })
+  mesh = new Mesh(gl, { geometry, program })
   container.appendChild(gl.canvas)
 
   gl.canvas.style.width = '100%'
@@ -226,42 +234,51 @@ const initAurora = () => {
   gl.canvas.style.top = '0'
   gl.canvas.style.left = '0'
 
-  const update = (t: number) => {
-    animateId = requestAnimationFrame(update)
+  const renderFrame = (t: number) => {
+    if (!program || !renderer || !mesh) return
     const time = props.time ?? t * 0.01
     const speed = props.speed ?? 1.0
-    if (program) {
-      program.uniforms.uTime.value = time * speed * 0.1
-      program.uniforms.uAmplitude.value = props.amplitude ?? 1.0
-      program.uniforms.uBlend.value = props.blend ?? 0.5
-      program.uniforms.uIntensity.value = props.intensity ?? 1.0
-      const positions = props.colorPositions ?? [0.0, 0.5, 1.0]
-      program.uniforms.uColorPositions.value = positions
-      const stops = props.colorStops ?? ['#27FF64', '#7cff67', '#27FF64']
-      program.uniforms.uColorStops.value = stops.map((hex: string) => {
-        const c = new Color(hex)
-        return [c.r, c.g, c.b]
-      })
-      renderer!.render({ scene: mesh })
-    }
+    program.uniforms.uTime.value = time * speed * 0.1
+    renderer.render({ scene: mesh })
   }
-  animateId = requestAnimationFrame(update)
+
+  const update = (t: number) => {
+    if (!shouldAnimate.value) {
+      animateId = 0
+      return
+    }
+    renderFrame(t)
+    animateId = requestAnimationFrame(update)
+  }
 
   resize()
-
-  return () => {
-    cancelAnimationFrame(animateId)
-    window.removeEventListener('resize', resize)
-    if (container && gl.canvas.parentNode === container) {
-      container.removeChild(gl.canvas)
-    }
-    gl.getExtension('WEBGL_lose_context')?.loseContext()
+  renderFrame(0)
+  if (shouldAnimate.value) {
+    animateId = requestAnimationFrame(update)
   }
+
+  stopMotionWatch = watch(shouldAnimate, active => {
+    if (active) {
+      if (!animateId) {
+        animateId = requestAnimationFrame(update)
+      }
+    } else if (animateId) {
+      cancelAnimationFrame(animateId)
+      animateId = 0
+    }
+  })
 }
 
 const cleanup = () => {
+  stopMotionWatch?.()
+  stopMotionWatch = null
   if (animateId) {
     cancelAnimationFrame(animateId)
+    animateId = 0
+  }
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler)
+    resizeHandler = null
   }
   if (renderer) {
     const gl = renderer.gl
@@ -272,6 +289,8 @@ const cleanup = () => {
     gl.getExtension('WEBGL_lose_context')?.loseContext()
   }
   renderer = null
+  program = null
+  mesh = null
 }
 
 onMounted(() => {
@@ -283,11 +302,29 @@ onUnmounted(() => {
 })
 
 watch(
-  () => [props.amplitude, props.intensity],
-  () => {
-    cleanup()
-    initAurora()
+  () => [props.amplitude, props.blend, props.intensity, props.colorPositions],
+  ([amplitude, blend, intensity, colorPositions]) => {
+    if (!program) return
+    program.uniforms.uAmplitude.value = amplitude ?? 1.0
+    program.uniforms.uBlend.value = blend ?? 0.5
+    program.uniforms.uIntensity.value = intensity ?? 1.0
+    program.uniforms.uColorPositions.value = colorPositions ?? [0.0, 0.5, 1.0]
+    if (!shouldAnimate.value && renderer && mesh) {
+      renderer.render({ scene: mesh })
+    }
   }
+)
+
+watch(
+  () => props.colorStops,
+  stops => {
+    if (!program) return
+    program.uniforms.uColorStops.value = parseColorStops(stops ?? ['#7cff67', '#171D22', '#7cff67'])
+    if (!shouldAnimate.value && renderer && mesh) {
+      renderer.render({ scene: mesh })
+    }
+  },
+  { deep: true }
 )
 </script>
 

@@ -94,7 +94,7 @@ const getQualityBadgeInfo = (song: Song) => {
         />
         <div
           v-if="isCurrent(song)"
-          class="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          class="absolute inset-0 flex items-center justify-center bg-black/55"
         >
           <span
             class="text-primary h-6 w-6"

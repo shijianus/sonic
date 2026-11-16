@@ -5,12 +5,53 @@ import MobileHeader from './Header.vue'
 import MobileTabBar from './TabBar.vue'
 import PlayerDrawerMobile from '@/components/Mobile/PlayerDrawerMobile.vue'
 import { useGlobalStore } from '@/stores/modules/global'
+import { readPrefersReducedMotion } from '@/composables/useAmbientMotion'
 import { storeToRefs } from 'pinia'
 
 const globalStore = useGlobalStore()
 const { isPlayerDrawerOpen } = storeToRefs(globalStore)
 const openPlayerDrawer = () => {
   globalStore.openPlayerDrawer()
+}
+
+const clearNode = (node: HTMLElement) => {
+  node.style.transition = ''
+  node.style.opacity = ''
+  node.style.transform = ''
+}
+
+const onMobileEnter = (el: Element, done: () => void) => {
+  const node = el as HTMLElement
+  if (readPrefersReducedMotion()) {
+    clearNode(node)
+    return done()
+  }
+  node.style.transition = 'none'
+  node.style.opacity = '0'
+  setTimeout(() => {
+    node.style.transition = 'opacity 100ms cubic-bezier(0.22, 1, 0.36, 1)'
+    node.style.opacity = '1'
+    setTimeout(() => {
+      clearNode(node)
+      done()
+    }, 100)
+  }, 16)
+}
+
+const onMobileLeave = (el: Element, done: () => void) => {
+  const node = el as HTMLElement
+  if (readPrefersReducedMotion()) {
+    queueMicrotask(done)
+    return
+  }
+  node.style.transition = 'opacity 50ms ease-out'
+  setTimeout(() => {
+    node.style.opacity = '0'
+  }, 16)
+  setTimeout(() => {
+    clearNode(node)
+    done()
+  }, 66)
 }
 </script>
 
@@ -33,9 +74,11 @@ const openPlayerDrawer = () => {
       "
     >
       <router-view v-slot="{ Component, route }">
-        <keep-alive>
-          <component :is="Component" :key="route.path" />
-        </keep-alive>
+        <transition mode="out-in" :css="false" @enter="onMobileEnter" @leave="onMobileLeave">
+          <keep-alive :max="6">
+            <component :is="Component" :key="route.path" />
+          </keep-alive>
+        </transition>
       </router-view>
     </main>
 

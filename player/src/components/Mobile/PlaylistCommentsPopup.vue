@@ -96,7 +96,7 @@ watch(
     <div class="h-full overflow-y-auto p-4 space-y-4">
       <!-- 移动端发表评论 UI 占位符 -->
       <div
-        class="rounded-2xl border border-glass bg-white/5 p-3 backdrop-blur-md cursor-pointer transition-all active:scale-[0.99]"
+        class="rounded-2xl border border-glass bg-white/5 p-3 cursor-pointer transition-transform duration-150 active:scale-[0.99]"
         @click="handleCommentAction"
       >
         <div class="flex items-center gap-2.5 mb-2">

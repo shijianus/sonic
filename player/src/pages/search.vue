@@ -262,7 +262,7 @@ const maxScore = computed(() => {
         class="search-box mx-auto w-full max-w-md md:max-w-lg transition-all duration-300"
       >
         <div
-          class="flex h-11 items-center gap-2.5 rounded-full border px-3.5 backdrop-blur-xl transition-all duration-300"
+          class="flex h-11 items-center gap-2.5 rounded-full border px-3.5 transition-[border-color,background-color,box-shadow] duration-150"
           :class="[
             inputFocused
               ? 'border-sky-500/40 bg-white/[0.08] ring-2 ring-sky-500/20 shadow-[0_0_20px_rgba(56,189,248,0.12)]'

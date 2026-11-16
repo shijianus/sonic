@@ -258,12 +258,12 @@ export const vScrollIn: Directive<
     const {
       direction = 'up',
       delay = 0,
-      duration = 0.6,
-      distance = 40,
+      duration = 0.2,
+      distance = 14,
       stagger = false,
-      staggerDelay = 0.08,
+      staggerDelay = 0.02,
       once = true,
-      threshold = 0.1,
+      threshold = 0.05,
     } = binding.value || {}
 
     // 计算起始位置
@@ -307,7 +307,8 @@ export const vScrollIn: Directive<
                 duration,
                 delay,
                 stagger: staggerDelay,
-                ease: 'power3.out',
+                ease: 'power2.out',
+                clearProps: 'transform',
               })
             } else {
               gsap.to(el, {
@@ -316,7 +317,8 @@ export const vScrollIn: Directive<
                 y: 0,
                 duration,
                 delay,
-                ease: 'power3.out',
+                ease: 'power2.out',
+                clearProps: 'transform',
               })
             }
 
@@ -329,13 +331,13 @@ export const vScrollIn: Directive<
       },
       {
         threshold,
-        rootMargin: '0px 0px -10% 0px', // 提前一点触发
+        rootMargin: '40px 0px 40px 0px', // 提前触发，避免滚动时出现空白延迟
       }
     )
 
     observer.observe(el)
 
-    // 兜底：即使 IntersectionObserver/GSAP 未触发，2 秒后也强制显示内容
+    // 兜底：即使 IntersectionObserver/GSAP 未触发，1 秒后强制显示内容
     const fallbackTimer = setTimeout(() => {
       if (stagger) {
         const items = el.querySelectorAll('.stagger-item')
@@ -344,7 +346,7 @@ export const vScrollIn: Directive<
         gsap.set(el, { opacity: 1, x: 0, y: 0 })
       }
       observer.disconnect()
-    }, 2000)
+    }, 1000)
 
     // 存储清理函数
     ;(el as any)._scrollInCleanup = () => {
@@ -483,50 +485,59 @@ export const vMagnetic: Directive<
     if (prefersReducedMotion()) return
     const { strength = 0.4, distance = 80 } = binding.value || {}
 
-    // 保存原始位置
+    // 不设置 CSS transition-transform 避免与 GSAP 冲突；用 rAF 节流与缓存中心点
     el.style.position = el.style.position || 'relative'
-    el.style.transition = 'transform 0.3s cubic-bezier(0.23, 1, 0.32, 1)'
+    let rafId = 0
+    let pending: { x: number; y: number } | null = null
 
     const handleMouseMove = (e: MouseEvent) => {
-      const rect = el.getBoundingClientRect()
-      const centerX = rect.left + rect.width / 2
-      const centerY = rect.top + rect.height / 2
+      pending = { x: e.clientX, y: e.clientY }
+      if (rafId) return
+      rafId = requestAnimationFrame(() => {
+        rafId = 0
+        if (!pending) return
+        const rect = el.getBoundingClientRect()
+        const centerX = rect.left + rect.width / 2
+        const centerY = rect.top + rect.height / 2
 
-      const deltaX = e.clientX - centerX
-      const deltaY = e.clientY - centerY
-      const dist = Math.sqrt(deltaX ** 2 + deltaY ** 2)
+        const deltaX = pending.x - centerX
+        const deltaY = pending.y - centerY
+        const dist = Math.sqrt(deltaX ** 2 + deltaY ** 2)
 
-      if (dist < distance) {
-        // 计算吸附偏移
-        const pull = 1 - dist / distance
-        const moveX = deltaX * strength * pull
-        const moveY = deltaY * strength * pull
-
-        gsap.to(el, {
-          x: moveX,
-          y: moveY,
-          duration: 0.3,
-          ease: 'power2.out',
-        })
-      }
-    }
-
-    const handleMouseLeave = () => {
-      gsap.to(el, {
-        x: 0,
-        y: 0,
-        duration: 0.5,
-        ease: 'elastic.out(1, 0.3)',
+        if (dist < distance) {
+          const pull = 1 - dist / distance
+          gsap.to(el, {
+            x: deltaX * strength * pull,
+            y: deltaY * strength * pull,
+            duration: 0.16,
+            ease: 'power2.out',
+            overwrite: 'auto',
+          })
+        }
       })
     }
 
-    // 监听父元素或者更大范围
+    const handleMouseLeave = () => {
+      if (rafId) {
+        cancelAnimationFrame(rafId)
+        rafId = 0
+      }
+      pending = null
+      gsap.to(el, {
+        x: 0,
+        y: 0,
+        duration: 0.18,
+        ease: 'power2.out',
+      })
+    }
+
     const parent = el.parentElement || document.body
 
-    parent.addEventListener('mousemove', handleMouseMove)
+    parent.addEventListener('mousemove', handleMouseMove, { passive: true })
     el.addEventListener('mouseleave', handleMouseLeave)
 
     ;(el as any)._magneticCleanup = () => {
+      if (rafId) cancelAnimationFrame(rafId)
       parent.removeEventListener('mousemove', handleMouseMove)
       el.removeEventListener('mouseleave', handleMouseLeave)
     }

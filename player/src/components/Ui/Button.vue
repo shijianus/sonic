@@ -42,17 +42,17 @@ const buttonRef = ref<HTMLElement>()
 const ripples = ref<{ id: number; x: number; y: number; size: number }[]>([])
 let rippleId = 0
 
+const resolveButtonEl = (): HTMLElement | null => {
+  const el = buttonRef.value as any
+  if (!el) return null
+  return el instanceof HTMLElement ? el : (el.$el as HTMLElement | null)
+}
+
 const createRipple = (e: MouseEvent) => {
   if (!props.ripple || props.disabled || props.loading) return
 
-  const el = buttonRef.value
+  const el = resolveButtonEl()
   if (!el) return
-
-  // 确保按钮有定位上下文（如果还没有的话）
-  const computedStyle = window.getComputedStyle(el)
-  if (computedStyle.position === 'static') {
-    el.style.position = 'relative'
-  }
 
   const rect = el.getBoundingClientRect()
   const size = Math.max(rect.width, rect.height) * 2
@@ -65,31 +65,36 @@ const createRipple = (e: MouseEvent) => {
   // 动画结束后移除
   setTimeout(() => {
     ripples.value = ripples.value.filter(r => r.id !== id)
-  }, 600)
+  }, 420)
 }
 
-// 3D 按压效果
+// 3D 按压效果（由 GSAP 独占 transform，避免与 CSS transition-all 冲突）
+let isPressed = false
 const handleMouseDown = () => {
-  if (!props.press3d || !buttonRef.value || props.disabled || props.loading) return
+  if (!props.press3d || props.disabled || props.loading) return
+  const el = resolveButtonEl()
+  if (!el) return
 
-  gsap.to(buttonRef.value, {
-    scale: 0.92,
-    rotateX: 8,
-    rotateY: -3,
-    duration: 0.1,
+  isPressed = true
+  gsap.killTweensOf(el)
+  gsap.to(el, {
+    scale: 0.94,
+    duration: 0.08,
     ease: 'power2.out',
   })
 }
 
 const handleMouseUp = () => {
-  if (!props.press3d || !buttonRef.value) return
+  if (!props.press3d || !isPressed) return
+  isPressed = false
+  const el = resolveButtonEl()
+  if (!el) return
 
-  gsap.to(buttonRef.value, {
+  gsap.killTweensOf(el)
+  gsap.to(el, {
     scale: 1,
-    rotateX: 0,
-    rotateY: 0,
-    duration: 0.4,
-    ease: 'elastic.out(1, 0.4)',
+    duration: 0.16,
+    ease: 'power3.out',
   })
 }
 
@@ -157,7 +162,7 @@ const variantClasses = computed(() => {
     case 'solid':
       return 'bg-sky-700 text-white shadow-lg shadow-sky-500/25 hover:bg-sky-800 hover:shadow-xl hover:shadow-sky-500/30'
     case 'soft':
-      return 'bg-white/10 text-primary backdrop-blur-sm hover:bg-white/20 hover:scale-110'
+      return 'bg-white/10 text-primary hover:bg-white/20 hover:scale-105'
     case 'ghost':
       return 'text-primary/70 hover:text-primary bg-transparent hover:bg-white/5'
     case 'text':
@@ -201,7 +206,7 @@ const roundedClasses = computed(() => {
 
 const classes = computed(() => {
   return [
-    'inline-flex items-center font-medium transition-all duration-300 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none',
+    'relative inline-flex items-center font-medium transition-colors duration-150 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed select-none',
     variantClasses.value,
     sizeClasses.value,
     roundedClasses.value,
@@ -281,14 +286,15 @@ const gradientStyle = computed(() => {
 <style>
 @reference "../../style/tailwind.css";
 .play-btn {
-  @apply flex items-center justify-center rounded-full text-white shadow-2xl transition-all duration-300;
+  @apply flex items-center justify-center rounded-full text-white shadow-2xl;
   background: linear-gradient(135deg, #2563eb 0%, #38bdf8 50%, #3b82f6 100%);
-  box-shadow: 0 10px 30px -6px rgba(37,99,235, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  box-shadow: 0 10px 26px -6px rgba(37,99,235, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.15s ease;
 }
 
 .play-btn:hover {
   @apply scale-105;
-  box-shadow: 0 14px 40px -4px rgba(37,99,235, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+  box-shadow: 0 14px 36px -4px rgba(37,99,235, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
 .play-btn.loading {
   @apply cursor-wait opacity-70;
@@ -302,7 +308,7 @@ const gradientStyle = computed(() => {
   opacity: 0.2;
   pointer-events: none;
   transform: scale(0);
-  animation: ripple-animation 0.6s ease-out forwards;
+  animation: ripple-animation 0.42s ease-out forwards;
 }
 
 @keyframes ripple-animation {
@@ -316,7 +322,6 @@ const gradientStyle = computed(() => {
 .btn-3d {
   transform-style: preserve-3d;
   perspective: 800px;
-  will-change: transform;
 }
 
 /* 渐变播放按钮增强 */
@@ -330,23 +335,12 @@ const gradientStyle = computed(() => {
   inset: -2px;
   border-radius: inherit;
   background: linear-gradient(135deg, #2563eb, #38bdf8, #3b82f6, #2563eb);
-  background-size: 200% 200%;
   opacity: 0;
   z-index: -1;
-  transition: opacity 0.3s ease;
-  animation: gradient-rotate 3s ease infinite;
+  transition: opacity 0.2s ease;
 }
 
 .play-btn:hover::before {
-  opacity: 0.6;
-}
-
-@keyframes gradient-rotate {
-  0%, 100% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
+  opacity: 0.5;
 }
 </style>

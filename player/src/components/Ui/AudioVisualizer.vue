@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { useAmbientMotion } from '@/composables/useAmbientMotion'
+
 export interface AudioVisualizerProps {
   frequencyData: Uint8Array
   timeDomainData: Uint8Array
@@ -10,6 +13,7 @@ export interface AudioVisualizerProps {
   gradientColors?: string[]
   showMirror?: boolean
   height?: number
+  active?: boolean
 }
 
 const props = withDefaults(defineProps<AudioVisualizerProps>(), {
@@ -20,11 +24,46 @@ const props = withDefaults(defineProps<AudioVisualizerProps>(), {
   color: '#3b82f6',
   gradientColors: () => ['#3b82f6', '#2563eb', '#38bdf8'],
   showMirror: false,
-  height: 200
+  height: 200,
+  active: true,
 })
+
+const { shouldAnimate } = useAmbientMotion()
+const isRenderActive = computed(() => props.active && shouldAnimate.value)
 
 const canvasRef = ref<HTMLCanvasElement>()
 let animationId: number | null = null
+let cssWidth = 0
+let cssHeight = 0
+let cachedGradient: CanvasGradient | null = null
+let cachedGradientKey = ''
+
+const getGradient = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+  const { type, gradientColors } = props
+  const key = `${type}:${width}x${height}:${gradientColors.join(',')}`
+  if (cachedGradient && cachedGradientKey === key) return cachedGradient
+
+  let grad: CanvasGradient
+  if (type === 'bars') {
+    grad = ctx.createLinearGradient(0, height, 0, 0)
+  } else if (type === 'wave') {
+    grad = ctx.createLinearGradient(0, 0, width, 0)
+  } else {
+    const centerX = width / 2
+    const centerY = height / 2
+    const radius = Math.min(width, height) * 0.375
+    const maxBarHeight = Math.min(width, height) * 0.25
+    grad = ctx.createRadialGradient(centerX, centerY, radius, centerX, centerY, radius + maxBarHeight)
+  }
+
+  const len = Math.max(1, gradientColors.length - 1)
+  gradientColors.forEach((color, index) => {
+    grad.addColorStop(index / len, color)
+  })
+  cachedGradient = grad
+  cachedGradientKey = key
+  return grad
+}
 
 // 检测是否有音频活动
 const hasAudioActivity = (data: Uint8Array, threshold = 10) => {
@@ -39,18 +78,14 @@ const hasAudioActivity = (data: Uint8Array, threshold = 10) => {
 
 // 绘制频谱柱状图
 const drawBars = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-  const { frequencyData, barWidth, barGap, gradientColors, showMirror } = props
+  const { frequencyData, barWidth, barGap, showMirror } = props
 
   if (frequencyData.length === 0) return
 
   // 如果没有音频活动，不绘制任何内容
   if (!hasAudioActivity(frequencyData)) return
 
-  // 创建渐变色
-  const gradient = ctx.createLinearGradient(0, height, 0, 0)
-  gradientColors.forEach((color, index) => {
-    gradient.addColorStop(index / (gradientColors.length - 1), color)
-  })
+  const gradient = getGradient(ctx, width, height)
 
   const totalBarWidth = barWidth + barGap
 
@@ -102,7 +137,7 @@ const drawBars = (ctx: CanvasRenderingContext2D, width: number, height: number) 
 
 // 绘制波形图
 const drawWave = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-  const { timeDomainData, gradientColors } = props
+  const { timeDomainData } = props
 
   if (timeDomainData.length === 0) return
 
@@ -117,11 +152,7 @@ const drawWave = (ctx: CanvasRenderingContext2D, width: number, height: number) 
   const sliceWidth = width / timeDomainData.length
   const centerY = height / 2
 
-  // 创建渐变色
-  const gradient = ctx.createLinearGradient(0, 0, width, 0)
-  gradientColors.forEach((color, index) => {
-    gradient.addColorStop(index / (gradientColors.length - 1), color)
-  })
+  const gradient = getGradient(ctx, width, height)
 
   ctx.strokeStyle = gradient
   ctx.lineWidth = 2
@@ -166,7 +197,7 @@ const drawWave = (ctx: CanvasRenderingContext2D, width: number, height: number) 
 
 // 绘制圆形频谱
 const drawCircular = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
-  const { frequencyData, barCount, gradientColors } = props
+  const { frequencyData, barCount } = props
 
   if (frequencyData.length === 0) return
 
@@ -180,11 +211,7 @@ const drawCircular = (ctx: CanvasRenderingContext2D, width: number, height: numb
   // 频谱条最大高度：容器的25%（从内圆延伸到边缘）
   const maxBarHeight = Math.min(width, height) * 0.25
 
-  // 创建径向渐变
-  const gradient = ctx.createRadialGradient(centerX, centerY, radius, centerX, centerY, radius + maxBarHeight)
-  gradientColors.forEach((color, index) => {
-    gradient.addColorStop(index / (gradientColors.length - 1), color)
-  })
+  const gradient = getGradient(ctx, width, height)
 
   // 使用对数分布采样，类似柱状图的处理
   const usableDataLength = Math.floor(frequencyData.length * 0.6)
@@ -229,73 +256,98 @@ const drawCircular = (ctx: CanvasRenderingContext2D, width: number, height: numb
   }
 }
 
-// 渲染循环
-const render = () => {
+const clearCanvas = () => {
   const canvas = canvasRef.value
-  if (!canvas) return
+  const ctx = canvas?.getContext('2d')
+  if (!canvas || !ctx || cssWidth <= 0 || cssHeight <= 0) return
+  ctx.clearRect(0, 0, cssWidth, cssHeight)
+}
+
+const stopRenderLoop = () => {
+  if (animationId !== null) {
+    cancelAnimationFrame(animationId)
+    animationId = null
+  }
+}
+
+// 渲染循环（仅在 active && shouldAnimate 时运行，暂停或隐藏即停止 rAF）
+const render = () => {
+  if (!isRenderActive.value) {
+    animationId = null
+    clearCanvas()
+    return
+  }
+
+  const canvas = canvasRef.value
+  if (!canvas) {
+    animationId = null
+    return
+  }
 
   const ctx = canvas.getContext('2d')
-  if (!ctx) return
+  if (!ctx) {
+    animationId = null
+    return
+  }
 
-  const { width, height } = canvas
-
-  // 清空画布
-  ctx.clearRect(0, 0, width, height)
-
-  // 根据类型绘制
-  switch (props.type) {
-    case 'bars':
-      drawBars(ctx, width, height)
-      break
-    case 'wave':
-      drawWave(ctx, width, height)
-      break
-    case 'circular':
-      drawCircular(ctx, width, height)
-      break
+  if (cssWidth > 0 && cssHeight > 0) {
+    ctx.clearRect(0, 0, cssWidth, cssHeight)
+    switch (props.type) {
+      case 'bars':
+        drawBars(ctx, cssWidth, cssHeight)
+        break
+      case 'wave':
+        drawWave(ctx, cssWidth, cssHeight)
+        break
+      case 'circular':
+        drawCircular(ctx, cssWidth, cssHeight)
+        break
+    }
   }
 
   animationId = requestAnimationFrame(render)
 }
 
-// 监听数据变化,启动渲染
-watch(
-  () => [props.frequencyData, props.timeDomainData],
-  () => {
-    if (!animationId && canvasRef.value) {
+const syncRenderLoop = () => {
+  if (isRenderActive.value) {
+    if (animationId === null && canvasRef.value) {
       render()
     }
-  },
-  { deep: true }
-)
+  } else {
+    stopRenderLoop()
+    clearCanvas()
+  }
+}
 
-// 处理画布尺寸
+watch(isRenderActive, syncRenderLoop)
+
+// 处理画布尺寸与 DPR 缩放（修复原先 width 物理像素与 ctx.scale 双重缩放）
 const updateCanvasSize = () => {
   const canvas = canvasRef.value
   if (!canvas) return
 
-  // 使用 CSS 尺寸作为实际尺寸
   const rect = canvas.getBoundingClientRect()
-  canvas.width = rect.width * window.devicePixelRatio
-  canvas.height = rect.height * window.devicePixelRatio
+  const dpr = Math.min(window.devicePixelRatio || 1, 2)
+  cssWidth = rect.width
+  cssHeight = rect.height
+  canvas.width = Math.max(1, Math.round(cssWidth * dpr))
+  canvas.height = Math.max(1, Math.round(cssHeight * dpr))
+  cachedGradient = null
 
-  // 缩放上下文以匹配设备像素比
   const ctx = canvas.getContext('2d')
   if (ctx) {
-    ctx.scale(window.devicePixelRatio, window.devicePixelRatio)
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
   }
 }
 
 onMounted(() => {
   updateCanvasSize()
   window.addEventListener('resize', updateCanvasSize)
-  render()
+  syncRenderLoop()
 })
 
 onUnmounted(() => {
-  if (animationId !== null) {
-    cancelAnimationFrame(animationId)
-  }
+  stopRenderLoop()
   window.removeEventListener('resize', updateCanvasSize)
 })
 </script>

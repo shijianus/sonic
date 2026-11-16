@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { gsap } from 'gsap'
 import LazyImage from '@/components/Ui/LazyImage.vue'
 import { formatCoverUrl } from '@/utils/imageUrl'
-import { prefersReducedMotion } from '@/utils/motion'
 
 interface Props {
   id: number | string
@@ -13,172 +11,24 @@ interface Props {
 
 const props = defineProps<Props>()
 const router = useRouter()
-const cardRef = ref<HTMLElement | null>(null)
-const imageRef = ref<HTMLElement | null>(null)
-const isAnimating = ref(false)
 const resolvedHref = computed(() => router.resolve(props.to).href)
 
-// 共享元素飞行动画
-const handleClick = async (event: MouseEvent) => {
+// 即时路由跳转，去除阻塞式共享元素飞入覆盖层
+const handleClick = (event: MouseEvent) => {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return
   event.preventDefault()
-  if (isAnimating.value) return
-  if (!cardRef.value || !imageRef.value) {
-    router.push(props.to)
-    return
-  }
-  if (prefersReducedMotion()) {
-    router.push(props.to)
-    return
-  }
-
-  isAnimating.value = true
-  const imageEl = imageRef.value.querySelector('img') || imageRef.value
-  const rect = imageEl.getBoundingClientRect()
-
-  // 创建飞行克隆
-  const clone = document.createElement('div')
-  clone.className = 'artist-avatar-clone'
-  clone.style.cssText = `
-    position: fixed;
-    z-index: 10000;
-    width: ${rect.width}px;
-    height: ${rect.height}px;
-    left: ${rect.left}px;
-    top: ${rect.top}px;
-    border-radius: 50%;
-    background-image: url(${formatCoverUrl(props.picUrl, { size: 400, artist: props.name })});
-    background-size: cover;
-    background-position: center;
-    pointer-events: none;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.4);
-    will-change: transform, width, height, left, top;
-  `
-  document.body.appendChild(clone)
-
-  // 隐藏原始头像
-  imageEl.style.opacity = '0'
-
-  // 计算目标位置（屏幕中央偏上）
-  const targetSize = Math.min(192, window.innerWidth * 0.4)
-  const targetX = (window.innerWidth - targetSize) / 2
-  const targetY = window.innerHeight * 0.15
-
-  // 创建背景遮罩
-  const overlay = document.createElement('div')
-  overlay.style.cssText = `
-    position: fixed;
-    z-index: 9999;
-    inset: 0;
-    background: rgba(0,0,0,0);
-    pointer-events: none;
-  `
-  document.body.appendChild(overlay)
-
-  const tl = gsap.timeline({
-    onComplete: () => {
-      router.push(props.to)
-      setTimeout(() => {
-        clone.remove()
-        overlay.remove()
-        imageEl.style.opacity = '1'
-        isAnimating.value = false
-      }, 0)
-    },
-  })
-
-  // 背景淡入
-  tl.to(overlay, {
-    background: 'rgba(0,0,0,0.5)',
-    duration: 0.12,
-    ease: 'power2.out',
-  }, 0)
-
-  // 头像飞到中央并放大
-  tl.to(clone, {
-    width: targetSize,
-    height: targetSize,
-    left: targetX,
-    top: targetY,
-    duration: 0.18,
-    ease: 'power3.out',
-  }, 0)
-
-  // 添加光环效果
-  const ring = document.createElement('div')
-  ring.style.cssText = `
-    position: fixed;
-    z-index: 9998;
-    width: ${targetSize}px;
-    height: ${targetSize}px;
-    left: ${targetX}px;
-    top: ${targetY}px;
-    border-radius: 50%;
-    border: 2px solid rgba(56,189,248, 0.6);
-    pointer-events: none;
-    opacity: 0;
-  `
-  document.body.appendChild(ring)
-
-  tl.to(ring, {
-    opacity: 1,
-    scale: 1.3,
-    duration: 0.06,
-    ease: 'power2.out',
-  }, 0.02)
-
-  tl.to(ring, {
-    opacity: 0,
-    scale: 1.5,
-    duration: 0.06,
-    ease: 'power2.in',
-    onComplete: () => ring.remove(),
-  }, 0.10)
-
-  // 淡出过渡到新页面
-  tl.to([clone, overlay], {
-    opacity: 0,
-    duration: 0.05,
-    ease: 'power2.in',
-  }, '+=0.01')
-}
-
-// 悬停效果
-const handleMouseEnter = () => {
-  if (prefersReducedMotion()) return
-  if (imageRef.value) {
-    gsap.to(imageRef.value, {
-      scale: 1.08,
-      duration: 0.3,
-      ease: 'power2.out',
-    })
-  }
-}
-
-const handleMouseLeave = () => {
-  if (prefersReducedMotion()) return
-  if (imageRef.value) {
-    gsap.to(imageRef.value, {
-      scale: 1,
-      duration: 0.3,
-      ease: 'power2.out',
-    })
-  }
+  router.push(props.to)
 }
 </script>
 
 <template>
   <a
-    ref="cardRef"
     :href="resolvedHref"
-    class="group flex min-w-11 cursor-pointer flex-col items-center rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-sky-400/70"
+    class="group flex min-w-11 cursor-pointer flex-col items-center rounded-2xl outline-none transition-transform duration-150 ease-out active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-sky-400/70"
     @click="handleClick"
-    @mouseenter="handleMouseEnter"
-    @mouseleave="handleMouseLeave"
   >
     <div
-      ref="imageRef"
-      class="border-glass relative mb-2.5 aspect-square w-full overflow-hidden rounded-full border-2 shadow-lg transition-all duration-300 group-hover:border-[#2563eb] group-hover:shadow-[0_0_20px_rgba(37,99,235,0.5)]"
+      class="border-glass relative mb-2.5 aspect-square w-full overflow-hidden rounded-full border-2 shadow-lg transition-[border-color,transform] duration-200 ease-out group-hover:scale-105 group-hover:border-[#2563eb]"
     >
       <LazyImage
         :src="formatCoverUrl(picUrl, { size: 150, artist: name })"
@@ -187,15 +37,15 @@ const handleMouseLeave = () => {
         img-class="h-full w-full object-cover"
       />
       <div
-        class="artist-hover-play absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-all duration-300 group-hover:bg-black/40 group-hover:opacity-100"
+        class="artist-hover-play absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 transition-[opacity,background-color] duration-150 group-hover:bg-black/35 group-hover:opacity-100"
       >
         <span
-          class="icon-[mdi--play] h-6 w-6 scale-50 text-white transition-transform group-hover:scale-100"
+          class="icon-[mdi--play] h-6 w-6 scale-75 text-white transition-transform duration-150 group-hover:scale-100"
         />
       </div>
     </div>
     <span
-      class="text-primary/70 group-hover:text-primary w-full truncate text-center text-xs transition-colors"
+      class="text-primary/70 group-hover:text-primary w-full truncate text-center text-xs transition-colors duration-150"
     >
       {{ name }}
     </span>
@@ -203,10 +53,6 @@ const handleMouseLeave = () => {
 </template>
 
 <style scoped>
-.artist-avatar-clone {
-  transition: box-shadow 0.3s ease;
-}
-
 @media (hover: none) {
   .artist-hover-play {
     opacity: 1;

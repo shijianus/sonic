@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import * as THREE from 'three'
 import type { WebGLRenderer, ShaderMaterial, Vector2, Vector3 } from 'three/src/Three.js'
-import { type CSSProperties } from 'vue'
+import { type CSSProperties, onBeforeUnmount, onMounted, ref, useTemplateRef, watch } from 'vue'
+import { useAmbientMotion } from '@/composables/useAmbientMotion'
 
 type ColorBendsProps = {
   className?: string
@@ -138,10 +139,13 @@ const pointerTargetRef = ref(new THREE.Vector2(0, 0))
 const pointerCurrentRef = ref(new THREE.Vector2(0, 0))
 const pointerSmoothRef = ref(8)
 
+const { shouldAnimate } = useAmbientMotion()
+
 let cleanup: (() => void) | null = null
 
 const setup = () => {
-  const container = containerRef.value!
+  const container = containerRef.value
+  if (!container) return
   const scene = new THREE.Scene()
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1)
 
@@ -182,7 +186,8 @@ const setup = () => {
   })
   rendererRef.value = renderer
   ;(renderer as any).outputColorSpace = (THREE as any).SRGBColorSpace
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2))
+  // Soft full-bleed backdrop shaders don't need 2x supersampling
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.25))
   renderer.setClearColor(0x000000, props.transparent ? 0 : 1)
   renderer.domElement.style.width = '100%'
   renderer.domElement.style.height = '100%'
@@ -190,10 +195,18 @@ const setup = () => {
   container.appendChild(renderer.domElement)
 
   const clock = new THREE.Clock()
+  let cachedRect = { left: 0, top: 0, width: 1, height: 1 }
 
   const handleResize = () => {
     const w = container.clientWidth || 1
     const h = container.clientHeight || 1
+    const rect = container.getBoundingClientRect()
+    cachedRect = {
+      left: rect.left,
+      top: rect.top,
+      width: rect.width || w,
+      height: rect.height || h,
+    }
     renderer.setSize(w, h, false)
     ;(material.uniforms.uCanvas.value as Vector2).set(w, h)
   }
@@ -208,7 +221,7 @@ const setup = () => {
     ;(window as any).addEventListener('resize', handleResize)
   }
 
-  const loop = () => {
+  const renderFrame = () => {
     const dt = clock.getDelta()
     const elapsed = clock.elapsedTime
     material.uniforms.uTime.value = elapsed
@@ -225,21 +238,50 @@ const setup = () => {
     cur.lerp(tgt, amt)
     ;(material.uniforms.uPointer.value as Vector2).copy(cur)
     renderer.render(scene, camera)
+  }
+
+  const loop = () => {
+    if (!shouldAnimate.value) {
+      rafRef.value = null
+      return
+    }
+    renderFrame()
     rafRef.value = requestAnimationFrame(loop)
   }
-  rafRef.value = requestAnimationFrame(loop)
+
+  // Render initial frame once even when static/paused
+  renderFrame()
+  if (shouldAnimate.value) {
+    rafRef.value = requestAnimationFrame(loop)
+  }
+
+  const stopMotionWatch = watch(shouldAnimate, active => {
+    if (active) {
+      clock.getDelta()
+      if (rafRef.value === null) {
+        rafRef.value = requestAnimationFrame(loop)
+      }
+    } else if (rafRef.value !== null) {
+      cancelAnimationFrame(rafRef.value)
+      rafRef.value = null
+    }
+  })
 
   const handlePointerMove = (e: PointerEvent) => {
-    const rect = container.getBoundingClientRect()
-    const x = ((e.clientX - rect.left) / rect.width) * 2 - 1
-    const y = -(((e.clientY - rect.top) / rect.height) * 2 - 1)
+    if (!shouldAnimate.value || cachedRect.width <= 0 || cachedRect.height <= 0) return
+    const x = ((e.clientX - cachedRect.left) / cachedRect.width) * 2 - 1
+    const y = -(((e.clientY - cachedRect.top) / cachedRect.height) * 2 - 1)
     pointerTargetRef.value.set(x, y)
   }
 
-  container.addEventListener('pointermove', handlePointerMove)
+  container.addEventListener('pointermove', handlePointerMove, { passive: true })
 
   cleanup = () => {
-    if (rafRef.value !== null) cancelAnimationFrame(rafRef.value)
+    stopMotionWatch()
+    if (rafRef.value !== null) {
+      cancelAnimationFrame(rafRef.value)
+      rafRef.value = null
+    }
     if (resizeObserverRef.value) resizeObserverRef.value.disconnect()
     else window.removeEventListener('resize', handleResize)
     container.removeEventListener('pointermove', handlePointerMove)

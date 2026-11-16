@@ -283,7 +283,7 @@ onMounted(() => loadArtists(true))
               v-model="searchState.keyword"
               type="text"
               :placeholder="t('artists.searchPlaceholder')"
-              class="w-full rounded-full border border-white/10 bg-white/5 py-1.5 pl-9 pr-8 text-xs sm:text-sm text-primary placeholder:text-primary/40 outline-none backdrop-blur-md transition-all focus:border-sky-500/50 focus:bg-white/10 focus:ring-2 focus:ring-sky-500/20"
+              class="w-full rounded-full border border-white/10 bg-white/5 py-1.5 pl-9 pr-8 text-xs sm:text-sm text-primary placeholder:text-primary/40 outline-none transition-[border-color,background-color,box-shadow] duration-150 focus:border-sky-500/50 focus:bg-white/10 focus:ring-2 focus:ring-sky-500/20"
               @input="onSearchInput"
               @keyup.enter="triggerSearch()"
             />

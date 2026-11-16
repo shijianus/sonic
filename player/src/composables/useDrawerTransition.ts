@@ -6,6 +6,7 @@
 import { gsap } from 'gsap'
 import type VinylDisc from '@/components/Player/VinylDisc.vue'
 import { formatCoverUrl } from '@/utils/imageUrl'
+import { readPrefersReducedMotion, useAmbientMotion } from './useAmbientMotion'
 
 export interface DrawerTransitionOptions {
   /** 抽屉容器元素 */
@@ -68,86 +69,136 @@ export function useDrawerTransition(options: DrawerTransitionOptions) {
 
   // ── 打开动画 ──
 
-  /** 打开抽屉：共享元素过渡或降级滑入 */
+  /** 打开抽屉：纯 transform 合成器共享元素过渡或快速滑入 */
   const open = async () => {
     if (!drawerRef.value) return
 
-    gsap.set(drawerRef.value, { display: 'flex', opacity: 1 })
+    gsap.killTweensOf(drawerRef.value)
+    gsap.set(drawerRef.value, { display: 'flex', opacity: 1, y: 0 })
     await nextTick()
 
     const { footer, cover, label, songInfo } = getTransitionElements()
+    const { isPerfMode } = useAmbientMotion()
+
+    if (readPrefersReducedMotion() || isPerfMode.value) {
+      if (label) gsap.set(label, { opacity: 1 })
+      if (songInfo) gsap.set(songInfo, { opacity: 1, y: 0 })
+      if (isPlaying.value) vinylDiscRef.value?.startAlbumRotation()
+      return
+    }
 
     if (footer && cover && label) {
-      // 共享元素过渡：封面从 footer 飞向黑胶中心
       const footerRect = footer.getBoundingClientRect()
       const labelRect = label.getBoundingClientRect()
-      const clone = createClone(footerRect, '8px')
+      const clone = createClone(footerRect, '14px')
+
+      const dx = labelRect.left + labelRect.width / 2 - (footerRect.left + footerRect.width / 2)
+      const dy = labelRect.top + labelRect.height / 2 - (footerRect.top + footerRect.height / 2)
+      const sx = footerRect.width > 0 ? labelRect.width / footerRect.width : 1
+      const sy = footerRect.height > 0 ? labelRect.height / footerRect.height : 1
 
       gsap.set(label, { opacity: 0 })
-      gsap.set(songInfo, { opacity: 0 })
+      if (songInfo) gsap.set(songInfo, { opacity: 0, y: 10 })
 
-      // 背景淡入
       gsap.fromTo(
         drawerRef.value,
-        { backgroundColor: 'rgba(0,0,0,0)' },
-        { backgroundColor: 'rgba(0,0,0,0.95)', duration: 0.5, ease: 'power2.out' },
+        { opacity: 0 },
+        { opacity: 1, duration: 0.18, ease: 'power2.out' }
       )
 
       const tl = gsap.timeline({
         onComplete: () => {
-          // 克隆淡出 → 真实元素淡入
-          gsap.to(clone, { opacity: 0, duration: 0.2, ease: 'power2.out', onComplete: () => clone.remove() })
-          gsap.to(label, { opacity: 1, duration: 0.2, ease: 'power2.out' })
+          gsap.set(label, { opacity: 1 })
+          clone.remove()
           if (isPlaying.value) vinylDiscRef.value?.startAlbumRotation()
         },
       })
 
-      // 飞向黑胶中心
-      tl.to(clone, { width: labelRect.width, height: labelRect.height, left: labelRect.left, top: labelRect.top, borderRadius: '50%', duration: 0.6, ease: 'power3.out' })
-      // 歌曲信息淡入
-      tl.fromTo(songInfo!, { y: 20, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, ease: 'power2.out' }, '-=0.3')
-      // 歌词入场
-      tl.fromTo('.lyric-line', { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, stagger: 0.05, ease: 'power2.out' }, '-=0.2')
+      tl.to(clone, {
+        x: dx,
+        y: dy,
+        scaleX: sx,
+        scaleY: sy,
+        borderRadius: '50%',
+        duration: 0.24,
+        ease: 'power3.out',
+      })
+
+      if (songInfo) {
+        tl.to(songInfo, { y: 0, opacity: 1, duration: 0.18, ease: 'power2.out' }, '-=0.14')
+      }
     } else {
-      // 降级：滑入动画
-      const tl = gsap.timeline({ onComplete: () => { if (isPlaying.value) vinylDiscRef.value?.startAlbumRotation() } })
-      tl.fromTo(drawerRef.value, { y: '-100%', opacity: 0 }, { y: '0%', opacity: 1, duration: 0.6, ease: 'power3.out' })
-        .fromTo('.album-cover', { y: -60, opacity: 0, scale: 0.8 }, { y: 0, opacity: 1, scale: 1, duration: 0.6, ease: 'power3.out' }, '-=0.4')
-        .fromTo('.song-info', { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.5, ease: 'power2.out' }, '-=0.4')
-        .fromTo('.lyric-line', { y: 30, opacity: 0 }, { y: 0, opacity: 1, duration: 0.4, stagger: 0.06, ease: 'power2.out' }, '-=0.3')
+      const tl = gsap.timeline({
+        onComplete: () => {
+          if (isPlaying.value) vinylDiscRef.value?.startAlbumRotation()
+        },
+      })
+      tl.fromTo(
+        drawerRef.value,
+        { y: 18, opacity: 0 },
+        { y: 0, opacity: 1, duration: 0.2, ease: 'power3.out', clearProps: 'transform' }
+      )
+      if (songInfo) {
+        tl.fromTo(songInfo, { y: 10, opacity: 0 }, { y: 0, opacity: 1, duration: 0.16, ease: 'power2.out' }, '-=0.12')
+      }
     }
   }
 
   // ── 关闭动画 ──
 
-  /** 关闭抽屉：封面飞回 footer 或降级滑出 */
+  /** 关闭抽屉：纯 transform 合成器飞回或快速淡出 */
   const close = () => {
-    if (!drawerRef.value) return
+    if (!drawerRef.value) {
+      isRendered.value = false
+      return
+    }
 
     vinylDiscRef.value?.stopAlbumRotation()
     cleanupClones()
 
+    const { isPerfMode } = useAmbientMotion()
+    if (readPrefersReducedMotion() || isPerfMode.value) {
+      gsap.set(drawerRef.value, { display: 'none', opacity: 0 })
+      isRendered.value = false
+      return
+    }
+
     const { footer, cover, label } = getTransitionElements()
 
     if (footer && cover && label) {
-      // 共享元素过渡：封面飞回 footer
       const footerRect = footer.getBoundingClientRect()
       const labelRect = label.getBoundingClientRect()
       const clone = createClone(labelRect, '50%')
 
+      const dx = footerRect.left + footerRect.width / 2 - (labelRect.left + labelRect.width / 2)
+      const dy = footerRect.top + footerRect.height / 2 - (labelRect.top + labelRect.height / 2)
+      const sx = labelRect.width > 0 ? footerRect.width / labelRect.width : 1
+      const sy = labelRect.height > 0 ? footerRect.height / labelRect.height : 1
+
       gsap.set(label, { opacity: 0 })
-      gsap.to(drawerRef.value, { opacity: 0, duration: 0.3, ease: 'power2.in' })
+      gsap.to(drawerRef.value, { opacity: 0, duration: 0.16, ease: 'power2.in' })
       gsap.to(clone, {
-        width: footerRect.width, height: footerRect.height,
-        left: footerRect.left, top: footerRect.top,
-        borderRadius: '8px', duration: 0.5, ease: 'power3.inOut',
-        onComplete: () => { clone.remove(); isRendered.value = false },
+        x: dx,
+        y: dy,
+        scaleX: sx,
+        scaleY: sy,
+        borderRadius: '14px',
+        duration: 0.2,
+        ease: 'power2.inOut',
+        onComplete: () => {
+          clone.remove()
+          isRendered.value = false
+        },
       })
     } else {
-      // 降级：滑出动画
       gsap.to(drawerRef.value, {
-        y: '100%', opacity: 0, duration: 0.4, ease: 'power3.in',
-        onComplete: () => { isRendered.value = false },
+        y: 16,
+        opacity: 0,
+        duration: 0.16,
+        ease: 'power2.in',
+        onComplete: () => {
+          isRendered.value = false
+        },
       })
     }
   }

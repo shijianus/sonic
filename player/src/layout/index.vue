@@ -7,6 +7,7 @@ import { computed, defineAsyncComponent } from 'vue'
 import type { Component } from 'vue'
 import { useSettingsStore } from '@/stores/modules/settings'
 import { useGlobalStore } from '@/stores/modules/global'
+import { readPrefersReducedMotion, useAmbientMotion } from '@/composables/useAmbientMotion'
 
 const Aurora = defineAsyncComponent(() => import('@/components/Background/Aurora.vue'))
 const ColorBends = defineAsyncComponent(() => import('@/components/Background/ColorBends.vue'))
@@ -17,6 +18,7 @@ const settings = useSettingsStore()
 const { aurora, colorBends, ultimate, shadowBling, backgroundType } = storeToRefs(settings)
 const globalStore = useGlobalStore()
 const { isPlayerDrawerOpen } = storeToRefs(globalStore)
+const { isPerfMode } = useAmbientMotion()
 
 const colorStops = computed(() => {
   const stops = (aurora.value.colorStops || []).slice(0, 3)
@@ -59,56 +61,62 @@ const currentBackgroundComponent = computed<Component>(
 )
 const currentBackgroundProps = computed(() => backgroundPropsMap.value[currentBackgroundType.value])
 
-// ── 路由过渡（不依赖 requestAnimationFrame）──
-// Vue 的 CSS 过渡靠 rAF 翻转 enter-from/enter-to 类,在后台冻结 rAF 的内嵌 WebView
-// 中会永远停在 opacity:0。这里改用 setTimeout 驱动内联样式过渡,并尊重系统减少动效偏好。
-const ROUTE_TRANSITION_MS = 300
-const prefersReducedMotion = () =>
-  typeof window.matchMedia === 'function' &&
-  window.matchMedia('(prefers-reduced-motion: reduce)').matches
+// ── 路由过渡（极速合成器过渡，不依赖易冻结的 rAF）──
+const ROUTE_LEAVE_MS = 65
+const ROUTE_ENTER_MS = 140
+const ROUTE_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
+
+const clearNodeTransition = (node: HTMLElement) => {
+  node.style.transition = ''
+  node.style.opacity = ''
+  node.style.transform = ''
+}
 
 const onRouteEnter = (el: Element, done: () => void) => {
   const node = el as HTMLElement
-  if (prefersReducedMotion()) return done()
-  node.style.transition = `opacity ${ROUTE_TRANSITION_MS}ms ease, transform ${ROUTE_TRANSITION_MS}ms ease`
+  if (readPrefersReducedMotion()) {
+    clearNodeTransition(node)
+    return done()
+  }
+  node.style.transition = 'none'
   node.style.opacity = '0'
-  node.style.transform = 'translateX(-20px)'
+  node.style.transform = 'translate3d(0, 6px, 0)'
   setTimeout(() => {
+    node.style.transition = `opacity ${ROUTE_ENTER_MS}ms ${ROUTE_EASE}, transform ${ROUTE_ENTER_MS}ms ${ROUTE_EASE}`
     node.style.opacity = '1'
-    node.style.transform = 'translateX(0)'
+    node.style.transform = 'translate3d(0, 0, 0)'
     setTimeout(() => {
-      node.style.transition = ''
-      node.style.opacity = ''
-      node.style.transform = ''
+      clearNodeTransition(node)
       done()
-    }, ROUTE_TRANSITION_MS)
-  }, 20)
+    }, ROUTE_ENTER_MS)
+  }, 16)
 }
 
 const onRouteLeave = (el: Element, done: () => void) => {
   const node = el as HTMLElement
-  if (prefersReducedMotion()) {
+  if (readPrefersReducedMotion()) {
     // Let Vue finish patching the out-in placeholder before it mounts the new page.
     queueMicrotask(done)
     return
   }
-  node.style.transition = `opacity ${ROUTE_TRANSITION_MS}ms ease, transform ${ROUTE_TRANSITION_MS}ms ease`
+  node.style.transition = `opacity ${ROUTE_LEAVE_MS}ms ease-out, transform ${ROUTE_LEAVE_MS}ms ease-out`
   setTimeout(() => {
     node.style.opacity = '0'
-    node.style.transform = 'translateX(20px)'
-  }, 20)
+    node.style.transform = 'translate3d(0, -4px, 0)'
+  }, 16)
   setTimeout(() => {
-    node.style.transition = ''
+    clearNodeTransition(node)
     done()
-  }, ROUTE_TRANSITION_MS + 20)
+  }, ROUTE_LEAVE_MS + 16)
 }
 </script>
 
 <template>
   <div class="relative flex h-full w-full overflow-hidden">
-    <div class="custom-theme absolute inset-0 h-full w-full bg-[#07101f]">
+    <div class="custom-theme absolute inset-0 h-full w-full bg-[var(--glass-bg-solid)]">
       <transition appear name="fade-bg" mode="out-in">
         <component
+          v-if="!isPerfMode"
           :is="currentBackgroundComponent"
           :key="currentBackgroundType"
           v-bind="currentBackgroundProps"
@@ -117,12 +125,8 @@ const onRouteLeave = (el: Element, done: () => void) => {
       </transition>
     </div>
 
-    <!-- Sonic 风格氛围光晕流光层 (Ambient Glowing Drift Blobs) -->
-    <div class="fixed inset-0 overflow-hidden pointer-events-none z-0" aria-hidden="true">
-      <div class="absolute -top-[15%] -left-[10%] size-[65vmax] rounded-full blur-[110px] animate-drift-a opacity-35 dark:opacity-40" style="background: #2563eb;"></div>
-      <div class="absolute -bottom-[20%] -right-[15%] size-[60vmax] rounded-full blur-[120px] animate-drift-b opacity-30 dark:opacity-35" style="background: #38bdf8;"></div>
-      <div class="absolute top-[30%] left-[35%] size-[38vmax] rounded-full blur-[100px] animate-drift-c opacity-20 dark:opacity-25" style="background: #3b82f6;"></div>
-    </div>
+    <!-- Sonic 科技感微网格与工作室径向辉光（零模糊滤镜与动画，无合成重绘成本） -->
+    <div class="tech-ambient-overlay fixed inset-0 pointer-events-none z-0" aria-hidden="true"></div>
 
     <!-- 主工作区：几何对齐的 Studio 架构 (全组件限制在统一上下区间 [Y_top, Y_bottom] 内) -->
     <div class="z-50 flex h-full w-full p-3 sm:p-4 gap-3 sm:gap-4 overflow-hidden">
@@ -138,8 +142,8 @@ const onRouteLeave = (el: Element, done: () => void) => {
           class="section-container relative flex flex-1 min-h-0 flex-col overflow-hidden p-2 rounded-[28px]"
         >
           <router-view v-slot="{ Component, route }">
-            <transition appear mode="out-in" :css="false" @enter="onRouteEnter" @leave="onRouteLeave">
-              <keep-alive>
+            <transition mode="out-in" :css="false" @enter="onRouteEnter" @leave="onRouteLeave">
+              <keep-alive :max="8">
                 <component :is="Component" :key="route.path" />
               </keep-alive>
             </transition>
@@ -160,9 +164,20 @@ const onRouteLeave = (el: Element, done: () => void) => {
   </div>
 </template>
 <style>
+.tech-ambient-overlay {
+  background-image:
+    radial-gradient(60% 45% at 18% 12%, rgba(56, 189, 248, 0.14) 0%, transparent 70%),
+    radial-gradient(50% 45% at 85% 88%, rgba(37, 99, 235, 0.16) 0%, transparent 70%),
+    radial-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+  background-size:
+    100% 100%,
+    100% 100%,
+    28px 28px;
+}
+
 .fade-bg-enter-active,
 .fade-bg-leave-active {
-  transition: opacity 0.4s ease;
+  transition: opacity 0.24s ease;
 }
 
 .fade-bg-enter-from,

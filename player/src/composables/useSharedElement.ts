@@ -77,48 +77,32 @@ export function useSharedElement() {
         pointer-events: none;
         box-shadow: 0 10px 40px rgba(0,0,0,0.3);
         transform: scale(${scale.from});
-        will-change: transform, width, height, left, top, border-radius;
+        transform-origin: center center;
+        will-change: transform, opacity;
       `
       document.body.appendChild(clone)
 
       onStart?.()
 
-      // 动画进度对象
+      // 纯合成器 transform 抛物线飞行，避免每帧写入 left/top/width/height 触发布局
       const progress = { t: 0 }
+      const targetScaleX = sourceRect.width > 0 ? targetRect.width / sourceRect.width : scale.to
+      const targetScaleY = sourceRect.height > 0 ? targetRect.height / sourceRect.height : scale.to
 
-      // 使用 GSAP 动画进度来计算抛物线位置
       gsap.to(progress, {
         t: 1,
         duration,
         ease,
         onUpdate: () => {
           const t = progress.t
-
-          // 线性插值 X 和尺寸
-          const currentX = startX + deltaX * t
-          const currentWidth = sourceRect.width + (targetRect.width - sourceRect.width) * t
-          const currentHeight = sourceRect.height + (targetRect.height - sourceRect.height) * t
-
-          // 抛物线 Y：y = startY + deltaY * t + arcHeight * 4 * t * (1 - t)
-          // 4 * t * (1-t) 在 t=0.5 时达到最大值 1
           const parabola = 4 * t * (1 - t)
-          const currentY = startY + deltaY * t + arcHeight * parabola
-
-          // 计算旋转角度（增加动感）
+          const tx = deltaX * t
+          const ty = deltaY * t + arcHeight * parabola
+          const sx = scale.from + (targetScaleX - scale.from) * t
+          const sy = scale.from + (targetScaleY - scale.from) * t
           const rotation = (1 - t) * (deltaX > 0 ? 15 : -15)
 
-          // 应用位置和尺寸
-          clone.style.left = `${currentX - currentWidth / 2}px`
-          clone.style.top = `${currentY - currentHeight / 2}px`
-          clone.style.width = `${currentWidth}px`
-          clone.style.height = `${currentHeight}px`
-          clone.style.transform = `scale(${scale.from + (scale.to - scale.from) * t}) rotate(${rotation}deg)`
-
-          // 插值圆角
-          const fromRadius = parseFloat(borderRadius.from) || 12
-          const toRadius = parseFloat(borderRadius.to) || 12
-          const currentRadius = fromRadius + (toRadius - fromRadius) * t
-          clone.style.borderRadius = `${currentRadius}px`
+          clone.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${sx}, ${sy}) rotate(${rotation}deg)`
         },
         onComplete: () => {
           clone.remove()

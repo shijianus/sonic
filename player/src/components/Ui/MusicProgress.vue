@@ -31,7 +31,7 @@ const state = reactive({
   dragProgress: null as number | null,
   showTimePreview: false,
   previewTime: 0,
-  previewPosition: 0,
+  previewPercent: 0,
 })
 
 const formatTime = (seconds: number) => {
@@ -71,57 +71,66 @@ const handleProgressKeydown = (event: KeyboardEvent) => {
   setCurrentTime(Math.max(0, Math.min(total, next)))
 }
 
+let cachedRect: DOMRect | null = null
+const getBarRect = () => {
+  if (!progressBarRef.value) return null
+  if (!cachedRect) {
+    cachedRect = progressBarRef.value.getBoundingClientRect()
+  }
+  return cachedRect
+}
+
 const handleProgressHover = (event: MouseEvent) => {
   if (!progressBarRef.value || !currentSong.value) return
   const rect = progressBarRef.value.getBoundingClientRect()
+  cachedRect = rect
+  if (!rect.width) return
   const hoverX = event.clientX - rect.left
   const hoverProgress = Math.max(0, Math.min(1, hoverX / rect.width))
 
   let d = duration.value
   if (!d && currentSong.value.duration) {
     d = currentSong.value.duration
-    // 如果数值较大（大于10000），大概率是毫秒，转换为秒
     if (d > 10000) d = d / 1000
   }
 
   state.previewTime = hoverProgress * d
-  state.previewPosition = hoverX
+  state.previewPercent = hoverProgress * 100
   state.showTimePreview = true
 }
 
 const handleProgressLeave = () => {
   state.showTimePreview = false
+  if (!state.isDragging) cachedRect = null
 }
 
 const handleProgressDrag = (clientX: number) => {
-  if (!state.isDragging || !progressBarRef.value) return
-  const rect = progressBarRef.value.getBoundingClientRect()
+  if (!state.isDragging) return
+  const rect = getBarRect()
+  if (!rect || !rect.width) return
   const x = clientX - rect.left
   const newProgress = (x / rect.width) * 100
   state.dragProgress = Math.max(0, Math.min(100, newProgress))
 
-  // 更新预览时间
   if (currentSong.value) {
     let d = duration.value
     if (!d && currentSong.value.duration) {
       d = currentSong.value.duration
-      // 如果数值较大（大于10000），大概率是毫秒，转换为秒
       if (d > 10000) d = d / 1000
     }
     state.previewTime = (state.dragProgress / 100) * d
-    state.previewPosition = x
+    state.previewPercent = state.dragProgress
   }
 }
 
 const startDrag = (event: MouseEvent | TouchEvent) => {
   if (event instanceof TouchEvent) {
-    // 阻止默认滚动行为
-    // event.preventDefault()
-    // 注意：在 passive listener 中不能 preventDefault，这里假设在 template 中使用了 .prevent
+    // 由 .prevent 修饰符阻止滚动
   } else {
     event.preventDefault()
   }
 
+  cachedRect = progressBarRef.value?.getBoundingClientRect() ?? null
   state.isDragging = true
   state.dragProgress = progress.value
   document.body.style.userSelect = 'none'
@@ -136,6 +145,7 @@ const stopDrag = () => {
   }
   state.isDragging = false
   state.dragProgress = null
+  cachedRect = null
   document.body.style.userSelect = ''
 }
 
@@ -148,7 +158,6 @@ const handleMouseMove = (event: MouseEvent) => {
 
 const handleTouchMove = (event: TouchEvent) => {
   if (state.isDragging) {
-    // event.preventDefault() // 由 .prevent 修饰符处理
     handleProgressDrag(event.touches[0].clientX)
   }
 }
@@ -157,6 +166,7 @@ const handleProgressClick = (event: MouseEvent) => {
   if (state.isDragging) return
   if (!progressBarRef.value) return
   const rect = progressBarRef.value.getBoundingClientRect()
+  if (!rect.width) return
   const clickX = event.clientX - rect.left
   const newProgress = (clickX / rect.width) * 100
   setProgress(Math.max(0, Math.min(100, newProgress)))
@@ -171,13 +181,13 @@ const displayProgress = computed(() => {
   return state.isDragging && state.dragProgress !== null ? state.dragProgress : progress.value
 })
 
+const progressScaleStyle = computed(() => ({
+  transform: `scaleX(${Math.max(0, Math.min(1, displayProgress.value / 100))})`,
+  background: gradientStyle.value,
+}))
+
 const previewPositionPercent = computed(() => {
-  if (state.isDragging) {
-    return displayProgress.value
-  }
-  if (!progressBarRef.value) return 0
-  const width = progressBarRef.value.getBoundingClientRect().width
-  return width > 0 ? (state.previewPosition / width) * 100 : 0
+  return state.isDragging ? displayProgress.value : state.previewPercent
 })
 </script>
 
@@ -217,12 +227,12 @@ const previewPositionPercent = computed(() => {
     </Transition>
 
     <div
-      class="progress-track absolute top-1/2 right-0 left-0 h-1 -translate-y-1/2 rounded-full transition-all group-hover:h-1.5"
-      :class="state.isDragging ? 'h-1.5' : ''"
+      class="progress-track absolute top-1/2 right-0 left-0 h-1 -translate-y-1/2 overflow-hidden rounded-full transition-transform duration-150 group-hover:scale-y-150"
+      :class="state.isDragging ? 'scale-y-150' : ''"
     >
       <div
-        class="progress-fill absolute inset-y-0 left-0 rounded-full"
-        :style="{ width: `${displayProgress}%`, background: gradientStyle }"
+        class="progress-fill absolute inset-0 origin-left rounded-full will-change-transform"
+        :style="progressScaleStyle"
       ></div>
     </div>
   </div>
@@ -240,8 +250,7 @@ const previewPositionPercent = computed(() => {
 }
 
 .progress-fill {
-  box-shadow: 0 0 12px rgba(56,189,248, 0.35);
-  transition: width 0.05s linear;
+  box-shadow: 0 0 10px rgba(56,189,248, 0.3);
 }
 
 .time-preview {

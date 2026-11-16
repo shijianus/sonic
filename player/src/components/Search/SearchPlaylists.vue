@@ -101,11 +101,11 @@ onUnmounted(() => {
           <LazyImage
             :src="formatCoverUrl(pl.coverImgUrl, { size: 300 })"
             alt="cover"
-            img-class="h-full w-full object-cover transition-all duration-500 group-hover:scale-110"
+            img-class="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-105"
           />
           <div class="absolute inset-0 bg-linear-to-t from-black/70 via-black/20 to-transparent" />
           <div
-            class="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-black/50 px-2 py-1 text-[11px] text-white backdrop-blur-sm"
+            class="absolute top-2 right-2 flex items-center gap-1 rounded-full bg-slate-950/75 px-2 py-0.5 text-[11px] font-medium text-white tabular-nums"
           >
             <span class="icon-[mdi--headphones] h-3 w-3" />
             {{ formatCount(pl.playCount) }}
@@ -118,7 +118,7 @@ onUnmounted(() => {
             </div>
           </div>
           <div
-            class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 transition-all duration-300 group-hover:opacity-100"
+            class="absolute inset-0 flex items-center justify-center bg-black/20 opacity-0 transition-opacity duration-150 group-hover:opacity-100"
           >
             <div
               class="flex h-12 w-12 items-center justify-center rounded-full bg-white/90 shadow-xl"

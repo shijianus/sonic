@@ -14,6 +14,7 @@ import {
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAudio } from '@/composables/useAudio'
+import { readPrefersReducedMotion } from '@/composables/useAmbientMotion'
 
 const router = useRouter()
 const route = useRoute()
@@ -92,20 +93,23 @@ const deleteUserPlaylist = (playlistId: string) => {
 const indicatorRef = ref<HTMLElement | null>(null)
 const navContainerRef = ref<HTMLElement | null>(null)
 
-// 更新指示器位置
+// 更新指示器位置（仅驱动 compositor transform/opacity，避免 height 与 CSS transition 竞争）
 const updateIndicator = () => {
-  if (!indicatorRef.value || !navContainerRef.value || sidebarCollapsed.value) {
-    if (indicatorRef.value) {
-      gsap.to(indicatorRef.value, { opacity: 0, duration: 0.15 })
+  const indicator = indicatorRef.value
+  if (!indicator || !navContainerRef.value || sidebarCollapsed.value) {
+    if (indicator) {
+      gsap.killTweensOf(indicator)
+      gsap.to(indicator, { opacity: 0, duration: readPrefersReducedMotion() ? 0 : 0.12 })
     }
     return
   }
 
   const activeLink = navContainerRef.value.querySelector('.nav-link-active') as HTMLElement
   if (!activeLink) {
-    gsap.to(indicatorRef.value, {
+    gsap.killTweensOf(indicator)
+    gsap.to(indicator, {
       opacity: 0,
-      duration: 0.2,
+      duration: readPrefersReducedMotion() ? 0 : 0.12,
     })
     return
   }
@@ -113,11 +117,11 @@ const updateIndicator = () => {
   const containerRect = navContainerRef.value.getBoundingClientRect()
   const linkRect = activeLink.getBoundingClientRect()
 
-  gsap.to(indicatorRef.value, {
+  gsap.killTweensOf(indicator)
+  gsap.to(indicator, {
     y: linkRect.top - containerRect.top,
-    height: linkRect.height,
     opacity: 1,
-    duration: 0.25,
+    duration: readPrefersReducedMotion() ? 0 : 0.18,
     ease: 'power3.out',
   })
 }
@@ -174,6 +178,8 @@ onMounted(() => {
       : (cb: () => void) => setTimeout(cb, 1200)
 
   scheduleIdle(() => {
+    prefetchRoute('/charts')
+    prefetchRoute('/artists')
     prefetchRoute('/search')
     prefetchRoute('/downloads')
     prefetchRoute('/settings')
@@ -209,11 +215,11 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
 
 <template>
   <aside
-    class="hidden md:flex shrink-0 h-full flex-col transition-all duration-300 ease-in-out"
+    class="hidden md:flex shrink-0 h-full flex-col transition-[width] duration-200 ease-out"
     :class="sidebarCollapsed ? 'w-20' : 'w-64 xl:w-72'"
   >
     <div
-      class="sidebar relative flex h-full w-full flex-col justify-between rounded-[28px] overflow-hidden transition-all duration-300"
+      class="sidebar relative flex h-full w-full flex-col justify-between rounded-[28px] overflow-hidden transition-[padding] duration-200"
       :class="sidebarCollapsed ? 'p-2.5 items-center' : 'p-3.5 xl:p-4'"
     >
       <div class="flex flex-col min-h-0 flex-1 w-full">
@@ -255,7 +261,7 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
                   {{ BRAND_PRODUCT.charAt(0).toUpperCase() + BRAND_PRODUCT.slice(1) }}
                 </span>
                 <span
-                  class="inline-flex items-center -translate-y-0.5 px-1.5 py-0.5 text-[8.5px] xl:text-[9.5px] font-extrabold uppercase tracking-wider rounded-md bg-blue-500/20 border border-blue-400/40 text-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.25)] select-none shrink-0"
+                  class="inline-flex items-center -translate-y-0.5 px-1.5 py-0.5 text-[8.5px] xl:text-[9.5px] font-extrabold uppercase tracking-wider rounded-md bg-sky-500/15 dark:bg-blue-500/20 border border-sky-500/35 dark:border-blue-400/40 text-sky-700 dark:text-sky-300 shadow-[0_0_8px_rgba(56,189,248,0.2)] select-none shrink-0"
                 >
                   {{ BRAND_STUDIO }}
                 </span>
@@ -407,7 +413,7 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
                   :to="item.to"
                   @mouseenter="prefetchRoute(item.to)"
                   @focus="prefetchRoute(item.to)"
-                  class="nav-link text-primary/70 hover:text-primary relative z-10 flex items-center h-[34px] min-h-[34px] rounded-xl text-xs transition-all duration-200 outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
+                  class="nav-link text-primary/70 hover:text-primary relative z-10 flex items-center h-[34px] min-h-[34px] rounded-xl text-xs transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
                   :class="[
                     sidebarCollapsed ? 'justify-center px-0 w-9 mx-auto' : 'space-x-2.5 px-2.5 py-1',
                     {
@@ -447,7 +453,7 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
                   v-for="pl in collectedPlaylists"
                   :key="pl.id"
                   :to="`/playlist/${pl.id}`"
-                  class="nav-link text-primary/70 hover:text-primary relative z-10 flex items-center h-[34px] min-h-[34px] rounded-xl text-xs transition-all duration-200 outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
+                  class="nav-link text-primary/70 hover:text-primary relative z-10 flex items-center h-[34px] min-h-[34px] rounded-xl text-xs transition-colors duration-150 outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
                   :class="[
                     sidebarCollapsed ? 'justify-center px-0 w-9 mx-auto' : 'space-x-2.5 px-2.5 py-1',
                     {
@@ -547,7 +553,7 @@ onUnmounted(() => window.removeEventListener('popstate', syncHistoryState))
 <style scoped>
 /* 导航指示器过渡与毛玻璃微光 */
 .nav-indicator {
-  transition: opacity 0.2s ease;
+  will-change: transform, opacity;
   background-color: var(--glass-interactive-bg);
   border: 1px solid var(--glass-border-default);
   box-shadow: 0 0 14px rgba(37, 99, 235, 0.12);

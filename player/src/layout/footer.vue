@@ -153,7 +153,6 @@ const flipCover = (newCover: string) => {
   state.isFlipping = true
   state.prevCover = state.displayCover
 
-  // 创建翻转动画
   const tl = gsap.timeline({
     onComplete: () => {
       state.isFlipping = false
@@ -161,23 +160,22 @@ const flipCover = (newCover: string) => {
     },
   })
 
-  // 翻转到背面
+  // 快速 3D 翻面切换（避免拖沓的回弹尾迹）
   tl.to(coverRef.value, {
     rotateY: 90,
-    scale: 0.9,
-    duration: 0.2,
+    scale: 0.92,
+    duration: 0.12,
     ease: 'power2.in',
     onComplete: () => {
       state.displayCover = newCover
     },
   })
 
-  // 翻转回正面
   tl.to(coverRef.value, {
     rotateY: 0,
     scale: 1,
-    duration: 0.3,
-    ease: 'back.out(1.5)',
+    duration: 0.18,
+    ease: 'power3.out',
   })
 }
 
@@ -485,7 +483,7 @@ const isDegradedQuality = computed(() => qualityDisplayInfo.value.isDegraded)
 const menuCoords = ref({ bottom: 0, right: 0 })
 
 const updateQualityMenuPosition = () => {
-  if (!qualityBtnRef.value) return
+  if (!showQualityMenu.value || !qualityBtnRef.value) return
   const rect = qualityBtnRef.value.getBoundingClientRect()
   menuCoords.value = {
     bottom: Math.max(16, window.innerHeight - rect.top + 10),
@@ -619,6 +617,21 @@ const updatePerfModeState = () => {
 }
 let perfObserver: MutationObserver | null = null
 
+const toggleQualityMenuListeners = (open: boolean) => {
+  if (typeof window === 'undefined') return
+  if (open) {
+    window.addEventListener('resize', updateQualityMenuPosition)
+    window.addEventListener('scroll', updateQualityMenuPosition, { capture: true, passive: true })
+  } else {
+    window.removeEventListener('resize', updateQualityMenuPosition)
+    window.removeEventListener('scroll', updateQualityMenuPosition, true)
+  }
+}
+
+watch(showQualityMenu, open => {
+  toggleQualityMenuListeners(open)
+})
+
 onMounted(() => {
   updatePerfModeState()
   if (typeof MutationObserver !== 'undefined') {
@@ -627,16 +640,13 @@ onMounted(() => {
   }
   document.addEventListener('pointerdown', handleDocumentClick)
   document.addEventListener('keydown', handleKeydown)
-  window.addEventListener('resize', updateQualityMenuPosition)
-  window.addEventListener('scroll', updateQualityMenuPosition, true)
 })
 
 onUnmounted(() => {
   if (perfObserver) perfObserver.disconnect()
   document.removeEventListener('pointerdown', handleDocumentClick)
   document.removeEventListener('keydown', handleKeydown)
-  window.removeEventListener('resize', updateQualityMenuPosition)
-  window.removeEventListener('scroll', updateQualityMenuPosition, true)
+  toggleQualityMenuListeners(false)
 })
 
 const emit = defineEmits(['show'])
@@ -644,7 +654,6 @@ const emit = defineEmits(['show'])
 <template>
   <footer
     class="footer-dock glass-dock player-panel relative w-full shrink-0 overflow-hidden rounded-[26px] p-3 sm:p-4"
-    style="-webkit-backdrop-filter: blur(28px) saturate(190%) contrast(105%); backdrop-filter: blur(28px) saturate(190%) contrast(105%);"
   >
     <!-- 独立音频频谱带 (限定在进度条上方 20px 独立带内，不透明度 <= 0.25，仅播放时出现，性能模式下不渲染) -->
     <div
@@ -661,6 +670,7 @@ const emit = defineEmits(['show'])
         :bar-gap="2"
         :gradient-colors="visualizerGradient"
         :height="20"
+        :active="isPlaying"
       />
     </div>
 
@@ -676,7 +686,7 @@ const emit = defineEmits(['show'])
             :aria-label="t('player.openPlayer')"
             :title="t('player.openPlayer')"
             @click="emit('show')"
-            class="cover-inner flex h-12 w-12 cursor-pointer items-center justify-center rounded-2xl bg-cover shadow-lg ring-1 ring-white/15 transition-all duration-300 outline-none hover:shadow-xl hover:scale-105 focus-visible:ring-2 focus-visible:ring-sky-400/70"
+            class="cover-inner flex h-12 w-12 cursor-pointer items-center justify-center rounded-2xl bg-cover shadow-lg ring-1 ring-white/15 transition-shadow duration-150 outline-none hover:shadow-xl focus-visible:ring-2 focus-visible:ring-sky-400/70"
             :class="{ 'animate-pulse-subtle': isPlaying }"
             :style="{
               backgroundImage: state.displayCover
@@ -690,9 +700,9 @@ const emit = defineEmits(['show'])
               class="absolute inset-0 flex items-center justify-center rounded-lg bg-black/20 opacity-0 transition-opacity hover:opacity-100"
             >
               <div class="flex items-end gap-0.5 h-4">
-                <span class="w-1 bg-white rounded-full animate-equalizer-1"></span>
-                <span class="w-1 bg-white rounded-full animate-equalizer-2"></span>
-                <span class="w-1 bg-white rounded-full animate-equalizer-3"></span>
+                <span class="h-4 w-1 origin-bottom bg-white rounded-full animate-equalizer-1"></span>
+                <span class="h-4 w-1 origin-bottom bg-white rounded-full animate-equalizer-2"></span>
+                <span class="h-4 w-1 origin-bottom bg-white rounded-full animate-equalizer-3"></span>
               </div>
             </div>
           </button>
@@ -1070,32 +1080,35 @@ const emit = defineEmits(['show'])
   animation: pulse-subtle 2s ease-in-out infinite;
 }
 
-/* 音频均衡器动画 */
+/* 音频均衡器动画：纯 transform 合成，避免 height 触发布局计算 */
 @keyframes equalizer-1 {
-  0%, 100% { height: 4px; }
-  50% { height: 16px; }
+  0%, 100% { transform: scaleY(0.25); }
+  50% { transform: scaleY(1); }
 }
 
 @keyframes equalizer-2 {
-  0%, 100% { height: 8px; }
-  50% { height: 12px; }
+  0%, 100% { transform: scaleY(0.5); }
+  50% { transform: scaleY(0.75); }
 }
 
 @keyframes equalizer-3 {
-  0%, 100% { height: 6px; }
-  50% { height: 14px; }
+  0%, 100% { transform: scaleY(0.375); }
+  50% { transform: scaleY(0.875); }
 }
 
 .animate-equalizer-1 {
-  animation: equalizer-1 0.5s ease-in-out infinite;
+  animation: equalizer-1 0.45s ease-in-out infinite;
+  will-change: transform;
 }
 
 .animate-equalizer-2 {
-  animation: equalizer-2 0.5s ease-in-out infinite 0.1s;
+  animation: equalizer-2 0.45s ease-in-out infinite 0.1s;
+  will-change: transform;
 }
 
 .animate-equalizer-3 {
-  animation: equalizer-3 0.5s ease-in-out infinite 0.2s;
+  animation: equalizer-3 0.45s ease-in-out infinite 0.2s;
+  will-change: transform;
 }
 
 /* 音质菜单与反馈弹窗过渡 (引用设计令牌并遵守 prefers-reduced-motion) */

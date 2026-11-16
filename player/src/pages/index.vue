@@ -191,12 +191,6 @@ const prefersReduced = computed(() => reducedMotion.value === 'reduce')
 const autoplayPaused = ref(false)
 const hoverPaused = ref(false)
 
-const activeBannerIndex = ref(0)
-const onSlideChange = (sw: SwiperClass) => {
-  activeBannerIndex.value = sw.realIndex ?? 0
-}
-const activeBanner = computed(() => state.banners[activeBannerIndex.value] || state.banners[0])
-
 const slidePrev = () => {
   state.swiper?.slidePrev()
 }
@@ -451,33 +445,25 @@ onMounted(() => {
     <div class="custom-scrollbar h-full overflow-y-auto">
       <HomeSkeleton v-if="isLoading" />
       <div v-else class="space-y-10 p-5 pb-8">
-        <!-- ═══════ Banner 轮播 (学习网易云: 动态氛围流光 + 特色角标 + 悬停试听 + 播放音波联动) ═══════ -->
+        <!-- ═══════ Banner 轮播 ═══════ -->
         <section
           v-if="banners.length"
-          v-scroll-in="{ direction: 'up', duration: 0.8 }"
           class="group/section relative max-h-[50vh]"
           @mouseenter="pauseForInteraction"
           @mouseleave="resumeAfterInteraction"
           @focusin="pauseForInteraction"
           @focusout="resumeAfterInteraction"
         >
-          <!-- 动态海报氛围光晕背景 (提取当前活动海报色彩向四周弥散) -->
+          <!-- 轻量合成器径向辉光背景（移除全宽 blur-3xl 海报滤镜） -->
           <div
-            class="pointer-events-none absolute -inset-6 -z-10 overflow-hidden rounded-3xl opacity-35 blur-3xl transition-opacity duration-700 ease-out"
+            class="banner-aura pointer-events-none absolute -inset-4 -z-10 rounded-3xl"
             aria-hidden="true"
-          >
-            <img
-              v-if="activeBanner?.coverImgUrl"
-              :src="activeBanner.coverImgUrl"
-              class="h-full w-full object-cover scale-125 filter transition-all duration-700 ease-out"
-              alt=""
-            />
-          </div>
+          ></div>
 
           <!-- 自动轮播暂停/继续控制按钮 -->
           <button
             type="button"
-            class="absolute top-3 right-3 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-glass bg-[var(--glass-bg-overlay)] text-primary shadow-lg backdrop-blur-md transition-all hover:bg-[var(--glass-interactive-hover)] hover:scale-105 focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:outline-none"
+            class="absolute top-3 right-3 z-20 flex h-10 w-10 items-center justify-center rounded-full border border-glass bg-[var(--glass-bg-overlay)] text-primary shadow-lg transition-[background-color,transform] duration-150 hover:bg-[var(--glass-interactive-hover)] hover:scale-105 focus-visible:ring-2 focus-visible:ring-sky-400/70 focus-visible:outline-none cursor-pointer"
             :aria-label="autoplayPaused ? t('home.playCarousel') : t('home.pauseCarousel')"
             :title="autoplayPaused ? t('home.playCarousel') : t('home.pauseCarousel')"
             @click="toggleAutoplay"
@@ -488,7 +474,7 @@ onMounted(() => {
           <!-- 左右快速翻页箭头 (桌面端悬浮显现) -->
           <button
             type="button"
-            class="absolute left-2 top-1/2 z-20 -translate-y-1/2 hidden lg:flex h-10 w-10 items-center justify-center rounded-full border border-glass bg-[var(--glass-bg-overlay)] text-primary opacity-0 shadow-lg backdrop-blur-md transition-all duration-300 hover:bg-[var(--glass-interactive-hover)] hover:scale-110 group-hover/section:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
+            class="absolute left-2 top-1/2 z-20 -translate-y-1/2 hidden lg:flex h-10 w-10 items-center justify-center rounded-full border border-glass bg-[var(--glass-bg-overlay)] text-primary opacity-0 shadow-lg transition-[opacity,background-color,transform] duration-150 hover:bg-[var(--glass-interactive-hover)] hover:scale-105 group-hover/section:opacity-100 focus-visible:opacity-100 focus-visible:outline-none cursor-pointer"
             :aria-label="t('common.back')"
             @click="slidePrev"
           >
@@ -496,7 +482,7 @@ onMounted(() => {
           </button>
           <button
             type="button"
-            class="absolute right-2 top-1/2 z-20 -translate-y-1/2 hidden lg:flex h-10 w-10 items-center justify-center rounded-full border border-glass bg-[var(--glass-bg-overlay)] text-primary opacity-0 shadow-lg backdrop-blur-md transition-all duration-300 hover:bg-[var(--glass-interactive-hover)] hover:scale-110 group-hover/section:opacity-100 focus-visible:opacity-100 focus-visible:outline-none"
+            class="absolute right-2 top-1/2 z-20 -translate-y-1/2 hidden lg:flex h-10 w-10 items-center justify-center rounded-full border border-glass bg-[var(--glass-bg-overlay)] text-primary opacity-0 shadow-lg transition-[opacity,background-color,transform] duration-150 hover:bg-[var(--glass-interactive-hover)] hover:scale-105 group-hover/section:opacity-100 focus-visible:opacity-100 focus-visible:outline-none cursor-pointer"
             :aria-label="t('common.forward')"
             @click="slideNext"
           >
@@ -505,13 +491,12 @@ onMounted(() => {
 
           <Swiper
             @swiper="onSwiper"
-            @slideChange="onSlideChange"
             :modules="swiperModules"
             :slides-per-view="1"
             :space-between="20"
             :centered-slides="true"
             :loop="true"
-            :speed="prefersReduced ? 0 : 350"
+            :speed="prefersReduced ? 0 : 260"
             :autoplay="prefersReduced ? false : { delay: 5000, disableOnInteraction: false }"
             :pagination="{ clickable: true, el: '.home-pagination' }"
             :breakpoints="{
@@ -527,26 +512,26 @@ onMounted(() => {
                 tabindex="0"
                 @click="handleBannerClick(item)"
                 @keydown.enter="handleBannerClick(item)"
-                class="group relative block aspect-[1080/400] max-h-[46vh] cursor-pointer overflow-hidden rounded-2xl select-none shadow-xl transition-shadow duration-300 hover:shadow-2xl"
+                class="group relative block aspect-[1080/400] max-h-[46vh] cursor-pointer overflow-hidden rounded-2xl select-none shadow-xl transition-shadow duration-200 hover:shadow-2xl"
               >
                 <!-- 海报封面原图 -->
                 <LazyImage
                   :src="item.coverImgUrl"
                   alt="banner"
-                  img-class="h-full w-full object-cover transition-transform duration-700 ease-out group-hover:scale-[1.04]"
+                  img-class="h-full w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                 />
 
-                <!-- 渐变暗角遮罩 (从底部往上渐变，确保文字与按钮通透可读) -->
-                <div class="absolute inset-0 bg-linear-to-t from-black/85 via-black/25 to-transparent opacity-85 transition-opacity duration-300 group-hover:opacity-95" />
+                <!-- 渐变暗角遮罩 -->
+                <div class="absolute inset-0 bg-linear-to-t from-black/85 via-black/25 to-transparent opacity-85 transition-opacity duration-200 group-hover:opacity-95" />
 
-                <!-- 悬浮微交互：中央大号半透明磨砂播放按钮 -->
+                <!-- 悬浮微交互：中央播放按钮 -->
                 <div
-                  class="absolute inset-0 flex items-center justify-center transition-all duration-300"
+                  class="absolute inset-0 flex items-center justify-center transition-opacity duration-150"
                   :class="isBannerPlaying(item) ? 'opacity-100' : 'opacity-0 group-hover:opacity-100'"
                 >
                   <button
                     type="button"
-                    class="flex h-14 w-14 items-center justify-center rounded-full border border-white/40 bg-black/45 text-white shadow-2xl backdrop-blur-xl transition-all duration-300 hover:scale-115 hover:bg-black/65 hover:border-white/70 active:scale-95 focus-visible:outline-none"
+                    class="flex h-14 w-14 items-center justify-center rounded-full border border-white/40 bg-slate-950/70 text-white shadow-2xl transition-[transform,background-color,border-color] duration-150 hover:scale-105 hover:bg-slate-900/85 hover:border-white/70 active:scale-95 focus-visible:outline-none cursor-pointer"
                     :aria-label="isBannerPlaying(item) ? t('player.pause') : t('player.play')"
                     @click.stop="handlePlayBannerDirectly(item, $event)"
                   >
@@ -561,7 +546,7 @@ onMounted(() => {
                   </button>
                 </div>
 
-                <!-- 左下角信息排版：标题 + 副标题/类型快捷提示 -->
+                <!-- 左下角信息排版 -->
                 <div class="pointer-events-none absolute bottom-4 left-5 z-10 max-w-[70%] space-y-1.5">
                   <div v-if="item.description">
                     <h3 class="line-clamp-1 text-base font-bold tracking-tight text-white drop-shadow-md sm:text-lg lg:text-xl">
@@ -571,14 +556,14 @@ onMounted(() => {
                   <div class="flex items-center gap-2 text-xs text-white/80 drop-shadow">
                     <span
                       v-if="item.targetType === 1"
-                      class="inline-flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-medium backdrop-blur-md"
+                      class="inline-flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-medium"
                     >
                       <span class="icon-[mdi--headphones] h-3 w-3 text-sky-300" />
                       {{ isBannerPlaying(item) ? t('home.bannerNowPlaying') : t('home.bannerQuickPlay') }}
                     </span>
                     <span
                       v-else-if="item.targetType === 10"
-                      class="inline-flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-medium backdrop-blur-md"
+                      class="inline-flex items-center gap-1 rounded-full bg-white/20 px-2.5 py-0.5 text-[11px] font-medium"
                     >
                       <span class="icon-[mdi--album] h-3 w-3 text-amber-300" />
                       {{ t('home.bannerPlayAll') }}
@@ -586,18 +571,18 @@ onMounted(() => {
                   </div>
                 </div>
 
-                <!-- 右下角特色角标 (贴合卡片边缘的网易云标志性风格，带动态均衡器音波) -->
+                <!-- 右下角特色角标 -->
                 <div class="pointer-events-none absolute right-0 bottom-0 z-10">
                   <div
-                    class="inline-flex items-center gap-1.5 rounded-tl-xl px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg backdrop-blur-md bg-linear-to-r"
+                    class="inline-flex items-center gap-1.5 rounded-tl-xl px-3.5 py-1.5 text-xs font-semibold text-white shadow-lg bg-linear-to-r"
                     :class="getBannerTagMeta(item).gradientClass"
                   >
                     <!-- 若正在热播当前单曲，呈现律动均衡器动画 -->
                     <span v-if="isBannerPlaying(item)" class="flex items-end gap-0.5 h-3.5 pb-0.5">
-                      <span class="w-0.5 bg-white rounded-full animate-equalizer-1" />
-                      <span class="w-0.5 bg-white rounded-full animate-equalizer-2" />
-                      <span class="w-0.5 bg-white rounded-full animate-equalizer-3" />
-                      <span class="w-0.5 bg-white rounded-full animate-equalizer-4" />
+                      <span class="h-3.5 w-0.5 origin-bottom bg-white rounded-full animate-equalizer-1" />
+                      <span class="h-3.5 w-0.5 origin-bottom bg-white rounded-full animate-equalizer-2" />
+                      <span class="h-3.5 w-0.5 origin-bottom bg-white rounded-full animate-equalizer-3" />
+                      <span class="h-3.5 w-0.5 origin-bottom bg-white rounded-full animate-equalizer-4" />
                     </span>
                     <span v-else :class="getBannerTagMeta(item).icon" class="h-3.5 w-3.5" />
                     <span>{{ isBannerPlaying(item) ? t('home.bannerNowPlaying') : getBannerTagMeta(item).text }}</span>
@@ -609,11 +594,11 @@ onMounted(() => {
           <div class="home-pagination mt-4 flex justify-center gap-1.5"></div>
         </section>
 
-        <!-- ═══════ 音乐雷达 (用户真实检索后呈现，学习热门单曲排版) ═══════ -->
+        <!-- ═══════ 音乐雷达 ═══════ -->
         <MusicRadarSection v-if="hasSearchHistory" class="mb-10" />
 
         <!-- ═══════ 推荐歌单 ═══════ -->
-        <section v-if="recommendPlaylists.length" v-scroll-in="{ direction: 'up', delay: 0.1 }">
+        <section v-if="recommendPlaylists.length">
           <div class="mb-6 flex items-baseline justify-between">
             <h2 class="text-primary flex items-center gap-2.5 text-xl font-bold tracking-tight">
               <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-sky-500 to-blue-600">
@@ -623,7 +608,6 @@ onMounted(() => {
             </h2>
           </div>
           <div
-            v-scroll-in="{ stagger: true, staggerDelay: 0.04 }"
             class="grid grid-cols-2 gap-3.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
           >
             <HeroCard
@@ -637,14 +621,13 @@ onMounted(() => {
               :to="`/playlist/${item.id}`"
               :is-playing="activePlayingPlaylistId === item.id && isPlaying"
               :is-loading="loadingPlaylistId === item.id"
-              class="stagger-item"
               @play="handlePlayPlaylist(item)"
             />
           </div>
         </section>
 
         <!-- ═══════ 热门歌手 ═══════ -->
-        <section v-if="artists.length" v-scroll-in="{ direction: 'up', delay: 0.1 }">
+        <section v-if="artists.length">
           <div class="mb-6 flex items-baseline justify-between">
             <h2 class="text-primary flex items-center gap-2.5 text-xl font-bold tracking-tight">
               <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-sky-500 to-blue-600">
@@ -653,16 +636,14 @@ onMounted(() => {
               {{ t('components.discover.hotArtists') }}
             </h2>
             <router-link
-              v-magnetic="{ strength: 0.3, distance: 60 }"
               to="/artists"
-              class="text-primary/40 hover:text-primary/70 flex min-h-11 items-center gap-1 text-[13px] font-medium transition-all duration-200 hover:gap-1.5"
+              class="text-primary/50 hover:text-primary flex min-h-11 items-center gap-1 text-[13px] font-medium transition-colors duration-150 group/more"
             >
               {{ t('common.viewAll') }}
-              <span class="icon-[mdi--chevron-right] h-4 w-4" />
+              <span class="icon-[mdi--chevron-right] h-4 w-4 transition-transform duration-150 group-hover/more:translate-x-0.5" />
             </router-link>
           </div>
           <div
-            v-scroll-in="{ stagger: true, staggerDelay: 0.03 }"
             class="grid grid-cols-4 gap-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12"
           >
             <ArtistCard
@@ -672,13 +653,12 @@ onMounted(() => {
               :name="artist.name"
               :pic-url="artist.picUrl"
               :to="`/artist/${artist.id}`"
-              class="stagger-item"
             />
           </div>
         </section>
 
         <!-- ═══════ 热门歌曲 ═══════ -->
-        <section v-if="hotSongs.length" v-scroll-in="{ direction: 'up', delay: 0.1 }">
+        <section v-if="hotSongs.length">
           <div class="mb-6 flex items-baseline justify-between">
             <h2 class="text-primary flex items-center gap-2.5 text-xl font-bold tracking-tight">
               <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-cyan-500 to-blue-600">
@@ -687,33 +667,29 @@ onMounted(() => {
               {{ t('home.hotSongs') }}
             </h2>
             <router-link
-              v-magnetic="{ strength: 0.3, distance: 60 }"
               to="/charts"
-              class="text-primary/40 hover:text-primary/70 flex min-h-11 items-center gap-1 text-[13px] font-medium transition-all duration-200 hover:gap-1.5"
+              class="text-primary/50 hover:text-primary flex min-h-11 items-center gap-1 text-[13px] font-medium transition-colors duration-150 group/more"
             >
               {{ t('common.viewAll') }}
-              <span class="icon-[mdi--chevron-right] h-4 w-4" />
+              <span class="icon-[mdi--chevron-right] h-4 w-4 transition-transform duration-150 group-hover/more:translate-x-0.5" />
             </router-link>
           </div>
           <div class="songs-container overflow-hidden rounded-2xl">
-            <div
-              v-scroll-in="{ stagger: true, staggerDelay: 0.03, distance: 20 }"
-              class="grid md:grid-cols-2"
-            >
+            <div class="grid md:grid-cols-2">
               <SongCard
                 v-for="(song, idx) in hotSongs"
                 :key="song.id"
                 :song="song"
                 :index="idx"
                 :to="`/song/${song.id}`"
-                class="stagger-item song-divider"
+                class="song-divider"
               />
             </div>
           </div>
         </section>
 
         <!-- ═══════ 推荐MV ═══════ -->
-        <section v-if="mvs.length" v-scroll-in="{ direction: 'up', delay: 0.1 }">
+        <section v-if="mvs.length">
           <div class="mb-6 flex items-baseline justify-between">
             <h2 class="text-primary flex items-center gap-2.5 text-xl font-bold tracking-tight">
               <span class="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-cyan-500 to-blue-600">
@@ -722,16 +698,14 @@ onMounted(() => {
               {{ t('components.discover.recommendMv') }}
             </h2>
             <router-link
-              v-magnetic="{ strength: 0.3, distance: 60 }"
               to="/mv-list"
-              class="text-primary/40 hover:text-primary/70 flex min-h-11 items-center gap-1 text-[13px] font-medium transition-all duration-200 hover:gap-1.5"
+              class="text-primary/50 hover:text-primary flex min-h-11 items-center gap-1 text-[13px] font-medium transition-colors duration-150 group/more"
             >
               {{ t('common.viewAll') }}
-              <span class="icon-[mdi--chevron-right] h-4 w-4" />
+              <span class="icon-[mdi--chevron-right] h-4 w-4 transition-transform duration-150 group-hover/more:translate-x-0.5" />
             </router-link>
           </div>
           <div
-            v-scroll-in="{ stagger: true, staggerDelay: 0.06 }"
             class="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6"
           >
             <MVCard
@@ -743,7 +717,6 @@ onMounted(() => {
               :cover="mv.cover"
               :play-count="mv.playCount as number"
               :to="`/mv-player/${mv.id}`"
-              class="stagger-item"
             />
           </div>
         </section>
@@ -755,12 +728,20 @@ onMounted(() => {
 <style scoped>
 @reference "../style/tailwind.css";
 
-/* ── 3D 聚光灯层叠卡片过渡 (学习网易云 Coverflow 视觉重点) ── */
+.banner-aura {
+  background: radial-gradient(
+    70% 80% at 50% 45%,
+    rgba(56, 189, 248, 0.16) 0%,
+    rgba(37, 99, 235, 0.06) 55%,
+    transparent 80%
+  );
+}
+
+/* ── 3D 聚光灯层叠卡片过渡 ── */
 .home-swiper :deep(.swiper-slide) {
-  transform: scale(0.93);
-  opacity: 0.65;
-  transition: transform 0.45s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.45s cubic-bezier(0.2, 0.8, 0.2, 1);
-  will-change: transform, opacity;
+  transform: scale(0.94);
+  opacity: 0.7;
+  transition: transform 0.25s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.25s ease;
 }
 
 .home-swiper :deep(.swiper-slide-active) {
@@ -769,35 +750,39 @@ onMounted(() => {
   z-index: 10;
 }
 
-/* ── 跳动音频均衡器动画 (正在播放指示器) ── */
+/* ── 跳动音频均衡器动画 (纯 transform 合成，避免 height 重排) ── */
 @keyframes banner-eq-1 {
-  0%, 100% { height: 4px; }
-  50% { height: 13px; }
+  0%, 100% { transform: scaleY(0.28); }
+  50% { transform: scaleY(0.95); }
 }
 @keyframes banner-eq-2 {
-  0%, 100% { height: 11px; }
-  50% { height: 5px; }
+  0%, 100% { transform: scaleY(0.8); }
+  50% { transform: scaleY(0.35); }
 }
 @keyframes banner-eq-3 {
-  0%, 100% { height: 5px; }
-  50% { height: 14px; }
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
 }
 @keyframes banner-eq-4 {
-  0%, 100% { height: 12px; }
-  50% { height: 4px; }
+  0%, 100% { transform: scaleY(0.85); }
+  50% { transform: scaleY(0.28); }
 }
 
 .animate-equalizer-1 {
-  animation: banner-eq-1 0.8s ease-in-out infinite;
+  animation: banner-eq-1 0.7s ease-in-out infinite;
+  will-change: transform;
 }
 .animate-equalizer-2 {
-  animation: banner-eq-2 0.7s ease-in-out infinite 0.15s;
+  animation: banner-eq-2 0.65s ease-in-out infinite 0.15s;
+  will-change: transform;
 }
 .animate-equalizer-3 {
-  animation: banner-eq-3 0.9s ease-in-out infinite 0.3s;
+  animation: banner-eq-3 0.75s ease-in-out infinite 0.3s;
+  will-change: transform;
 }
 .animate-equalizer-4 {
-  animation: banner-eq-4 0.75s ease-in-out infinite 0.1s;
+  animation: banner-eq-4 0.68s ease-in-out infinite 0.1s;
+  will-change: transform;
 }
 
 /* ── 轮播图分页指示器 ── */
@@ -807,7 +792,7 @@ onMounted(() => {
   background: var(--glass-text-primary);
   opacity: 0.2;
   border-radius: 9999px;
-  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: width 0.2s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.2s ease;
 }
 
 .home-pagination :deep(.swiper-pagination-bullet-active) {

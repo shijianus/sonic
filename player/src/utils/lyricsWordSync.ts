@@ -407,10 +407,16 @@ export function syncWordElements(
         const end = Number.isFinite(w.endSec) ? w.endSec : (w.endMs || (start * 1000 + 300)) / 1000
 
         if (effectiveTime < start) {
-          // 状态 ①：还没唱到
-          charSpan.style.setProperty('--fill', '0%')
-          charSpan.style.backgroundImage = ''
-          charSpan.classList.remove('word-sung', 'word-singing')
+          // 状态 ①：还没唱到（仅在状态变化时写 DOM，避免每帧无意义重设）
+          if (
+            charSpan.classList.contains('word-sung') ||
+            charSpan.classList.contains('word-singing') ||
+            charSpan.style.backgroundImage
+          ) {
+            charSpan.style.setProperty('--fill', '0%')
+            charSpan.style.backgroundImage = ''
+            charSpan.classList.remove('word-sung', 'word-singing')
+          }
         } else if (effectiveTime < end) {
           // 状态 ②：正在唱到这里（显式平滑渐变填充）
           const dur = Math.max(0.04, end - start)
@@ -421,11 +427,17 @@ export function syncWordElements(
           charSpan.classList.add('word-singing')
           charSpan.classList.remove('word-sung')
         } else {
-          // 状态 ③：已经唱过
-          charSpan.style.setProperty('--fill', '100%')
-          charSpan.style.backgroundImage = ''
-          charSpan.classList.add('word-sung')
-          charSpan.classList.remove('word-singing')
+          // 状态 ③：已经唱过（仅在状态变化时写 DOM）
+          if (
+            !charSpan.classList.contains('word-sung') ||
+            charSpan.classList.contains('word-singing') ||
+            charSpan.style.backgroundImage
+          ) {
+            charSpan.style.setProperty('--fill', '100%')
+            charSpan.style.backgroundImage = ''
+            charSpan.classList.add('word-sung')
+            charSpan.classList.remove('word-singing')
+          }
         }
       }
     }

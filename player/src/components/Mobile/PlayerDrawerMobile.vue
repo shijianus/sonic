@@ -482,7 +482,7 @@ const playModeIcon = computed(() => {
     aria-modal="true"
     :aria-label="t('player.fullPlayerAria')"
     tabindex="-1"
-    class="bg-overlay/95 fixed inset-0 z-9999 flex flex-col backdrop-blur-xl outline-none"
+    class="bg-overlay/95 fixed inset-0 z-9999 flex flex-col outline-none"
   >
     <!-- 封面模糊背景（可切换启用） -->
     <div v-show="useCoverBg" class="absolute inset-0 -z-10 overflow-hidden">
@@ -898,10 +898,7 @@ const playModeIcon = computed(() => {
 }
 
 .bg-layer {
-  transform: scale(1.5);
-  filter: blur(40px) saturate(1.3);
-  transition: filter 0.3s ease;
-  will-change: transform, opacity;
+  will-change: opacity;
 }
 
 .vinyl-disc {
@@ -1019,7 +1016,6 @@ const playModeIcon = computed(() => {
   -webkit-text-fill-color: transparent;
   color: transparent;
   transition: transform 0.08s cubic-bezier(0.2, 0, 0, 1);
-  will-change: transform, --fill;
   cursor: pointer;
 }
 
@@ -1070,7 +1066,7 @@ const playModeIcon = computed(() => {
 
 
 .control-btn {
-  transition: all 0.2s ease;
+  transition: transform 0.15s ease, background-color 0.15s ease;
 }
 
 .control-btn:active {
@@ -1079,7 +1075,7 @@ const playModeIcon = computed(() => {
 }
 
 .play-btn {
-  transition: all 0.2s ease;
+  transition: transform 0.15s ease;
 }
 
 .play-btn:active {
@@ -1087,7 +1083,7 @@ const playModeIcon = computed(() => {
 }
 
 .toolbar-panel {
-  animation: slideDown 0.2s ease;
+  animation: slideDown 0.16s ease-out;
 }
 
 @keyframes slideDown {
@@ -1111,7 +1107,7 @@ const playModeIcon = computed(() => {
   padding: 0.5rem;
   border-radius: 0.75rem;
   font-size: 0.6875rem;
-  transition: all 0.2s ease;
+  transition: transform 0.15s ease, background-color 0.15s ease, color 0.15s ease;
 }
 
 .toolbar-btn:active {
