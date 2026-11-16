@@ -1,9 +1,181 @@
 
- RUN  v5.0.5 /workspace/scratch/f2e94de409da/sonic
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/tmp/sonic-followup-base[39m
 
+(node:222080) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mbackend beta lyrics timeout contract[2m > [22m[2mreturns HTTP 200 with prior lyrics=false after the total budget expires and starts no fallback
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-lyrics","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
 
- Test Files  2 passed (2)
-      Tests  82 passed (82)
-   Start at  15:31:11
-   Duration  2.62s (tests 82%, import 10%, transform 8%)
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mbackend beta lyrics timeout contract[2m > [22m[2mreturns HTTP 200 with prior lyrics=true after the total budget expires and starts no fallback
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-lyrics","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mnexus records each upstream timeout even before the search budget expires
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mforward records each upstream timeout even before the search budget expires
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-forward","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mkeeps a completed provider when other bodies stall and does not cache the incomplete search
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mcancels outstanding provider bodies on client disconnect
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mrecords an Engine timeout at the total deadline without launching direct providers
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mreturns a classified timeout from the compatibility route when its request budget expires
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mrejects a string result for cloudsearch type 1000
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mrejects a string result for cloudsearch type 1004
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mrejects an upstream HTTP 200 response whose provider code is an error
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mrejects malformed pagination and clamps oversized CloudSearch values
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mdoes not relay malformed CloudSearch data from the local Engine
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2maccepts structured playlist results from the native protocol
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2maccepts structured MV results and forwards the keyword to the web search endpoint
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mfalls back to the native MV protocol when the web response is malformed
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2maccepts song results from the synthetic Nexus provider through cloudsearch type 1
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mreturns an observable error when all Nexus providers fail
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mrefreshes a partial Engine result with policy no-store and attempts [ [Object] ]
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mrefreshes a partial Engine result with policy PUBLIC, No-Store and attempts []
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mrefreshes a partial Engine result with policy public, max-age=600 and attempts [ [Object] ]
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mrefreshes a partial Engine result with policy private, max-age=600 and attempts []
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mdoes not turn a private Engine suggestion response into a public response
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mdoes not offer unrelated recommendations when the direct search times out without a match
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mpreserves a direct provider result through a stalled body, then finds the recovered track
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mbackend beta bounded cache and singleflight[2m > [22m[2mcoalesces a real hotspot in commercial upstream JSON calls
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mpreserves valid empty results
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mpreserves valid populated results
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mreturns a retryable failure for network
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mreturns a retryable failure for http
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mreturns a retryable failure for invalid-json
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mreturns a retryable failure for missing-list
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mreturns a retryable failure for provider-code
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mpreserves valid empty results
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mpreserves valid populated results
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mreturns a retryable failure for network
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mreturns a retryable failure for http
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mreturns a retryable failure for invalid-json
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mreturns a retryable failure for missing-list
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mreturns a retryable failure for provider-code
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mencodes region 7 in the direct WEAPI request
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mencodes region 96 in the direct WEAPI request
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mencodes region 8 in the direct WEAPI request
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mencodes region 16 in the direct WEAPI request
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mpreserves the region and excludes caller-provided transport options on the sidecar hop
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mnormalizes song durations from the default API
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mnormalizes song durations from the regional WEAPI
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mnormalizes song durations from the regional sidecar
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mreturns retryable failure when both regional transports fail without substituting default songs
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mpreserves default and personalized requests without invoking a regional transport
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mrejects unsupported region values without requesting any upstream
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog deadlines[2m > [22m[2mreturns a retryable failure when the provider exhausts the gateway budget
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog deadlines[2m > [22m[2mkeeps the shared Engine circuit available after a chart provider failure
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstdout[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mbackend beta readiness, drain and maintenance[2m > [22m[2mreports draining readiness and refuses new work on an existing HTTP connection while its current request drains
+[22m[39m{"type":"access","requestId":"582fa707-c220-480d-9ef8-9f5f8b586051","method":"GET","path":"/api/banner","status":200,"durationMs":30}
+{"type":"access","requestId":"5326c2ef-edef-437d-85b2-2f63a55e0049","method":"GET","path":"/api/sonic/engine/health","status":503,"durationMs":28}
+{"type":"access","requestId":"09b91735-7bf8-4ad3-adf7-339d5d264021","method":"GET","path":"/api/banner","status":503,"durationMs":29}
+
+ [32m✓[39m tests/backend-beta-runtime.test.ts [2m([22m[2m76 tests[22m[2m)[22m[33m 1847[2mms[22m[39m
+   [32m✓[39m backend beta request cancellation [2m(5)[22m
+     [33m[2m✓[22m[39m combines a provider deadline with a caller signal and does not launch fallback after cancellation[33m 513[2mms[22m[39m
+   [32m✓[39m chart catalog deadlines [2m(2)[22m
+     [33m[2m✓[22m[39m returns a retryable failure when the provider exhausts the gateway budget[33m 510[2mms[22m[39m
+ [32m✓[39m tests/external-adapters-hardening.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 25[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m2 passed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[32m82 passed[39m[22m[90m (82)[39m
+[2m   Start at [22m 20:01:18
+[2m   Duration [22m 2.44s[2m (tests 83%, transform 10%, import 7%)[22m
 

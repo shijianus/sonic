@@ -1,22 +1,47 @@
 
-> sonic-music-player@2.2.0 test /workspace/scratch/f2e94de409da/sonic/player
+> sonic-music-player@2.2.0 test /tmp/sonic-followup-base/player
 > vitest run
 
 
- RUN  v5.0.5 /workspace/scratch/f2e94de409da/sonic/player
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/tmp/sonic-followup-base/player[39m
 
+ [32m✓[39m tests/relativeTimeYT.test.ts [2m([22m[2m11 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/transformers.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 22[2mms[22m[39m
 Not implemented: HTMLMediaElement's load() method
 Not implemented: HTMLMediaElement's load() method
 Not implemented: HTMLMediaElement's load() method
 Not implemented: HTMLMediaElement's load() method
 Not implemented: HTMLMediaElement's load() method
+ [32m✓[39m tests/queueIntegration.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 54[2mms[22m[39m
+ [32m✓[39m tests/playbackErrors.test.ts [2m([22m[2m10 tests[22m[2m)[22m[32m 92[2mms[22m[39m
+ [32m✓[39m tests/libraryStore.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+ [32m✓[39m tests/sourceBinding.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 138[2mms[22m[39m
+ [32m✓[39m tests/audioQuality.test.ts [2m([22m[2m8 tests[22m[2m)[22m[32m 186[2mms[22m[39m
+ [32m✓[39m tests/releaseFollowupPlayback.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 179[2mms[22m[39m
+ [32m✓[39m tests/playbackRace.test.ts [2m([22m[2m9 tests[22m[2m)[22m[32m 64[2mms[22m[39m
+ [32m✓[39m tests/recommendStore.test.ts [2m([22m[2m24 tests[22m[2m)[22m[32m 159[2mms[22m[39m
+ [32m✓[39m tests/playbackListening.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 165[2mms[22m[39m
+ [32m✓[39m tests/authStore.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 16[2mms[22m[39m
+ [32m✓[39m tests/accessGate.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 12[2mms[22m[39m
+[90mstderr[2m | tests/sonicBlogBridge.test.ts[2m > [22m[2msonic blog bridge origin allowlist[2m > [22m[2mrejects unauthorized origins and never broadcasts with a wildcard target
+[22m[39m[SonicBridge] Ignored command from unauthorized origin: https://evil.example
 
- Test Files  22 passed (22)
-      Tests  178 passed (178)
-   Start at  15:31:21
-   Duration  5.30s (environment 71%, tests 12%, import 12%, transform 4%)
+ [32m✓[39m tests/sonicBlogBridge.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 12[2mms[22m[39m
+ [32m✓[39m tests/searchHistory.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 19[2mms[22m[39m
+ [32m✓[39m tests/commentEmoji.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/downloadIdentity.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 7[2mms[22m[39m
+ [32m✓[39m tests/qualityProbe.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 15[2mms[22m[39m
+ [32m✓[39m tests/localMusicUndo.test.ts [2m([22m[2m1 test[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/searchErrors.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/pagination.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 5[2mms[22m[39m
+ [32m✓[39m tests/releaseFollowup.test.ts [2m([22m[2m24 tests[22m[2m)[22m[33m 2458[2mms[22m[39m
 
-Environment  jsdom was created 22 times · 20.84s total, 71% of tracked time
-             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
-             learn more: https://vitest.dev/guide/improving-performance#test-environments
+[2m Test Files [22m [1m[32m22 passed[39m[22m[90m (22)[39m
+[2m      Tests [22m [1m[32m178 passed[39m[22m[90m (178)[39m
+[2m   Start at [22m 20:01:12
+[2m   Duration [22m 5.24s[2m (environment 61%, transform 14%, import 13%, tests 12%)[22m
+
+[2mEnvironment [22m [33mjsdom was created 22 times[39m[2m · 18.39s total, 61% of tracked time[22m
+[2m            [22m [2mcreate it once per worker with [22m[33mpool: 'vmThreads'[39m[2m (keeps per-file isolation) or [22m[33misolate: false[39m[2m (shares it across files)[22m
+[2m            [22m [2mlearn more: https://vitest.dev/guide/improving-performance#test-environments[22m
 

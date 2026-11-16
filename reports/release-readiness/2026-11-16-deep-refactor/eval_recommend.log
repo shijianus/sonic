@@ -1,5 +1,3 @@
-$ npm run eval:recommend
-npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
 > sonic@2.2.0 eval:recommend
 > jiti scripts/evaluate-recommendation.mjs
@@ -82,10 +80,12 @@ npm warn Unknown env config "http-proxy". This will stop working in the next maj
     "livePlaybackVerified": false
   },
   "performanceMetrics": {
-    "recommendLatency_p50_ms": 6.34,
-    "recommendLatency_p95_ms": 11.43,
-    "searchLatency_p50_ms": 2.57,
-    "searchLatency_p95_ms": 5.45,
-    "processRssMemory_MB": 92.3
+    "recommendLatency_p50_ms": 7.02,
+    "recommendLatency_p95_ms": 12.63,
+    "searchLatency_p50_ms": 2.95,
+    "searchLatency_p95_ms": 5.95,
+    "processRssMemory_MB": 156.3
   }
 }
+(node:223383) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

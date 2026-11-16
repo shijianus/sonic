@@ -1,0 +1,10 @@
+
+> sonic@2.2.0 typecheck
+> tsc --noEmit && pnpm --dir player run typecheck
+
+
+> sonic-music-player@2.2.0 typecheck /tmp/sonic-followup-base/player
+> vue-tsc --noEmit
+
+
+[typecheck-meta] commit=4a7ae8a66429cc422684c8cda41ad444da15da5b sourceDigest=b07b013f586f83ad5e1827cd0256e5d18c1649903011da03454e8aa5f583a077 dirty=false exit=0

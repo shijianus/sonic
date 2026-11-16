@@ -1,80 +1,78 @@
-$ npm run test:pressure
-npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
 > sonic@2.2.0 test:pressure
 > node scripts/verify-public-beta-pressure.mjs
 
 {
   "ok": true,
-  "verifiedAt": "2026-11-15T21:19:32.815Z",
+  "verifiedAt": "2026-11-16T04:01:47.698Z",
   "target": "127.0.0.1 loopback Engine",
-  "releaseId": "752911f0c2d6-be0bd32f3d50",
-  "sourceDigest": "be0bd32f3d508a65ca8ec5d08c0efd14e3e6d986e8c8f151cb3e8b701e7d3a1b",
+  "releaseId": "4a7ae8a66429cc422684c8cda41ad444da15da5b",
+  "sourceDigest": "b07b013f586f83ad5e1827cd0256e5d18c1649903011da03454e8aa5f583a077",
   "workers": 8,
   "requestsPerWorker": 75,
   "totalRequests": 605,
-  "elapsedMs": 1233.78,
-  "throughputRequestsPerSecond": 490.36,
+  "elapsedMs": 1299.19,
+  "throughputRequestsPerSecond": 465.67,
   "latency": {
     "count": 605,
-    "p50Ms": 12.13,
-    "p95Ms": 36.98,
-    "maxMs": 68.97
+    "p50Ms": 13.39,
+    "p95Ms": 39.28,
+    "maxMs": 62.11
   },
   "byKind": {
     "search": {
       "count": 121,
-      "p50Ms": 9.29,
-      "p95Ms": 28.55,
-      "maxMs": 39.55
+      "p50Ms": 10.76,
+      "p95Ms": 21.52,
+      "maxMs": 37.59
     },
     "stream-200": {
       "count": 1,
-      "p50Ms": 23.93,
-      "p95Ms": 23.93,
-      "maxMs": 23.93
+      "p50Ms": 18.15,
+      "p95Ms": 18.15,
+      "maxMs": 18.15
     },
     "stream-206": {
       "count": 1,
-      "p50Ms": 4.03,
-      "p95Ms": 4.03,
-      "maxMs": 4.03
+      "p50Ms": 4.76,
+      "p95Ms": 4.76,
+      "maxMs": 4.76
     },
     "stream-416": {
       "count": 1,
-      "p50Ms": 2.82,
-      "p95Ms": 2.82,
-      "maxMs": 2.82
+      "p50Ms": 4.34,
+      "p95Ms": 4.34,
+      "maxMs": 4.34
     },
     "stream-404": {
       "count": 1,
-      "p50Ms": 2.18,
-      "p95Ms": 2.18,
-      "maxMs": 2.18
+      "p50Ms": 3.62,
+      "p95Ms": 3.62,
+      "maxMs": 3.62
     },
     "range": {
       "count": 120,
-      "p50Ms": 5.56,
-      "p95Ms": 18.28,
-      "maxMs": 36.98
+      "p50Ms": 6.89,
+      "p95Ms": 19.71,
+      "maxMs": 29.38
     },
     "error": {
       "count": 120,
-      "p50Ms": 6.22,
-      "p95Ms": 20.7,
-      "maxMs": 26.55
+      "p50Ms": 6.94,
+      "p95Ms": 16.13,
+      "maxMs": 29.13
     },
     "event": {
       "count": 120,
-      "p50Ms": 17.39,
-      "p95Ms": 28.52,
-      "maxMs": 55.08
+      "p50Ms": 18.54,
+      "p95Ms": 36.61,
+      "maxMs": 59.79
     },
     "profile": {
       "count": 120,
-      "p50Ms": 28.31,
-      "p95Ms": 52.97,
-      "maxMs": 68.97
+      "p50Ms": 29.41,
+      "p95Ms": 51.08,
+      "maxMs": 62.11
     }
   },
   "cancellationChecks": 16,

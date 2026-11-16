@@ -1,15 +1,21 @@
+(node:223016) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:223034) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:223070) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
 {
   "ok": true,
   "manifest": {
     "schemaVersion": 1,
-    "baseCommit": "5cfeb865f90ea24d2bb81ba4d0751db75f5c63fe",
-    "sourceDigest": "be0bd32f3d508a65ca8ec5d08c0efd14e3e6d986e8c8f151cb3e8b701e7d3a1b",
-    "releaseId": "5cfeb865f90ea24d2bb81ba4d0751db75f5c63fe",
-    "buildTime": "2026-11-15T21:19:06.000Z",
+    "baseCommit": "4a7ae8a66429cc422684c8cda41ad444da15da5b",
+    "sourceDigest": "b07b013f586f83ad5e1827cd0256e5d18c1649903011da03454e8aa5f583a077",
+    "releaseId": "4a7ae8a66429cc422684c8cda41ad444da15da5b",
+    "buildTime": "2026-11-16T04:00:14.000Z",
     "dirty": false
   },
-  "runtime": "v24.22.1",
-  "temporaryDatabase": "/tmp/sonic-release-http-tTEDAF/recommend.sqlite",
+  "runtime": "v22.18.0",
+  "temporaryDatabase": "/tmp/sonic-release-http-UsP1ov/recommend.sqlite",
   "checks": [
     {
       "name": "compiled engine reports matching release identity",
@@ -38,7 +44,7 @@
       "name": "online backup contains persisted events and a digest",
       "ok": true,
       "events": 2,
-      "sha256": "c5afc5665e785cdf90b53a6ca2510deda911769529bf343dd3da123a72653bfa"
+      "sha256": "a180dc759c442f9c716dd1ac3e28943431b344953971389af4134e4fff21e75d"
     },
     {
       "name": "restore refuses the live database",

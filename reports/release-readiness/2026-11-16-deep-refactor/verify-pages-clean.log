@@ -1,6 +1,5 @@
-npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
 > sonic@2.2.0 verify:pages-deploy
 > node scripts/verify-pages-deploy-tree.mjs
 
-{"ok":true,"stagingRoot":"/tmp/sonic-pages-deploy-AE3Rjx","releaseId":"5cfeb865f90ea24d2bb81ba4d0751db75f5c63fe","sourceDigest":"be0bd32f3d508a65ca8ec5d08c0efd14e3e6d986e8c8f151cb3e8b701e7d3a1b","pagesArtifactDigest":"3ad942aa7c83b5038a456b7c6004ba158652fc6af64063be48d1f4a68a328e54","compiledRelease":true}
+{"ok":true,"stagingRoot":"/tmp/sonic-pages-deploy-ujZXhH","releaseId":"4a7ae8a66429cc422684c8cda41ad444da15da5b","sourceDigest":"b07b013f586f83ad5e1827cd0256e5d18c1649903011da03454e8aa5f583a077","pagesArtifactDigest":"c976ff2e6ec04b7f188ae1b8aedaccc039207c12db4164b657066f764154e8cb","compiledRelease":true}

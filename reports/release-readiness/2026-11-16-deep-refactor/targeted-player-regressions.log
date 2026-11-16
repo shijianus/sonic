@@ -1,13 +1,15 @@
 
- RUN  v5.0.5 /workspace/scratch/f2e94de409da/sonic/player
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/tmp/sonic-followup-base/player[39m
 
+ [32m✓[39m tests/releaseFollowup.test.ts [2m([22m[2m24 tests[22m[2m)[22m[33m 2481[2mms[22m[39m
+ [32m✓[39m tests/releaseFollowupPlayback.test.ts [2m([22m[2m28 tests[22m[2m)[22m[32m 161[2mms[22m[39m
+ [32m✓[39m tests/pagination.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 4[2mms[22m[39m
 
- Test Files  3 passed (3)
-      Tests  54 passed (54)
-   Start at  15:31:14
-   Duration  6.17s (tests 41%, environment 36%, import 20%, transform 4%)
+[2m Test Files [22m [1m[32m3 passed[39m[22m[90m (3)[39m
+[2m      Tests [22m [1m[32m54 passed[39m[22m[90m (54)[39m
+[2m   Start at [22m 20:01:21
+[2m   Duration [22m 5.58s[2m (tests 50%, environment 29%, import 18%, transform 2%)[22m
 
-Environment  jsdom was created 3 times · 2.05s total, 36% of tracked time
-             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
-             learn more: https://vitest.dev/guide/improving-performance#test-environments
+[2m    Isolate [22m [33m3 workers spawned[39m[2m · ~598ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~1.20s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
 

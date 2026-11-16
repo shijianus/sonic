@@ -1,146 +1,140 @@
-[1A[2K[WebServer] (node:37) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
 
+Running 136 tests using 1 worker
 
-Running 123 tests using 1 worker
-
-[1A[2K(node:45) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `node --trace-warnings ...` to show where the warning was created)
-
-
-[1A[2K(node:45) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `node --trace-warnings ...` to show where the warning was created)
-
-
-[1A[2K[1/123] [desktop-chromium] › e2e/specs/a11y.spec.ts:5:3 › 基础可访问性 › 搜索、播放控制与进度条具备可访问名称
-[1A[2K[2/123] [desktop-chromium] › e2e/specs/a11y.spec.ts:23:3 › 基础可访问性 › 所有可见按钮都有可访问名称
-[1A[2K[3/123] [desktop-chromium] › e2e/specs/a11y.spec.ts:41:3 › 基础可访问性 › 键盘可聚焦搜索框并提交查询
-[1A[2K[4/123] [desktop-chromium] › e2e/specs/charts-degradation.spec.ts:3:1 › desktop Trending labels a New Songs fallback only after a failure and retries the selected window
-[1A[2K[5/123] [desktop-chromium] › e2e/specs/charts-degradation.spec.ts:61:1 › desktop official chart clears obsolete tracks, reports upstream failure and retries the selected chart
-[1A[2K[6/123] [desktop-chromium] › e2e/specs/charts-official.spec.ts:24:1 › desktop official charts: 25 entries stay inside their slot and tabs remain clickable
-[1A[2K[7/123] [desktop-chromium] › e2e/specs/charts-race.spec.ts:41:3 › desktop Trending: an older response cannot replace the selected filter
-[1A[2K[8/123] [desktop-chromium] › e2e/specs/charts-race.spec.ts:41:3 › desktop New Songs: an older response cannot replace the selected filter
-[1A[2K[9/123] [desktop-chromium] › e2e/specs/core.spec.ts:8:3 › 核心播放路径 › 首页加载：布局、搜索入口与播放器控制可见，无横向溢出
-[1A[2K[10/123] [desktop-chromium] › e2e/specs/core.spec.ts:18:3 › 核心播放路径 › 搜索 → 播放 → 暂停 → 恢复
-[1A[2K[11/123] [desktop-chromium] › e2e/specs/core.spec.ts:41:3 › 核心播放路径 › 切歌与快速连点下一首：最终只播放最后一次选择
-[1A[2K[12/123] [desktop-chromium] › e2e/specs/core.spec.ts:60:3 › 核心播放路径 › Seek：点击进度条 50% 后真实音频时间跳转并继续播放
-[1A[2K[13/123] [desktop-chromium] › e2e/specs/core.spec.ts:87:3 › 核心播放路径 › 歌词：随当前歌曲加载并高亮推进，切歌后歌词同步切换
-[1A[2K[14/123] [desktop-chromium] › e2e/specs/core.spec.ts:111:3 › 核心播放路径 › 收藏：喜欢后进入收藏页可见，刷新后保持
-[1A[2K[15/123] [desktop-chromium] › e2e/specs/core.spec.ts:131:3 › 核心播放路径 › 播放历史：播过的歌曲进入最近播放并刷新后保持
-[1A[2K[16/123] [desktop-chromium] › e2e/specs/core.spec.ts:142:3 › 核心播放路径 › 歌词降级：纯音乐与无歌词返回明确提示而不是崩溃
-[1A[2K[17/123] [desktop-chromium] › e2e/specs/csp.spec.ts:8:1 › the deployed CSP allows the built app without violations
-[1A[2K[18/123] [desktop-chromium] › e2e/specs/desktop-navigation.spec.ts:2:1 › desktop sidebar navigation renders each page with reduced motion
-[1A[2K[19/123] [desktop-chromium] › e2e/specs/playback-listening.spec.ts:2:1 › 真实音频跳到末尾不会上报完播，从头播放才会上报
-[1A[2K[20/123] [desktop-chromium] › e2e/specs/playback-sync.spec.ts:2:1 › 音频、歌词与播放器展示在同一曲目内同步推进，切歌后同时更新
-[1A[2K[21/123] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:13:1 › the first search stays public until a visitor explicitly enables personalization
-[1A[2K[22/123] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:51:1 › opting out in one tab immediately disables uploads in another tab
-[1A[2K[23/123] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:92:1 › cached and refreshed account profiles render local initials without loading remote avatars
-[1A[2K[24/123] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:150:1 › an erasure identity conflict preserves the anonymous profile ID for retry
-[1A[2K[25/123] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:222:1 › account erasure applies the returned epoch to subsequent behavior events
-[1A[2K[26/123] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:356:1 › local data clearing closes another app tab’s music database and lets it reopen empty
-[1A[2K[27/123] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:393:1 › blocked local data clearing reports failure and can be retried after the blocker closes
-[1A[2K[28/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop Songs: 403 → retry → results
-[1A[2K[29/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop Songs: 429 → retry → results
-[1A[2K[30/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop Songs: 503 → retry → results
-[1A[2K[31/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop Songs: network → retry → results
-[1A[2K[32/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop Playlists: 403 → retry → results
-[1A[2K[33/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop Playlists: 429 → retry → results
-[1A[2K[34/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop Playlists: 503 → retry → results
-[1A[2K[35/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop Playlists: network → retry → results
-[1A[2K[36/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop MV: 403 → retry → results
-[1A[2K[37/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop MV: 429 → retry → results
-[1A[2K[38/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop MV: 503 → retry → results
-[1A[2K[39/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:37:5 › desktop MV: network → retry → results
-[1A[2K[40/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:168:1 › desktop empty playlist and MV searches have an empty state, not an error or blank panel
-[1A[2K[41/123] [desktop-chromium] › e2e/specs/release-followup.spec.ts:222:1 › desktop long title and artist wrap in rows and expanded player without horizontal overflow
-[1A[2K[42/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:14:3 › cover flight with default motion › pause cancels the selected song while the cover is in flight
-[1A[2K[43/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:33:3 › cover flight with default motion › rapid row selections followed by Next cannot be reversed by the cover flights
-[1A[2K[44/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:93:3 › 异常与降级 › 取流中暂停：迟到的 URL 不得在用户暂停后自动起播
-[1A[2K[45/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:117:3 › 异常与降级 › 快速切歌：旧歌慢响应晚到不覆盖新歌状态
-[1A[2K[46/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:143:3 › 异常与降级 › 播放 403：给出明确错误提示，页面与播放器保持可用
-[1A[2K[47/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:159:3 › 异常与降级 › 播放 429：提示限流原因，不产生未捕获异常
-[1A[2K[48/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:169:3 › 异常与降级 › 播放 404：提示曲目无可用音源，页面保持可用
-[1A[2K[49/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:179:3 › 异常与降级 › 播放 503：提示服务降级，不静默卡死
-[1A[2K[50/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:190:3 › 异常与降级 › 播放挂起超时：不得无限加载，需给出网络错误提示
-[1A[2K[51/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:205:3 › 异常与降级 › 播放连接中断：提示网络错误而不是静默卡死
-[1A[2K[52/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:215:3 › 异常与降级 › 搜索 429：显示可重试错误态，而不是伪装成空结果
-[1A[2K[53/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:224:3 › 异常与降级 › 搜索 403：显示上游错误态
-[1A[2K[54/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:232:3 › 异常与降级 › 搜索断网：显示网络错误态
-[1A[2K[55/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:240:3 › 异常与降级 › 快速改搜索词：旧慢请求晚到不覆盖新结果
-[1A[2K[56/123] [desktop-chromium] › e2e/specs/resilience.spec.ts:253:3 › 异常与降级 › 搜索空结果与异常 JSON：明确空态，不崩溃
-[1A[2K[57/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：首页
-[1A[2K[58/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：搜索
-[1A[2K[59/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：收藏
-[1A[2K[60/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：最近播放
-[1A[2K[61/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：榜单
-[1A[2K[62/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：MV 列表
-[1A[2K[63/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：歌手
-[1A[2K[64/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：新专辑
-[1A[2K[65/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：下载
-[1A[2K[66/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：本地音乐
-[1A[2K[67/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：设置
-[1A[2K[68/123] [desktop-chromium] › e2e/specs/routes.spec.ts:46:3 › 主要路由可加载：歌单
-[1A[2K[69/123] [desktop-chromium] › e2e/specs/routes.spec.ts:61:1 › 侧边栏切换路由：连续切换不白屏
-[1A[2K[70/123] [desktop-chromium] › e2e/specs/routes.spec.ts:86:1 › 未知路由显示 404 而不是白屏
-[1A[2K[71/123] [desktop-chromium] › e2e/specs/routes.spec.ts:96:1 › 匿名模式：页面不存在登录死入口
-[1A[2K[72/123] [desktop-chromium] › e2e/specs/search-suggestions.spec.ts:2:1 › a superseded desktop suggestion failure preserves the current suggestions
-[1A[2K[73/123] [desktop-chromium] › e2e/specs/search-timeout.spec.ts:52:1 › a timed-out search keeps its retry panel when all fallbacks are empty and recovers
-[1A[2K[74/123] [desktop-chromium] › e2e/specs/search-timeout.spec.ts:99:1 › a partial timeout keeps matching songs visible without the retry panel
-[1A[2K[75/123] [desktop-chromium] › e2e/specs/search-timeout.spec.ts:108:1 › successful empty searches still use the ordinary empty state
-[1A[2K[76/123] [desktop-chromium] › e2e/specs/search-timeout.spec.ts:125:1 › the compatibility fallback can provide songs after a primary timeout
-[1A[2K[77/123] [desktop-chromium] › e2e/specs/search-visual.spec.ts:6:3 › 搜索与风格探索雷达视觉与交互核验 › 桌面端：多维度分组颜色区分、相斥替换、雷达图标极简对齐、音频稳定播放、搜索提交
-[1A[2K[78/123] [desktop-chromium] › e2e/specs/search-visual.spec.ts:156:3 › 搜索与风格探索雷达视觉与交互核验 › 移动端：多角度Tag支援与相斥替换、不同组别颜色区分、单曲列表与音频起播核验
-[1A[2K(node:1574) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `node --trace-warnings ...` to show where the warning was created)
-
-
-[1A[2K(node:1574) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
-(Use `node --trace-warnings ...` to show where the warning was created)
-
-
-[1A[2K[79/123] [mobile-chromium] › e2e/specs/charts-degradation.responsive.spec.ts:3:1 › mobile charts clear tracks when switching in either direction and distinguish failures from empty results
-[1A[2K[80/123] [mobile-chromium] › e2e/specs/charts-degradation.responsive.spec.ts:93:1 › mobile chart category changes ignore a late response for the previously selected category
-[1A[2K[81/123] [mobile-chromium] › e2e/specs/charts-degradation.responsive.spec.ts:139:1 › mobile official chart clears obsolete tracks, reports upstream failure and retries the selected chart
-[1A[2K[82/123] [mobile-chromium] › e2e/specs/charts-official.responsive.spec.ts:24:1 › mobile official charts: 25 entries wrap vertically with no horizontal carousel
-[1A[2K[83/123] [mobile-chromium] › e2e/specs/charts-official.responsive.spec.ts:81:1 › mobile artist filters keep stable touch targets and let users reach and reset the last initial
-[1A[2K[84/123] [mobile-chromium] › e2e/specs/mobile-favorites.responsive.spec.ts:2:1 › mobile favorites deep link selects Recent and restores the tab after history navigation
-[1A[2K[85/123] [mobile-chromium] › e2e/specs/mobile-favorites.responsive.spec.ts:28:1 › mobile playlist and MV favorites are visible, openable and removable without liked songs
-[1A[2K[86/123] [mobile-chromium] › e2e/specs/mobile-favorites.responsive.spec.ts:107:1 › mobile liked songs play from a native button and can be removed independently
-[1A[2K[87/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:2:1 › mobile search and Style Radar expose full-size, localized controls
-[1A[2K[88/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:56:7 › 移动搜索错误反馈 360px › nexus 429 与真实空结果区分，重试可恢复
-[1A[2K[89/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:56:7 › 移动搜索错误反馈 360px › nexus 403 与真实空结果区分，重试可恢复
-[1A[2K[90/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:56:7 › 移动搜索错误反馈 360px › nexus 503 与真实空结果区分，重试可恢复
-[1A[2K[91/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:56:7 › 移动搜索错误反馈 360px › nexus network 与真实空结果区分，重试可恢复
-[1A[2K[92/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:123:5 › 移动搜索错误反馈 360px › cloudsearch 错误覆盖歌曲、歌单和 MV，重试保持所选 Tab
-[1A[2K[93/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:169:5 › 移动搜索错误反馈 360px › 长曲名在结果与播放器完整换行且控件保持可用
-[1A[2K[94/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:219:5 › 移动搜索错误反馈 360px › 真正空结果仍显示空态，没有重试错误面板
-[1A[2K[95/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:56:7 › 移动搜索错误反馈 390px › nexus 429 与真实空结果区分，重试可恢复
-[1A[2K[96/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:56:7 › 移动搜索错误反馈 390px › nexus 403 与真实空结果区分，重试可恢复
-[1A[2K[97/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:56:7 › 移动搜索错误反馈 390px › nexus 503 与真实空结果区分，重试可恢复
-[1A[2K[98/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:56:7 › 移动搜索错误反馈 390px › nexus network 与真实空结果区分，重试可恢复
-[1A[2K[99/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:123:5 › 移动搜索错误反馈 390px › cloudsearch 错误覆盖歌曲、歌单和 MV，重试保持所选 Tab
-[1A[2K[100/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:169:5 › 移动搜索错误反馈 390px › 长曲名在结果与播放器完整换行且控件保持可用
-[1A[2K[101/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:219:5 › 移动搜索错误反馈 390px › 真正空结果仍显示空态，没有重试错误面板
-[1A[2K[102/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:231:1 › mobile suggestions disappear when the query changes and return for the current query
-[1A[2K[103/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:279:3 › a pending mobile playlist does not replace playback after select a song
-[1A[2K[104/123] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:279:3 › a pending mobile playlist does not replace playback after pause
-[1A[2K[105/123] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:48:7 › release follow-up mobile 360px › Songs: HTTP 503 → retry → results retains the selected tab
-[1A[2K[106/123] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:48:7 › release follow-up mobile 360px › Playlists: HTTP 503 → retry → results retains the selected tab
-[1A[2K[107/123] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:48:7 › release follow-up mobile 360px › MV: HTTP 503 → retry → results retains the selected tab
-[1A[2K[108/123] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:135:5 › release follow-up mobile 360px › slow URL load → mini Cancel → late successful response never autoplays
-[1A[2K[109/123] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:232:5 › release follow-up mobile 360px › expanded cover and lyrics views show complete long titles and artists without horizontal overflow
-[1A[2K[110/123] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:48:7 › release follow-up mobile 390px › Songs: HTTP 503 → retry → results retains the selected tab
-[1A[2K[111/123] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:48:7 › release follow-up mobile 390px › Playlists: HTTP 503 → retry → results retains the selected tab
-[1A[2K[112/123] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:48:7 › release follow-up mobile 390px › MV: HTTP 503 → retry → results retains the selected tab
-[1A[2K[113/123] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:135:5 › release follow-up mobile 390px › slow URL load → mini Cancel → late successful response never autoplays
-[1A[2K[114/123] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:232:5 › release follow-up mobile 390px › expanded cover and lyrics views show complete long titles and artists without horizontal overflow
-[1A[2K[115/123] [mobile-chromium] › e2e/specs/responsive.spec.ts:5:3 › 移动端响应式与可访问性 › 移动端搜索结果可见且无横向溢出
-[1A[2K[116/123] [mobile-chromium] › e2e/specs/responsive.spec.ts:13:3 › 移动端响应式与可访问性 › 移动端点击结果可真实播放，再次点击可暂停
-[1A[2K[117/123] [mobile-chromium] › e2e/specs/responsive.spec.ts:32:3 › 移动端响应式与可访问性 › 移动端核心控件具备可访问名称
-[1A[2K[118/123] [mobile-chromium] › e2e/specs/responsive.spec.ts:46:3 › 移动端响应式与可访问性 › mobile recommendation switches have named, full-size touch targets
-[1A[2K[119/123] [mobile-chromium] › e2e/specs/responsive.spec.ts:69:3 › 移动端响应式与可访问性 › 移动端页面 lang 与 viewport 正确设置
-[1A[2K[120/123] [mobile-chromium] › e2e/specs/search-timeout.spec.ts:52:1 › a timed-out search keeps its retry panel when all fallbacks are empty and recovers
-[1A[2K[121/123] [mobile-chromium] › e2e/specs/search-timeout.spec.ts:99:1 › a partial timeout keeps matching songs visible without the retry panel
-[1A[2K[122/123] [mobile-chromium] › e2e/specs/search-timeout.spec.ts:108:1 › successful empty searches still use the ordinary empty state
-[1A[2K[123/123] [mobile-chromium] › e2e/specs/search-timeout.spec.ts:125:1 › the compatibility fallback can provide songs after a primary timeout
-[1A[2K  123 passed (7.7m)
+[1A[2K[1/136] [desktop-chromium] › e2e/specs/a11y.spec.ts:5:3 › 基础可访问性 › 搜索、播放控制与进度条具备可访问名称
+[1A[2K[2/136] [desktop-chromium] › e2e/specs/a11y.spec.ts:24:3 › 基础可访问性 › 所有可见按钮都有可访问名称
+[1A[2K[3/136] [desktop-chromium] › e2e/specs/a11y.spec.ts:50:3 › 基础可访问性 › 键盘可聚焦搜索框并提交查询
+[1A[2K[4/136] [desktop-chromium] › e2e/specs/charts-degradation.spec.ts:4:1 › desktop Trending labels a New Songs fallback only after a failure and retries the selected window
+[1A[2K[5/136] [desktop-chromium] › e2e/specs/charts-degradation.spec.ts:47:1 › desktop official chart clears obsolete tracks, reports upstream failure and retries the selected chart
+[1A[2K[6/136] [desktop-chromium] › e2e/specs/charts-official.spec.ts:21:1 › desktop official charts: 25 entries stay inside their slot and tabs remain clickable
+[1A[2K[7/136] [desktop-chromium] › e2e/specs/charts-race.spec.ts:27:3 › desktop Trending: an older response cannot replace the selected filter
+[1A[2K[8/136] [desktop-chromium] › e2e/specs/charts-race.spec.ts:27:3 › desktop New Songs: an older response cannot replace the selected filter
+[1A[2K[9/136] [desktop-chromium] › e2e/specs/core.spec.ts:8:3 › 核心播放路径 › 首页加载：布局、搜索入口与播放器控制可见，无横向溢出
+[1A[2K[10/136] [desktop-chromium] › e2e/specs/core.spec.ts:17:3 › 核心播放路径 › 搜索 → 播放 → 暂停 → 恢复
+[1A[2K[11/136] [desktop-chromium] › e2e/specs/core.spec.ts:43:3 › 核心播放路径 › 切歌与快速连点下一首：最终只播放最后一次选择
+[1A[2K[12/136] [desktop-chromium] › e2e/specs/core.spec.ts:59:3 › 核心播放路径 › Seek：点击进度条 50% 后真实音频时间跳转并继续播放
+[1A[2K[13/136] [desktop-chromium] › e2e/specs/core.spec.ts:83:3 › 核心播放路径 › 歌词：随当前歌曲加载并高亮推进，切歌后歌词同步切换
+[1A[2K[14/136] [desktop-chromium] › e2e/specs/core.spec.ts:103:3 › 核心播放路径 › 收藏：喜欢后进入收藏页可见，刷新后保持
+[1A[2K[15/136] [desktop-chromium] › e2e/specs/core.spec.ts:116:3 › 核心播放路径 › 播放历史：播过的歌曲进入最近播放并刷新后保持
+[1A[2K[16/136] [desktop-chromium] › e2e/specs/core.spec.ts:128:3 › 核心播放路径 › 歌词降级：纯音乐与无歌词返回明确提示而不是崩溃
+[1A[2K[17/136] [desktop-chromium] › e2e/specs/csp.spec.ts:9:1 › the deployed CSP allows the built app without violations
+[1A[2K[18/136] [desktop-chromium] › e2e/specs/desktop-navigation.spec.ts:3:1 › desktop sidebar navigation renders each page with reduced motion
+[1A[2K[19/136] [desktop-chromium] › e2e/specs/pagination.spec.ts:34:1 › desktop search pagination clicks Next/Prev, supports keyboard Enter, and updates offsets cleanly
+[1A[2K[20/136] [desktop-chromium] › e2e/specs/pagination.spec.ts:93:1 › desktop pagination clamps page when upstream total shrinks and guards rapid stale responses
+[1A[2K[21/136] [desktop-chromium] › e2e/specs/pagination.spec.ts:154:1 › desktop pagination shows loading state, surfaces error on page 2, and retries page 2 without resetting to page 1
+[1A[2K[22/136] [desktop-chromium] › e2e/specs/playback-listening.spec.ts:3:1 › 真实音频跳到末尾不会上报完播，从头播放才会上报
+[1A[2K[23/136] [desktop-chromium] › e2e/specs/playback-sync.spec.ts:3:1 › 音频、歌词与播放器展示在同一曲目内同步推进，切歌后同时更新
+[1A[2K[24/136] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:16:1 › the first search stays public until a visitor explicitly enables personalization
+[1A[2K[25/136] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:44:1 › opting out in one tab immediately disables uploads in another tab
+[1A[2K[26/136] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:75:1 › cached and refreshed account profiles render local initials without loading remote avatars
+[1A[2K[27/136] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:107:1 › an erasure identity conflict preserves the anonymous profile ID for retry
+[1A[2K[28/136] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:144:1 › account erasure applies the returned epoch to subsequent behavior events
+[1A[2K[29/136] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:223:1 › local data clearing closes another app tab’s music database and lets it reopen empty
+[1A[2K[30/136] [desktop-chromium] › e2e/specs/privacy-erasure.spec.ts:252:1 › blocked local data clearing reports failure and can be retried after the blocker closes
+[1A[2K[31/136] [desktop-chromium] › e2e/specs/quality-switch.spec.ts:9:1 › desktop click switches audio quality, updates stream br= and preserves playback position
+[1A[2K[32/136] [desktop-chromium] › e2e/specs/quality-switch.spec.ts:81:1 › desktop keyboard navigation (ArrowDown/ArrowUp/Enter/Escape) operates quality menu
+[1A[2K[33/136] [desktop-chromium] › e2e/specs/quality-switch.spec.ts:106:1 › failed quality switch rolls back stream URL and badge, keeps menu open, and shows error toast
+[1A[2K[34/136] [desktop-chromium] › e2e/specs/quality-switch.spec.ts:149:1 › dedupes repeated clicks, cancels stale quality switch on rapid change or track switch, and disables unavailable tiers
+[1A[2K[35/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop Songs: 403 → retry → results
+[1A[2K[36/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop Songs: 429 → retry → results
+[1A[2K[37/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop Songs: 503 → retry → results
+[1A[2K[38/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop Songs: network → retry → results
+[1A[2K[39/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop Playlists: 403 → retry → results
+[1A[2K[40/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop Playlists: 429 → retry → results
+[1A[2K[41/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop Playlists: 503 → retry → results
+[1A[2K[42/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop Playlists: network → retry → results
+[1A[2K[43/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop MV: 403 → retry → results
+[1A[2K[44/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop MV: 429 → retry → results
+[1A[2K[45/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop MV: 503 → retry → results
+[1A[2K[46/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:13:5 › desktop MV: network → retry → results
+[1A[2K[47/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:63:1 › desktop empty playlist and MV searches have an empty state, not an error or blank panel
+[1A[2K[48/136] [desktop-chromium] › e2e/specs/release-followup.spec.ts:101:1 › desktop long title and artist wrap in rows and expanded player without horizontal overflow
+[1A[2K[49/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:14:3 › cover flight with default motion › pause cancels the selected song while the cover is in flight
+[1A[2K[50/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:31:3 › cover flight with default motion › rapid row selections followed by Next cannot be reversed by the cover flights
+[1A[2K[51/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:79:3 › 异常与降级 › 取流中暂停：迟到的 URL 不得在用户暂停后自动起播
+[1A[2K[52/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:102:3 › 异常与降级 › 快速切歌：旧歌慢响应晚到不覆盖新歌状态
+[1A[2K[53/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:126:3 › 异常与降级 › 播放 403：给出明确错误提示，页面与播放器保持可用
+[1A[2K[54/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:142:3 › 异常与降级 › 播放 429：提示限流原因，不产生未捕获异常
+[1A[2K[55/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:151:3 › 异常与降级 › 播放 404：提示曲目无可用音源，页面保持可用
+[1A[2K[56/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:160:3 › 异常与降级 › 播放 503：提示服务降级，不静默卡死
+[1A[2K[57/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:170:3 › 异常与降级 › 播放挂起超时：不得无限加载，需给出网络错误提示
+[1A[2K[58/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:182:3 › 异常与降级 › 播放连接中断：提示网络错误而不是静默卡死
+[1A[2K[59/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:191:3 › 异常与降级 › 搜索 429：显示可重试错误态，而不是伪装成空结果
+[1A[2K[60/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:199:3 › 异常与降级 › 搜索 403：显示上游错误态
+[1A[2K[61/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:206:3 › 异常与降级 › 搜索断网：显示网络错误态
+[1A[2K[62/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:213:3 › 异常与降级 › 快速改搜索词：旧慢请求晚到不覆盖新结果
+[1A[2K[63/136] [desktop-chromium] › e2e/specs/resilience.spec.ts:226:3 › 异常与降级 › 搜索空结果与异常 JSON：明确空态，不崩溃
+[1A[2K[64/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：首页
+[1A[2K[65/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：搜索
+[1A[2K[66/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：收藏
+[1A[2K[67/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：最近播放
+[1A[2K[68/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：榜单
+[1A[2K[69/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：MV 列表
+[1A[2K[70/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：歌手
+[1A[2K[71/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：新专辑
+[1A[2K[72/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：下载
+[1A[2K[73/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：本地音乐
+[1A[2K[74/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：设置
+[1A[2K[75/136] [desktop-chromium] › e2e/specs/routes.spec.ts:24:3 › 主要路由可加载：歌单
+[1A[2K[76/136] [desktop-chromium] › e2e/specs/routes.spec.ts:36:1 › 侧边栏切换路由：连续切换不白屏
+[1A[2K[77/136] [desktop-chromium] › e2e/specs/routes.spec.ts:55:1 › 未知路由显示 404 而不是白屏
+[1A[2K[78/136] [desktop-chromium] › e2e/specs/routes.spec.ts:61:1 › 匿名模式：页面不存在登录死入口
+[1A[2K[79/136] [desktop-chromium] › e2e/specs/search-suggestions.spec.ts:3:1 › a superseded desktop suggestion failure preserves the current suggestions
+[1A[2K[80/136] [desktop-chromium] › e2e/specs/search-timeout.spec.ts:28:1 › a timed-out search keeps its retry panel when all fallbacks are empty and recovers
+[1A[2K[81/136] [desktop-chromium] › e2e/specs/search-timeout.spec.ts:64:1 › a partial timeout keeps matching songs visible without the retry panel
+[1A[2K[82/136] [desktop-chromium] › e2e/specs/search-timeout.spec.ts:72:1 › successful empty searches still use the ordinary empty state
+[1A[2K[83/136] [desktop-chromium] › e2e/specs/search-timeout.spec.ts:82:1 › the compatibility fallback can provide songs after a primary timeout
+[1A[2K[84/136] [desktop-chromium] › e2e/specs/search-visual.spec.ts:6:3 › 搜索与风格探索雷达视觉与交互核验 › 桌面端：多维度分组颜色区分、相斥替换、雷达图标极简对齐、音频稳定播放、搜索提交
+[1A[2K[85/136] [desktop-chromium] › e2e/specs/search-visual.spec.ts:140:3 › 搜索与风格探索雷达视觉与交互核验 › 移动端：多角度Tag支援与相斥替换、不同组别颜色区分、单曲列表与音频起播核验
+[1A[2K[86/136] [mobile-chromium] › e2e/specs/charts-degradation.responsive.spec.ts:4:1 › mobile charts clear tracks when switching in either direction and distinguish failures from empty results
+[1A[2K[87/136] [mobile-chromium] › e2e/specs/charts-degradation.responsive.spec.ts:76:1 › mobile chart category changes ignore a late response for the previously selected category
+[1A[2K[88/136] [mobile-chromium] › e2e/specs/charts-degradation.responsive.spec.ts:113:1 › mobile official chart clears obsolete tracks, reports upstream failure and retries the selected chart
+[1A[2K[89/136] [mobile-chromium] › e2e/specs/charts-official.responsive.spec.ts:21:1 › mobile official charts: 25 entries wrap vertically with no horizontal carousel
+[1A[2K[90/136] [mobile-chromium] › e2e/specs/charts-official.responsive.spec.ts:67:1 › mobile artist filters keep stable touch targets and let users reach and reset the last initial
+[1A[2K[91/136] [mobile-chromium] › e2e/specs/mobile-favorites.responsive.spec.ts:3:1 › mobile favorites deep link selects Recent and restores the tab after history navigation
+[1A[2K[92/136] [mobile-chromium] › e2e/specs/mobile-favorites.responsive.spec.ts:24:1 › mobile playlist and MV favorites are visible, openable and removable without liked songs
+[1A[2K[93/136] [mobile-chromium] › e2e/specs/mobile-favorites.responsive.spec.ts:74:1 › mobile liked songs play from a native button and can be removed independently
+[1A[2K[94/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:3:1 › mobile search and Style Radar expose full-size, localized controls
+[1A[2K[95/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:40:7 › 移动搜索错误反馈 360px › nexus 429 与真实空结果区分，重试可恢复
+[1A[2K[96/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:40:7 › 移动搜索错误反馈 360px › nexus 403 与真实空结果区分，重试可恢复
+[1A[2K[97/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:40:7 › 移动搜索错误反馈 360px › nexus 503 与真实空结果区分，重试可恢复
+[1A[2K[98/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:40:7 › 移动搜索错误反馈 360px › nexus network 与真实空结果区分，重试可恢复
+[1A[2K[99/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:72:5 › 移动搜索错误反馈 360px › cloudsearch 错误覆盖歌曲、歌单和 MV，重试保持所选 Tab
+[1A[2K[100/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:93:5 › 移动搜索错误反馈 360px › 长曲名在结果与播放器完整换行且控件保持可用
+[1A[2K[101/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:120:5 › 移动搜索错误反馈 360px › 真正空结果仍显示空态，没有重试错误面板
+[1A[2K[102/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:40:7 › 移动搜索错误反馈 390px › nexus 429 与真实空结果区分，重试可恢复
+[1A[2K[103/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:40:7 › 移动搜索错误反馈 390px › nexus 403 与真实空结果区分，重试可恢复
+[1A[2K[104/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:40:7 › 移动搜索错误反馈 390px › nexus 503 与真实空结果区分，重试可恢复
+[1A[2K[105/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:40:7 › 移动搜索错误反馈 390px › nexus network 与真实空结果区分，重试可恢复
+[1A[2K[106/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:72:5 › 移动搜索错误反馈 390px › cloudsearch 错误覆盖歌曲、歌单和 MV，重试保持所选 Tab
+[1A[2K[107/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:93:5 › 移动搜索错误反馈 390px › 长曲名在结果与播放器完整换行且控件保持可用
+[1A[2K[108/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:120:5 › 移动搜索错误反馈 390px › 真正空结果仍显示空态，没有重试错误面板
+[1A[2K[109/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:131:1 › mobile suggestions disappear when the query changes and return for the current query
+[1A[2K[110/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:163:3 › a pending mobile playlist does not replace playback after select a song
+[1A[2K[111/136] [mobile-chromium] › e2e/specs/mobile-search.responsive.spec.ts:163:3 › a pending mobile playlist does not replace playback after pause
+[1A[2K[112/136] [mobile-chromium] › e2e/specs/pagination.responsive.spec.ts:22:5 › mobile search pagination 360px › renders numeric/prev/next buttons cleanly, handles clicks, dedupes active page, clamps shrink & recovers from error
+[1A[2K[113/136] [mobile-chromium] › e2e/specs/pagination.responsive.spec.ts:22:5 › mobile search pagination 390px › renders numeric/prev/next buttons cleanly, handles clicks, dedupes active page, clamps shrink & recovers from error
+[1A[2K[114/136] [mobile-chromium] › e2e/specs/quality-switch.responsive.spec.ts:7:5 › mobile quality settings & layout 360px › quality options fit viewport without overflow, persist selection across reload, and drive mobile playback quality
+[1A[2K[115/136] [mobile-chromium] › e2e/specs/quality-switch.responsive.spec.ts:51:5 › mobile quality settings & layout 360px › playback on mobile keeps mini player layout clean without desktop quality popover leak
+[1A[2K[116/136] [mobile-chromium] › e2e/specs/quality-switch.responsive.spec.ts:7:5 › mobile quality settings & layout 390px › quality options fit viewport without overflow, persist selection across reload, and drive mobile playback quality
+[1A[2K[117/136] [mobile-chromium] › e2e/specs/quality-switch.responsive.spec.ts:51:5 › mobile quality settings & layout 390px › playback on mobile keeps mini player layout clean without desktop quality popover leak
+[1A[2K[118/136] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:27:7 › release follow-up mobile 360px › Songs: HTTP 503 → retry → results retains the selected tab
+[1A[2K[119/136] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:27:7 › release follow-up mobile 360px › Playlists: HTTP 503 → retry → results retains the selected tab
+[1A[2K[120/136] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:27:7 › release follow-up mobile 360px › MV: HTTP 503 → retry → results retains the selected tab
+[1A[2K[121/136] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:59:5 › release follow-up mobile 360px › slow URL load → mini Cancel → late successful response never autoplays
+[1A[2K[122/136] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:112:5 › release follow-up mobile 360px › expanded cover and lyrics views show complete long titles and artists without horizontal overflow
+[1A[2K[123/136] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:27:7 › release follow-up mobile 390px › Songs: HTTP 503 → retry → results retains the selected tab
+[1A[2K[124/136] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:27:7 › release follow-up mobile 390px › Playlists: HTTP 503 → retry → results retains the selected tab
+[1A[2K[125/136] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:27:7 › release follow-up mobile 390px › MV: HTTP 503 → retry → results retains the selected tab
+[1A[2K[126/136] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:59:5 › release follow-up mobile 390px › slow URL load → mini Cancel → late successful response never autoplays
+[1A[2K[127/136] [mobile-chromium] › e2e/specs/release-followup.responsive.spec.ts:112:5 › release follow-up mobile 390px › expanded cover and lyrics views show complete long titles and artists without horizontal overflow
+[1A[2K[128/136] [mobile-chromium] › e2e/specs/responsive.spec.ts:5:3 › 移动端响应式与可访问性 › 移动端搜索结果可见且无横向溢出
+[1A[2K[129/136] [mobile-chromium] › e2e/specs/responsive.spec.ts:12:3 › 移动端响应式与可访问性 › 移动端点击结果可真实播放，再次点击可暂停
+[1A[2K[130/136] [mobile-chromium] › e2e/specs/responsive.spec.ts:27:3 › 移动端响应式与可访问性 › 移动端核心控件具备可访问名称
+[1A[2K[131/136] [mobile-chromium] › e2e/specs/responsive.spec.ts:40:3 › 移动端响应式与可访问性 › mobile recommendation switches have named, full-size touch targets
+[1A[2K[132/136] [mobile-chromium] › e2e/specs/responsive.spec.ts:54:3 › 移动端响应式与可访问性 › 移动端页面 lang 与 viewport 正确设置
+[1A[2K[133/136] [mobile-chromium] › e2e/specs/search-timeout.spec.ts:28:1 › a timed-out search keeps its retry panel when all fallbacks are empty and recovers
+[1A[2K[134/136] [mobile-chromium] › e2e/specs/search-timeout.spec.ts:64:1 › a partial timeout keeps matching songs visible without the retry panel
+[1A[2K[135/136] [mobile-chromium] › e2e/specs/search-timeout.spec.ts:72:1 › successful empty searches still use the ordinary empty state
+[1A[2K[136/136] [mobile-chromium] › e2e/specs/search-timeout.spec.ts:82:1 › the compatibility fallback can provide songs after a primary timeout
+[1A[2K  136 passed (8.3m)

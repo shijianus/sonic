@@ -1,48 +1,46 @@
-$ npm run test:load
-npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
 > sonic@2.2.0 test:load
 > node --experimental-sqlite scripts/verify-mixed-load.mjs
 
 {
   "ok": true,
-  "releaseId": "752911f0c2d6-be0bd32f3d50",
-  "sourceDigest": "be0bd32f3d508a65ca8ec5d08c0efd14e3e6d986e8c8f151cb3e8b701e7d3a1b",
+  "releaseId": "4a7ae8a66429cc422684c8cda41ad444da15da5b",
+  "sourceDigest": "b07b013f586f83ad5e1827cd0256e5d18c1649903011da03454e8aa5f583a077",
   "target": "isolated-local-synthetic-engine",
   "workers": 8,
   "requests": 600,
-  "durationMs": 1440,
-  "requestsPerSecond": 416.67,
+  "durationMs": 1431,
+  "requestsPerSecond": 419.34,
   "latency": {
-    "p50Ms": 17.53,
-    "p95Ms": 38.05,
-    "maxMs": 93.38
+    "p50Ms": 18.15,
+    "p95Ms": 39.61,
+    "maxMs": 123.15
   },
   "byKind": {
     "search": {
-      "p50Ms": 8.39,
-      "p95Ms": 28.98,
-      "maxMs": 72.67
+      "p50Ms": 6.7,
+      "p95Ms": 90.2,
+      "maxMs": 123.15
     },
     "range": {
-      "p50Ms": 7.63,
-      "p95Ms": 21.85,
-      "maxMs": 35.32
+      "p50Ms": 5.7,
+      "p95Ms": 40.06,
+      "maxMs": 72.17
     },
     "write": {
-      "p50Ms": 20.24,
-      "p95Ms": 36.29,
-      "maxMs": 43.06
+      "p50Ms": 19.09,
+      "p95Ms": 36.92,
+      "maxMs": 52.66
     },
     "profile": {
-      "p50Ms": 24.68,
-      "p95Ms": 41.96,
-      "maxMs": 93.38
+      "p50Ms": 23.47,
+      "p95Ms": 42.1,
+      "maxMs": 47.72
     },
     "feed": {
-      "p50Ms": 21.59,
-      "p95Ms": 48.62,
-      "maxMs": 87.64
+      "p50Ms": 22.33,
+      "p95Ms": 36.58,
+      "maxMs": 42.93
     }
   },
   "privacyIsolation": true,

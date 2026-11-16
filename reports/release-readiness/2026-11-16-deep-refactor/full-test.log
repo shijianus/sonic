@@ -1,14 +1,15 @@
-npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
 > sonic@2.2.0 test
 > npm run typecheck && jiti scripts/test-sonic-gateway.mjs && jiti scripts/test-auth-compatibility.mjs && jiti scripts/test-cover-gateway.mjs && jiti scripts/test-local-engine-and-degradation.mjs && pnpm --dir player exec vitest run --root .. tests/security-route-hardening.test.ts tests/security.test.ts tests/security-hardening.test.ts tests/security-p0-regression.test.ts tests/oauth-security.test.ts tests/ssrf-security.test.ts tests/cache-keys.test.ts tests/engine-static.test.ts tests/frontend-xss.test.ts tests/config-parity.test.ts tests/recommendation-and-search.test.ts tests/multi-entity-recommendation.test.ts tests/release-p0-p1-gate.test.ts tests/beta-freeze-hardening.test.ts --maxWorkers=1 && npm run test:beta
 
-npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
 
 > sonic@2.2.0 typecheck
 > tsc --noEmit && pnpm --dir player run typecheck
 
-$ vue-tsc --noEmit
+
+> sonic-music-player@2.2.0 typecheck /tmp/sonic-followup-base/player
+> vue-tsc --noEmit
+
 === Running Sonic Gateway Test Suite (local provider fixtures) ===
 
 1. Testing GET /api/sonic/lyrics/nexus (with platformId)
@@ -18,7 +19,7 @@ $ vue-tsc --noEmit
   ✓ Data object exists
   ✓ Meta object exists
   ✓ Meta.attempts is an array
-  ✓ LatencyMs is number (19ms)
+  ✓ LatencyMs is number (22ms)
   ✓ Netease attempt recorded
   ✓ NetEase fixture lyrics are decoded
 
@@ -305,6 +306,8 @@ Cover Gateway Test Results: 28 passed, 0 failed
 
 4. Testing Tiered Rate Limiter (Anonymous vs API Key)
   ✓ Anonymous burst > limit is rate-limited (got allowed=false, tier=anonymous, limit=10)
+(node:219548) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
   ✓ Valid sonic_live_ API Key upgrades to api-key tier
 
 5. Testing Degradation State Machine (CLOSED -> 530 OPEN -> Fast-Fail -> HALF_OPEN -> CLOSED)
@@ -328,13 +331,13 @@ Cover Gateway Test Results: 28 passed, 0 failed
   ✓ GET /api/login/status returns clean guest session
 
 7. Testing Linux Node 22 HTTP Server (createSonicServer)
-{"type":"access","requestId":"f5c132ad-15a3-4470-bf4b-918ab94e6a6f","method":"GET","path":"/api/sonic/engine/health","status":401,"durationMs":7}
+{"type":"access","requestId":"3198ffe4-ece4-4aa3-9f79-b7c6e7f5397f","method":"GET","path":"/api/sonic/engine/health","status":401,"durationMs":20}
   ✓ Anonymous request on engine endpoint returns 401 (got 401)
-{"type":"access","requestId":"1b735c62-2fc7-4d2c-9169-59ac20cda3a2","method":"GET","path":"/api/music/search","status":401,"durationMs":1}
+{"type":"access","requestId":"35166a8c-5ff9-4289-a1f7-01bbda54f43b","method":"GET","path":"/api/music/search","status":401,"durationMs":1}
   ✓ Anonymous /api/music/search on Linux engine returns 401 (got 401)
-{"type":"access","requestId":"4c6246b3-816e-4f28-a19f-c5fc0d96af12","method":"GET","path":"/api/sonic/engine/health","status":200,"durationMs":4}
+{"type":"access","requestId":"48ee72eb-a29b-44a7-acd1-c8712a214e69","method":"GET","path":"/api/sonic/engine/health","status":200,"durationMs":3}
   ✓ Authenticated engine health over HTTP returns 200
-{"type":"access","requestId":"ee49fe40-48a3-472e-bb2c-7612ec0cda16","method":"GET","path":"/api/auth/user","status":200,"durationMs":2}
+{"type":"access","requestId":"2dc51b60-02a4-4bbf-9a05-b0d8f93280d4","method":"GET","path":"/api/auth/user","status":200,"durationMs":2}
   ✓ Valid v2 key authenticates over Node HTTP (got 200)
 
 ========================================
@@ -342,31 +345,393 @@ Local Engine & Degradation Test Results: 52 passed, 0 failed
 ========================================
 
 
- RUN  v5.0.5 /workspace/scratch/f2e94de409da/sonic
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/tmp/sonic-followup-base[39m
 
+(node:219626) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/beta-freeze-hardening.test.ts[2m > [22m[2mP1-7: withdrawn lyrics sources[2m > [22m[2mrejects an already-cached lyric after allowlist removal
+[22m[39m{"type":"rate_limit_degraded","backend":"kv","scope":"sonic-lyrics","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
 
- Test Files  14 passed (14)
-      Tests  247 passed (247)
-   Start at  15:30:12
-   Duration  6.79s (tests 67%, import 14%, environment 13%, transform 5%, worker 1%)
+ [32m✓[39m tests/beta-freeze-hardening.test.ts [2m([22m[2m42 tests[22m[2m)[22m[32m 256[2mms[22m[39m
+(node:219655) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/recommendation-and-search.test.ts[2m > [22m[2mCFSolara 智能音乐推荐与混合搜索引擎全链路测试[2m > [22m[2m7. Edge / VPS 路由网关、VPS 离线降级与缓存隐私隔离[2m > [22m[2m当携带用户标识头时强制返回 Cache-Control: private, no-store 防止 CDN 缓存投毒
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-recommend","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
 
-    Isolate  14 workers spawned · ~161ms startup each (spawn + environment, per file)
-             at least ~2.09s faster with isolate: false — reuses workers across files instead of one per file
+[90mstderr[2m | tests/recommendation-and-search.test.ts[2m > [22m[2m推荐存储持久化 fail-closed[2m > [22m[2m开发/测试环境在数据库不可写时回退内存并保留告警
+[22m[39m[Sonic Recommend] Failed to open SQLite store at /tmp/sonic-db-M7qrt0/not-a-directory/store.sqlite (EEXIST: file already exists, mkdir '/tmp/sonic-db-M7qrt0/not-a-directory'); falling back to MemoryRecommendStore
 
-npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+ [32m✓[39m tests/recommendation-and-search.test.ts [2m([22m[2m27 tests[22m[2m)[22m[33m 915[2mms[22m[39m
+   [32m✓[39m CFSolara 智能音乐推荐与混合搜索引擎全链路测试 [2m(24)[22m
+     [32m✓[39m 3. 真实站内热度计算、防刷榜与外部热榜严格分离 [2m(5)[22m
+       [33m[2m✓[22m[39m 热榜按窗口统计已登录听众，sqlite 存储不被无关事件或轮换匿名 ID 干扰[33m 605[2mms[22m[39m
+[90mstderr[2m | tests/release-p0-p1-gate.test.ts[2m > [22m[2mP0-A: OAuth Feature Gate, CSRF Consistency & Token Content-Type Interop[2m > [22m[2mSONIC_ENABLE_OAUTH=0 blocks login and callback with 403 while keeping server auth enforcement intact
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"auth-login","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/release-p0-p1-gate.test.ts[2m > [22m[2mP0-A: OAuth Feature Gate, CSRF Consistency & Token Content-Type Interop[2m > [22m[2msupports EPOMAIL_TOKEN_CONTENT_TYPE=form for RFC 6749 token endpoints
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"auth-callback","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/release-p0-p1-gate.test.ts[2m > [22m[2mP0-B: Audio Proxy Security, Range/206/416 Consistency & Rate-Limit Safeguards[2m > [22m[2mnever leaks signed upstream URLs via 302 redirect and enforces private, no-store caching
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"music-stream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/release-p0-p1-gate.test.ts[2m > [22m[2mP0-B: Audio Proxy Security, Range/206/416 Consistency & Rate-Limit Safeguards[2m > [22m[2mstrips Content-Length when upstream sends Content-Encoding and rejects mismatched 206 Content-Range span
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"music-stream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/release-p0-p1-gate.test.ts[2m > [22m[2mP0-B: Audio Proxy Security, Range/206/416 Consistency & Rate-Limit Safeguards[2m > [22m[2mhandles upstream 416, 403, 429 and 503 HTML error pages cleanly with no-store without leaking HTML
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"music-stream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/release-p0-p1-gate.test.ts[2m > [22m[2mP0-B: Audio Proxy Security, Range/206/416 Consistency & Rate-Limit Safeguards[2m > [22m[2menforces concurrent rate-limit bursts and fails closed when SONIC_REQUIRE_DISTRIBUTED_RATE_LIMIT=1 lacks native binding
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"burst-test","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/release-p0-p1-gate.test.ts[2m > [22m[2mP0-C: Content Licensing Matrix, Strict Allowlist Isolation & First-Party Synthetic Range/Seek[2m > [22m[2mblocks every unapproved commercial/third-party entrypoint with 403 under strict-allowlist
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"music-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/release-p0-p1-gate.test.ts[2m > [22m[2mP0-C: Content Licensing Matrix, Strict Allowlist Isolation & First-Party Synthetic Range/Seek[2m > [22m[2mserves first-party synthetic PCM/WAV tracks with byte-exact HTTP 200, 206 Range Seek continuity, 416, and fault injection
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/release-p0-p1-gate.test.ts [2m([22m[2m13 tests[22m[2m)[22m[33m 314[2mms[22m[39m
+[90mstderr[2m | tests/oauth-security.test.ts[2m > [22m[2mOAuth login: state + PKCE transaction[2m > [22m[2missues a 256-bit state, S256 challenge and HttpOnly transaction cookies
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"auth-login","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/oauth-security.test.ts[2m > [22m[2mOAuth callback: state, PKCE, code exchange and session delivery[2m > [22m[2mrejects a verified-email=false account
+[22m[39m[Sonic Auth Callback Error] Error Epomail account email is not verified
+
+[90mstderr[2m | tests/oauth-security.test.ts[2m > [22m[2mOptional KV-backed API key revocation[2m > [22m[2mfails closed when an enabled revocation store read fails
+[22m[39m[Sonic Auth] Key revocation KV read failed: KV unavailable
+
+ [32m✓[39m tests/oauth-security.test.ts [2m([22m[2m19 tests[22m[2m)[22m[32m 77[2mms[22m[39m
+(node:219793) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/multi-entity-recommendation.test.ts[2m > [22m[2mSonic 歌集 (Album/Playlist) 与 MV 多实体推荐与信号传播全链路测试[2m > [22m[2m5. 端点适配、向后兼容性与隐私一键清空[2m > [22m[2mGET /api/sonic/recommend/for-you?feed=mixed 返回符合新契约的混合 Feed 数组
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-recommend","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstdout[2m | tests/multi-entity-recommendation.test.ts[2m > [22m[2mSonic 歌集 (Album/Playlist) 与 MV 多实体推荐与信号传播全链路测试[2m > [22m[2m6. 延迟守卫与基准压测 (P95 Latency Guard)[2m > [22m[2mfor-you?feed=mixed 连续 100 次请求成功并记录延迟
+[22m[39m[Multi-Entity Latency Guard] Iterations=100, P50=8.10ms, P95=10.09ms
+
+ [32m✓[39m tests/multi-entity-recommendation.test.ts [2m([22m[2m16 tests[22m[2m)[22m[33m 1432[2mms[22m[39m
+   [32m✓[39m Sonic 歌集 (Album/Playlist) 与 MV 多实体推荐与信号传播全链路测试 [2m(16)[22m
+     [32m✓[39m 6. 延迟守卫与基准压测 (P95 Latency Guard) [2m(1)[22m
+       [33m[2m✓[22m[39m for-you?feed=mixed 连续 100 次请求成功并记录延迟[33m 857[2mms[22m[39m
+[90mstderr[2m | tests/security.test.ts[2m > [22m[2mTask 1 & Task 2: API Key Signature, Rotation & Revocation[2m > [22m[2mfails closed when the signing secret is missing or short
+[22m[39m[Sonic Auth] SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters; rejecting authentication (fail closed)
+
+[90mstderr[2m | tests/security.test.ts[2m > [22m[2mTask 1 & Task 2: API Key Signature, Rotation & Revocation[2m > [22m[2mfails closed when the signing secret is missing or short
+[22m[39m[Sonic Auth] Cannot issue API Key: SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters
+
+[90mstderr[2m | tests/security.test.ts[2m > [22m[2mTask 1 & Task 2: API Key Signature, Rotation & Revocation[2m > [22m[2mfails closed when the signing secret is missing or short
+[22m[39m[Sonic Auth] Cannot issue API Key: SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters
+
+[90mstderr[2m | tests/security.test.ts[2m > [22m[2mTask 3: OAuth State CSRF & Security[2m > [22m[2mreturns 400 when OAuth callback state is missing or mismatched
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"auth-callback","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/security.test.ts [2m([22m[2m20 tests[22m[2m)[22m[32m 54[2mms[22m[39m
+[90mstderr[2m | tests/security-hardening.test.ts[2m > [22m[2mProxy: Kuwo audio redirects stay inside the allowlist[2m > [22m[2mreturns 502 instead of following a redirect to loopback
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"legacy-proxy","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/security-hardening.test.ts[2m > [22m[2mProxy: Kuwo audio redirects stay inside the allowlist[2m > [22m[2mreturns 502 instead of following a redirect to loopback
+[22m[39m[Sonic Proxy] Kuwo audio proxy rejected or failed: Protocol downgrade from https to http during redirect is forbidden
+
+ [32m✓[39m tests/security-hardening.test.ts [2m([22m[2m26 tests[22m[2m)[22m[32m 68[2mms[22m[39m
+ [32m✓[39m tests/ssrf-security.test.ts [2m([22m[2m22 tests[22m[2m)[22m[32m 103[2mms[22m[39m
+[90mstderr[2m | tests/security-p0-regression.test.ts[2m > [22m[2mP0-2: Linux engine enforces service auth regardless of Host[2m > [22m[2mfails closed with 503 when the engine secret is not configured
+[22m[39m[Sonic Engine Access] SONIC_ENGINE_SECRET is missing or shorter than 32 characters; rejecting access (fail closed)
+
+[90mstderr[2m | tests/security-p0-regression.test.ts[2m > [22m[2mP0-4: client IP spoofing cannot bypass rate limits[2m > [22m[2mkeys Node requests on the socket IP even when the client forges CF-Connecting-IP
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"socket-ip","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/security-p0-regression.test.ts [2m([22m[2m16 tests[22m[2m)[22m[32m 105[2mms[22m[39m
+(node:219882) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/security-route-hardening.test.ts[2m > [22m[2manonymous event ingestion quota[2m > [22m[2mrejects a batch that exceeds the per-subject window
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-events","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/security-route-hardening.test.ts [2m([22m[2m30 tests[22m[2m)[22m[32m 129[2mms[22m[39m
+(node:219893) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"3f06d137-6fd0-4ea8-9e90-925cab8ac9ea","method":"GET","path":"/","status":200,"durationMs":13}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"00d79f04-6b21-485c-a408-5d0b0eb85a7a","method":"GET","path":"/secret.txt","status":404,"durationMs":3}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"e1bfc9a2-90cb-4296-841a-73abf85b978e","method":"GET","path":"/..%2F..%2Fsecret.txt","status":404,"durationMs":1}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mserves the SPA with nosniff/frame protections and never escapes the static root
+[22m[39m{"type":"access","requestId":"73246e12-3c8f-46cd-9981-3f0e91f8c65e","method":"GET","path":"/secret.txt","status":404,"durationMs":2}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mpreserves multiple Set-Cookie headers on the Node HTTP adapter
+[22m[39m{"type":"access","requestId":"5f3861d6-9c2b-4f56-9aa7-378ce2118036","method":"GET","path":"/api/auth/login","status":302,"durationMs":5}
+
+[90mstdout[2m | tests/engine-static.test.ts[2m > [22m[2mNode static server hardening[2m > [22m[2mreports not-ready when a persistent DB path is configured but the store is in memory
+[22m[39m{"type":"access","requestId":"64a5c6ec-72da-401d-ab93-4f72f7469de1","method":"GET","path":"/api/sonic/engine/health","status":503,"durationMs":5}
+
+ [32m✓[39m tests/engine-static.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 67[2mms[22m[39m
+ [32m✓[39m tests/frontend-xss.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+ [32m✓[39m tests/config-parity.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 6[2mms[22m[39m
+ [32m✓[39m tests/cache-keys.test.ts [2m([22m[2m3 tests[22m[2m)[22m[32m 4[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m14 passed[39m[22m[90m (14)[39m
+[2m      Tests [22m [1m[32m247 passed[39m[22m[90m (247)[39m
+[2m   Start at [22m 20:00:47
+[2m   Duration [22m 8.02s[2m (tests 52%, transform 27%, import 13%, environment 8%, worker 1%)[22m
+
+[2m    Isolate [22m [33m14 workers spawned[39m[2m · ~117ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~1.52s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
+
 
 > sonic@2.2.0 test:beta
 > pnpm --dir player exec vitest run --root .. tests/access-store.test.ts tests/access-mode.test.ts tests/access-invite.test.ts tests/radar-persistence.test.ts tests/content-policy-production.test.ts tests/release-deployed-verification.test.ts tests/backend-beta-security.test.ts tests/backend-beta-runtime.test.ts tests/backend-beta-recommend.test.ts tests/backend-beta-release.test.ts tests/backend-beta-artifact.test.ts tests/backend-beta-mv-catalog.test.ts tests/backend-beta-identity.test.ts tests/release-followup-identity.test.ts tests/release-followup-data.test.ts tests/release-followup-package.test.ts tests/release-followup-observability.test.ts tests/release-followup-stream.test.ts --maxWorkers=1
 
 
- RUN  v5.0.5 /workspace/scratch/f2e94de409da/sonic
+[1m[30m[46m RUN [49m[39m[22m [36mv5.0.5 [39m[90m/tmp/sonic-followup-base[39m
 
+(node:220059) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mbackend beta lyrics timeout contract[2m > [22m[2mreturns HTTP 200 with prior lyrics=false after the total budget expires and starts no fallback
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-lyrics","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
 
- Test Files  18 passed (18)
-      Tests  394 passed (394)
-   Start at  15:30:19
-   Duration  19.92s (tests 92%, import 7%, transform 1%)
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mbackend beta lyrics timeout contract[2m > [22m[2mreturns HTTP 200 with prior lyrics=true after the total budget expires and starts no fallback
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-lyrics","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
 
-    Isolate  18 workers spawned · ~120ms startup each (spawn + environment, per file)
-             at least ~2.03s faster with isolate: false — reuses workers across files instead of one per file
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mnexus records each upstream timeout even before the search budget expires
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mforward records each upstream timeout even before the search budget expires
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-forward","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mkeeps a completed provider when other bodies stall and does not cache the incomplete search
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mcancels outstanding provider bodies on client disconnect
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mrecords an Engine timeout at the total deadline without launching direct providers
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mNexus search deadlines[2m > [22m[2mreturns a classified timeout from the compatibility route when its request budget expires
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mrejects a string result for cloudsearch type 1000
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mrejects a string result for cloudsearch type 1004
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mrejects an upstream HTTP 200 response whose provider code is an error
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mrejects malformed pagination and clamps oversized CloudSearch values
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mdoes not relay malformed CloudSearch data from the local Engine
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2maccepts structured playlist results from the native protocol
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2maccepts structured MV results and forwards the keyword to the web search endpoint
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mfalls back to the native MV protocol when the web response is malformed
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2maccepts song results from the synthetic Nexus provider through cloudsearch type 1
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mCloudSearch response contract[2m > [22m[2mreturns an observable error when all Nexus providers fail
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mrefreshes a partial Engine result with policy no-store and attempts [ [Object] ]
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mrefreshes a partial Engine result with policy PUBLIC, No-Store and attempts []
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mrefreshes a partial Engine result with policy public, max-age=600 and attempts [ [Object] ]
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mrefreshes a partial Engine result with policy private, max-age=600 and attempts []
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mdoes not turn a private Engine suggestion response into a public response
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mdoes not offer unrelated recommendations when the direct search times out without a match
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mSmart Search cache recovery[2m > [22m[2mpreserves a direct provider result through a stalled body, then finds the recovered track
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-search","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mbackend beta bounded cache and singleflight[2m > [22m[2mcoalesces a real hotspot in commercial upstream JSON calls
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mpreserves valid empty results
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mpreserves valid populated results
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mreturns a retryable failure for network
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mreturns a retryable failure for http
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mreturns a retryable failure for invalid-json
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mreturns a retryable failure for missing-list
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for top/song[2m > [22m[2mreturns a retryable failure for provider-code
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mpreserves valid empty results
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mpreserves valid populated results
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mreturns a retryable failure for network
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mreturns a retryable failure for http
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mreturns a retryable failure for invalid-json
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mreturns a retryable failure for missing-list
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog response for toplist[2m > [22m[2mreturns a retryable failure for provider-code
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mencodes region 7 in the direct WEAPI request
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mencodes region 96 in the direct WEAPI request
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mencodes region 8 in the direct WEAPI request
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mencodes region 16 in the direct WEAPI request
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mpreserves the region and excludes caller-provided transport options on the sidecar hop
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mnormalizes song durations from the default API
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mnormalizes song durations from the regional WEAPI
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mnormalizes song durations from the regional sidecar
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mreturns retryable failure when both regional transports fail without substituting default songs
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mpreserves default and personalized requests without invoking a regional transport
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mnew-song regions[2m > [22m[2mrejects unsupported region values without requesting any upstream
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog deadlines[2m > [22m[2mreturns a retryable failure when the provider exhausts the gateway budget
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mchart catalog deadlines[2m > [22m[2mkeeps the shared Engine circuit available after a chart provider failure
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstdout[2m | tests/backend-beta-runtime.test.ts[2m > [22m[2mbackend beta readiness, drain and maintenance[2m > [22m[2mreports draining readiness and refuses new work on an existing HTTP connection while its current request drains
+[22m[39m{"type":"access","requestId":"ce6dfbf1-2081-4107-a549-f375439515d6","method":"GET","path":"/api/banner","status":200,"durationMs":31}
+{"type":"access","requestId":"728602c7-95b8-4ba4-8fdb-0b34f22a0c56","method":"GET","path":"/api/sonic/engine/health","status":503,"durationMs":29}
+{"type":"access","requestId":"3c3790a0-1f81-4083-b52e-197536f1048a","method":"GET","path":"/api/banner","status":503,"durationMs":29}
+
+ [32m✓[39m tests/backend-beta-runtime.test.ts [2m([22m[2m76 tests[22m[2m)[22m[33m 1828[2mms[22m[39m
+   [32m✓[39m backend beta request cancellation [2m(5)[22m
+     [33m[2m✓[22m[39m combines a provider deadline with a caller signal and does not launch fallback after cancellation[33m 506[2mms[22m[39m
+   [32m✓[39m chart catalog deadlines [2m(2)[22m
+     [33m[2m✓[22m[39m returns a retryable failure when the provider exhausts the gateway budget[33m 514[2mms[22m[39m
+ [32m✓[39m tests/release-followup-package.test.ts [2m([22m[2m41 tests[22m[2m)[22m[33m 5136[2mms[22m[39m
+   [32m✓[39m complete, secret-safe release source packages [2m(41)[22m
+     [33m[2m✓[22m[39m reports a production preflight decision after checking the exact artifact and Engine without invoking Wrangler[33m 858[2mms[22m[39m
+(node:221105) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/backend-beta-recommend.test.ts[2m > [22m[2mserver-verified MV catalog boundary[2m > [22m[2mimports a real provider ID, resolves client external IDs and serves mixed feed after SQLite reopen
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-events","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/backend-beta-recommend.test.ts [2m([22m[2m32 tests[22m[2m)[22m[33m 757[2mms[22m[39m
+(node:221136) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/release-followup-identity.test.ts[2m > [22m[2mLive Staging access probes against Pages handlers[2m > [22m[2mredeems a signed Pages invite, verifies protected access and rejects expiry as 401
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"access-session","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+[90mstderr[2m | tests/release-followup-identity.test.ts[2m > [22m[2mFollow-up identity and consent over the actual events hop[2m > [22m[2mkeeps an unscoped Cookie write public if revocation storage recovers before forwarding
+[22m[39m[Sonic Auth] Key revocation KV read failed: revocation storage unavailable
+
+[90mstderr[2m | tests/release-followup-identity.test.ts[2m > [22m[2mFollow-up identity and consent over the actual events hop[2m > [22m[2mkeeps an unscoped Cookie write public if revocation storage recovers before forwarding
+[22m[39m[Sonic Auth] Key revocation KV read failed: revocation storage unavailable
+
+ [32m✓[39m tests/release-followup-identity.test.ts [2m([22m[2m33 tests[22m[2m)[22m[33m 516[2mms[22m[39m
+(node:221247) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | tests/release-followup-data.test.ts[2m > [22m[2mrolls over a full anonymous epoch budget without accepting old activity or changing account epochs
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-events","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/release-followup-data.test.ts [2m([22m[2m30 tests[22m[2m)[22m[33m 787[2mms[22m[39m
+[90mstderr[2m | tests/backend-beta-security.test.ts[2m > [22m[2mpublic beta: actual capability allowlists[2m > [22m[2mblocks unrelated vendor domains before external forwarding
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-forward","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/backend-beta-security.test.ts [2m([22m[2m48 tests[22m[2m)[22m[32m 134[2mms[22m[39m
+ [32m✓[39m tests/release-followup-observability.test.ts [2m([22m[2m24 tests[22m[2m)[22m[33m 1013[2mms[22m[39m
+   [32m✓[39m release followup live verification fails closed with isolated HTTP stubs [2m(13)[22m
+     [33m[2m✓[22m[39m keeps --self-test deterministic, network-free and explicit about failing delivery[33m 746[2mms[22m[39m
+(node:221344) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:221381) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m tests/backend-beta-release.test.ts [2m([22m[2m20 tests[22m[2m)[22m[33m 722[2mms[22m[39m
+[90mstderr[2m | tests/release-deployed-verification.test.ts[2m > [22m[2mdeployed release verification[2m > [22m[2mreturns a protected Pages peer probe using only the configured service credential
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"engine-health","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/release-deployed-verification.test.ts [2m([22m[2m29 tests[22m[2m)[22m[33m 1013[2mms[22m[39m
+[90mstderr[2m | tests/release-followup-stream.test.ts[2m > [22m[2mrelease follow-up scoped stream cache retry[2m > [22m[2mdoes not globally bypass caches for &nocache=0
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"music-stream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/release-followup-stream.test.ts [2m([22m[2m15 tests[22m[2m)[22m[32m 77[2mms[22m[39m
+ [32m✓[39m tests/content-policy-production.test.ts [2m([22m[2m7 tests[22m[2m)[22m[32m 8[2mms[22m[39m
+ [32m✓[39m tests/backend-beta-identity.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 47[2mms[22m[39m
+ [32m✓[39m tests/access-mode.test.ts [2m([22m[2m14 tests[22m[2m)[22m[32m 38[2mms[22m[39m
+ [32m✓[39m tests/backend-beta-artifact.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 180[2mms[22m[39m
+[90mstderr[2m | tests/radar-persistence.test.ts[2m > [22m[2mradar album POST persistence contract[2m > [22m[2mrejects an Edge memory store instead of acknowledging a temporary sync
+[22m[39m[Sonic Auth] SONIC_SECRET / SOLARA_SECRET is missing or shorter than 32 characters; rejecting authentication (fail closed)
+
+[90mstderr[2m | tests/radar-persistence.test.ts[2m > [22m[2mradar album POST persistence contract[2m > [22m[2mrejects an Edge memory store instead of acknowledging a temporary sync
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"sonic-recommend","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/radar-persistence.test.ts [2m([22m[2m5 tests[22m[2m)[22m[32m 31[2mms[22m[39m
+[90mstderr[2m | tests/backend-beta-mv-catalog.test.ts[2m > [22m[2mVerified server MV catalog and stream binding[2m > [22m[2mregisters a successful provider MV detail for external-ID recommendation feedback
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"upstream","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/backend-beta-mv-catalog.test.ts [2m([22m[2m4 tests[22m[2m)[22m[32m 67[2mms[22m[39m
+[90mstderr[2m | tests/access-invite.test.ts[2m > [22m[2minvite endpoint body limits[2m > [22m[2mrejects a declared oversized body before parsing
+[22m[39m{"type":"rate_limit_degraded","backend":"memory","scope":"access-invite","degradedEvents":1,"note":"The shared rate limiter is absent or degraded; check the Durable Object binding and runtime"}
+
+ [32m✓[39m tests/access-invite.test.ts [2m([22m[2m6 tests[22m[2m)[22m[32m 40[2mms[22m[39m
+(node:221684) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [32m✓[39m tests/access-store.test.ts [2m([22m[2m2 tests[22m[2m)[22m[32m 26[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m18 passed[39m[22m[90m (18)[39m
+[2m      Tests [22m [1m[32m394 passed[39m[22m[90m (394)[39m
+[2m   Start at [22m 20:00:56
+[2m   Duration [22m 15.80s[2m (tests 87%, import 7%, transform 5%)[22m
+
+[2m    Isolate [22m [33m18 workers spawned[39m[2m · ~81ms startup each (spawn + environment, per file)[22m
+[2m            [22m [2mat least ~1.37s faster with [22m[33misolate: false[39m[2m — reuses workers across files instead of one per file[22m
 
