@@ -360,11 +360,24 @@ const load = async (id: string) => {
     state.publishTime = d?.publishTime || d?.publishDate || '1997-01-01'
     state.playCount = String(d?.playCount || '852000')
     state.description = d?.desc || d?.briefDesc || `${state.artist} 精彩高清音乐视频。`
+    const normalizeVideoUrl = (raw: unknown): string => {
+      const s = typeof raw === 'string' ? raw.trim() : ''
+      if (!s || !/^https?:\/\//i.test(s)) return ''
+      return s.replace(/^http:\/\/([^/]*\.126\.net\/)/i, 'https://$1')
+    }
     const u =
       urlRes.status === 'fulfilled'
         ? (urlRes.value as any)?.data || (urlRes.value as any)?.url || {}
         : {}
-    state.url = u?.url || ''
+    const brs = d?.brs || {}
+    const fallbackUrl =
+      normalizeVideoUrl(brs['1080']) ||
+      normalizeVideoUrl(brs['720']) ||
+      normalizeVideoUrl(brs['480']) ||
+      normalizeVideoUrl(brs['240']) ||
+      Object.values(brs).map(normalizeVideoUrl).find(Boolean) ||
+      ''
+    state.url = normalizeVideoUrl(u?.url) || normalizeVideoUrl(u?.data?.url) || fallbackUrl || ''
     state.error = !state.url
     state.retryKey += 1
     const simis =

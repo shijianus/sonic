@@ -317,7 +317,7 @@ async function runTests() {
       const fetchLoopback = globalThis.fetch;
       await withProviderFixtures((url, init) => {
         if (url.origin === cfEnv.SONIC_LOCAL_ENGINE_URL) return fetchLoopback(url, init);
-        if (url.href === 'http://antiserver.kuwo.cn/anti.s?type=convert_url&rid=999999999999&format=mp3&response=url') {
+        if (url.href === 'https://antiserver.kuwo.cn/anti.s?type=convert_url&rid=999999999999&format=mp3&response=url') {
           return new Response('https://www.kuwo.cn/nf/resource/fixture.mp3');
         }
       }, async () => {

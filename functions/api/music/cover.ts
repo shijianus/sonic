@@ -181,14 +181,19 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     const proxied = await proxyImage(targetUrl, `${pPrefix}proxy`, env, request);
     if (proxied) return proxied;
     if (cfg.contentPolicy === 'strict-allowlist') {
-      recordLicensingBlockMetric('direct-cover-url');
-      return jsonResponse(
-        {
-          brand: 'Sonic',
-          error: { code: 'SOURCE_DISABLED_BY_POLICY', message: 'Cover URL domain is not permitted by strict content policy' },
-        },
-        { status: 403, headers: { 'Cache-Control': 'no-store' } },
-      );
+      const allowedDomains = getAllowedMediaDomains(env, 'cover');
+      const isAllowlistedUrl =
+        allowedDomains.length > 0 && validateSafeUrl(targetUrl, { allowHttp: false, allowedDomains }).valid;
+      if (!isAllowlistedUrl) {
+        recordLicensingBlockMetric('direct-cover-url');
+        return jsonResponse(
+          {
+            brand: 'Sonic',
+            error: { code: 'SOURCE_DISABLED_BY_POLICY', message: 'Cover URL domain is not permitted by strict content policy' },
+          },
+          { status: 403, headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
     }
   }
 

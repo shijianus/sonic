@@ -173,7 +173,7 @@ export async function callLocalEngineJson<T = any>(
     return { ok: false, latencyMs: 0, skippedByCircuit: true, circuitState: c.state, error: `Circuit ${c.state} (${c.lastError || 'probe already in flight'})` };
   }
   const start = Date.now();
-  const timeoutMs = lease.probe ? Math.min(options?.timeoutMs ?? cfg.engineTimeoutMs, 2500) : options?.timeoutMs ?? cfg.engineTimeoutMs;
+  const timeoutMs = lease.probe ? Math.min(options?.timeoutMs ?? cfg.engineTimeoutMs, 4500) : options?.timeoutMs ?? cfg.engineTimeoutMs;
   const headers = buildEngineHeaders(cfg.engineSecret, options?.request, options?.clientIp);
   headers.Accept = 'application/json';
   if (options?.body !== undefined) headers['Content-Type'] = 'application/json; charset=utf-8';
@@ -302,7 +302,7 @@ export async function callLocalEngineStream(
   }
   const start = Date.now();
   const baseFirstByteMs = options?.timeoutMs ?? positiveMs(env?.SONIC_STREAM_FIRST_BYTE_TIMEOUT_MS, Math.max(cfg.engineTimeoutMs, 8000));
-  const firstByteTimeoutMs = lease.probe ? Math.min(baseFirstByteMs, 2500) : baseFirstByteMs;
+  const firstByteTimeoutMs = lease.probe ? Math.min(baseFirstByteMs, 4500) : baseFirstByteMs;
   const headers = buildEngineHeaders(cfg.engineSecret, options?.request);
   const range = options?.request?.headers.get('range');
   if (range) headers.Range = range;

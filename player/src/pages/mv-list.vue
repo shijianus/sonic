@@ -103,16 +103,48 @@ const shareMV = async (mv: any) => {
 const formatSec = (seconds: number) =>
   `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`
 
+let isUnmounted = false
+let detailEnrichGeneration = 0
+
+onUnmounted(() => {
+  isUnmounted = true
+  detailEnrichGeneration += 1
+})
+
+const enrichMissingDetails = (items: any[], generation: number) => {
+  const queue = items.filter(item => !item.publishTime || !item.desc)
+  if (!queue.length) return
+  const workerCount = Math.min(3, queue.length)
+  for (let i = 0; i < workerCount; i += 1) {
+    void (async () => {
+      while (queue.length && !isUnmounted && generation === detailEnrichGeneration) {
+        const item = queue.shift()
+        if (!item) break
+        try {
+          const detailRes: any = await mvDetail({ mvid: item.id })
+          if (isUnmounted || generation !== detailEnrichGeneration) break
+          const d = detailRes?.data
+          if (d?.publishTime && !item.publishTime) item.publishTime = d.publishTime
+          if (d?.desc && !item.desc) item.desc = d.desc
+          if (d?.briefDesc && !item.briefDesc) item.briefDesc = d.briefDesc
+        } catch {}
+      }
+    })()
+  }
+}
+
 const fetchList = async (reset = false) => {
   if (state.isLoadingMore) return
   if (!reset && !state.hasMore) return
 
   if (reset) {
+    detailEnrichGeneration += 1
     state.isPageLoading = true
     state.page = 0
   } else {
     state.isLoadingMore = true
   }
+  const activeGeneration = detailEnrichGeneration
   state.isLoadError = false
 
   try {
@@ -153,18 +185,8 @@ const fetchList = async (reset = false) => {
       }
     })
 
-    // 针对缺失简介或发布时间的条目，在前端后台静默拉取补充详情
-    mapped.forEach(async item => {
-      if (!item.publishTime || !item.desc) {
-        try {
-          const detailRes: any = await mvDetail({ mvid: item.id })
-          const d = detailRes?.data
-          if (d?.publishTime && !item.publishTime) item.publishTime = d.publishTime
-          if (d?.desc && !item.desc) item.desc = d.desc
-          if (d?.briefDesc && !item.briefDesc) item.briefDesc = d.briefDesc
-        } catch {}
-      }
-    })
+    // 针对缺失简介或发布时间的条目，以受控并发在后台静默补充详情
+    enrichMissingDetails(mapped, activeGeneration)
 
     state.mvList = reset ? mapped : state.mvList.concat(mapped)
     state.hasMore = mapped.length === limit

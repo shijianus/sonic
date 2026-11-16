@@ -353,6 +353,35 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
   }
   const regionalTopSongs = topSongType !== '0';
 
+  const normalizeMvStreamUrl = (rawUrl: unknown): string => {
+    const s = typeof rawUrl === 'string' ? rawUrl.trim() : '';
+    if (!s || !/^https?:\/\//i.test(s)) return '';
+    return s.replace(/^http:\/\/([^/]*\.126\.net\/)/i, 'https://$1');
+  };
+
+  if (normEndpoint === 'song/url/v1' || normEndpoint === 'song/url') {
+    const id = url.searchParams.get('id') || '';
+    const source = url.searchParams.get('source') || '';
+    const quality = url.searchParams.get('level') || url.searchParams.get('quality') || url.searchParams.get('br') || '';
+    const title = url.searchParams.get('title') || '';
+    const artist = url.searchParams.get('artist') || '';
+    const duration = url.searchParams.get('duration') || '';
+    const qs = new URLSearchParams({ id: String(id) });
+    if (source) qs.set('source', source);
+    if (quality) qs.set('quality', quality);
+    if (title) qs.set('title', title);
+    if (artist) qs.set('artist', artist);
+    if (duration) qs.set('duration', duration);
+    return jsonResponse(
+      {
+        code: 200,
+        brand: 'Sonic',
+        data: [{ id: String(id), url: `/api/music/stream?${qs.toString()}` }],
+      },
+      { headers: { 'Cache-Control': 'public, max-age=3600' } },
+    );
+  }
+
   // Primary Hop (when running on Cloudflare Pages): forward commercial catalog queries to Linux Local Engine
   let degradedHeader = false;
   if (cfg.enableLocalEngine) {
@@ -361,9 +390,15 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       request,
       timeoutMs: cfg.engineTimeoutMs,
     });
+    if (normEndpoint === 'mv/url' && engineRes.data?.data?.url) {
+      engineRes.data.data.url = normalizeMvStreamUrl(engineRes.data.data.url);
+    }
+    const mvUrlValid = normEndpoint !== 'mv/url' || Boolean(normalizeMvStreamUrl(engineRes.data?.data?.url));
     const enginePayloadValid = compatibilitySearch
       ? Boolean(compatibilityCloudType && isSuccessfulCloudSearchResponse(compatibilityCloudType, engineRes.data))
-      : (!chartField || chartCatalogList(engineRes.data, chartField));
+      : chartField
+        ? Boolean(chartCatalogList(engineRes.data, chartField))
+        : mvUrlValid;
     if (engineRes.ok && engineRes.data && enginePayloadValid) {
       const engineCache = String(engineRes.cacheControl || '').trim();
       const engineCacheLower = engineCache.toLowerCase();
@@ -425,22 +460,26 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
         headers,
         signal: AbortSignal.timeout(cfg.timeoutMs),
       });
-      if (ncmResp.ok) {
-        const ncmData = await ncmResp.json();
-        const chartEntries = chartField && chartCatalogList(ncmData, chartField);
-        if (regionalTopSongs && chartEntries) return topSongsResponse(chartEntries, true);
-        const usable = chartField
-          ? chartEntries
-          : ncmData && (ncmData.code === 200 || ncmData.songs || ncmData.playlist || ncmData.data);
-        if (usable) {
-          return jsonResponse(desensitizeData({ brand: 'Sonic', ...ncmData }), {
-            headers: {
-              'Cache-Control': 'public, max-age=1800',
-              'X-Sonic-Provider': 'local-netease',
-            },
-          });
+        if (ncmResp.ok) {
+          const ncmData = await ncmResp.json();
+          const chartEntries = chartField && chartCatalogList(ncmData, chartField);
+          if (regionalTopSongs && chartEntries) return topSongsResponse(chartEntries, true);
+          if (normEndpoint === 'mv/url' && ncmData?.data) {
+            ncmData.data.url = normalizeMvStreamUrl(ncmData.data.url);
+          }
+          const mvUrlUsable = normEndpoint !== 'mv/url' || Boolean(ncmData?.data?.url);
+          const usable = chartField
+            ? chartEntries
+            : mvUrlUsable && ncmData && (ncmData.code === 200 || ncmData.songs || ncmData.playlist || ncmData.data);
+          if (usable) {
+            return jsonResponse(desensitizeData({ brand: 'Sonic', ...ncmData }), {
+              headers: {
+                'Cache-Control': normEndpoint === 'mv/url' ? 'private, no-store' : 'public, max-age=1800',
+                'X-Sonic-Provider': 'local-netease',
+              },
+            });
+          }
         }
-      }
     } catch { request.signal.throwIfAborted(); }
   }
 
@@ -980,7 +1019,9 @@ async function handleUpstreamWithinBudget(endpoint: string, url: URL, request: R
       });
       const data: any = await resp.json();
       const brs = data?.data?.brs || {};
-      const streamUrl = brs[r] || brs['1080'] || brs['720'] || brs['480'] || brs['240'] || Object.values(brs)[0] || '';
+      const streamUrl = normalizeMvStreamUrl(
+        brs[r] || brs['1080'] || brs['720'] || brs['480'] || brs['240'] || Object.values(brs)[0] || '',
+      );
       if (!streamUrl || Number(data?.data?.id) !== Number(id)) {
         return jsonResponse({ code: 404, brand: 'Sonic', data: { id: Number(id), url: '' }, error: { code: 'MV_STREAM_UNAVAILABLE', message: 'The selected MV has no available stream' } }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
       }

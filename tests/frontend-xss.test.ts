@@ -96,12 +96,13 @@ describe('Third-party metadata is never parsed as HTML', () => {
     expect(escapeHtmlAttribute(null)).toBe('');
   });
 
-  it('keeps the legacy app and Vue cards on the escaped code path', () => {
+  it('keeps the legacy app and Vue cards on the escaped/safe rendering path', () => {
     expect(legacyAppSource).toContain('SonicPlaylistView.renderInto');
     expect(legacyAppSource).not.toContain('dom.playlistItems.innerHTML = playlistHtml');
-    expect(heroCardSource).toMatch(/const cleanCover = escapeHtmlAttribute\(formatCoverUrl\(/);
-    expect(mvCardSource).toMatch(/const cleanCover = escapeHtmlAttribute\(/);
-    expect(mvCardSource).not.toMatch(/const cleanCover = formatCoverUrl\(/);
+    expect(heroCardSource).not.toContain('innerHTML');
+    expect(heroCardSource).not.toContain('v-html');
+    expect(mvCardSource).not.toContain('innerHTML');
+    expect(mvCardSource).not.toContain('v-html');
   });
 
   it('ships baseline anti-sniffing and anti-framing headers', () => {

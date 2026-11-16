@@ -422,7 +422,7 @@ export async function searchKuwoNative(
 ): Promise<SonicSearchTrack[]> {
   try {
     const pn = Math.max(0, page - 1);
-    const url = `http://search.kuwo.cn/r.s?client=kt&all=${encodeURIComponent(query)}&pn=${pn}&rn=${count}&uid=794762570&ver=kwplayer_ar_9.2.2.1&vipver=1&show_copyright_off=1&newver=1&ft=music&cluster=0&strategy=2012&encoding=utf8&rformat=json&vermerge=1&mobi=1`;
+    const url = `https://search.kuwo.cn/r.s?client=kt&all=${encodeURIComponent(query)}&pn=${pn}&rn=${count}&uid=794762570&ver=kwplayer_ar_9.2.2.1&vipver=1&show_copyright_off=1&newver=1&ft=music&cluster=0&strategy=2012&encoding=utf8&rformat=json&vermerge=1&mobi=1`;
     const res = await nativeFetch(url, {
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
       signal,
@@ -698,7 +698,7 @@ async function resolveKuwoSingleStream(
   if (!/^\d+$/.test(cleanRid)) return null;
 
   const antiRes = await nativeFetch(
-    `http://antiserver.kuwo.cn/anti.s?type=convert_url&rid=${encodeURIComponent(cleanRid)}&format=mp3&response=url`,
+    `https://antiserver.kuwo.cn/anti.s?type=convert_url&rid=${encodeURIComponent(cleanRid)}&format=mp3&response=url`,
     {
       headers: {
         'User-Agent': 'okhttp/3.10.0',
@@ -1458,7 +1458,7 @@ async function resolvePlayableStreamWithinBudget(
       try {
         const timeoutRemaining = Math.min(3000, Math.max(500, budgetMs - (Date.now() - matchStart)));
         const kgRes = await nativeFetch(
-          `http://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword=${encodeURIComponent(searchKeywords)}&page=1&pagesize=5&showtype=1`,
+          `https://mobilecdn.kugou.com/api/v3/search/song?format=json&keyword=${encodeURIComponent(searchKeywords)}&page=1&pagesize=5&showtype=1`,
           { headers: { 'User-Agent': DESKTOP_UA }, signal }, timeoutRemaining);
         if (kgRes.ok) {
           const kgJson = (await kgRes.json()) as any;

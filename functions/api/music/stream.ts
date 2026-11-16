@@ -276,6 +276,43 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
   }
 
   // Default: Same-Origin Byte-Range Stream Proxy (preserves CORS `Content-Range`, anti-hotlink `Referer`, and HTTPS)
+  const canFallbackToLocalEngine =
+    cfg.enableLocalEngine &&
+    cfg.runtime !== 'linux-engine' &&
+    !targetParam &&
+    (request.method === 'GET' || request.method === 'HEAD');
+
+  const tryLocalEngineStreamFallback = async (): Promise<Response | null> => {
+    if (!canFallbackToLocalEngine) return null;
+    const engineStream = await callLocalEngineStream(
+      `/api/music/stream${url.search}`,
+      env,
+      { request, method: request.method as 'GET' | 'HEAD', signal: request.signal },
+    );
+    if (!engineStream.ok || !engineStream.response) return null;
+    const st = engineStream.response.status;
+    if (st !== 200 && st !== 206) {
+      void engineStream.response.body?.cancel().catch(() => {});
+      return null;
+    }
+    const outHeaders = new Headers(engineStream.response.headers);
+    corsHeaders().forEach((v, k) => {
+      if (!outHeaders.has(k)) outHeaders.set(k, v);
+    });
+    outHeaders.set('X-Sonic-Via', 'local-engine-stream-fallback');
+    recordStreamMetric(st === 206 ? 'proxied_206' : 'proxied_200');
+    return new Response(engineStream.response.body, {
+      status: st,
+      statusText: engineStream.response.statusText,
+      headers: outHeaders,
+    });
+  };
+
+  if (canFallbackToLocalEngine && targetUrl.hostname.toLowerCase().endsWith('.kuwo.cn')) {
+    const enginePreferred = await tryLocalEngineStreamFallback();
+    if (enginePreferred) return enginePreferred;
+  }
+
   try {
     const requestHeaders: Record<string, string> = {
       'User-Agent':
@@ -300,14 +337,14 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
       {
         method: request.method,
         headers: requestHeaders,
-        // 客户端断开时同步取消上游请求；safeFetch 会将其与自身 15s 超时及流式取消组合。
+        // 客户端断开时同步取消上游请求；safeFetch 会将其与自身超时及流式取消组合。
         signal: request.signal,
       },
       {
         allowHttp: false,
         allowedDomains,
         maxRedirects: 3,
-        timeoutMs: 15000,
+        timeoutMs: canFallbackToLocalEngine ? 5000 : 15000,
         maxBytes: 256 * 1024 * 1024,
         includeMetadata: true,
         pool: 'media',
@@ -343,6 +380,8 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
 
     if (status === 401 || status === 403) {
       upstream.body?.cancel().catch(() => {});
+      const engineFallback = await tryLocalEngineStreamFallback();
+      if (engineFallback) return engineFallback;
       recordStreamMetric('err_403');
       return jsonResponse(
         {
@@ -355,6 +394,8 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
 
     if (status === 404 || status === 410) {
       upstream.body?.cancel().catch(() => {});
+      const engineFallback = await tryLocalEngineStreamFallback();
+      if (engineFallback) return engineFallback;
       recordStreamMetric('err_404');
       return jsonResponse(
         {
@@ -367,6 +408,8 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
 
     if (status === 429) {
       upstream.body?.cancel().catch(() => {});
+      const engineFallback = await tryLocalEngineStreamFallback();
+      if (engineFallback) return engineFallback;
       recordStreamMetric('err_429');
       const h429 = corsHeaders({ 'Cache-Control': 'no-store' });
       const retryAfter = (upstream.headers.get('retry-after') || '').trim();
@@ -384,6 +427,8 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
 
     if (status >= 500) {
       upstream.body?.cancel().catch(() => {});
+      const engineFallback = await tryLocalEngineStreamFallback();
+      if (engineFallback) return engineFallback;
       recordStreamMetric('err_5xx');
       return jsonResponse(
         {
@@ -397,6 +442,8 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
     // 2. Verify active-content safety on 2xx responses
     if (!isMediaContentType(upstream.headers.get('content-type'))) {
       upstream.body?.cancel().catch(() => {});
+      const engineFallback = await tryLocalEngineStreamFallback();
+      if (engineFallback) return engineFallback;
       recordStreamMetric('err_415');
       return errorResponse('Upstream returned a non-audio content type', 415);
     }
@@ -535,6 +582,8 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
         { status: 503, headers: corsHeaders({ 'Cache-Control': 'no-store', 'Retry-After': '1' }) },
       );
     }
+    const engineFallback = await tryLocalEngineStreamFallback();
+    if (engineFallback) return engineFallback;
     const rawMsg = String(err?.message || 'Proxy error');
     const isTimeout =
       err?.name === 'TimeoutError' ||

@@ -110,7 +110,7 @@ export function respondToSonicGatewayProvider(url, init) {
       return Response.json({ data: { lists: [] } });
     case 'GET https://lyrics.kugou.com/search':
       return Response.json({ candidates: [] });
-    case 'GET http://search.kuwo.cn/r.s': {
+    case 'GET https://search.kuwo.cn/r.s': {
       const abslist = query.get('all') === sharedTitle
         ? [{ MUSICRID: 'MUSIC_801', SONGNAME: sharedTitle, ARTIST: sharedArtist, DURATION: '240' }]
         : [];

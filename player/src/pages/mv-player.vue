@@ -801,10 +801,20 @@ const loadMV = async (id: number) => {
         ? (allRes.value as any)?.data || (allRes.value as any)?.mvs || []
         : []
 
+    const normalizeVideoUrl = (raw: unknown): string => {
+      const s = typeof raw === 'string' ? raw.trim() : ''
+      if (!s || !/^https?:\/\//i.test(s)) return ''
+      return s.replace(/^http:\/\/([^/]*\.126\.net\/)/i, 'https://$1')
+    }
     const brs = d?.brs || {}
     const fallbackUrl =
-      brs['1080'] || brs['720'] || brs['480'] || brs['240'] || Object.values(brs)[0] || ''
-    const videoUrl = u?.url || u?.data?.url || fallbackUrl || ''
+      normalizeVideoUrl(brs['1080']) ||
+      normalizeVideoUrl(brs['720']) ||
+      normalizeVideoUrl(brs['480']) ||
+      normalizeVideoUrl(brs['240']) ||
+      Object.values(brs).map(normalizeVideoUrl).find(Boolean) ||
+      ''
+    const videoUrl = normalizeVideoUrl(u?.url) || normalizeVideoUrl(u?.data?.url) || fallbackUrl || ''
 
     state.currentMV = {
       id: Number(d?.id ?? id),
