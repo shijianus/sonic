@@ -230,7 +230,7 @@ if ! node -e '
 const actual = JSON.parse(process.argv[1]).result?.config;
 const expected = JSON.parse(process.argv[2]).config;
 if (!actual || !expected || JSON.stringify(actual.ingress) !== JSON.stringify(expected.ingress) ||
-    JSON.stringify(actual['warp-routing']) !== JSON.stringify(expected['warp-routing'])) process.exit(1);
+    JSON.stringify(actual["warp-routing"]) !== JSON.stringify(expected["warp-routing"])) process.exit(1);
 ' "${READBACK_TUNNEL}" "${MERGED_TUNNEL_CONFIG}"; then
   echo "[-] FAILED to verify the applied Tunnel configuration." >&2
   exit 1
