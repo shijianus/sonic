@@ -96,10 +96,9 @@ echo ""
 
 # 3. Check environment
 if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-  echo "[-] WARNING: CLOUDFLARE_API_TOKEN environment variable is not set." >&2
-  if [[ "${MODE}" == "execute" ]]; then
-    exit 1
-  fi
+  echo "[-] ERROR: CLOUDFLARE_API_TOKEN environment variable is required to read the current Tunnel configuration." >&2
+  echo "    Refusing to synthesize a rollback from an empty current configuration." >&2
+  exit 1
 else
   echo "[+] Auth credential detected in environment: CLOUDFLARE_API_TOKEN [SET]"
 fi
@@ -108,69 +107,74 @@ echo ""
 # Step 1: Merge Tunnel Ingress Configuration (Preserve engine-sonic.epocanvas.tech)
 TUNNEL_ENDPOINT="https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/cfd_tunnel/${TUNNEL_ID}/configurations"
 
-# Fetch current tunnel configuration if token is available
-CURRENT_INGRESS_JSON="[]"
-if [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]]; then
-  CURRENT_CFG_RESP=$(curl -s -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" "${TUNNEL_ENDPOINT}" || true)
-  if echo "${CURRENT_CFG_RESP}" | jq -e '.success' >/dev/null 2>&1; then
-    CURRENT_INGRESS_JSON=$(echo "${CURRENT_CFG_RESP}" | jq -c '.result.config.ingress // []')
-  fi
+# Fetch and validate the current Tunnel configuration before constructing a
+# rollback. A failed read must never degrade into an empty configuration.
+if ! CURRENT_CFG_RESP=$(curl -fsS \
+  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+  -H "Accept: application/json" \
+  "${TUNNEL_ENDPOINT}"); then
+  echo "[-] ERROR: Unable to read the current Tunnel configuration. No changes made." >&2
+  exit 1
 fi
 
-# Merge current ingress with rollback backup (merge mode, never overwrite)
-MERGED_TUNNEL_CONFIG=$(node -e '
+if ! echo "${CURRENT_CFG_RESP}" | jq -e '.success == true and (.result.config.ingress | type == "array")' >/dev/null; then
+  echo "[-] ERROR: Cloudflare returned an invalid Tunnel configuration. No changes made." >&2
+  exit 1
+fi
+
+# Replace only the backed-up sonic route, preserve every other current rule
+# and preserve all top-level Tunnel settings such as warp-routing.
+TUNNEL_CONFIGS=$(node -e '
 const fs = require("fs");
-const currentIngress = JSON.parse(process.argv[1]);
+const currentResponse = JSON.parse(process.argv[1]);
 const backup = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
-const backupIngress = backup.config?.ingress || [];
+const currentConfig = currentResponse.result?.config;
+const backupConfig = backup.config;
+if (!currentConfig || !Array.isArray(currentConfig.ingress)) throw new Error("Invalid current Tunnel config");
+if (!backupConfig || !Array.isArray(backupConfig.ingress)) throw new Error("Invalid backup Tunnel config");
 
-// Collect all hostnames from current and backup
-const rules = new Map();
+const targetHost = "sonic.epocanvas.tech";
+const engineHost = "engine-sonic.epocanvas.tech";
+const backupTarget = backupConfig.ingress.filter(rule => rule?.hostname === targetHost);
+if (backupTarget.length === 0) throw new Error("Tunnel backup has no sonic.epocanvas.tech route");
+const currentEngine = currentConfig.ingress.filter(rule => rule?.hostname === engineHost);
+const backupEngine = backupConfig.ingress.filter(rule => rule?.hostname === engineHost);
+if (currentEngine.length === 0 && backupEngine.length === 0) {
+  throw new Error("Neither current nor backup Tunnel config has engine-sonic.epocanvas.tech");
+}
 
-// 1. Keep current active rules (specifically engine-sonic.epocanvas.tech)
-for (const rule of currentIngress) {
-  if (rule.hostname) {
-    rules.set(rule.hostname, rule);
+const mergedIngress = [];
+let insertedTarget = false;
+for (const rule of currentConfig.ingress) {
+  if (rule?.hostname === targetHost) {
+    if (!insertedTarget) {
+      mergedIngress.push(...backupTarget);
+      insertedTarget = true;
+    }
+    continue;
   }
+  if (!rule?.hostname) continue;
+  mergedIngress.push(rule);
 }
-
-// 2. Merge backup rules (restore sonic.epocanvas.tech)
-for (const rule of backupIngress) {
-  if (rule.hostname) {
-    rules.set(rule.hostname, rule);
-  }
+if (!insertedTarget) mergedIngress.push(...backupTarget);
+if (currentEngine.length === 0) {
+  const insertAt = mergedIngress.findIndex(rule => rule?.hostname === targetHost);
+  mergedIngress.splice(insertAt < 0 ? mergedIngress.length : insertAt, 0, ...backupEngine);
 }
+const currentCatchAll = currentConfig.ingress.filter(rule => !rule?.hostname);
+const backupCatchAll = backupConfig.ingress.filter(rule => !rule?.hostname);
+const catchAll = currentCatchAll.length ? currentCatchAll : backupCatchAll;
+if (catchAll.length === 0) catchAll.push({ service: "http_status:404" });
+mergedIngress.push(...catchAll);
 
-// Ensure engine-sonic is explicitly safeguarded
-if (!rules.has("engine-sonic.epocanvas.tech")) {
-  rules.set("engine-sonic.epocanvas.tech", {
-    service: "http://localhost:8080",
-    hostname: "engine-sonic.epocanvas.tech"
-  });
-}
+const mergedConfig = { ...currentConfig, ingress: mergedIngress };
+if (!mergedConfig.ingress.some(rule => rule?.hostname === targetHost)) throw new Error("Merged config lost sonic route");
+if (!mergedConfig.ingress.some(rule => rule?.hostname === engineHost)) throw new Error("Merged config lost engine route");
+console.log(JSON.stringify({ original: currentConfig, merged: mergedConfig }));
+' "${CURRENT_CFG_RESP}" "${TUNNEL_BACKUP}")
 
-// Ensure sonic.epocanvas.tech is present
-if (!rules.has("sonic.epocanvas.tech")) {
-  rules.set("sonic.epocanvas.tech", {
-    service: "http://localhost:8080",
-    hostname: "sonic.epocanvas.tech"
-  });
-}
-
-// Rebuild ingress array with catch-all 404 at the end
-const merged = [];
-for (const [hostname, rule] of rules.entries()) {
-  merged.push(rule);
-}
-merged.push({ service: "http_status:404" });
-
-console.log(JSON.stringify({
-  config: {
-    ingress: merged,
-    "warp-routing": { enabled: false }
-  }
-}));
-' "${CURRENT_INGRESS_JSON}" "${TUNNEL_BACKUP}")
+ORIGINAL_TUNNEL_CONFIG=$(echo "${TUNNEL_CONFIGS}" | jq -c '{config: .original}')
+MERGED_TUNNEL_CONFIG=$(echo "${TUNNEL_CONFIGS}" | jq -c '{config: .merged}')
 
 echo "[+] Step 1 (Tunnel): MERGE sonic.epocanvas.tech ingress into Cloudflare Tunnel"
 echo "    Strategy: Non-destructive Merge (PRESERVES engine-sonic.epocanvas.tech)"
@@ -215,10 +219,26 @@ if ! echo "${TUNNEL_RESP}" | jq -e '.success' >/dev/null 2>&1; then
   echo "${TUNNEL_RESP}" >&2
   exit 1
 fi
-echo "   ✓ Merged tunnel ingress configuration applied successfully (engine-sonic preserved)."
+if ! READBACK_TUNNEL=$(curl -fsS \
+  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+  -H "Accept: application/json" \
+  "${TUNNEL_ENDPOINT}"); then
+  echo "[-] FAILED to read back Tunnel configuration after update." >&2
+  exit 1
+fi
+if ! node -e '
+const actual = JSON.parse(process.argv[1]).result?.config;
+const expected = JSON.parse(process.argv[2]).config;
+if (!actual || !expected || JSON.stringify(actual.ingress) !== JSON.stringify(expected.ingress) ||
+    JSON.stringify(actual['warp-routing']) !== JSON.stringify(expected['warp-routing'])) process.exit(1);
+' "${READBACK_TUNNEL}" "${MERGED_TUNNEL_CONFIG}"; then
+  echo "[-] FAILED to verify the applied Tunnel configuration." >&2
+  exit 1
+fi
+echo "   ✓ Merged tunnel ingress configuration applied and verified (engine-sonic preserved)."
 
 echo "2. Applying DNS CNAME Update..."
-DNS_RESP=$(curl -s -X PATCH "${DNS_ENDPOINT}" \
+DNS_RESP=$(curl -fsS -X PATCH "${DNS_ENDPOINT}" \
   -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
   -H "Content-Type: application/json" \
   -d "${DNS_PAYLOAD}")
@@ -228,7 +248,31 @@ if ! echo "${DNS_RESP}" | jq -e '.success' >/dev/null 2>&1; then
   echo "${DNS_RESP}" >&2
   exit 1
 fi
-echo "   ✓ DNS CNAME record updated back to ${RECORD_CONTENT} successfully."
+if ! DNS_READBACK=$(curl -fsS \
+  -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+  -H "Accept: application/json" \
+  "${DNS_ENDPOINT}"); then
+  echo "[-] FAILED to read back DNS after update. Restoring the original Tunnel config." >&2
+  curl -fsS -X PUT "${TUNNEL_ENDPOINT}" \
+    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "${ORIGINAL_TUNNEL_CONFIG}" >/dev/null || echo "[-] CRITICAL: Tunnel restoration also failed." >&2
+  exit 1
+fi
+if ! node -e '
+const record = JSON.parse(process.argv[1]).result;
+const expectedContent = process.argv[2];
+const expectedProxied = JSON.parse(process.argv[3]);
+if (!record || record.type !== "CNAME" || record.content !== expectedContent || record.proxied !== expectedProxied) process.exit(1);
+' "${DNS_READBACK}" "${RECORD_CONTENT}" "${PROXIED}"; then
+  echo "[-] FAILED to verify DNS after update. Restoring the original Tunnel config." >&2
+  curl -fsS -X PUT "${TUNNEL_ENDPOINT}" \
+    -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d "${ORIGINAL_TUNNEL_CONFIG}" >/dev/null || echo "[-] CRITICAL: Tunnel restoration also failed." >&2
+  exit 1
+fi
+echo "   ✓ DNS CNAME record updated and verified successfully."
 
 echo "================================================================================"
 echo " [LIVE ROLLBACK COMPLETE] Verified both Tunnel Ingress and DNS CNAME restored."

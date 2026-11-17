@@ -268,10 +268,10 @@ try {
   const timeout = await a.fetch('http://127.0.0.1/api/sonic/search/nexus?q=local-slow-body', {
     headers: { Cookie: entered.headers.get('set-cookie').split(';', 1)[0], 'CF-Connecting-IP': '192.0.2.1' },
   });
-  assert.equal(timeout.status, 200);
+  assert.equal(timeout.status, 504);
   assert.equal(timeout.headers.get('cache-control'), 'private, no-store');
   const timedOut = await timeout.json();
-  assert.deepEqual(timedOut.data.tracks, []);
+  assert.equal(timedOut.error.code, 'UPSTREAM_TIMEOUT');
   assert.deepEqual(timedOut.meta.attempts.map(({ provider, errorCode }) => ({ provider, errorCode })),
     [{ provider: 'netease', errorCode: 'UPSTREAM_TIMEOUT' }]);
   assert.equal(providerRequests, 1);
