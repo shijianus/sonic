@@ -11,6 +11,7 @@ import { recordLicensingBlockMetric, redactSensitiveString } from './observabili
 import { extractAuthCredentials } from '../auth';
 import { checkEngineIdentityAccess } from './engine-identity';
 import { callLocalEngineJson, createRuntimeAbortBudget } from './local-engine';
+import { UPSTREAM_TIMEOUT } from './request-budget';
 import { hasSearchTimeout } from './search-cache-policy';
 
 export { handleOptions };
@@ -768,7 +769,7 @@ export async function handleSingleProviderSearchRequest(
         latencyMs,
         provider: p,
         ...(degraded ? { degraded: true, degradedReason, circuitState } : {}),
-        attempts: [...attemptsPrefix, { provider: attemptName, via, ok: tracks.length > 0, ms: latencyMs }],
+        attempts: [...attemptsPrefix, { provider: attemptName, via, ok: true, ms: latencyMs }],
       },
     };
 
@@ -791,11 +792,14 @@ export async function handleSingleProviderSearchRequest(
   } catch (err: any) {
     request.signal.throwIfAborted();
     const latencyMs = Date.now() - startTime;
-    return sonicError('PROVIDER_SEARCH_ERROR', redactSensitiveString(err?.message || `Search failed on ${p}`), 502, {
+    const timedOut = err?.name === 'TimeoutError' || budget.signal.reason?.name === 'TimeoutError';
+    const errorCode = timedOut ? UPSTREAM_TIMEOUT : 'PROVIDER_SEARCH_ERROR';
+    const message = redactSensitiveString(err?.message || `Search failed on ${p}`);
+    return sonicError(errorCode, message, timedOut ? 504 : 502, {
       provider: p,
       latencyMs,
       ...(degraded ? { degraded: true, degradedReason, circuitState } : {}),
-      attempts: [...attemptsPrefix, { provider: p, ok: false, ms: latencyMs, error: redactSensitiveString(err?.message) }],
+      attempts: [...attemptsPrefix, { provider: p, ok: false, ms: latencyMs, error: message, errorCode }],
     });
   } finally {
     budget.dispose();

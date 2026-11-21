@@ -21,6 +21,10 @@ import {
 } from '../../music';
 import { titlesMatchStrictly, artistsMatchStrictly } from '../native-protocols';
 
+function qqSearchSucceeded(code: unknown): boolean {
+  return code === undefined || code === 0 || code === '0';
+}
+
 export const qqProvider: SonicProviderAdapter = {
   name: 'qq',
   isEnabled(env?: AppEnv): boolean {
@@ -147,7 +151,7 @@ export const qqProvider: SonicProviderAdapter = {
       if (h5Res.ok) {
         const h5Json = await readBoundedProviderJson(h5Res);
         const songList = h5Json?.data?.song?.list;
-        if (Array.isArray(songList)) {
+        if (qqSearchSucceeded(h5Json?.code) && Array.isArray(songList)) {
           return songList.map((item: any) => {
             const platformId = String(item.songmid || item.mid || item.songid || '');
             const durationSec = typeof item.interval === 'number' ? item.interval : 0;
@@ -224,7 +228,7 @@ export const qqProvider: SonicProviderAdapter = {
       if (uRes.ok) {
         const uJson = await readBoundedProviderJson(uRes);
         const songList = uJson?.req?.data?.body?.song?.list;
-        if (Array.isArray(songList)) {
+        if (qqSearchSucceeded(uJson?.code) && qqSearchSucceeded(uJson?.req?.code) && Array.isArray(songList)) {
           return songList.map((item: any) => {
             const platformId = String(item.mid || item.id || '');
             const durationSec = typeof item.interval === 'number' ? item.interval : 0;
@@ -285,7 +289,7 @@ export const qqProvider: SonicProviderAdapter = {
       }
       const sJson = await readBoundedProviderJson(sRes);
       const list = sJson?.data?.song?.list;
-      if (!Array.isArray(list)) throw new Error('Invalid QQ search response');
+      if (!qqSearchSucceeded(sJson?.code) || !Array.isArray(list)) throw new Error('Invalid QQ search response');
 
       return list.map((item: any) => {
         const platformId = String(item.songmid || item.songid || '');

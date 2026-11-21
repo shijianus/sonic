@@ -68,12 +68,14 @@ async function waitForTimeout(signal) {
 
 function qqDesktopFixture(init) {
   const { req } = JSON.parse(init.body);
-  if (req.method !== 'DoSearchForQQMusicDesktop') return;
+  if (req.module !== 'music.search.SearchCgiService' || req.method !== 'DoSearchForQQMusicDesktop') return;
   const { query } = req.param;
-  const songs = [sharedTitle, '晴天', '起风了'].includes(query)
-    ? [{ mid: 'fixtureQQ1', name: query, singer: [{ name: sharedArtist }], interval: 240 }]
-    : [];
-  return Response.json({ req: { data: { body: { song: { list: songs } } } } });
+  if (query === 'qq-upstream-error') {
+    return Response.json({ code: 0, req: { code: 2001, data: { body: { song: { list: [] } } } } });
+  }
+  if (query !== '晴天' || req.param.search_type !== 0 || req.param.num_per_page !== 3 || req.param.page_num !== 1) return;
+  const song = { mid: 'fixtureQQDesktop', name: query, singer: [{ name: '周杰伦' }], interval: 269 };
+  return Response.json({ code: 0, req: { code: 0, data: { body: { song: { list: [song] } } } } });
 }
 
 export function respondToSonicGatewayProvider(url, init) {
@@ -90,12 +92,19 @@ export function respondToSonicGatewayProvider(url, init) {
     case 'GET https://api.amll.dev/v1/lyrics/get':
     case 'GET https://api.amll.dev/v1/lyrics/search':
       return new Response(null, { status: 404 });
-    case 'GET https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp':
-      if (query.get('w') === timedOutQuery) return waitForTimeout(init.signal);
-      // Empty H5 response deliberately exercises the desktop search fallback.
-      return Response.json({ data: { song: { list: [] } } });
+    case 'GET https://c.y.qq.com/soso/fcgi-bin/search_for_qq_cp': {
+      const keyword = query.get('w');
+      if (keyword === timedOutQuery) return waitForTimeout(init.signal);
+      if (keyword === '晴天' || keyword === 'qq-upstream-error') {
+        return Response.json({ code: 1000, data: { song: { list: [] } } });
+      }
+      const songs = [sharedTitle, '起风了'].includes(keyword)
+        ? [{ songmid: 'fixtureQQH5', songname: keyword, singer: [{ name: sharedArtist }], interval: 240 }]
+        : [];
+      return Response.json({ code: 0, data: { song: { list: songs } } });
+    }
     case 'GET https://c.y.qq.com/soso/fcgi-bin/client_search_cp':
-      return Response.json({ data: { song: { list: [] } } });
+      return Response.json({ code: query.get('w') === 'qq-upstream-error' ? 1000 : 0, data: { song: { list: [] } } });
     case 'POST https://u.y.qq.com/cgi-bin/musicu.fcg':
       return qqDesktopFixture(init);
     case 'GET https://songsearch.kugou.com/song_search_v2': {
@@ -106,11 +115,10 @@ export function respondToSonicGatewayProvider(url, init) {
         : [];
       return Response.json({ data: { info } });
     }
-    case 'GET https://songsearch.kugou.com/song_search_v2':
-      return Response.json({ data: { lists: [] } });
     case 'GET https://lyrics.kugou.com/search':
       return Response.json({ candidates: [] });
     case 'GET https://search.kuwo.cn/r.s': {
+      if (query.get('all') === timedOutQuery) return waitForTimeout(init.signal);
       const abslist = query.get('all') === sharedTitle
         ? [{ MUSICRID: 'MUSIC_801', SONGNAME: sharedTitle, ARTIST: sharedArtist, DURATION: '240' }]
         : [];

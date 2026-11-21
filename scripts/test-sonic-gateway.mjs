@@ -6,6 +6,8 @@ import { handleUpstreamEndpoint } from '../functions/_lib/sonic/upstream';
 import { withProviderFixtures } from './test-fixtures/provider-fetch.mjs';
 import { respondToSonicGatewayProvider } from './test-fixtures/sonic-gateway.mjs';
 
+const nexusProviders = ['netease', 'qq', 'kugou', 'kuwo'];
+
 let passed = 0;
 let failed = 0;
 
@@ -99,7 +101,7 @@ async function runTests() {
     assert(json.brand === 'Sonic', `Brand is Sonic`);
     assert(json.data && Array.isArray(json.data.tracks), `Tracks array returned (${json.data?.tracks?.length} tracks)`);
     assert(Array.isArray(json.meta.attempts), `Meta.attempts logged (${json.meta?.attempts?.length} attempts)`);
-    assert(json.data.tracks.length === 1, 'The three matching provider results are merged');
+    assert(json.data.tracks.length === 1, 'The four matching provider results are merged');
 
     if (json.data.tracks.length > 0) {
       const t = json.data.tracks[0];
@@ -108,7 +110,7 @@ async function runTests() {
       assert(t.platform !== undefined, `Track has platform: "${t.platform}"`);
       assert(t.platformId !== undefined, `Track has platformId: "${t.platformId}"`);
       assert(Array.isArray(t.sources), `Track has sources[]: ${JSON.stringify(t.sources)}`);
-      assert(['netease', 'qq', 'kugou'].every(platform => t.sources.some(source => source.platform === platform)), 'Merged track retains all three provider sources');
+      assert(nexusProviders.every(platform => t.sources?.some(source => source.platform === platform)) && t.sources.length === nexusProviders.length, 'Merged track retains all four unique provider sources');
     }
   }
 
@@ -137,10 +139,9 @@ async function runTests() {
     assert(json.brand === 'Sonic', `Brand is Sonic`);
     assert(json.error?.code === 'UPSTREAM_TIMEOUT', `Timeout error is classified (got ${json.error?.code})`);
     const attempts = json.meta?.attempts ?? [];
-    const providers = ['netease', 'qq', 'kugou'];
-    const allTimedOut = attempts.length === providers.length && providers.every(provider => attempts.some(attempt =>
+    const allTimedOut = attempts.length === nexusProviders.length && nexusProviders.every(provider => attempts.some(attempt =>
       attempt.provider === provider && !attempt.ok && attempt.errorCode === 'UPSTREAM_TIMEOUT'));
-    assert(allTimedOut, `All three upstream timeouts are recorded${allTimedOut ? '' : ` (${JSON.stringify(attempts)})`}`);
+    assert(allTimedOut, `All four upstream timeouts are recorded${allTimedOut ? '' : ` (${JSON.stringify(attempts)})`}`);
     assert(!json.data && res.headers.get('Cache-Control') === 'no-store', 'A timed-out search returns no fabricated tracks and is not cached');
   }
 
@@ -153,7 +154,24 @@ async function runTests() {
 
     assert(res.status === 200, `Status is 200 (got ${res.status})`);
     assert(json.brand === 'Sonic', `Brand is Sonic`);
-    assert(json.data && Array.isArray(json.data.tracks) && json.data.tracks.length > 0, `QQ returned ${json.data?.tracks?.length} tracks`);
+    const [song] = json.data?.tracks ?? [];
+    assert(song?.platformId === 'fixtureQQDesktop' && song.title === '晴天' && song.artist === '周杰伦' && song.duration === 269,
+      'QQ desktop fallback decodes the track after an H5 application error');
+
+    const miss = await handleSingleProviderSearchRequest('qq', new Request('http://localhost/api/sonic/search/qq?q=qq-valid-empty&nocache=1'), {});
+    const missJson = await miss.json();
+    assert(miss.status === 200 && missJson.data?.tracks?.length === 0 && missJson.meta?.attempts?.some(a => a.provider === 'qq' && a.ok),
+      'A successful QQ response with no matches returns an empty page');
+
+    const failure = await handleSingleProviderSearchRequest('qq', new Request('http://localhost/api/sonic/search/qq?q=qq-upstream-error&nocache=1'), {});
+    const failureJson = await failure.json();
+    assert(failure.status === 502 && failureJson.error?.code === 'PROVIDER_SEARCH_ERROR' && failure.headers.get('Cache-Control') === 'no-store',
+      'QQ application errors on all three interfaces remain observable and uncached');
+
+    const timeout = await handleSingleProviderSearchRequest('qq', new Request('http://localhost/api/sonic/search/qq?q=周杰伦&nocache=1'), { SONIC_TIMEOUT_MS: '500' });
+    const timeoutJson = await timeout.json();
+    assert(timeout.status === 504 && timeoutJson.error?.code === 'UPSTREAM_TIMEOUT' && timeoutJson.meta?.attempts?.some(a => a.errorCode === 'UPSTREAM_TIMEOUT'),
+      'A standalone QQ timeout returns 504 and records the timeout on its attempt');
   }
 
   // Test 9: Native NetEase Single Provider Search + Default Third-Party Exclusion
