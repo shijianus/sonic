@@ -44,7 +44,7 @@ The official ordinary-file export requests current account authorization from
 POST /api/music/ecs on every invocation, including when the file is cached.
 Guests can obtain ECS downloads and play them. Accounts can export original
 bytes, or use the bundled MP3 worker at 128 or 320 kbps, from supported mono or
-stereo inputs up to ten minutes. High export refuses low-bitrate lossy inputs.
+stereo inputs up to ten minutes. High export is available for ECS1/2 only, and refuses low-bitrate lossy inputs or sample rates below 32 kHz. Encoding never raises the sample rate above the source.
 MP3 encoding is lossy and cannot restore information missing from the source.
 This format provides encrypted distribution and authenticated official export.
 A web client authorized to play audio receives decoded bytes. This design does

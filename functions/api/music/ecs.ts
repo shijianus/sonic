@@ -75,5 +75,8 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   if (!license) return error(400, 'INVALID_ECS_LICENSE');
   if (!permitted(license.source, env.SONIC_ECS_DOWNLOAD_SOURCES, env)) return error(403, 'DOWNLOAD_NOT_PERMITTED');
   if (input.action === 'export' && !permitted(license.source, env.SONIC_ECS_EXPORT_SOURCES, env)) return error(403, 'EXPORT_NOT_PERMITTED');
+  if (input.action === 'export' && input.target === 'high' && license.tier === 3) {
+    return error(403, 'ECS_HIGHER_QUALITY_UNAVAILABLE');
+  }
   return reply(200, license);
 }

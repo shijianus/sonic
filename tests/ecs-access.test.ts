@@ -56,6 +56,14 @@ describe('ECS license and export policy', () => {
     expect(played.data).toEqual({ key: grant.key, tier, source: 'synthetic' });
   });
 
+  it('reserves high export for original and high archives', async () => {
+    const grant = await issue(base, 'synthetic', 3);
+    const session = await account();
+    const response = await post({ action: 'export', target: 'high', ticket: grant.ticket }, base, { Cookie: 'sonic_session=' + session.apiKey });
+    expect(response.status).toBe(403);
+    expect(response.data.error.code).toBe('ECS_HIGHER_QUALITY_UNAVAILABLE');
+  });
+
   it('uses the intersection of the download grant and current content policy', async () => {
     const body = { action: 'issue', source: 'netease', tier: 1 };
     expect(await post(body)).toMatchObject({ status: 403, data: { error: { code: 'DOWNLOAD_NOT_PERMITTED' } } });
