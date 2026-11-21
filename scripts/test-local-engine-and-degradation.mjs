@@ -1,6 +1,7 @@
 // Comprehensive Test Suite for Sonic Linux Local Engine, Provenance, Auth, Rate-Limiting & Degradation State Machine
 import http from 'node:http';
 import crypto from 'node:crypto';
+import { mock } from 'node:test';
 import {
   md5Hex,
   aes128EcbEncryptHex,
@@ -267,9 +268,12 @@ async function runTests() {
       SONIC_ENABLE_NETEASE: '0',
       SONIC_ENABLE_QQ: '0',
       SONIC_ENABLE_KUGOU: '0',
+      SONIC_ENABLE_KUWO: '0',
       SONIC_ENABLE_GDSTUDIO: '0',
     };
 
+    let now = Date.now();
+    const clock = mock.method(Date, 'now', () => now);
     try {
       // Step 5a: Healthy local engine -> CLOSED, populates cache, records local-engine + local-netease
       const res1 = await handleNexusSearchRequest(
@@ -283,6 +287,7 @@ async function runTests() {
       assert(json1.meta.attempts.some((a) => a.provider === 'local-netease' && a.via === 'local-engine'), 'Engine sub-attempt preserves local-netease provenance');
 
       // Step 5b: Simulate Cloudflare Tunnel 530 outage -> instant circuit OPEN
+      now += 3_600_001; // Expire the fresh search entry, retaining its stale copy.
       engineMode = 'tunnel-530';
       const hitsBeforeOutage = engineHits;
       const res2 = await handleNexusSearchRequest(
@@ -290,11 +295,14 @@ async function runTests() {
         cfEnv,
       );
       const json2 = await res2.json();
+      assert(engineHits === hitsBeforeOutage + 1 && json2.meta.attempts[0]?.error === 'Engine HTTP 530',
+        'A single engine request reports the real HTTP 530');
       assert(getLocalEngineCircuitSnapshot(cfEnv).state === 'OPEN', '530 Tunnel error trips circuit breaker immediately to OPEN');
       assert(res2.headers.get('X-Sonic-Degraded') === '1', 'Outage response sets X-Sonic-Degraded: 1');
       assert(json2.meta.degraded === true, 'Outage response sets meta.degraded=true');
 
-      // Step 5c: Next request while OPEN fast-fails (0 engine hits!) and serves stale cache if nocache=1 is NOT set (or fast-fails in 0ms)
+      // Step 5c: Even just before the cooldown expires, no retry reaches the engine.
+      now += Number(cfEnv.SONIC_CB_COOLDOWN_MS) - 1;
       const hitsWhileOpen = engineHits;
       const res3 = await handleNexusSearchRequest(
         new Request('https://sonic.epocanvas.tech/api/sonic/search/nexus?q=unseen_song&nocache=1'),
@@ -305,13 +313,14 @@ async function runTests() {
       assert(String(json3.meta.attempts[0]?.error || '').includes('Circuit OPEN'), 'Fast-fail recorded in meta.attempts');
 
       // Step 5c-bis: Stale cache fallback serves previously cached "起风了" while circuit is OPEN!
-      const staleEnv = { ...cfEnv, SONIC_CACHE_SEARCH_TTL_SEC: '0' };
       const resStale = await handleNexusSearchRequest(
         new Request('https://sonic.epocanvas.tech/api/sonic/search/nexus?q=%E8%B5%B7%E9%A3%8E%E4%BA%86'),
         cfEnv,
       );
       const jsonStale = await resStale.json();
-      assert(resStale.status === 200 && jsonStale.data.tracks.length === 1, 'Cached search result served immediately during outage');
+      assert(resStale.status === 200 && resStale.headers.get('X-Sonic-Cache') === 'STALE' &&
+        jsonStale.meta.degraded === true && jsonStale.data.tracks.length === 1 && engineHits === hitsWhileOpen,
+        'Expired search result served from stale cache without an engine request');
 
       // Step 5d: A Kuwo region prompt is unavailable while the Engine is down.
       const fetchLoopback = globalThis.fetch;
@@ -323,7 +332,7 @@ async function runTests() {
       }, async () => {
         const streamRes = await handleMusicStream({
           request: new Request('https://sonic.epocanvas.tech/api/music/stream?id=999999999999&source=kuwo'),
-          env: cfEnv,
+          env: { ...cfEnv, SONIC_ENABLE_KUWO: '1' },
         });
         const streamJson = await streamRes.json();
         assert(streamRes.status === 404, `Unresolvable stream returns 404 (got ${streamRes.status})`);
@@ -331,16 +340,19 @@ async function runTests() {
       });
 
       // Step 5e: Cooldown elapses -> HALF_OPEN probe -> recovers to CLOSED
-      await new Promise((r) => setTimeout(r, 180));
+      now += 1;
+      assert(getLocalEngineCircuitSnapshot(cfEnv).state === 'HALF_OPEN', 'Probe becomes eligible at the cooldown boundary');
       engineMode = 'healthy';
       const resRecover = await handleNexusSearchRequest(
         new Request('https://sonic.epocanvas.tech/api/sonic/search/nexus?q=%E8%B5%B7%E9%A3%8E%E4%BA%86&nocache=1'),
         cfEnv,
       );
       const jsonRecover = await resRecover.json();
-      assert(getLocalEngineCircuitSnapshot(cfEnv).state === 'CLOSED', 'Circuit recovers HALF_OPEN -> CLOSED after healthy probe');
+      assert(engineHits === hitsWhileOpen + 1 && getLocalEngineCircuitSnapshot(cfEnv).state === 'CLOSED',
+        'One healthy HTTP probe recovers HALF_OPEN -> CLOSED');
       assert(jsonRecover.meta.degraded === false, 'Recovered response clears degraded=false');
     } finally {
+      clock.mock.restore();
       await new Promise((resolve) => mockServer.close(resolve));
       resetLocalEngineCircuitForTest();
     }
@@ -427,11 +439,14 @@ async function runTests() {
   console.log(`========================================\n`);
 
   if (failed > 0) {
-    process.exit(1);
+    process.exitCode = 1;
   }
 }
 
-runTests().catch((err) => {
+const localFetch = globalThis.fetch;
+withProviderFixtures((url, init) => {
+  if (url.hostname === '127.0.0.1') return localFetch(url, init);
+}, runTests).catch((err) => {
   console.error('Fatal test error:', err);
   process.exit(1);
 });
