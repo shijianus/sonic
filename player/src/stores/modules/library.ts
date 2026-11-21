@@ -320,14 +320,18 @@ export const useLibraryStore = defineStore('library', {
       const generation = expectedGeneration ?? this.currentSyncGeneration()
       if (!this.isSyncGenerationActive(namespace, generation)) return false
       this.accountSyncStatus = 'syncing'
+      const versionBeforeRead = this.accountVersion
       try {
         const remote = await fetchAccountLibrary(accountIdFor(namespace))
         if (!this.isSyncGenerationActive(namespace, generation)) return false
-        this.accountVersion = remote.version
-        this.accountTombstones = clone(remote.tombstones)
-        this.replaceCollectionsWithRemote(remote)
-        this.reapplyQueuedMutations()
-        this.persistNamespace(namespace)
+        // A user can edit the library while its initial snapshot is in flight.
+        if (this.accountVersion === versionBeforeRead || remote.version >= this.accountVersion) {
+          this.accountVersion = remote.version
+          this.accountTombstones = clone(remote.tombstones)
+          this.replaceCollectionsWithRemote(remote)
+          this.reapplyQueuedMutations()
+          this.persistNamespace(namespace)
+        }
         if (this.accountOperationQueue.length > 0) {
           const flushed = await this.flushAccountQueue(namespace, generation)
           if (!flushed) return false

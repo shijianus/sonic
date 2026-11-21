@@ -147,6 +147,22 @@ describe('library store', () => {
     expect(JSON.parse(localStorage.getItem('library')!).likedSongs.map((s: {id:string}) => s.id)).toEqual(['guest-song'])
   })
 
+  it('preserves a committed edit if an older snapshot arrives after the write receipt', async () => {
+    let finishSnapshot!: (value: AccountSnapshot) => void
+    vi.mocked(fetchAccountLibrary).mockImplementationOnce(() => new Promise(resolve => { finishSnapshot = resolve }))
+    vi.mocked(applyAccountLibraryMutation).mockImplementation(async input => ({
+      version: 1, replayed: false, updatedAt: 1, operationId: input.operationId,
+    }))
+    const lib = useLibraryStore()
+    const opening = lib.activateAccount('a')
+    lib.toggleLikeSong({ id: 'new', name: 'New favorite', artist: 'Artist' })
+    await vi.waitFor(() => expect(lib.accountVersion).toBe(1))
+    finishSnapshot(snapshot(0, []))
+    expect(await opening).toBe(true)
+    expect(lib.isSongLiked('new')).toBe(true)
+    expect(lib.accountVersion).toBe(1)
+  })
+
   it('resends the original operation after a lost response and then flushes the next edit', async () => {
     const operations = [{ type: 'upsert', collection: 'likedSongs', id: '1', value: { id: '1', name: 'One' } }]
     const first = { operationId: 'lost-response', baseVersion: 0, createdAt: 1, operations }
