@@ -494,8 +494,8 @@ const updateQualityMenuPosition = () => {
 }
 
 const openAndFocusQualityMenu = () => {
-  updateQualityMenuPosition()
   showQualityMenu.value = true
+  updateQualityMenuPosition()
   const activeIdx = availableQualities.value.findIndex(q => q.level === effectiveQualityLevel.value)
   focusedQualityIndex.value = activeIdx >= 0 ? activeIdx : 0
   nextTick(() => {

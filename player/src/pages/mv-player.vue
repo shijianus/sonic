@@ -309,156 +309,6 @@ const DEFAULT_RECOMMEND_CANDIDATES: RelatedMV[] = [
   },
 ]
 
-const HOT_COMMENTS_PRESETS: MVComment[] = [
-  {
-    id: 357710565,
-    username: '云上听风',
-    avatarUrl: 'https://p1.music.126.net/Ic1ChdTTB9-Ogu64HJ7FpA==/18502581673938111.jpg',
-    time: '2024-03-15',
-    rawTime: 1710460800000,
-    content: parseCommentEmoji('前奏一响就起鸡皮疙瘩了[憨笑][强]，当年循环了无数遍的经典！'),
-    likes: 852,
-  },
-  {
-    id: 345275930,
-    username: '夜行诗人',
-    avatarUrl: 'https://p1.music.126.net/Wx2C7Az0olxtMNVfN4aS9g==/18945684858379975.jpg',
-    time: '2024-04-02',
-    rawTime: 1712016000000,
-    content: parseCommentEmoji('时间的味道，经典永不过时[爱心][啤酒]！这声线太绝了。'),
-    likes: 549,
-  },
-  {
-    id: 9608200257,
-    username: '海盐柠檬茶',
-    avatarUrl: 'https://p2.music.126.net/6y-UleORITEDbvrOLAssGQ==/109951163996500858.jpg',
-    time: '2024-05-18',
-    rawTime: 1715990400000,
-    content: parseCommentEmoji('官方高清修复版真清晰，百看不厌[偷笑][赞]！'),
-    likes: 421,
-  },
-  {
-    id: 9601364721,
-    username: '星河长明',
-    avatarUrl: 'https://p2.music.126.net/c5N8O9P0Q1R2S3T4U5V6W==/109951163365829143.jpg',
-    time: '2024-06-20',
-    rawTime: 1718841600000,
-    content: parseCommentEmoji('每次听到高潮部分都忍不住跟着合唱[大哭][流泪]！'),
-    likes: 289,
-  },
-  {
-    id: 9601364722,
-    username: '夏目友人',
-    avatarUrl: 'https://p2.music.126.net/b4M7N8O9P0Q1R2S3T4U5V==/109951163156294712.jpg',
-    time: '2024-07-09',
-    rawTime: 1720483200000,
-    content: parseCommentEmoji('这就是华语乐坛黄金时代的魅力[鼓掌][玫瑰]！'),
-    likes: 198,
-  },
-  {
-    id: 9601364723,
-    username: '风吹半夏',
-    avatarUrl: 'https://p2.music.126.net/8W1Y2Z3A4B5C6D7E8F9G0==/109951163074218321.jpg',
-    time: '2024-08-11',
-    rawTime: 1723334400000,
-    content: parseCommentEmoji('无论听过多少新歌，这首在歌单里的位置永远无法被替代[比心][微笑]！'),
-    likes: 156,
-  },
-  {
-    id: 9601364724,
-    username: '琴键上的光芒',
-    avatarUrl: 'https://p2.music.126.net/rK1m9N2o3P4q5R6s7T8u9==/109951163250912384.jpg',
-    time: '2024-09-03',
-    rawTime: 1725321600000,
-    content: parseCommentEmoji('编曲和词作放在现在看依然是天花板级别的存在[大笑][鼓掌]！'),
-    likes: 115,
-  },
-  {
-    id: 9601364725,
-    username: '暮色归途',
-    avatarUrl: 'https://p2.music.126.net/m7n9V3H4L1z0y8X1e2w3Q==/109951163825828552.jpg',
-    time: '2024-10-14',
-    rawTime: 1728864000000,
-    content: parseCommentEmoji('深夜戴上耳机，所有的喧嚣都静止了，纯粹的感动[色][心]！'),
-    likes: 98,
-  },
-]
-
-const LATEST_COMMENTS_PRESETS: MVComment[] = [
-  {
-    id: 9801001,
-    username: '半岛旧梦',
-    avatarUrl: 'https://p2.music.126.net/NWv6PtSBkyWZzqbJVzBr7g==/109951169164936450.jpg',
-    time: '刚刚',
-    rawTime: Date.now() - 120000,
-    content: parseCommentEmoji('刚刚重温完 MV 依然震撼！前奏一出来鸡皮疙瘩就起来了[大哭][强]'),
-    likes: 2,
-  },
-  {
-    id: 9801002,
-    username: '晚风知我意',
-    avatarUrl: 'https://p2.music.126.net/78q0jUUJ0h08GxAs2G-tCA==/109951168529051968.jpg',
-    time: '15分钟前',
-    rawTime: Date.now() - 900000,
-    content: parseCommentEmoji('2026年了还有人在听这首歌吗？特地来打卡[憨笑][赞]'),
-    likes: 5,
-  },
-  {
-    id: 9801003,
-    username: '晨光微曦',
-    avatarUrl: 'https://p2.music.126.net/5KJI2mq0G0OQHQaAfAJfwg==/109951173289563385.jpg',
-    time: '45分钟前',
-    rawTime: Date.now() - 2700000,
-    content: parseCommentEmoji('官方高清修复版真清晰，色彩和光影调校得太棒了[偷笑][玫瑰]'),
-    likes: 1,
-  },
-  {
-    id: 9801004,
-    username: '北纬以南',
-    avatarUrl: 'https://p2.music.126.net/Z2x6knGRr7eRrZeOlgCngA==/109951172414270313.jpg',
-    time: '2小时前',
-    rawTime: Date.now() - 7200000,
-    content: parseCommentEmoji('这个桥段的处理真的太绝了，词作与旋律天花板[爱心][心]'),
-    likes: 4,
-  },
-  {
-    id: 9801005,
-    username: '山河入梦',
-    avatarUrl: 'https://p2.music.126.net/FlL7wkN6VBoGTj3Df7s2_w==/109951170316908673.jpg',
-    time: '5小时前',
-    rawTime: Date.now() - 18000000,
-    content: parseCommentEmoji('被前奏狠狠击中，直接加入单曲循环列表[坏笑][干杯]'),
-    likes: 0,
-  },
-  {
-    id: 9801006,
-    username: '落日弥漫',
-    avatarUrl: 'https://p2.music.126.net/FLHG9Ou-sIq9F6dPe7SuNw==/109951169440811453.jpg',
-    time: '12小时前',
-    rawTime: Date.now() - 43200000,
-    content: parseCommentEmoji('现在的流行乐很少能听到这种直击心灵的声音了[流泪][鼓掌]'),
-    likes: 3,
-  },
-  {
-    id: 9801007,
-    username: '云端漫步',
-    avatarUrl: 'https://p2.music.126.net/BtXjoRNLCZjoSV-3Ag3M0Q==/109951164458656122.jpg',
-    time: '昨天',
-    rawTime: Date.now() - 86400000,
-    content: parseCommentEmoji('耳机里流淌着青春的回忆，百看不厌的经典神作[比心][微笑]'),
-    likes: 6,
-  },
-  {
-    id: 9801008,
-    username: '星夜听海',
-    avatarUrl: 'https://p2.music.126.net/YrjCHWk_OQhjlc5ycLpY3A==/109951172494696852.jpg',
-    time: '2天前',
-    rawTime: Date.now() - 172800000,
-    content: parseCommentEmoji('第无数次打卡，每一次听都有全新的感动[强][太阳]'),
-    likes: 1,
-  },
-]
-
 const state = reactive({
   currentMV: {} as MVInfo,
   relatedMVs: [] as RelatedMV[],
@@ -916,7 +766,7 @@ const loadComments = async (id: number, overrideSortType?: 1 | 2 | 3) => {
     const sortType: 1 | 2 | 3 = overrideSortType ?? (state.commentsSort === 'latest' ? 3 : 1)
     const res: any = await commentNew({ id, type: 1, sortType, pageNo: 1, pageSize: 25 })
     const list: any[] = res?.data?.comments || res?.comments || []
-    let remoteComments: MVComment[] = list.map((c, i) => {
+    const remoteComments: MVComment[] = list.map((c, i) => {
       const commentId = c?.commentId || c?.id || `remote_${id}_${sortType}_${i}`
       const key = String(commentId)
       return {
@@ -931,18 +781,6 @@ const loadComments = async (id: number, overrideSortType?: 1 | 2 | 3) => {
         isLiked: state.likedCommentIds.has(key),
       }
     })
-
-    // 若远端无数据，使用高品质对应排序模式的数据
-    if (!remoteComments.length) {
-      const presets = sortType === 3 ? LATEST_COMMENTS_PRESETS : HOT_COMMENTS_PRESETS
-      remoteComments = presets.map((c, i) => {
-        const key = getCommentKey(c, i)
-        return {
-          ...c,
-          isLiked: state.likedCommentIds.has(key),
-        }
-      })
-    }
 
     // 严密排序逻辑保障 (确保无论远端返回何种顺序，界面均具备明确筛选区分)：
     // 若为“最新评论”，按时间绝对倒序排列 (最新在前)
@@ -962,14 +800,13 @@ const loadComments = async (id: number, overrideSortType?: 1 | 2 | 3) => {
       }
     })
 
-    // 给予平滑过渡延时，让用户清晰感知真实刷新加载过程 (用户体验)
-    await new Promise(r => setTimeout(r, 150))
 
     state.comments = [...localComments, ...remoteComments]
     await nextTick()
     checkTerminationBoundary()
     syncContainersAlignment()
   } catch {
+    state.comments = getLocalMVComments(id)
   } finally {
     state.isCommentsLoading = false
   }
