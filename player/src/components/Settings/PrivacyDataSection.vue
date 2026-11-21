@@ -2,6 +2,7 @@
 import { useI18n } from 'vue-i18n'
 import Button from '@/components/Ui/Button.vue'
 import { useDialogA11y } from '@/composables/useDialogA11y'
+import { useAuthStore } from '@/stores/modules/auth'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { useToastStore } from '@/stores/modules/toast'
 import { deleteMusicDatabase } from '@/utils/indexedDB'
@@ -10,7 +11,10 @@ const { t } = useI18n()
 const toastStore = useToastStore()
 const recommendStore = useRecommendStore()
 
-const confirmOpen = ref(false)
+const authStore = useAuthStore()
+const dialog = ref<'local' | 'profile' | null>(null)
+const confirmOpen = computed(() => dialog.value !== null)
+const profileConfirmation = ref({ identity: '', description: '' })
 const isClearing = ref(false)
 const isClearingRecommend = ref(false)
 const dialogRef = ref<HTMLElement | null>(null)
@@ -23,23 +27,37 @@ const handleToggleAutoDj = () => {
   recommendStore.autoDjEnabled = !recommendStore.autoDjEnabled
 }
 
+const openProfileConfirmation = () => {
+  if (isClearing.value || isClearingRecommend.value) return
+  const account = authStore.verifiedAccountId
+  const identity = recommendStore.captureErasureIdentity()
+  profileConfirmation.value = {
+    identity,
+    description: account
+      ? t('recommend.privacy.clearAccountDesc', { account: authStore.userEmail || account })
+      : t(recommendStore.anonId ? 'recommend.privacy.clearAnonymousDesc' : 'recommend.privacy.clearDislikesDesc'),
+  }
+  dialog.value = 'profile'
+}
+
 const handleClearRecommendProfile = async () => {
   if (isClearingRecommend.value) return
   isClearingRecommend.value = true
   try {
-    const ok = await recommendStore.clearAllRecommendationProfile()
+    const ok = await recommendStore.clearAllRecommendationProfile(profileConfirmation.value.identity)
     toastStore.show({
       message: ok ? t('recommend.privacy.recommendProfileCleared') : t('recommend.privacy.recommendProfileClearFailed'),
       type: ok ? 'success' : 'error',
     })
   } finally {
     isClearingRecommend.value = false
+    dialog.value = null
   }
 }
 
 const closeConfirm = () => {
-  if (isClearing.value) return
-  confirmOpen.value = false
+  if (isClearing.value || isClearingRecommend.value) return
+  dialog.value = null
 }
 
 useDialogA11y({
@@ -52,15 +70,12 @@ const clearAllLocalData = async () => {
   if (isClearing.value) return
   isClearing.value = true
   try {
-    const recommendOk = await recommendStore.clearAllRecommendationProfile()
-    if (!recommendOk) {
-      toastStore.show({ message: t('components.settings.privacyClearFailed'), type: 'error' })
-      return
-    }
     let localStorageOk = true
     let musicDatabaseOk = true
     try {
       recommendStore.setPersonalizationEnabled(false)
+      recommendStore.dislikedTracks = []
+      await nextTick()
       localStorage.clear()
       sessionStorage.clear()
     } catch {
@@ -79,7 +94,7 @@ const clearAllLocalData = async () => {
     if (ok) setTimeout(() => window.location.reload(), 500)
   } finally {
     isClearing.value = false
-    confirmOpen.value = false
+    dialog.value = null
   }
 }
 </script>
@@ -191,7 +206,7 @@ const clearAllLocalData = async () => {
           rounded="lg"
           :loading="isClearingRecommend"
           class="border-glass bg-hover-glass text-primary/80 hover:text-primary border px-3 py-1.5 text-xs"
-          @click="handleClearRecommendProfile"
+          @click="openProfileConfirmation"
         >
           {{ t('recommend.privacy.clearRecommendProfile') }}
         </Button>
@@ -205,7 +220,7 @@ const clearAllLocalData = async () => {
       class="min-h-11 border border-red-500/30 bg-red-500/10 px-4 text-xs font-semibold text-red-400 hover:bg-red-500/20"
       icon="icon-[mdi--delete-forever-outline]"
       icon-class="h-4 w-4"
-      @click="confirmOpen = true"
+      @click="dialog = 'local'"
     >
       {{ t('components.settings.privacyClear') }}
     </Button>
@@ -219,6 +234,7 @@ const clearAllLocalData = async () => {
         role="dialog"
         aria-modal="true"
         aria-labelledby="privacy-clear-dialog-title"
+        aria-describedby="privacy-clear-dialog-description"
         @click.self="closeConfirm"
       >
         <div
@@ -233,10 +249,13 @@ const clearAllLocalData = async () => {
             </div>
             <div class="min-w-0">
               <h3 id="privacy-clear-dialog-title" class="text-base font-semibold text-primary">
-                {{ t('components.settings.privacyClearConfirmTitle') }}
+                {{ dialog === 'profile' ? t('recommend.privacy.clearProfileTitle') : t('components.settings.privacyClearConfirmTitle') }}
               </h3>
-              <p class="mt-1 text-xs font-medium leading-relaxed text-primary/70">
-                {{ t('components.settings.privacyClearConfirmDesc') }}
+              <p id="privacy-clear-dialog-description" class="mt-1 text-xs font-medium leading-relaxed text-primary/70">
+                {{ dialog === 'profile' ? profileConfirmation.description : t('components.settings.privacyClearConfirmDesc') }}
+                <template v-if="dialog === 'local' && recommendStore.anonId && !authStore.verifiedAccountId">
+                  {{ t('components.settings.privacyAnonymousClearHint') }}
+                </template>
               </p>
             </div>
           </div>
@@ -247,7 +266,7 @@ const clearAllLocalData = async () => {
               size="sm"
               rounded="xl"
               class="min-h-11 px-4 text-xs font-medium text-primary/70 hover:bg-hover-glass hover:text-primary"
-              :disabled="isClearing"
+              :disabled="isClearing || isClearingRecommend"
               @click="closeConfirm"
             >
               {{ t('common.cancel') }}
@@ -257,10 +276,10 @@ const clearAllLocalData = async () => {
               size="sm"
               rounded="xl"
               class="min-h-11 border border-red-500/40 bg-red-500/20 px-4 text-xs font-semibold text-red-300 hover:bg-red-500/30"
-              :loading="isClearing"
-              @click="clearAllLocalData"
+              :loading="isClearing || isClearingRecommend"
+              @click="dialog === 'profile' ? handleClearRecommendProfile() : clearAllLocalData()"
             >
-              {{ t('components.settings.privacyClearConfirmAction') }}
+              {{ dialog === 'profile' ? t('recommend.privacy.clearProfileAction') : t('components.settings.privacyClearConfirmAction') }}
             </Button>
           </div>
         </div>

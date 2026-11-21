@@ -177,6 +177,17 @@ describe('recommend store: 隐私控制、不感兴趣负反馈与事件队列',
     ).toBe(true)
   })
 
+  it('keeps the new anonymous profile when the confirmed device identity has changed', async () => {
+    const rec = optedInStore()
+    const confirmedIdentity = rec.captureErasureIdentity()
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+    localStorage.setItem(deviceKey, 'anon_different_device_profile')
+
+    expect(await rec.clearAllRecommendationProfile(confirmedIdentity)).toBe(false)
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(localStorage.getItem(deviceKey)).toBe('anon_different_device_profile')
+  })
+
   it('推荐画像删除失败时保留本地画像和匿名身份以便重试', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('unavailable', { status: 503 }))
 

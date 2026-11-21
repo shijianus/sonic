@@ -3,6 +3,11 @@ import type { Page } from '@playwright/test'
 
 const eventEpoch = 'a'.repeat(32)
 
+async function openProfileDialog(page: Page) {
+  await page.getByRole('button', { name: 'Reset Recommendation Profile & Dislikes' }).click()
+  return page.getByRole('dialog', { name: 'Delete recommendation profile?' })
+}
+
 function personalizationSwitch(page: Page) {
   return page.getByRole('switch', { name: 'Smart Search & Personalized Recommendations' })
 }
@@ -72,7 +77,7 @@ test('opting out in one tab immediately disables uploads in another tab', async 
   expect(posts).toEqual([])
 })
 
-test('cached and refreshed account profiles render local initials without loading remote avatars', async ({ page }) => {
+test('account details appear only after verification and never load a remote avatar', async ({ page }) => {
   const fakeEmail = 'private-avatar@example.invalid'
   const avatar = `https://api.dicebear.com/7.x/identicon/svg?seed=${encodeURIComponent(fakeEmail)}`
   const remoteRequests: string[] = []
@@ -93,8 +98,8 @@ test('cached and refreshed account profiles render local initials without loadin
   try {
     await page.goto('/#/settings')
     const account = page.getByRole('button', { name: 'Account menu' })
-    await expect(account).toContainText('Cached Account')
-    await expect(account.getByText('C', { exact: true })).toBeVisible()
+    await expect(account).toBeVisible()
+    await expect(account).not.toContainText('Cached Account')
     releaseProfile()
     await expect(account).toContainText('Refreshed Account')
     await expect(account.getByText('R', { exact: true })).toBeVisible()
@@ -127,15 +132,14 @@ test('an erasure identity conflict preserves the anonymous profile ID for retry'
 
   await page.goto('/#/settings')
   await expect(personalizationSwitch(page)).toHaveAttribute('aria-checked', 'false')
-  await page.getByRole('button', { name: 'Clear all local data', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: 'Clear all local data?' })
-  await expect(dialog).toBeVisible()
+  const dialog = await openProfileDialog(page)
+  await expect(dialog).toContainText('this browser’s anonymous ID')
   await dialog.screenshot({ path: testInfo.outputPath('privacy-erase-dialog.png') })
-  await dialog.getByRole('button', { name: 'Clear everything' }).click()
-  await expect(page.getByText('Some data could not be cleared. Please retry.')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Delete profile' }).click()
+  await expect(page.getByText('Recommendation data could not be fully cleared. Please retry.')).toBeVisible()
   expect(await page.evaluate(() => localStorage.getItem('sonic-e2e-local-data'))).toBe('preserved')
 
-  await page.getByRole('button', { name: 'Reset Recommendation Profile & Dislikes' }).click()
+  await (await openProfileDialog(page)).getByRole('button', { name: 'Delete profile' }).click()
   await expect(page.getByText('Recommendation profile and disliked tracks cleared')).toBeVisible()
   const expected = { anonId, target: 'anonymous-opt-in' }
   expect(deletes).toEqual([expected, expected])
@@ -156,7 +160,9 @@ test('account erasure applies the returned epoch to subsequent behavior events',
 
   await page.goto('/#/settings')
   await expect(page.getByRole('button', { name: 'Account menu' })).toContainText('Erasure Test')
-  await page.getByRole('button', { name: 'Reset Recommendation Profile & Dislikes' }).click()
+  const dialog = await openProfileDialog(page)
+  await expect(dialog).toContainText('erasure@example.invalid')
+  await dialog.getByRole('button', { name: 'Delete profile' }).click()
   await expect(page.getByText('Recommendation profile and disliked tracks cleared')).toBeVisible()
   await personalizationSwitch(page).click()
 
@@ -201,12 +207,6 @@ async function openClearSettings(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('recommend', JSON.stringify({ personalizationEnabled: false }))
   })
-  await page.route('**/api/sonic/events', async (route) => {
-    if (route.request().method() !== 'DELETE') return route.continue()
-    await route.fulfill({ json: {
-      brand: 'Sonic', data: { privacyMode: 'public', cleared: false, removedEvents: 0 },
-    } })
-  })
   await page.goto('/#/settings')
 }
 
@@ -219,6 +219,28 @@ async function confirmLocalClear(page: Page) {
 async function hasMusicDatabase(page: Page) {
   return page.evaluate(async name => (await indexedDB.databases()).some(db => db.name === name), musicDbName)
 }
+
+test('an offline local clear removes device data without deleting an account profile', async ({ context, page }) => {
+  const observer = await context.newPage()
+  const seeded = await seedMusicDatabase(observer)
+  await seeded.evaluate(db => db.close())
+  await page.route('**/api/auth/user', route => route.fulfill({ json: {
+    ok: true, user: { id: 'device-clear', name: 'Offline Account', email: 'offline@example.invalid' },
+  } }))
+  const deletions: string[] = []
+  context.on('request', request => {
+    if (request.method() === 'DELETE') deletions.push(request.url())
+  })
+  await openClearSettings(page)
+  await expect(page.getByRole('button', { name: 'Account menu' })).toContainText('Offline Account')
+  await page.evaluate(() => localStorage.setItem('sonic-local-clear-probe', 'present'))
+  await context.setOffline(true)
+  await confirmLocalClear(page)
+
+  await expect.poll(() => observer.evaluate(() => localStorage.getItem('sonic-local-clear-probe'))).toBeNull()
+  await expect.poll(() => hasMusicDatabase(observer)).toBe(false)
+  expect(deletions).toEqual([])
+})
 
 test('local data clearing closes another app tab’s music database and lets it reopen empty', async ({ context, page }) => {
   const other = await context.newPage()
@@ -236,7 +258,7 @@ test('local data clearing closes another app tab’s music database and lets it 
   await other.getByRole('link', { name: 'Downloads', exact: true }).click()
   await expect.poll(() => hasMusicDatabase(other)).toBe(true)
   const localCount = await other.evaluate(name => new Promise<number>((resolve, reject) => {
-    const open = indexedDB.open(name, 3)
+    const open = indexedDB.open(name)
     open.onerror = () => reject(open.error)
     open.onsuccess = () => {
       const db = open.result

@@ -551,7 +551,12 @@ export const useRecommendStore = defineStore('recommend', {
       syncAnonId(this)
     },
 
-    async clearAllRecommendationProfile(): Promise<boolean> {
+    captureErasureIdentity(): string {
+      return deliveryIdentity(syncAnonId(this))
+    },
+
+    async clearAllRecommendationProfile(confirmedIdentity?: string): Promise<boolean> {
+      if (confirmedIdentity !== undefined && confirmedIdentity !== this.captureErasureIdentity()) return false
       const delivery = deliveryFor(this)
       if (delivery.clearing) return delivery.clearing
       const accountId = currentAccountId()
