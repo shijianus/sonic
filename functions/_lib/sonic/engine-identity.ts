@@ -99,7 +99,7 @@ export async function issueEngineIdentity(
 
 export function isAccountIdentityPath(path: string): boolean {
   const pathname = new URL(path, 'https://engine.internal').pathname;
-  return pathname.startsWith('/api/account/') || pathname === '/api/sonic/recommend/radar-album';
+  return pathname.startsWith('/api/account/') || pathname === '/api/music/ecs' || pathname === '/api/sonic/recommend/radar-album';
 }
 
 async function verifyAssertion(request: Request, env?: AppEnv, nowMs = Date.now()): Promise<IdentityAssertion | null> {

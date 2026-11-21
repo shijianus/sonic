@@ -44,6 +44,7 @@ import { onRequest as handleMusicCover } from '../functions/api/music/cover';
 import { onRequest as handleMusicLyric } from '../functions/api/music/lyric';
 import { onRequest as handleMusicRandom } from '../functions/api/music/random';
 import { onRequest as handleMusicSearch } from '../functions/api/music/search';
+import { onRequest as handleEcs } from '../functions/api/music/ecs';
 import { onRequest as handleMusicStream } from '../functions/api/music/stream';
 import { onRequest as handleEngineHealth } from '../functions/api/sonic/engine/health';
 import { onRequest as handleEngineMetrics } from '../functions/api/sonic/engine/metrics';
@@ -273,6 +274,7 @@ async function dispatchFunctionRoute(request: Request, env: AppEnv): Promise<Res
   }
   if (pathname === '/api/music/random') return handleMusicRandom({ request, env });
   if (pathname === '/api/music/search') return handleMusicSearch({ request, env });
+  if (pathname === '/api/music/ecs') return handleEcs({ request, env });
   if (pathname === '/api/music/stream') return handleMusicStream({ request, env });
 
   // Sonic Gateway & Engine routes

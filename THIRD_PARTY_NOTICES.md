@@ -39,3 +39,9 @@ Vite, TypeScript, Vitest, ESLint, Tailwind/PostCSS, `vite-plugin-*` and related 
 ## Music content
 
 No license is granted for any music recording, lyrics, cover art, artist image or other third-party content accessed through the service. See `docs/COMPLIANCE.md`.
+
+## ECS audio archives and export
+
+The player uses jose (MIT) for RFC 7516 JWE and @breezystack/lamejs (LGPL-3.0)
+for a separately bundled MP3 worker. Notices and license texts ship under
+`/licenses/`. See [ECS deployment and format](docs/ECS.md).

@@ -27,6 +27,7 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
   'player/src/auto-import/imports.d.ts', 'player/src/auto-import/components.d.ts',
   'player/src/vite-env.d.ts', 'player/build/plugins.ts', 'player/build/getEnv.ts',
   'player/build/proxy.ts', 'player/public/_headers', 'player/public/_redirects', 'player/public/bootstrap.js',
+  'player/public/licenses/ecs-dependencies.txt', 'player/public/licenses/GPL-3.txt', 'player/public/licenses/LGPL-3.txt',
   'js/index.js', 'js/playlist-view.js', '.github/workflows/ci.yml',
   'scripts/release-inputs.mjs', 'scripts/write-release-manifest.mjs',
   'scripts/package-release.mjs', 'scripts/prepare-pages-preview.mjs',
