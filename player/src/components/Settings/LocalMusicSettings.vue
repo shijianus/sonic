@@ -5,6 +5,9 @@ import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
 import { formatTime, isSupportedAudioFormat } from '@/utils/audioUtils'
 import Button from '@/components/Ui/Button.vue'
+import DownloadExportDialog from '@/components/Dialog/DownloadExportDialog.vue'
+import type { EcsExportFile } from '@/utils/offlineDownload'
+import type { LocalMusic } from '@/utils/indexedDB'
 import { useToastStore } from '@/stores/modules/toast'
 
 const { t } = useI18n()
@@ -12,6 +15,13 @@ const localMusicStore = useLocalMusicStore()
 const toastStore = useToastStore()
 const { musics, isLoading } = storeToRefs(localMusicStore)
 const { setPlaylist, play } = useAudio()
+
+const exportItem = shallowRef<EcsExportFile | null>(null)
+function openExport(music: LocalMusic) {
+  if (music.ecsTier) exportItem.value = {
+    file: music.file, name: music.name, artist: music.artist, ecsTier: music.ecsTier,
+  }
+}
 
 const fileInput = ref<HTMLInputElement | null>(null)
 const isDragging = ref(false)
@@ -115,7 +125,7 @@ const handlePlayAll = () => {
   play(songs[0], 0)
 }
 
-const handlePlayOne = (music: any) => {
+const handlePlayOne = (music: LocalMusic) => {
   const songs = musics.value.map(m => localMusicStore.convertToSong(m))
   const index = songs.findIndex(s => s.id === music.id)
   if (index !== -1) {
@@ -301,8 +311,9 @@ const handlePlayOne = (music: any) => {
               <span class="icon-[mdi--music] h-6 w-6"></span>
             </div>
             <div class="min-w-0 flex-1">
-              <p class="text-primary mb-1 truncate text-sm font-semibold">{{ music.name }}</p>
-              <div class="text-primary/60 flex items-center gap-3 text-xs">
+              <p class="text-primary mb-1 break-words text-sm font-semibold">{{ music.name }}</p>
+              <div class="text-primary/60 flex flex-wrap items-center gap-3 text-xs">
+                <span v-if="music.ecsTier">ECS{{ music.ecsTier }}</span>
                 <span class="flex items-center gap-1">
                   <span class="icon-[mdi--clock-outline] h-3.5 w-3.5"></span>
                   {{ formatTime(music.duration) }}
@@ -314,6 +325,17 @@ const handlePlayOne = (music: any) => {
               </div>
             </div>
           </div>
+          <Button
+            v-if="music.ecsTier"
+            variant="ghost"
+            size="icon-lg"
+            rounded="full"
+            data-testid="local-ecs-export"
+            :aria-label="t('downloads.exportAudio')"
+            :title="t('downloads.exportAudio')"
+            icon="icon-[mdi--export-variant]"
+            @click="openExport(music)"
+          />
           <Button
             variant="ghost"
             size="icon-lg"
@@ -328,4 +350,5 @@ const handlePlayOne = (music: any) => {
       </div>
     </div>
   </div>
+  <DownloadExportDialog v-if="exportItem" :item="exportItem" @close="exportItem = null" />
 </template>

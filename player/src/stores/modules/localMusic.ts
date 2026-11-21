@@ -57,6 +57,7 @@ export const useLocalMusicStore = defineStore('localMusic', {
         duration,
         cover,
         file,
+        ...(ecs ? { ecsTier: ecs.meta.tier } : {}),
         createTime: Date.now(),
       }
 
