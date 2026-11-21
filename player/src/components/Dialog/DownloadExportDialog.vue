@@ -50,7 +50,7 @@ async function save() {
   <Teleport to="body">
     <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" @click.self="close">
       <form ref="dialogRef" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="download-export-title"
-        class="glass-card w-full max-w-sm space-y-4 rounded-2xl p-5 text-primary" @submit.prevent="save">
+        class="w-full max-w-sm space-y-4 rounded-2xl border border-glass bg-[var(--glass-bg-solid)] p-5 text-primary shadow-[var(--glass-shadow-xl)]" @submit.prevent="save">
         <h3 id="download-export-title" class="break-words text-base font-semibold">{{ t('downloads.exportAudio') }} · {{ item.name }}</h3>
         <label class="flex flex-col gap-2 text-sm">
           {{ t('downloads.ecsFormat') }}
