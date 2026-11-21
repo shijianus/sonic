@@ -1,11 +1,28 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { createApp, nextTick } from 'vue'
 import { setActivePinia, createPinia } from 'pinia'
 import piniaPluginPersistedstate from 'pinia-plugin-persistedstate'
 import { useLibraryStore } from '@/stores/modules/library'
 
+import { applyAccountLibraryMutation, fetchAccountLibrary, type AccountSnapshot } from '@/api/account'
+
+vi.mock('@/api/account', async importActual => ({
+  ...(await importActual<typeof import('@/api/account')>()),
+  fetchAccountLibrary: vi.fn(),
+  applyAccountLibraryMutation: vi.fn(),
+}))
+
+function snapshot(version: number, songs: string[]): AccountSnapshot {
+  return {
+    schemaVersion: 1, version, updatedAt: null, tombstones: [],
+    likedSongs: songs.map(id => ({ id, name: id })), collectedPlaylists: [], followedArtists: [],
+    likedMvs: [], collectedAlbums: [], userPlaylists: [],
+  }
+}
+
 describe('library store', () => {
   beforeEach(() => {
+    vi.resetAllMocks()
     localStorage.clear()
     const pinia = createPinia()
     pinia.use(piniaPluginPersistedstate)
@@ -107,5 +124,47 @@ describe('library store', () => {
     expect(revived.isArtistFollowed(6452)).toBe(true)
     expect(revived.isMvLiked('m1')).toBe(true)
     expect(revived.isAlbumCollected(9)).toBe(true)
+  })
+
+  it('hydrates only the guest library until verification and never copies account data back to the guest', async () => {
+    localStorage.setItem('auth', JSON.stringify({ isAuthenticated: true, user: { id: 'a' } }))
+    localStorage.setItem('library', JSON.stringify(snapshot(0, ['guest-song'])))
+    localStorage.setItem('library:account:a', JSON.stringify(snapshot(0, ['private-song'])))
+    vi.mocked(fetchAccountLibrary).mockResolvedValue(snapshot(0, ['private-song']))
+    const lib = useLibraryStore()
+    expect(lib.likedSongs.map(s => s.id)).toEqual(['guest-song'])
+    await lib.activateAccount('a')
+    expect(fetchAccountLibrary).toHaveBeenLastCalledWith('a')
+    expect(lib.likedSongs.map(s => s.id)).toEqual(['private-song'])
+    // Another tab changed its local profile. It cannot change this store's write target.
+    localStorage.setItem('auth', JSON.stringify({ isAuthenticated: true, user: { id: 'b' } }))
+    vi.mocked(applyAccountLibraryMutation).mockRejectedValue(new Error('offline'))
+    lib.toggleLikeSong({ id: 'a-only', name: 'A only', artist: 'A' })
+    expect(applyAccountLibraryMutation).toHaveBeenLastCalledWith(expect.any(Object), 'a')
+    expect(localStorage.getItem('library:account:b')).toBeNull()
+    lib.deactivateAccount()
+    expect(lib.likedSongs.map(s => s.id)).toEqual(['guest-song'])
+    expect(JSON.parse(localStorage.getItem('library')!).likedSongs.map((s: {id:string}) => s.id)).toEqual(['guest-song'])
+  })
+
+  it('resends the original operation after a lost response and then flushes the next edit', async () => {
+    const operations = [{ type: 'upsert', collection: 'likedSongs', id: '1', value: { id: '1', name: 'One' } }]
+    const first = { operationId: 'lost-response', baseVersion: 0, createdAt: 1, operations }
+    const second = { operationId: 'second-edit', baseVersion: 1, createdAt: 2,
+      operations: [{ type: 'delete', collection: 'likedSongs', id: '1' }] }
+    localStorage.setItem('library:account:a', JSON.stringify({ accountVersion: 0, accountOperationQueue: [first, second] }))
+    vi.mocked(fetchAccountLibrary).mockResolvedValue(snapshot(1, ['1']))
+    vi.mocked(applyAccountLibraryMutation)
+      .mockResolvedValueOnce({ operationId: first.operationId, replayed: true, version: 1, updatedAt: 1 })
+      .mockResolvedValueOnce({ operationId: second.operationId, replayed: false, version: 2, updatedAt: 2 })
+    const lib = useLibraryStore()
+    expect(await lib.activateAccount('a')).toBe(true)
+    expect(applyAccountLibraryMutation).toHaveBeenNthCalledWith(1, {
+      operationId: first.operationId, baseVersion: 0, operations,
+    }, 'a')
+    expect(lib.accountSyncStatus).toBe('synced')
+    expect(lib.accountVersion).toBe(2)
+    expect(lib.accountOperationQueue).toEqual([])
+    expect(lib.likedSongs).toEqual([])
   })
 })

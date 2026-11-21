@@ -237,6 +237,12 @@ async function getRecommendations() {
 
 ---
 
+## 账号资料库同步
+
+`GET /api/account/library` 读取已登录用户的资料库，`POST /api/account/library` 写入收藏和歌单。使用浏览器会话 Cookie 的请求须设置 `X-Sonic-Account-Target` 为资料库打开时由 `GET /api/auth/user` 返回的 `user.id`。会话已变更或请求缺少目标时，服务端返回 `409 ACCOUNT_IDENTITY_MISMATCH`。客户端应重新确认会话，保留原账号的待同步队列。显式 API Key 客户端可以省略该头。
+
+一次写入使用固定的 `operationId`、`baseVersion` 与操作内容。网络中断后先用原始请求确认回执；服务端确认 `VERSION_CONFLICT` 时才重新读取快照并合并尚未提交的操作。
+
 ## 🧠 智能推荐与混合搜索引擎端点 (`/api/sonic/recommend/*` & `/api/sonic/search/smart`)
 
 | 方法 | 路径 | 说明 | 核心参数 |

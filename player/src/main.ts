@@ -13,7 +13,8 @@ import I18n from '@/languages'
 import Pinia from '@/stores'
 
 import { useGlobalStore } from '@/stores/modules/global'
-import { useAuthStore } from '@/stores/modules/auth'
+import { ACCOUNT_SESSION_NOTICE, notifyAccountSessionChange, useAuthStore } from '@/stores/modules/auth'
+import { safeStorage } from '@/utils/safeStorage'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { storeToRefs } from 'pinia'
 import { watch } from 'vue'
@@ -42,6 +43,21 @@ watch(
   () => { void recommendStore.prepareAccountEventEpoch() },
   { immediate: true }
 )
+// Migrate away from storing account profiles in localStorage. A shared cookie
+// can change between two tabs, even when the previous tab stays open.
+safeStorage.removeItem('auth')
+window.addEventListener('storage', event => {
+  if (event.key === ACCOUNT_SESSION_NOTICE || event.key === 'auth' || event.key === null)
+    void authStore.refreshChangedSession()
+})
+window.addEventListener('online', () => { void authStore.checkAuth(true) })
+window.addEventListener('focus', () => { void authStore.checkAuth() })
+const entryUrl = new URL(window.location.href)
+if (entryUrl.searchParams.get('auth') === 'success') {
+  notifyAccountSessionChange()
+  entryUrl.searchParams.delete('auth')
+  window.history.replaceState(window.history.state, '', entryUrl)
+}
 void authStore.checkAuth()
 
 const globalStore = useGlobalStore()

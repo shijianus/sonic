@@ -25,7 +25,7 @@ const keepLocal = () => {
 }
 
 const retry = async () => {
-  if (authStore.user?.id) await libraryStore.activateAccount(authStore.user.id, true)
+  await authStore.checkAuth(true)
 }
 </script>
 
@@ -72,7 +72,7 @@ const retry = async () => {
         {{ t('accountSync.keepLocal') }}
       </button>
       <button
-        v-if="libraryStore.accountSyncStatus === 'error'"
+        v-if="libraryStore.accountSyncStatus === 'error' || libraryStore.accountSyncStatus === 'pending'"
         type="button"
         class="inline-flex min-h-10 items-center justify-center rounded-xl border border-glass bg-button-glass px-3 text-xs font-semibold text-primary transition-colors hover:bg-hover-button-glass focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/70"
         @click="retry"

@@ -65,7 +65,12 @@ export class SqliteAccountStore implements AccountStore {
     return this.transaction(true, () => {
       const receipt = this.db.prepare('SELECT * FROM account_operations WHERE subject=? AND operation_id=?').get(subject, mutation.operationId);
       if (receipt) {
-        if (receipt.fingerprint !== fingerprint) throw new AccountError('IDEMPOTENCY_CONFLICT', 'operationId already used with different content', 409);
+        // Older clients rebased pending operations after a lost response. Compare
+        // their content with the original committed envelope, including its base.
+        const originalBase = Number(receipt.version) - 1;
+        const originalFingerprint = originalBase === mutation.baseVersion
+          ? fingerprint : sha256Hex(JSON.stringify({ ...mutation, baseVersion: originalBase }));
+        if (receipt.fingerprint !== originalFingerprint) throw new AccountError('IDEMPOTENCY_CONFLICT', 'operationId already used with different content', 409);
         return { operationId: mutation.operationId, version: Number(receipt.version), updatedAt: Number(receipt.updated_at), replayed: true };
       }
       const user = this.db.prepare('SELECT version FROM account_users WHERE subject=?').get(subject);

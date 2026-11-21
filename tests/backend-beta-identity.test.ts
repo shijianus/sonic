@@ -59,3 +59,53 @@ describe('Signed internal subject identity', () => {
     expect(seen).toEqual({ rawCredentials: false, assertion: true });
   });
 });
+
+describe('Account library read and retry contracts', () => {
+  it('requires the browser library to target the currently verified cookie account', async () => {
+    const { onRequest } = await import('../functions/api/account/library');
+    const { SqliteAccountStore } = await import('../server/account-store');
+    const store = new SqliteAccountStore(':memory:');
+    try {
+      const env = { SONIC_ENV: 'test', SONIC_SECRET: 'test-account-library-user-signing-key-32-chars', ACCOUNT_STORE: store };
+      const account = await createSession(env, { id: 'first-reader', name: 'Reader', email: 'first@example.test', avatar: '', role: 'user' });
+      const request = (method: string, target?: string, bearer = false) => new Request('https://library.example/api/account/library', {
+        method, headers: {
+          ...(bearer ? { Authorization: 'Bearer ' + account.apiKey } : { Cookie: 'sonic_session=' + account.apiKey }),
+          ...(target === undefined ? {} : { 'X-Sonic-Account-Target': target }),
+          Origin: 'https://library.example',
+        },
+        ...(method === 'POST' ? { body: JSON.stringify({ operationId: 'first-edit', baseVersion: 0,
+          operations: [{ collection: 'likedSongs', type: 'upsert', id: '1', value: { name: 'One' } }] }) } : {}),
+      });
+      for (const method of ['GET', 'POST']) {
+        for (const target of [undefined, 'second-reader']) {
+          const result = await onRequest({ request: request(method, target), env });
+          expect(result.status).toBe(409);
+          expect((await result.json()).error.code).toBe('ACCOUNT_IDENTITY_MISMATCH');
+        }
+      }
+      const saved = await onRequest({ request: request('POST', account.id), env });
+      expect(saved.status).toBe(200);
+      const data = await onRequest({ request: request('GET', account.id), env });
+      expect((await data.json()).data.likedSongs).toMatchObject([{ id: '1', name: 'One' }]);
+      expect((await onRequest({ request: request('GET', undefined, true), env })).status).toBe(200);
+    } finally { store.close(); }
+  });
+
+  it('recognizes identical legacy retries after a lost receipt and rejects changed operations', async () => {
+    const { SqliteAccountStore } = await import('../server/account-store');
+    const store = new SqliteAccountStore(':memory:');
+    try {
+      const subject = 'usr_' + '5'.repeat(24);
+      const original = { operationId: 'lost-response', baseVersion: 0, operations: [{
+        collection: 'likedSongs' as const, type: 'upsert' as const, id: 'one', value: { id: 'one', name: 'One' },
+      }] };
+      expect(store.applyLibraryMutation(subject, original).version).toBe(1);
+      const retry = { ...original, baseVersion: 1 };
+      expect(store.applyLibraryMutation(subject, retry)).toMatchObject({ replayed: true, version: 1 });
+      expect(() => store.applyLibraryMutation(subject, { ...retry, operations: [{ ...original.operations[0], value: { id: 'one', name: 'Different' } }] }))
+        .toThrowError(/operationId already used/);
+      expect(store.getLibrary(subject)).toMatchObject({ version: 1, likedSongs: [{ id: 'one', name: 'One' }] });
+    } finally { store.close(); }
+  });
+});

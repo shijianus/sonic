@@ -23,7 +23,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   try {
     const denied = await guardGatewayRequest(request, env, 'sonic-account');
     if (denied) { for (const [key, value] of Object.entries(HEADERS)) denied.headers.set(key, value); return denied; }
-    const subject = await resolveAuthenticatedSubject(request, env);
+    const subject = await resolveAuthenticatedSubject(request, env, true);
     if (!subject) return failure(new AccountError('UNAUTHORIZED', 'An authenticated account is required', 401));
     let mutation: ReturnType<typeof normalizeAccountMutation> | undefined;
     if (request.method === 'POST') {
@@ -37,7 +37,7 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
       const result = await callLocalEngineJson<any>('/api/account/library', env, { request, method: request.method as 'GET' | 'POST', ...(mutation ? { body: JSON.stringify(mutation) } : {}) });
       if (result.ok && result.data?.brand === 'Sonic' && result.data?.meta?.storageKind === 'sqlite') {
         const data = result.data.data;
-        const valid = mutation ? data?.operationId === mutation.operationId && Number.isSafeInteger(data?.version) && data.version === mutation.baseVersion + 1
+        const valid = mutation ? data?.operationId === mutation.operationId && Number.isSafeInteger(data?.version) && data.version >= 1 && (data.replayed === true || data.version === mutation.baseVersion + 1)
           : data?.schemaVersion === 1 && Number.isSafeInteger(data?.version) && data.version >= 0 && Array.isArray(data.tombstones) && ACCOUNT_COLLECTIONS.every(key => Array.isArray(data[key]));
         if (valid) return jsonResponse({ ...result.data, meta: { ...result.data.meta, persistenceConfirmed: true } }, { headers: HEADERS });
       }

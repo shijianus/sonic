@@ -4,7 +4,7 @@
  */
 import { defineStore } from 'pinia'
 import { httpGet, httpPost } from '@/utils/http'
-import piniaPersistConfig from '../persist'
+import { safeStorage } from '@/utils/safeStorage'
 import { useLibraryStore } from './library'
 
 export interface UserInfo {
@@ -23,6 +23,13 @@ export interface AuthState {
   isLoading: boolean
   lastSyncTime: number
   sessionRevision: number
+}
+
+// Carries only a change notification. Account profiles are obtained from the server.
+export const ACCOUNT_SESSION_NOTICE = 'sonic-account-session-change'
+
+export function notifyAccountSessionChange(): void {
+  safeStorage.setItem(ACCOUNT_SESSION_NOTICE, Array.from(crypto.getRandomValues(new Uint32Array(2))).join('-'))
 }
 
 const requests = new WeakMap<object, { verification: number; logout: Promise<boolean> | null }>()
@@ -125,6 +132,16 @@ export const useAuthStore = defineStore('auth', {
       return null
     },
 
+    async refreshChangedSession(): Promise<void> {
+      // Hide the previous account immediately while verifying the shared cookie.
+      this.sessionRevision++
+      this.user = null
+      this.isAuthenticated = false
+      this.lastSyncTime = 0
+      this.deactivateLibrary()
+      await this.checkAuth(true)
+    },
+
     login(): void {
       if (typeof window !== 'undefined') window.location.href = '/api/auth/login'
     },
@@ -143,6 +160,7 @@ export const useAuthStore = defineStore('auth', {
           this.isAuthenticated = false
           this.lastSyncTime = 0
           this.deactivateLibrary()
+          notifyAccountSessionChange()
           return true
         } catch {
           return false
@@ -166,10 +184,4 @@ export const useAuthStore = defineStore('auth', {
     },
   },
 
-  persist: {
-    ...piniaPersistConfig('auth', ['user', 'isAuthenticated']),
-    afterHydrate: ({ store }) => {
-      if (store.user) store.user = localProfile(store.user)
-    },
-  },
 })

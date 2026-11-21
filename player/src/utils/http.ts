@@ -57,7 +57,7 @@ instance.interceptors.response.use(
 export const httpGet = <T>(
     url: string,
     params?: object,
-    config?: { signal?: AbortSignal }
+    config?: { signal?: AbortSignal; headers?: Record<string, string> }
 ): Promise<T> =>
     instance.get<T, T>(url, { params, ...config }) as unknown as Promise<T>
 

@@ -125,13 +125,13 @@ export function isAccountVersionConflict(error: unknown): error is AccountApiErr
   return error instanceof AccountApiError && error.code === 'VERSION_CONFLICT'
 }
 
-export async function fetchAccountLibrary(signal?: AbortSignal): Promise<AccountSnapshot> {
+export async function fetchAccountLibrary(expectedAccountId: string, signal?: AbortSignal): Promise<AccountSnapshot> {
   try {
     const response = await httpGet<{
       brand?: string
       data?: AccountSnapshot
       meta?: AccountPersistenceMeta
-    }>('/account/library', undefined, signal ? { signal } : undefined)
+    }>('/account/library', undefined, { signal, headers: { 'X-Sonic-Account-Target': expectedAccountId } })
     if (!response?.data) invalidResponse('Missing account snapshot')
     assertPersistenceMeta(response.meta)
     assertSnapshot(response.data)
@@ -145,7 +145,7 @@ export async function applyAccountLibraryMutation(input: {
   operationId: string
   baseVersion: number
   operations: AccountOperation[]
-}): Promise<AccountMutationResult> {
+}, expectedAccountId: string): Promise<AccountMutationResult> {
   if (!/^[A-Za-z0-9_-]{8,128}$/.test(input.operationId)) {
     throw new AccountApiError('INVALID_ACCOUNT_PAYLOAD', 'Invalid account operation id', 400, undefined, false)
   }
@@ -160,6 +160,7 @@ export async function applyAccountLibraryMutation(input: {
     }>('/account/library', input, {
       headers: {
         'Idempotency-Key': input.operationId,
+        'X-Sonic-Account-Target': expectedAccountId,
       },
     })
     assertPersistenceMeta(response?.meta)

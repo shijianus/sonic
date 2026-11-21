@@ -6,7 +6,6 @@
  */
 import { defineStore } from 'pinia'
 import type { Song } from '../interface'
-import piniaPersistConfig from '../persist'
 import { safeStorage } from '@/utils/safeStorage'
 import {
   ACCOUNT_COLLECTIONS,
@@ -147,21 +146,13 @@ function accountNamespace(userId: string): string {
   return `account:${encodeURIComponent(userId)}`
 }
 
+function accountIdFor(namespace: string): string {
+  return decodeURIComponent(namespace.slice('account:'.length))
+}
+
 function storageKey(namespace: string): string {
   if (namespace === GUEST_NAMESPACE) return LEGACY_LIBRARY_KEY
   return `${ACCOUNT_LIBRARY_PREFIX}${namespace.slice('account:'.length)}`
-}
-
-function getAuthenticatedNamespaceFromStorage(): string {
-  try {
-    const raw = safeStorage.getItem('auth')
-    if (!raw) return GUEST_NAMESPACE
-    const auth = JSON.parse(raw) as { isAuthenticated?: boolean; user?: { id?: unknown } }
-    const id = typeof auth.user?.id === 'string' ? auth.user.id.trim() : ''
-    return auth.isAuthenticated && id ? accountNamespace(id) : GUEST_NAMESPACE
-  } catch {
-    return GUEST_NAMESPACE
-  }
 }
 
 function readPersistedNamespace(namespace: string): Partial<PersistedLibraryState> | null {
@@ -240,28 +231,28 @@ function createOperationId(): string {
   return `library-${Date.now()}-${random}`.slice(0, 128)
 }
 
-const namespaceStorage = {
-  getItem: (_key: string): string | null => safeStorage.getItem(storageKey(getAuthenticatedNamespaceFromStorage())),
-  setItem: (_key: string, value: string): void => {
-    safeStorage.setItem(storageKey(getAuthenticatedNamespaceFromStorage()), value)
-  },
-} as Storage
+function restoreLibrary(namespace: string): PersistedLibraryState {
+  const value = readPersistedNamespace(namespace)
+  return {
+    likedSongs: copyCollection(value?.likedSongs),
+    collectedPlaylists: copyCollection(value?.collectedPlaylists),
+    followedArtists: copyCollection(value?.followedArtists),
+    likedMvs: copyCollection(value?.likedMvs),
+    collectedAlbums: copyCollection(value?.collectedAlbums),
+    userPlaylists: copyCollection(value?.userPlaylists),
+    accountVersion: Number.isSafeInteger(value?.accountVersion) && Number(value?.accountVersion) >= 0 ? Number(value?.accountVersion) : 0,
+    accountOperationQueue: copyQueue(value?.accountOperationQueue),
+    localRevision: Number.isSafeInteger(value?.localRevision) && Number(value?.localRevision) >= 0 ? Number(value?.localRevision) : 0,
+    guestMergeHandledRevision: Number.isSafeInteger(value?.guestMergeHandledRevision) ? Number(value?.guestMergeHandledRevision) : -1,
+  }
+}
 
-let accountFlushPromise: Promise<boolean> | null = null
+const accountFlushes = new WeakMap<object, { generation: number; promise: Promise<boolean> }>()
 
 export const useLibraryStore = defineStore('library', {
   state: (): LibraryState => ({
-    likedSongs: [],
-    collectedPlaylists: [],
-    followedArtists: [],
-    likedMvs: [],
-    collectedAlbums: [],
-    userPlaylists: [],
-    accountVersion: 0,
+    ...restoreLibrary(GUEST_NAMESPACE),
     accountSyncStatus: 'idle',
-    accountOperationQueue: [],
-    localRevision: 0,
-    guestMergeHandledRevision: -1,
     accountNamespace: GUEST_NAMESPACE,
     guestMergeAvailable: false,
     guestItemCount: 0,
@@ -293,11 +284,10 @@ export const useLibraryStore = defineStore('library', {
         return true
       }
 
-      const previousNamespace = this.accountNamespace
-      if (previousNamespace !== nextNamespace) this.persistNamespace(previousNamespace)
       const generation = this.bumpSyncGeneration()
       this.accountNamespace = nextNamespace
-      this.applyPersistedNamespace(readPersistedNamespace(nextNamespace))
+      Object.assign(this, restoreLibrary(nextNamespace))
+      this.accountTombstones = []
       this.accountSyncStatus = 'idle'
       this.updateGuestMergePrompt()
       return this.syncAccountLibrary(false, generation)
@@ -305,15 +295,13 @@ export const useLibraryStore = defineStore('library', {
 
     /** Switch back to the retained guest namespace without deleting account data. */
     deactivateAccount(): void {
-      const previousNamespace = this.accountNamespace
       this.bumpSyncGeneration()
-      if (previousNamespace !== GUEST_NAMESPACE) this.persistNamespace(previousNamespace)
       this.accountNamespace = GUEST_NAMESPACE
-      this.applyPersistedNamespace(readPersistedNamespace(GUEST_NAMESPACE))
+      Object.assign(this, restoreLibrary(GUEST_NAMESPACE))
+      this.accountTombstones = []
       this.accountSyncStatus = 'idle'
       this.guestMergeAvailable = false
       this.guestItemCount = 0
-      this.persistNamespace(GUEST_NAMESPACE)
     },
 
     /** Whether this store is already displaying the requested account namespace. */
@@ -333,7 +321,7 @@ export const useLibraryStore = defineStore('library', {
       if (!this.isSyncGenerationActive(namespace, generation)) return false
       this.accountSyncStatus = 'syncing'
       try {
-        const remote = await fetchAccountLibrary()
+        const remote = await fetchAccountLibrary(accountIdFor(namespace))
         if (!this.isSyncGenerationActive(namespace, generation)) return false
         this.accountVersion = remote.version
         this.accountTombstones = clone(remote.tombstones)
@@ -753,26 +741,6 @@ export const useLibraryStore = defineStore('library', {
       safeStorage.setItem(storageKey(namespace), JSON.stringify(value))
     },
 
-    applyPersistedNamespace(value: Partial<PersistedLibraryState> | null): void {
-      this.likedSongs = copyCollection<LikedSongItem>(value?.likedSongs)
-      this.collectedPlaylists = copyCollection<CollectedPlaylistItem>(value?.collectedPlaylists)
-      this.followedArtists = copyCollection<FollowedArtistItem>(value?.followedArtists)
-      this.likedMvs = copyCollection<LikedMvItem>(value?.likedMvs)
-      this.collectedAlbums = copyCollection<CollectedAlbumItem>(value?.collectedAlbums)
-      this.userPlaylists = copyCollection<UserPlaylistItem>(value?.userPlaylists)
-      this.accountVersion = Number.isSafeInteger(value?.accountVersion) && Number(value?.accountVersion) >= 0
-        ? Number(value?.accountVersion)
-        : 0
-      this.accountOperationQueue = copyQueue(value?.accountOperationQueue)
-      this.localRevision = Number.isSafeInteger(value?.localRevision) && Number(value?.localRevision) >= 0
-        ? Number(value?.localRevision)
-        : 0
-      this.guestMergeHandledRevision = Number.isSafeInteger(value?.guestMergeHandledRevision)
-        ? Number(value?.guestMergeHandledRevision)
-        : -1
-      this.accountTombstones = []
-    },
-
     updateGuestMergePrompt(): void {
       const guest = readPersistedNamespace(GUEST_NAMESPACE)
       this.guestItemCount = countLibraryItems(guest)
@@ -790,13 +758,6 @@ export const useLibraryStore = defineStore('library', {
 
     reapplyQueuedMutations(): void {
       for (const mutation of this.accountOperationQueue) this.applyOperationsToLocalState(mutation.operations)
-      if (this.accountOperationQueue.length > 0) {
-        const baseVersion = this.accountVersion
-        this.accountOperationQueue = this.accountOperationQueue.map((mutation, index) => ({
-          ...mutation,
-          baseVersion: index === 0 ? baseVersion : baseVersion,
-        }))
-      }
     },
 
     applyOperationsToLocalState(operations: AccountOperation[]): void {
@@ -823,24 +784,26 @@ export const useLibraryStore = defineStore('library', {
         createdAt: Date.now(),
       }
       this.accountOperationQueue.push(mutation)
-      this.accountSyncStatus = this.accountNamespace === GUEST_NAMESPACE ? 'pending' : 'pending'
+      this.accountSyncStatus = 'pending'
       this.persistNamespace(this.accountNamespace)
       if (this.accountNamespace !== GUEST_NAMESPACE) void this.flushAccountQueue(this.accountNamespace, this.currentSyncGeneration())
     },
 
     recordLocalMutation(operation: AccountOperation): void {
       this.localRevision += 1
-      this.enqueueAccountOperations([operation])
       if (this.accountNamespace === GUEST_NAMESPACE) this.persistNamespace(GUEST_NAMESPACE)
+      else this.enqueueAccountOperations([operation])
     },
 
     async flushAccountQueue(namespace: string, generation: number): Promise<boolean> {
       if (namespace === GUEST_NAMESPACE || !this.isSyncGenerationActive(namespace, generation)) return false
-      if (accountFlushPromise) return accountFlushPromise
-      accountFlushPromise = this.flushAccountQueueInternal(namespace, generation).finally(() => {
-        accountFlushPromise = null
+      const current = accountFlushes.get(this)
+      if (current?.generation === generation) return current.promise
+      const promise = this.flushAccountQueueInternal(namespace, generation).finally(() => {
+        if (accountFlushes.get(this)?.promise === promise) accountFlushes.delete(this)
       })
-      return accountFlushPromise
+      accountFlushes.set(this, { generation, promise })
+      return promise
     },
 
     async flushAccountQueueInternal(namespace: string, generation: number): Promise<boolean> {
@@ -852,26 +815,45 @@ export const useLibraryStore = defineStore('library', {
             operationId: mutation.operationId,
             baseVersion: mutation.baseVersion,
             operations: mutation.operations,
-          })
+          }, accountIdFor(namespace))
           if (!this.isSyncGenerationActive(namespace, generation)) return false
           this.accountOperationQueue.shift()
-          this.accountVersion = result.version
-          if (this.accountOperationQueue[0]) this.accountOperationQueue[0].baseVersion = result.version
+          this.accountVersion = Math.max(this.accountVersion, result.version)
+          if (result.replayed) {
+            // A later edit on another device may supersede the replayed operation.
+            const remote = await fetchAccountLibrary(accountIdFor(namespace))
+            if (!this.isSyncGenerationActive(namespace, generation)) return false
+            this.accountVersion = remote.version
+            this.accountTombstones = clone(remote.tombstones)
+            this.replaceCollectionsWithRemote(remote)
+            this.reapplyQueuedMutations()
+          }
+          const next = this.accountOperationQueue[0]
+          if (next && !result.replayed && next.baseVersion === mutation.baseVersion)
+            next.baseVersion = result.version
           this.accountSyncStatus = this.accountOperationQueue.length > 0 ? 'pending' : 'synced'
           this.persistNamespace(namespace)
         } catch (error) {
+          if (!this.isSyncGenerationActive(namespace, generation)) return false
           if (isAccountVersionConflict(error)) {
             try {
-              const remote = await fetchAccountLibrary()
+              const remote = await fetchAccountLibrary(accountIdFor(namespace))
               if (!this.isSyncGenerationActive(namespace, generation)) return false
               this.accountVersion = remote.version
               this.accountTombstones = clone(remote.tombstones)
               this.replaceCollectionsWithRemote(remote)
+              // Only a confirmed version conflict permits changing a request that
+              // may already have reached the server. Preserve newer remote deletions.
+              const deleted = new Set(remote.tombstones.filter(t => t.version > mutation.baseVersion)
+                .map(t => t.collection + ':' + t.id))
+              mutation.operations = mutation.operations.filter(op => op.type !== 'upsert' || !deleted.has(op.collection + ':' + op.id))
+              if (!mutation.operations.length) this.accountOperationQueue.shift()
+              else mutation.baseVersion = remote.version
               this.reapplyQueuedMutations()
               this.persistNamespace(namespace)
               continue
             } catch {
-              this.accountSyncStatus = 'error'
+              if (this.isSyncGenerationActive(namespace, generation)) this.accountSyncStatus = 'error'
               return false
             }
           }
@@ -885,17 +867,4 @@ export const useLibraryStore = defineStore('library', {
       return true
     },
   },
-
-  persist: piniaPersistConfig<LibraryState>('library', [
-    'likedSongs',
-    'collectedPlaylists',
-    'followedArtists',
-    'likedMvs',
-    'collectedAlbums',
-    'userPlaylists',
-    'accountVersion',
-    'accountOperationQueue',
-    'localRevision',
-    'guestMergeHandledRevision',
-  ], namespaceStorage),
 })

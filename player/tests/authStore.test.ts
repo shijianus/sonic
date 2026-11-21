@@ -67,3 +67,18 @@ it('keeps the newer verified account when overlapping checks finish out of order
   expect(auth.verifiedAccountId).toBe(nextUser.id)
   expect(mock.activateAccount).toHaveBeenCalledExactlyOnceWith(nextUser.id, true)
 })
+
+it('hides the previous account while another tab changes the shared session', async () => {
+  mock.httpGet.mockResolvedValueOnce({ ok: true, user })
+  const auth = useAuthStore()
+  await auth.checkAuth()
+  const changed = delayedVerification()
+  mock.httpGet.mockReturnValueOnce(changed.promise)
+  const verify = auth.refreshChangedSession()
+  expect(auth.user).toBeNull()
+  expect(auth.verifiedAccountId).toBeUndefined()
+  expect(mock.deactivateAccount).toHaveBeenCalledOnce()
+  changed.finish({ ok: true, user: { ...user, id: 'account-b' } })
+  await verify
+  expect(auth.verifiedAccountId).toBe('account-b')
+})
