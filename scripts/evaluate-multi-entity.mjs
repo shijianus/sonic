@@ -120,7 +120,11 @@ async function runEvaluation() {
 
   const store = new SqliteRecommendStore(':memory:');
   ensureMultiEntityCatalogSeeded(store);
-  const env = { RECOMMEND_STORE: store, SONIC_RECOMMEND_OFFLINE: '1' };
+  const env = {
+    RECOMMEND_STORE: store,
+    SONIC_RECOMMEND_OFFLINE: '1',
+    SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: '1',
+  };
 
   // The ordinary seed catalog does not claim verified videos. Add synthetic video
   // references to this private in-memory fixture only, without querying a provider.
