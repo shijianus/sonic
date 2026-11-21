@@ -197,3 +197,24 @@ test('desktop pagination shows loading state, surfaces error on page 2, and retr
   await expect(page.getByText('2 / 3', { exact: true })).toBeVisible()
   expect(seenOffsets).toEqual([0, 30, 30])
 })
+
+test('leaves the ranked window to browse source pages with unknown totals', async ({ page }) => {
+  await page.route('**/api/sonic/search/smart?**', route => route.fulfill({
+    json: { data: { resultScope: 'ranked-window', totalKnown: true, total: 1,
+      tracks: buildSmartPageTracks(1, 40, 1), suggestions: [] } },
+  }))
+  await page.route('**/api/sonic/search/nexus?**', route => {
+    const p = Number(new URL(route.request().url()).searchParams.get('page'))
+    return route.fulfill({ json: { data: { tracks: buildSmartPageTracks(p, 40, 45),
+      total: p === 1 ? 40 : 5, totalKnown: false, hasMore: p === 1 } } })
+  })
+
+  await page.goto('/#/search?q=window')
+  await page.getByRole('button', { name: 'Browse provider results' }).click()
+  const next = page.getByRole('button', { name: 'Next', exact: true })
+  await expect(next).toBeEnabled()
+  await next.click()
+  await expect(page.getByText('Paginated Track 41', { exact: true })).toBeVisible()
+  await expect(next).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Prev', exact: true })).toBeEnabled()
+})
