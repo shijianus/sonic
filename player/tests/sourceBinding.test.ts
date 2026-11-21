@@ -9,6 +9,18 @@ describe('曲目、实际音频与歌词强绑定 (Source & Lyrics Synchronizati
     vi.restoreAllMocks()
   })
 
+  it('keeps imported file metadata local while an offline copy of a provider song can still request lyrics', async () => {
+    const fetch = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      brand: 'Sonic', data: { syncedLyrics: [{ time: 1000, text: 'Provider lyrics' }] },
+    })))
+    const { fetchLyrics } = useLyrics()
+    await fetchLyrics({ id: 'local_recording', name: 'Private memo', artist: 'Private speaker', isLocal: true }, true)
+    await fetchLyrics('local_legacy', true)
+    expect(fetch).not.toHaveBeenCalled()
+    await fetchLyrics({ id: 'netease:123', source: 'netease', name: 'Public song', artist: 'Public artist', isLocal: true }, true)
+    expect(fetch).toHaveBeenCalled()
+  })
+
   it('1. useLyrics 优先使用 resolvedSource 与 resolvedId 进行强绑定请求', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

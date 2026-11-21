@@ -3,7 +3,7 @@ import { useLocalMusicStore } from '@/stores/modules/localMusic'
 import { useAudio } from '@/composables/useAudio'
 import { useI18n } from 'vue-i18n'
 import { storeToRefs } from 'pinia'
-import { formatTime } from '@/utils/audioUtils'
+import { formatTime, isSupportedAudioFormat } from '@/utils/audioUtils'
 import Button from '@/components/Ui/Button.vue'
 import { useToastStore } from '@/stores/modules/toast'
 
@@ -39,14 +39,15 @@ const importFiles = async (files: File[]) => {
   importReport.failed = []
 
   for (const file of files) {
-    if (!file.type.startsWith('audio/')) {
+    if (!isSupportedAudioFormat(file)) {
       importReport.skipped.push({ name: file.name, reason: t('components.settings.localMusicReasonUnsupported') })
       continue
     }
 
     const baseName = file.name.replace(/\.[^/.]+$/, '')
     const duplicate = musics.value.some(
-      music => music.name === baseName && music.file?.size === file.size
+      music => music.file?.size === file.size &&
+        (music.file instanceof File ? music.file.name === file.name : music.name === baseName)
     )
     if (duplicate) {
       importReport.skipped.push({ name: file.name, reason: t('components.settings.localMusicReasonDuplicate') })
@@ -180,7 +181,7 @@ const handlePlayOne = (music: any) => {
       ref="fileInput"
       class="hidden"
       multiple
-      accept="audio/*"
+      accept="audio/*,.ecs"
       @change="handleFileChange"
     />
 

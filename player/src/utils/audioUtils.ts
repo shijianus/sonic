@@ -6,6 +6,11 @@ export interface SongSourcePair {
   platformId: string
 }
 
+// IDs generated on import never refer to a provider. This also recognizes
+// persisted songs from older versions that did not keep the isLocal flag.
+export const isPrivateLocalImport = (song?: { id?: string | number } | null): boolean =>
+  typeof song?.id === 'string' && song.id.startsWith('local_')
+
 export const normalizeSongSource = (value: unknown): string => {
   const source = String(value || '').trim().toLowerCase()
   if (source === 'ncm') return 'netease'
@@ -157,17 +162,7 @@ export const getAudioMetadata = (file: File): Promise<AudioMetadata> => {
  * @returns 是否支持
  */
 export const isSupportedAudioFormat = (file: File): boolean => {
-  const supportedTypes = [
-    'audio/mpeg',
-    'audio/mp3',
-    'audio/wav',
-    'audio/ogg',
-    'audio/aac',
-    'audio/flac',
-    'audio/webm',
-  ]
-
-  return supportedTypes.includes(file.type) || /\.(mp3|wav|ogg|aac|flac|webm)$/i.test(file.name)
+  return file.type.startsWith('audio/') || /\.(ecs|mp3|m4a|wav|ogg|opus|aac|flac|aiff?|webm)$/i.test(file.name)
 }
 
 /**

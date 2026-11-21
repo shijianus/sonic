@@ -1,6 +1,6 @@
 import { reactive, ref, computed, toRefs } from 'vue'
 import { useAudioStore } from '@/stores/modules/audio'
-import { resolvedSongSource, songPlaybackSource, songSourcePair } from '@/utils/audioUtils'
+import { isPrivateLocalImport, resolvedSongSource, songPlaybackSource, songSourcePair } from '@/utils/audioUtils'
 import { songIdentityKey } from '@/utils/songIdentity'
 import i18n from '@/languages'
 import {
@@ -283,6 +283,12 @@ const fetchLyrics = async (idOrSong?: string | number | any, force = false, song
     const rawId = targetSong?.id ?? idOrSong
     if (rawId === undefined || rawId === null || rawId === '') {
       clearLyrics()
+      return
+    }
+
+    if (isPrivateLocalImport({ id: rawId })) {
+      clearLyrics()
+      state.lyricsOriginal = [{ time: 0, text: i18n.global.t('song.noLyrics') }]
       return
     }
 
