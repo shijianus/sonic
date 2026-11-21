@@ -7,6 +7,7 @@
 export {}
 declare global {
   const ACCESS_API_PATHS: typeof import('../stores/modules/access').ACCESS_API_PATHS
+  const ACCOUNT_SESSION_NOTICE: typeof import('../stores/modules/auth').ACCOUNT_SESSION_NOTICE
   const COMMENT_EMOJI_MAP: typeof import('../utils/commentEmoji').COMMENT_EMOJI_MAP
   const DEFAULT_COVER_DATA_URI: typeof import('../utils/imageUrl').DEFAULT_COVER_DATA_URI
   const DEFAULT_MV_POOL: typeof import('../stores/modules/radarAlbum').DEFAULT_MV_POOL
@@ -35,6 +36,7 @@ declare global {
   const createPinia: typeof import('pinia').createPinia
   const crossfade: typeof import('../utils/audioUtils').crossfade
   const customRef: typeof import('vue').customRef
+  const decodeEcs: typeof import('../utils/ecs').decodeEcs
   const defineAsyncComponent: typeof import('vue').defineAsyncComponent
   const defineComponent: typeof import('vue').defineComponent
   const defineStore: typeof import('pinia').defineStore
@@ -42,9 +44,15 @@ declare global {
   const dismissGatewayBanner: typeof import('../utils/gatewayHealth').dismissGatewayBanner
   const downloadSourcePair: typeof import('../utils/indexedDB').downloadSourcePair
   const downloadedMusicDB: typeof import('../utils/indexedDB').downloadedMusicDB
+  const ecsDownload: typeof import('../utils/offlineDownload').ecsDownload
+  const ecsFilename: typeof import('../utils/ecs').ecsFilename
+  const ecsQualityTier: typeof import('../utils/offlineDownload').ecsQualityTier
   const effectScope: typeof import('vue').effectScope
+  const encodeEcs: typeof import('../utils/ecs').encodeEcs
+  const encodeMp3: typeof import('../utils/ecsMp3').encodeMp3
   const escapeHtmlAttribute: typeof import('../utils/escapeHtml').escapeHtmlAttribute
   const exploreTags: typeof import('../utils/exploreTags').exploreTags
+  const exportEcs: typeof import('../utils/ecs').exportEcs
   const extractArray: typeof import('../utils/transformers').extractArray
   const extractColorsFromImage: typeof import('../utils/colorExtractor').extractColorsFromImage
   const extractData: typeof import('../utils/transformers').extractData
@@ -91,12 +99,16 @@ declare global {
   const httpGet: typeof import('../utils/http').httpGet
   const httpPost: typeof import('../utils/http').httpPost
   const httpUpload: typeof import('../utils/http').httpUpload
+  const identifyEcsAudio: typeof import('../utils/ecs').identifyEcsAudio
   const inject: typeof import('vue').inject
+  const inspectDownloadAudio: typeof import('../utils/offlineDownload').inspectDownloadAudio
   const inspectGatewayHeaders: typeof import('../utils/gatewayHealth').inspectGatewayHeaders
   const interpolateWordTimestamps: typeof import('../utils/lyricsWordSync').interpolateWordTimestamps
   const isDarkTheme: typeof import('../utils/colorThemeAdapter').isDarkTheme
+  const isEcsFile: typeof import('../utils/ecs').isEcsFile
   const isLosslessContentType: typeof import('../utils/qualityProbe').isLosslessContentType
   const isMetadataLine: typeof import('../utils/lyricsWordSync').isMetadataLine
+  const isPrivateLocalImport: typeof import('../utils/audioUtils').isPrivateLocalImport
   const isProxy: typeof import('vue').isProxy
   const isReactive: typeof import('vue').isReactive
   const isReadonly: typeof import('vue').isReadonly
@@ -117,6 +129,8 @@ declare global {
   const normalizeLyricWord: typeof import('../utils/lyricsWordSync').normalizeLyricWord
   const normalizePaginationTotal: typeof import('../utils/pagination').normalizePaginationTotal
   const normalizeSongSource: typeof import('../utils/audioUtils').normalizeSongSource
+  const notifyAccountSessionChange: typeof import('../stores/modules/auth').notifyAccountSessionChange
+  const offlineSong: typeof import('../utils/offlineDownload').offlineSong
   const onActivated: typeof import('vue').onActivated
   const onBeforeMount: typeof import('vue').onBeforeMount
   const onBeforeRouteLeave: typeof import('vue-router').onBeforeRouteLeave
@@ -133,15 +147,18 @@ declare global {
   const onUnmounted: typeof import('vue').onUnmounted
   const onUpdated: typeof import('vue').onUpdated
   const onWatcherCleanup: typeof import('vue').onWatcherCleanup
+  const packDownload: typeof import('../utils/offlineDownload').packDownload
   const parseAudioBlob: typeof import('../utils/blobMetadataParser').parseAudioBlob
   const parseCommentEmoji: typeof import('../utils/commentEmoji').parseCommentEmoji
   const parseTime: typeof import('../utils/audioUtils').parseTime
+  const playbackAudio: typeof import('../utils/offlineDownload').playbackAudio
   const prefersReducedMotion: typeof import('../utils/motion').prefersReducedMotion
   const probeSongQualities: typeof import('../utils/qualityProbe').probeSongQualities
   const provide: typeof import('vue').provide
   const qualityLabel: typeof import('../utils/qualityProbe').qualityLabel
   const qualityReason: typeof import('../utils/qualityProbe').qualityReason
   const reactive: typeof import('vue').reactive
+  const readEcsPlaybackKey: typeof import('../utils/indexedDB').readEcsPlaybackKey
   const readonly: typeof import('vue').readonly
   const ref: typeof import('vue').ref
   const resolveComponent: typeof import('vue').resolveComponent
@@ -189,6 +206,7 @@ declare global {
   const transformSongs: typeof import('../utils/transformers').transformSongs
   const transformTopSongs: typeof import('../utils/transformers').transformTopSongs
   const triggerRef: typeof import('vue').triggerRef
+  const unknownSearchNavigationTotal: typeof import('../utils/pagination').unknownSearchNavigationTotal
   const unref: typeof import('vue').unref
   const useAccessStore: typeof import('../stores/modules/access').useAccessStore
   const useAttrs: typeof import('vue').useAttrs
@@ -216,6 +234,7 @@ declare global {
   const watchEffect: typeof import('vue').watchEffect
   const watchPostEffect: typeof import('vue').watchPostEffect
   const watchSyncEffect: typeof import('vue').watchSyncEffect
+  const writeEcsPlaybackKey: typeof import('../utils/indexedDB').writeEcsPlaybackKey
 }
 // for type re-export
 declare global {
@@ -231,6 +250,9 @@ declare global {
   // @ts-ignore
   export type { RGB, ColorPalette } from '../utils/colorExtractor'
   import('../utils/colorExtractor')
+  // @ts-ignore
+  export type { EcsTier, EcsTarget, EcsMetadata } from '../utils/ecs'
+  import('../utils/ecs')
   // @ts-ignore
   export type { ExploreTagGroup, ExploreTagItem, GroupColorConfig } from '../utils/exploreTags'
   import('../utils/exploreTags')
@@ -252,6 +274,9 @@ declare global {
   // @ts-ignore
   export type { LyricWord } from '../utils/lyricsWordSync'
   import('../utils/lyricsWordSync')
+  // @ts-ignore
+  export type { EcsExportFile } from '../utils/offlineDownload'
+  import('../utils/offlineDownload')
   // @ts-ignore
   export type { QualityLevel, QualityChoiceMeta, ProbeQualityItem, SongProbeResult } from '../utils/qualityProbe'
   import('../utils/qualityProbe')
