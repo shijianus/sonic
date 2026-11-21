@@ -2045,7 +2045,7 @@ function setupInteractions() {
             } else if (action === "download") {
                 event.preventDefault();
                 event.stopPropagation();
-                showQualityMenu(event, index, "playlist");
+                openEcsDownload(state.playlistSongs[index]);
             }
         };
 
@@ -2687,33 +2687,12 @@ function createSearchResultItem(song, index) {
     const downloadButton = document.createElement("button");
     downloadButton.className = "action-btn download";
     downloadButton.type = "button";
-    downloadButton.title = "下载";
+    downloadButton.title = "下载 ECS";
     downloadButton.innerHTML = '<i class="fas fa-download"></i>';
     downloadButton.addEventListener("click", (event) => {
-        showQualityMenu(event, index, "search");
+        event.stopPropagation();
+        openEcsDownload(song);
     });
-
-    const qualityMenu = document.createElement("div");
-    qualityMenu.className = "quality-menu";
-
-    const qualityOptions = [
-        { label: "标准音质", suffix: " (128k)", quality: "128" },
-        { label: "高音质", suffix: " (192k)", quality: "192" },
-        { label: "超高音质", suffix: " (320k)", quality: "320" },
-        { label: "无损音质", suffix: "", quality: "999" },
-    ];
-
-    qualityOptions.forEach(option => {
-        const qualityItem = document.createElement("div");
-        qualityItem.className = "quality-option";
-        qualityItem.textContent = `${option.label}${option.suffix}`;
-        qualityItem.addEventListener("click", (event) => {
-            downloadWithQuality(event, index, "search", option.quality);
-        });
-        qualityMenu.appendChild(qualityItem);
-    });
-
-    downloadButton.appendChild(qualityMenu);
 
     actions.appendChild(playButton);
     actions.appendChild(downloadButton);
@@ -2819,84 +2798,6 @@ function displaySearchResults(newItems, options = {}) {
     const appendedCount = itemsToAppend.length;
     const totalRendered = state.renderedSearchCount;
     debugLog(`显示搜索结果: 新增 ${appendedCount} 个结果, 总计 ${totalRendered} 个, 加载更多按钮: ${state.hasMoreResults ? "显示" : "隐藏"}`);
-}
-
-// 显示质量选择菜单
-function showQualityMenu(event, index, type) {
-    event.stopPropagation();
-
-    // 移除现有的质量菜单
-    const existingMenu = document.querySelector(".dynamic-quality-menu");
-    if (existingMenu) {
-        existingMenu.remove();
-    }
-
-    // 创建新的质量菜单
-    const menu = document.createElement("div");
-    menu.className = "dynamic-quality-menu";
-    menu.innerHTML = `
-        <div class="quality-option" onclick="downloadWithQuality(event, ${index}, '${type}', '128')">标准音质 (128k)</div>
-        <div class="quality-option" onclick="downloadWithQuality(event, ${index}, '${type}', '192')">高音质 (192k)</div>
-        <div class="quality-option" onclick="downloadWithQuality(event, ${index}, '${type}', '320')">超高音质 (320k)</div>
-        <div class="quality-option" onclick="downloadWithQuality(event, ${index}, '${type}', '999')">无损音质</div>
-    `;
-
-    // 设置菜单位置
-    const button = event.target.closest("button");
-    const rect = button.getBoundingClientRect();
-    menu.style.position = "fixed";
-    menu.style.top = (rect.bottom + 5) + "px";
-    menu.style.left = (rect.left - 50) + "px";
-    menu.style.zIndex = "10000";
-
-    // 添加到body
-    document.body.appendChild(menu);
-
-    // 点击其他地方关闭菜单
-    setTimeout(() => {
-        document.addEventListener("click", function closeMenu(e) {
-            if (!menu.contains(e.target)) {
-                menu.remove();
-                document.removeEventListener("click", closeMenu);
-            }
-        });
-    }, 0);
-}
-
-// 根据质量下载 - 支持播放列表模式
-async function downloadWithQuality(event, index, type, quality) {
-    event.stopPropagation();
-    let song;
-
-    if (type === "search") {
-        song = state.searchResults[index];
-    } else if (type === "online") {
-        song = state.onlineSongs[index];
-    } else if (type === "playlist") {
-        song = state.playlistSongs[index];
-    }
-
-    if (!song) return;
-
-    // 关闭菜单并移除 menu-active 类
-    document.querySelectorAll(".quality-menu").forEach(menu => {
-        menu.classList.remove("show");
-        const parentItem = menu.closest(".search-result-item");
-        if (parentItem) parentItem.classList.remove("menu-active");
-    });
-
-    // 关闭动态质量菜单
-    const dynamicMenu = document.querySelector(".dynamic-quality-menu");
-    if (dynamicMenu) {
-        dynamicMenu.remove();
-    }
-
-    try {
-        await downloadSong(song, quality);
-    } catch (error) {
-        console.error("下载失败:", error);
-        showNotification("下载失败，请稍后重试", "error");
-    }
 }
 
 // 修复：播放搜索结果 - 添加到播放列表而不是清空
@@ -4372,56 +4273,24 @@ function scrollToCurrentLyric(element, containerOverride, immediate = false) {
     debugLog(`歌词滚动: 元素在容器内偏移=${elementOffsetTop}, 容器高度=${containerHeight}, 目标滚动=${finalScrollTop}`);
 }
 
-// 修复：下载歌曲
-async function downloadSong(song, quality = "320") {
+// Keep a single download implementation for the historical UI and the current player.
+// Pass only the catalog identity and display text. The player resolves a fresh source.
+function openEcsDownload(song) {
+    if (!song) return;
+    const rawId = String(song.url_id || song.id || "");
+    const parts = rawId.match(/^([a-z][a-z0-9_-]*):(.+)$/i);
+    const source = String(song.source || song.platform || (parts && parts[1]) || "netease").toLowerCase();
+    const trackId = parts ? parts[2] : rawId;
+    const artist = (Array.isArray(song.artist) ? song.artist : [song.artist])
+        .map(value => typeof value === "string" ? value : value?.name || "").filter(Boolean).join(" / ");
     try {
-        showNotification("正在准备下载...");
-
-        const audioUrl = API.getSongUrl(song, quality);
-        const audioData = await API.fetchJson(audioUrl);
-
-        if (audioData && audioData.url) {
-            const proxiedAudioUrl = buildAudioProxyUrl(audioData.url);
-            const preferredAudioUrl = preferHttpsUrl(audioData.url);
-
-            if (proxiedAudioUrl !== audioData.url) {
-                debugLog(`下载链接已通过代理转换为 HTTPS: ${proxiedAudioUrl}`);
-            } else if (preferredAudioUrl !== audioData.url) {
-                debugLog(`下载链接由 HTTP 升级为 HTTPS: ${preferredAudioUrl}`);
-            }
-
-            const downloadUrl = proxiedAudioUrl || preferredAudioUrl || audioData.url;
-
-            const link = document.createElement("a");
-            link.href = downloadUrl;
-            const preferredExtension =
-                quality === "999" ? "flac" : quality === "740" ? "ape" : "mp3";
-            const fileExtension = (() => {
-                try {
-                    const url = new URL(audioData.url);
-                    const pathname = url.pathname || "";
-                    const match = pathname.match(/\.([a-z0-9]+)$/i);
-                    if (match) {
-                        return match[1];
-                    }
-                } catch (error) {
-                    console.warn("无法从下载链接中解析扩展名:", error);
-                }
-                return preferredExtension;
-            })();
-            link.download = `${song.name} - ${Array.isArray(song.artist) ? song.artist.join(", ") : song.artist}.${fileExtension}`;
-            link.target = "_blank";
-            document.body.appendChild(link);
-            link.click();
-            document.body.removeChild(link);
-
-            showNotification("下载已开始", "success");
-        } else {
-            throw new Error("无法获取下载地址");
-        }
-    } catch (error) {
-        console.error("下载失败:", error);
-        showNotification("下载失败，请稍后重试", "error");
+        if (!trackId) throw new Error("MISSING_TRACK");
+        sessionStorage.setItem("sonic:ecs-download-handoff", JSON.stringify({
+            source, trackId, title: String(song.name || song.title || trackId), artist,
+        }));
+        window.location.assign("/downloads#/downloads");
+    } catch {
+        showNotification("无法打开 ECS 下载，请在新版播放器内选择曲目", "error");
     }
 }
 

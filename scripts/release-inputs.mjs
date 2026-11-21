@@ -39,7 +39,7 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
   'scripts/test-fixtures/provider-fetch.mjs', 'scripts/test-fixtures/sonic-gateway.mjs',
   'scripts/verify-observability-and-alerts.mjs',
   'scripts/evaluate-recommendation.mjs', 'scripts/evaluate-multi-entity.mjs',
-  'scripts/selftest-multi-entity-http.mjs', 'scripts/verify-mixed-load.mjs',
+  'scripts/selftest-multi-entity-http.mjs', 'scripts/verify-mixed-load.mjs', 'scripts/verify-public-beta-pressure.mjs',
   'scripts/backup-recommend-db.mjs', 'scripts/restore-recommend-db.mjs', 'scripts/revoke-invite.mjs',
   'scripts/recommend-recovery-guard.mjs',
   'scripts/build-staging-release.sh', 'scripts/deploy-staging-engine.py',
@@ -47,7 +47,7 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
   'scripts/verify-built-release.mjs', 'scripts/verify-engine-smoke.mjs',
   'scripts/verify-local-edge.mjs',
   'scripts/start-bare-metal-engine.mjs', 'scripts/rollback-production.sh', 'scripts/rollback-production.mjs',
-  'docs/RUNBOOK-ROLLBACK.md', 'docs/OPERATIONS.md',
+  'docs/RUNBOOK-ROLLBACK.md', 'docs/OPERATIONS.md', 'docs/ECS.md',
   'docs/release/RELEASE-CHECKLIST.md', 'docs/release/REMOTE-INVITE-BETA-HANDOFF.md',
   'docs/gray-test-multi-entity-windows.md', 'docs/multi-entity-implementation-status.md',
 ]);

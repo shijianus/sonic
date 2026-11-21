@@ -59,7 +59,7 @@ Pages 可以独立运行，也可以把部分解析、目录和推荐请求交�
 - 播放器抽屉支持歌词滚动、逐字填充、译文/罗马音，以及点击或拖动歌词定位；歌曲详情页主要展示静态歌词。
 - MV 播放、推荐列表和合辑接续；桌面 MV 页面有评论热/新排序及本地评论功能。
 - 浅色/深色/跟随系统主题，中、英、日三套语言资源，四类背景、性能模式及部分减少动效支持。
-- 本地音乐文件选择/拖入、浏览器内播放；下载音频的记录、播放、导出和删除。
+- 本地音乐文件与 ECS 文件可拖入播放。普通下载统一保存为加密的 `.ecs`。登录账号按音源授权可导出原始字节、320 kbps MP3 或 128 kbps MP3。音质级别、密钥轮换以及离线播放条件见 [ECS 说明](docs/ECS.md)。
 
 **界面与数据边界：**
 
@@ -558,37 +558,30 @@ curl --fail-with-body -X DELETE "$API_BASE/api/sonic/events" \
 
 Node 存储包含 canonical tracks、FTS5 索引、行为事件、搜索聚合、共现、实体/关系/反馈和雷达档案。`entity_stats` 目前有表结构但没有完整更新管线；SQLite 初始化采用幂等 DDL，并非版本化 migration 系统。
 
-浏览器 MV 合辑会本地持久化并在认证条件下尝试上送；当前云端回读方法未接入调用，Node 又缺少 `radar-album` 分发，所以不能承诺完整跨设备同步。
+浏览器 MV 合辑会本地持久化并在认证条件下尝试上送；当前云端回读方法未接入调用，跨设备读取体验仍需要使用两个真实设备逐项验收。
 
 设置中可分别清除本机存储与当前身份的推荐画像。本机清理支持离线操作，云端画像清除需在服务端及配置的外部推荐存储确认后显示成功。部署时需核对备份保留期和恢复保护。
 
 ## 限制与安全边界
 
-1. **返回成功不等于真实内容。** 兼容上游和前端 MV 页面仍存在固定视频、推荐、评论、播放量及详情补位；MV 兼容搜索还有未传关键词的分支。生产发布前应移除或明确标记演示数据。
+1. **MV 评论。** 上游没有评论时显示空状态，本机发表的评论保留在当前设备。开放公测前应按来源核对内容范围。
 2. **来源策略存在实现/文档差异。** GDStudio 的空配置默认、显式关闭后的回退及授权登记与历史矩阵不一致。未确认授权的来源不应开放；不要依赖代码里的 `APPROVED` 标签替代授权凭据。
 3. **降级状态尚未贯通所有链路。** 无音频 URL 当前返回 `404 STREAM_NOT_FOUND`，不是旧 API 文档中的 `503 STREAM_UNAVAILABLE_DEGRADED`；Nexus 歌词和前端健康状态还有清除降级标记的逻辑。不能承诺所有故障都正确显示降级提示或使用 stale cache。
 4. **限流不是全球强一致总额度。** 内存按进程/isolate，KV 为非原子计数；原生 binding 的阈值由平台配置，代码只传 key，不能用 RPM 环境变量或响应头推导严格全局剩余额度。参见 [Cloudflare 限流说明](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)。
 5. **KV 撤销有一致性延迟。** 本地 30 秒缓存不是全球撤销 SLA；只有开关和 binding 都有效才启用该检查。参见 [KV 一致性说明](https://developers.cloudflare.com/kv/concepts/how-kv-works/)。
 6. **认证与出站保护不能过度概括。** OAuth origin 配置不控制 API CORS，当前 API 返回通配 origin；部分 OAuth、Engine RPC、目录/Provider 请求直接使用 fetch，不具备与媒体 `safeFetch` 完全相同的边界。
 7. **SQLite 按单 Engine 写入设计。** 不应让多个副本共享同一文件；没有完整 schema migration/回滚框架。裸机生产须显式设置 `NODE_ENV=production`，并验证备份恢复。
-8. **前端仍有安全和交互待修项。** 动画卡片存在未经文本转义的 `innerHTML` 插值；空搜索页初始化、移动历史列表索引、路由复用、分页、重试与分享也有静态审查发现，不能把现有测试通过等同全面安全或可用。
+8. **浏览器与设备覆盖。** 桌面及移动尺寸使用 Chromium 回归。iOS Safari、锁屏、读屏和弱网体验需在目标设备验收。
 9. **历史测试资料不证明当前发布。** `docs/release/` 的 SHA、报告数量及旧环境结果必须核对日期与分支。Mock、合成音频及离线评分不能代替真实 OAuth、授权 CDN、真机、无障碍和回滚演练。
 10. **音质、歌词与第三方权利各自独立。** 请求 FLAC/320 不保证实际质量；插值词轴不等于真实字级标注；源码许可证不授予音乐、歌词、封面或 MV 的再分发权。
 
 ## 进一步维护建议
 
-以下是源码审阅后的建议，**不表示本次 README 更新已经修复这些问题**。
-
-### 优先处理：安全、内容真实性与数据正确性
-
-- **消除动画卡片 HTML 注入入口。** [`HeroCard.vue`](player/src/components/Ui/HeroCard.vue) 和 [`MVCard.vue`](player/src/components/Ui/MVCard.vue) 将上游名称拼接到 `innerHTML`；改用 `textContent`/安全 DOM，并为标题、歌手和副标题补组件交互回归。现有 XSS 测试主要检查封面属性及旧播放列表，覆盖不完整。
-- **统一来源策略和真实失败响应。** 对 [`licensing.ts`](functions/_lib/sonic/licensing.ts)、[`native-protocols.ts`](functions/_lib/sonic/native-protocols.ts) 建立空配置/模板/严格名单/显式关闭矩阵，验证实际出站请求；移除 [`upstream.ts`](functions/_lib/sonic/upstream.ts) 及 MV 页的无关内容补位。
-- **补实体输入和删除结果校验。** 在 [`events.ts`](functions/api/sonic/events.ts) 校验类型、ID、关系、动作一致性；让 [`PrivacyDataSection.vue`](player/src/components/Settings/PrivacyDataSection.vue) 区分各存储删除成功/失败，不吞错后统一报成功。
-- **先修阻断性前端路径。** 修复 [`search.vue`](player/src/pages/search.vue) 的 immediate watcher 调用尚未初始化函数、[`mobile/recent.vue`](player/src/pages/mobile/recent.vue) 的历史/队列索引混用，以及详情路由切换时旧状态残留。
+本轮修复了按身份隔离收藏和同步队列、删除范围、撤源后的搜索、分页、MV 评论和音质菜单。部署候选时应分别记录真实 OAuth、音源授权、移动设备、告警和流量回滚的验收结果。
 
 ### 随后处理：契约、运维与体验
 
-- 为 Pages 路由与 Node dispatcher 建立自动对照，补齐 `radar-album`；同步修订 [`API.md`](API.md) 的 URL key、歌词参数、错误码和带宽描述。
+- 为 Pages 路由与 Node dispatcher 建立自动对照，持续校验 `radar-album` 等路由；同步修订 [`API.md`](API.md) 的 URL key、歌词参数、错误码和带宽描述。
 - 提供保留 `/api` 前缀、服务端注入密钥的统一本地开发入口；统一 Axios 与直接 fetch 的基址、认证和错误处理。
 - 将混合 Feed 派生实体明确标为 derived/placeholder，验证真实 provider ID 与可播放性后再接 UI；补 Playlist 惩罚、撤销反馈及传播系数 `0` 的处理。
 - 建立 SQLite 版本迁移与跨重启实体测试；CI 保存评估数据/硬件条件，增加真实 HTTP 认证、实体持久化、Compose 和路由契约验证。

@@ -50,11 +50,12 @@ describe('Release artifact identity and Edge gate', () => {
     let dispatched = false;
     const response = await onRequest({
       request: new Request('https://sonic.example/api/sonic/search/smart?q=test'),
-      env: { SONIC_ENV: 'production' },
+      env: { SONIC_ENV: 'production', SONIC_ACCESS_MODE: 'open', SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'netease' },
       next: async () => { dispatched = true; return new Response('unexpected'); },
     });
     expect(response.status).toBe(503);
-    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(response.headers.get('cache-control')?.split(/\s*,\s*/)).toContain('no-store');
+    expect((await response.json()).error.code).toBe('RELEASE_NOT_READY');
     expect(dispatched).toBe(false);
   });
 

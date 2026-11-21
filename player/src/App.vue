@@ -1,12 +1,33 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, nextTick, onMounted, watch } from 'vue'
 import DownloadQualityDialog from '@/components/Dialog/DownloadQualityDialog.vue'
 import GlobalToast from '@/components/Ui/GlobalToast.vue'
 import AccessGate from '@/components/Access/AccessGate.vue'
+import { useDownloadStore } from '@/stores/modules/download'
 import { useAccessStore } from '@/stores/modules/access'
 import { gatewayHealth, dismissGatewayBanner } from '@/utils/gatewayHealth'
 
 const accessStore = useAccessStore()
+
+// Consume the historical player's one-shot request only after access is established.
+watch(() => accessStore.canAccess, async allowed => {
+  if (!allowed) return
+  try {
+    const key = 'sonic:ecs-download-handoff'
+    const raw = sessionStorage.getItem(key)
+    if (!raw) return
+    sessionStorage.removeItem(key)
+    const { source, trackId, title, artist } = JSON.parse(raw)
+    if (typeof source !== 'string' || !/^[a-z][a-z0-9_-]{0,29}$/.test(source) ||
+        typeof trackId !== 'string' || !trackId || trackId.length > 256 ||
+        typeof title !== 'string' || typeof artist !== 'string') return
+    await nextTick()
+    useDownloadStore().openDownloadDialog({
+      id: source + ':' + trackId, source, platformId: trackId,
+      name: title.slice(0, 512), artist: artist.slice(0, 512), duration: 0,
+    })
+  } catch { /* Storage can be unavailable in private browsing. */ }
+}, { immediate: true, flush: 'post' })
 
 onMounted(() => {
   try {

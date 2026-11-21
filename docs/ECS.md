@@ -1,9 +1,9 @@
 # EpoCanvas Sonic audio archives
 
 Every ordinary Sonic download ends in `.ecs`. The suffix before it indicates the
-requested source tier: `.ecs1.ecs` for the original/source tier, `.ecs2.ecs` for
-the high tier, and `.ecs3.ecs` for standard. The tier does not certify a bitrate
-or a studio master. The player inspects the decoded audio. Choosing Original
+archive tier: `.ecs1.ecs` for the original/source tier, `.ecs2.ecs` for
+the high tier, and `.ecs3.ecs` for standard. Sonic caps the selected tier at the quality it can establish from the downloaded audio.
+An archive tier does not certify a studio master. The player inspects the decoded audio. Choosing Original
 when exporting preserves the downloaded audio bytes exactly.
 
 ## Deployment
@@ -29,7 +29,7 @@ ecs=1 and a kid containing the server's opaque encrypted key ticket. The ticket
 is sealed with the server master key, a fresh 96-bit nonce and format-specific
 associated data. Inside the authenticated ciphertext, a big-endian 32-bit metadata
 length precedes UTF-8 JSON and the original audio bytes. Title, artist, album,
-source, source track ID and the requested tier are inside the ciphertext. Archive size
+source, source track ID and the archive tier are inside the ciphertext. Archive size
 is limited to 64 MiB of audio. Track names are not needed by the key service.
 
 The per-file content key is randomly generated on each issue. The browser stores
