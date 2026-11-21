@@ -117,6 +117,7 @@ export function mapSonicTrackToRecommendSong(t: any): RecommendSongItem {
       t.streamUrl ||
       `/api/music/stream?id=${encodeURIComponent(String(rawId))}&title=${encodeURIComponent(title)}&artist=${encodeURIComponent(artist)}`,
     sha: t.sha || '',
+    mediaMetadataVerified: t.mediaMetadataVerified === true,
     qualityBadge: t.qualityBadge || undefined,
     qualities: t.qualities || [],
     sources: t.sources || [],

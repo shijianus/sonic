@@ -4,10 +4,7 @@ import { useAudio } from '@/composables/useAudio'
 import type { Song } from '@/stores/interface'
 import { formatDurationOrDash } from '@/utils/time'
 import { formatCoverUrl } from '@/utils/imageUrl'
-import { useI18n } from 'vue-i18n'
 import { songIdentityKey } from '@/utils/songIdentity'
-
-const { t } = useI18n()
 
 type ListVariant = 'compact' | 'card'
 
@@ -48,29 +45,7 @@ const handleClick = (_song: Song, i: number) => {
   play(queue[i], i)
 }
 
-const getQualityBadgeInfo = (song: Song) => {
-  const isLossless = song.qualityBadge === 'SQ' || song.qualities?.[0]?.level === 'lossless'
-  const isExhigh = song.qualityBadge === 'HQ' || song.qualities?.[0]?.level === 'exhigh'
-  if (isLossless) {
-    return {
-      label: t('quality.lossless'),
-      title: t('quality.tips.lossless'),
-      badgeClass: 'bg-gradient-to-r from-blue-600/30 to-sky-600/30 text-sky-300 border border-sky-500/40',
-    }
-  }
-  if (isExhigh) {
-    return {
-      label: t('quality.exhigh'),
-      title: t('quality.tips.exhigh'),
-      badgeClass: 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30',
-    }
-  }
-  return {
-    label: t('quality.standard'),
-    title: t('quality.tips.standard'),
-    badgeClass: 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30',
-  }
-}
+const qualityLabel = (song: Song) => song.actualAudioLabel || (song.mediaMetadataVerified ? song.qualityBadge : undefined)
 </script>
 
 <template>
@@ -112,12 +87,11 @@ const getQualityBadgeInfo = (song: Song) => {
             {{ song.name }}
           </p>
           <span
-            v-if="song.qualityBadge || (song.qualities && song.qualities.length > 0)"
-            :title="getQualityBadgeInfo(song).title"
-            class="shrink-0 inline-flex items-center px-1.5 py-0.2 rounded text-[11px] font-bold leading-none select-none"
-            :class="getQualityBadgeInfo(song).badgeClass"
+            v-if="qualityLabel(song)"
+            :title="qualityLabel(song)"
+            class="shrink-0 inline-flex items-center px-1.5 py-0.2 rounded text-[11px] font-bold leading-none select-none bg-sky-500/10 text-sky-300/90 border border-sky-500/25"
           >
-            {{ getQualityBadgeInfo(song).label }}
+            {{ qualityLabel(song) }}
           </span>
         </div>
         <p class="song-artist mt-0.5 break-words whitespace-normal text-xs">
@@ -177,12 +151,11 @@ const getQualityBadgeInfo = (song: Song) => {
             {{ song.name }}
           </p>
           <span
-            v-if="song.qualityBadge || (song.qualities && song.qualities.length > 0)"
-            :title="getQualityBadgeInfo(song).title"
-            class="shrink-0 inline-flex items-center px-1.5 py-0.2 rounded text-[11px] font-bold leading-none select-none"
-            :class="getQualityBadgeInfo(song).badgeClass"
+            v-if="qualityLabel(song)"
+            :title="qualityLabel(song)"
+            class="shrink-0 inline-flex items-center px-1.5 py-0.2 rounded text-[11px] font-bold leading-none select-none bg-sky-500/10 text-sky-300/90 border border-sky-500/25"
           >
-            {{ getQualityBadgeInfo(song).label }}
+            {{ qualityLabel(song) }}
           </span>
         </div>
         <p class="song-artist mt-0.5 break-words whitespace-normal text-xs">

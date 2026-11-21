@@ -54,7 +54,7 @@ export async function onRequest({
 
   const cacheKey = `${computeContentPolicyEpoch(env)}:win=${window}:g=${genre || 'all'}:c=${count}`;
   if (allowSharedCache && !nocache) {
-    const hit = await getSonicCachedJson<any>('rec-trending-v1', cacheKey, env);
+    const hit = await getSonicCachedJson<any>('rec-trending-v2', cacheKey, env);
     if (hit?.value) {
       const cachedBody = {
         ...hit.value,
@@ -96,7 +96,7 @@ export async function onRequest({
         },
       };
       if (allowSharedCache && !nocache) {
-        await putSonicCachedJson('rec-trending-v1', cacheKey, body, 120, 1800, env, waitUntil);
+        await putSonicCachedJson('rec-trending-v2', cacheKey, body, 120, 1800, env, waitUntil);
       }
       return jsonResponse(body, {
         status: 200,
@@ -133,7 +133,7 @@ export async function onRequest({
     };
 
     if (allowSharedCache && !nocache && data.tracks.length > 0) {
-      await putSonicCachedJson('rec-trending-v1', cacheKey, responseBody, 120, 1800, env, waitUntil);
+      await putSonicCachedJson('rec-trending-v2', cacheKey, responseBody, 120, 1800, env, waitUntil);
     }
 
     return jsonResponse(responseBody, {

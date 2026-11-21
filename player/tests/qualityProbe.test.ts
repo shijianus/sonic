@@ -57,3 +57,13 @@ describe('quality probe target identity', () => {
     expect(calls.some(url => url.includes('br=128'))).toBe(true)
   })
 })
+
+it('does not invent a codec or whole-stream size for an untyped partial response', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(null, {
+    status: 206, headers: { 'Content-Type': 'application/octet-stream', 'Content-Length': '1' },
+  })))
+  const probe = await probeSongQualities({ id: 'without-size', duration: 200 }, { forceRefresh: true })
+  expect(probe.standard.totalBytes).toBeNull()
+  expect(probe.standard.actualBitrateKbps).toBeNull()
+  expect(probe.lossless.formatLabel).toBe('—')
+})

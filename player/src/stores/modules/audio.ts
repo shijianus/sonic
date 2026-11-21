@@ -1662,13 +1662,6 @@ export const useAudioStore = defineStore('audio', {
         newUrl = `/api/music/stream?${params.toString()}`
       }
 
-      const badgeMap: Record<string, string> = {
-        lossless: 'SQ',
-        exhigh: 'HQ',
-        standard: '标准',
-      }
-      const nextBadge = badgeMap[targetLevel] || song.qualityBadge
-
       const operation: QualitySwitch = {
         controller: new AbortController(),
         song,
@@ -1711,11 +1704,13 @@ export const useAudioStore = defineStore('audio', {
 
         // 新音源确认可用后才提交状态
         song.url = newUrl
-        song.qualityBadge = nextBadge
+        song.requestedQuality = targetLevel
+        song.mediaMetadataVerified = false
         const queuedSong = this.audio.playlist[this.audio.currentIndex]
         if (queuedSong && songPlaybackKey(queuedSong) === songPlaybackKey(song)) {
           queuedSong.url = newUrl
-          queuedSong.qualityBadge = nextBadge
+          queuedSong.requestedQuality = targetLevel
+          queuedSong.mediaMetadataVerified = false
         }
         resetSourceAttempts(song)
         this.audio.error = null

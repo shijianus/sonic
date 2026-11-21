@@ -88,7 +88,7 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
   let resolvedProvider = 'proxy-target';
   let resolvedVia = 'direct-param';
   let resolvedTrial = false;
-  let resolvedStreamType: 'full' | 'trial' | 'unavailable' = 'full';
+  let resolvedStreamType: 'full' | 'trial' | 'unavailable' | undefined;
   let resolvedTrialDuration = 0;
   let resolvedReferer = '';
   let resolvedCorsSafe = false;
@@ -249,7 +249,7 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
       resolvedProvider = resolved.provider;
       resolvedVia = resolved.via;
       resolvedTrial = Boolean(resolved.isTrial || resolved.streamType === 'trial');
-      resolvedStreamType = resolved.streamType || (resolvedTrial ? 'trial' : 'full');
+      resolvedStreamType = resolved.streamType || (resolvedTrial ? 'trial' : undefined);
       resolvedTrialDuration = resolved.trialDuration || (resolvedTrial ? 30 : 0);
       resolvedReferer = resolved.referer || '';
       resolvedCorsSafe = resolved.corsSafe;
@@ -531,7 +531,7 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
     headers.set('Referrer-Policy', 'no-referrer');
     headers.set('X-Sonic-Provider', resolvedProvider);
     headers.set('X-Sonic-Via', resolvedVia);
-    headers.set('X-Sonic-Stream-Type', resolvedStreamType);
+    if (resolvedStreamType) headers.set('X-Sonic-Stream-Type', resolvedStreamType);
     if (resolvedTrial) headers.set('X-Sonic-Stream-Trial', '1');
     if (resolvedTrialDuration > 0) headers.set('X-Sonic-Trial-Duration', String(resolvedTrialDuration));
     if (degraded) {

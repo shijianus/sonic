@@ -105,51 +105,9 @@ const downloadSong = (song: Song, index: number) => {
   downloadStore.openDownloadDialog(song)
 }
 
-const isPredominantlyLossless = computed(() => {
-  if (!props.songs || props.songs.length === 0) return false
-  const sqCount = props.songs.filter(
-    s => s.qualityBadge === 'SQ' || s.qualities?.[0]?.level === 'lossless'
-  ).length
-  return sqCount / props.songs.length >= 0.8
-})
-
 const getQualityBadgeInfo = (song: Song) => {
-  // 无任何音质数据时不渲染徽章，避免伪造档位
-  if (!song.qualityBadge && !(song.qualities && song.qualities.length > 0)) {
-    return null
-  }
-  const isLossless = song.qualityBadge === 'SQ' || song.qualities?.[0]?.level === 'lossless'
-  const isExhigh = song.qualityBadge === 'HQ' || song.qualities?.[0]?.level === 'exhigh'
-  const hasMultiple = Boolean(song.qualities && song.qualities.length > 1)
-
-  // 当绝大多数（80%以上）曲目均为 SQ 无损时，不逐行重复贴大徽章；仅标明例外或留作底栏切换
-  if (isPredominantlyLossless.value && isLossless) {
-    return null
-  }
-
-  if (isLossless) {
-    return {
-      label: 'SQ',
-      title: hasMultiple
-        ? `${t('quality.tips.lossless')} · ${t('player.playMode')}`
-        : t('quality.tips.lossless'),
-      badgeClass: 'bg-sky-500/10 text-sky-300/90 border border-sky-500/25',
-    }
-  }
-  if (isExhigh) {
-    return {
-      label: 'HQ',
-      title: hasMultiple
-        ? `${t('quality.tips.exhigh')} · ${t('player.playMode')}`
-        : t('quality.tips.exhigh'),
-      badgeClass: 'bg-cyan-500/15 text-cyan-300/90 border border-cyan-500/25',
-    }
-  }
-  return {
-    label: t('quality.standard'),
-    title: t('quality.tips.standard'),
-    badgeClass: 'bg-emerald-500/15 text-emerald-300/90 border border-emerald-500/25',
-  }
+  const label = song.actualAudioLabel || (song.mediaMetadataVerified ? song.qualityBadge : undefined)
+  return label ? { label, title: label, badgeClass: 'bg-sky-500/10 text-sky-300/90 border border-sky-500/25' } : null
 }
 </script>
 

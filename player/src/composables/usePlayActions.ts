@@ -29,6 +29,7 @@ export function mapToStoreSong(song: SongData): StoreSong {
     streamUrl: song.streamUrl,
     sha: song.sha,
     qualityBadge: song.qualityBadge,
+    mediaMetadataVerified: song.mediaMetadataVerified,
     qualities: song.qualities,
     streamType: song.streamType,
     trialDuration: song.trialDuration,

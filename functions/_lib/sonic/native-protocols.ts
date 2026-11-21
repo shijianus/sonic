@@ -1791,7 +1791,7 @@ export function sonicTrackToLegacySongItem(t: SonicSearchTrack): SongItem {
     coverUrl: t.coverUrl || t.cover,
     duration: t.duration,
     sources: t.sources,
-    streamType: t.platform === 'netease' && (t as any).isVip ? 'trial' : 'full',
+    streamType: t.streamType === 'full' && !t.mediaMetadataVerified ? undefined : t.streamType,
   };
 }
 

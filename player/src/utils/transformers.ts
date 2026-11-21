@@ -42,6 +42,7 @@ export interface SongData {
   mvId?: number | string
   sha?: string
   qualityBadge?: string
+  mediaMetadataVerified?: boolean
   qualities?: Array<{ level: string; label: string; bitrate: string; streamUrl?: string }>
   url?: string
   streamUrl?: string
@@ -343,6 +344,7 @@ export function transformSong(item: Record<string, unknown>): SongData {
     mvId: (item?.mv as number | string) || (item?.mvid as number | string) || 0,
     sha: (item?.sha as string) || (song?.sha as string) || '',
     // 缺失音质数据时保持为空，由展示层隐藏徽章；真实档位由 qualityProbe 网络探测补齐
+    mediaMetadataVerified: (item?.mediaMetadataVerified ?? song?.mediaMetadataVerified) === true,
     qualityBadge: (item?.qualityBadge as string) || (song?.qualityBadge as string) || undefined,
     qualities: (item?.qualities as any[]) || (song?.qualities as any[]) || undefined,
     url: (item?.streamUrl as string) || (item?.url as string) || (song?.url as string) || '',

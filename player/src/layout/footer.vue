@@ -275,12 +275,18 @@ let qualityToastTimer: any = null
 const currentSongProbe = ref<SongProbeResult | null>(null)
 
 const currentQualityLevel = computed<QualityLevel>(() => {
-  const badge = currentSong.value?.qualityBadge
-  if (badge === 'SQ') return 'lossless'
-  if (badge === 'HQ') return 'exhigh'
-  if (badge === '标准' || badge === 'STANDARD') return 'standard'
-  const firstLevel = currentSong.value?.qualities?.[0]?.level
-  if (firstLevel === 'lossless' || firstLevel === 'exhigh' || firstLevel === 'standard') return firstLevel
+  const song = currentSong.value
+  const explicit = song?.requestedQuality
+  if (explicit === 'lossless' || explicit === 'exhigh' || explicit === 'standard') return explicit
+  let requested: string = settingsStore.audioQuality
+  if (song?.url) {
+    try {
+      const params = new URL(song.url, window.location.origin).searchParams
+      requested = params.get('quality') || params.get('br') || requested
+    } catch { /* Opaque media sources do not describe a request tier. */ }
+  }
+  if (requested === 'standard' || requested === '128') return 'standard'
+  if (requested === 'exhigh' || requested === '320' || requested === 'higher') return 'exhigh'
   return 'lossless'
 })
 
@@ -308,7 +314,7 @@ const pendingQualityLevel = ref<string | null>(null)
 // 触发音质探测（仅在打开浮层或当前档位非标准需判断降级时触发）
 const triggerProbeIfNeeded = async () => {
   const song = currentSong.value
-  if (!song || !song.id) {
+  if (!song || !song.id || song.isLocal) {
     currentSongProbe.value = null
     return
   }
@@ -416,63 +422,21 @@ const qualityDisplayInfo = computed(() => {
   const reqLevel = currentQualityLevel.value
   const probe = currentSongProbe.value
 
-  const nominalBadge = qualityLabel(reqLevel)
-
-  if (!probe) {
-    const isProbing = reqLevel !== 'standard' || showQualityMenu.value
-    return {
-      badge: nominalBadge,
-      tooltip: isProbing
-        ? t('quality.currentQualityProbing', { quality: nominalBadge })
-        : t('quality.currentQuality', { quality: nominalBadge }),
-      isDegraded: false,
-      isLossless: reqLevel === 'lossless',
-    }
+  const song = currentSong.value
+  if (song?.isLocal) {
+    const label = song.actualAudioLabel || (/^ECS[123]$/.test(song.qualityBadge || '') ? song.qualityBadge : undefined) || t('quality.unknown')
+    return { badge: label, tooltip: label, isDegraded: false, isLossless: false }
   }
 
-  const currentItem = probe[reqLevel]
-  if (currentItem && currentItem.isAvailable) {
-    // 请求档位真实可用
-    return {
-      badge: nominalBadge,
-      tooltip: t('quality.currentQualityBitrate', {
-        quality: nominalBadge,
-        bitrate: currentItem.bitrateLabel,
-      }),
-      isDegraded: false,
-      isLossless: reqLevel === 'lossless' && (currentItem.formatLabel === 'FLAC' || currentItem.formatLabel === 'WAV' || currentItem.formatLabel === 'ALAC'),
-    }
-  }
-
-  // 请求档位不可用或被静默降级：寻找音源实际能提供的最高可用档位
-  const fallbackTier = probe.exhigh.isAvailable
-    ? probe.exhigh
-    : probe.standard.isAvailable
-      ? probe.standard
-      : null
-
-  if (fallbackTier) {
-    const actualFmt = fallbackTier.formatLabel || 'MP3'
-    const actualBitrateNum = fallbackTier.actualBitrateKbps || (fallbackTier.level === 'exhigh' ? 320 : 128)
-    const actualBadge = `${actualFmt} ${actualBitrateNum}k`
-    const tooltip = t('quality.actualQuality', {
-      requested: nominalBadge,
-      actual: `${actualFmt} ${actualBitrateNum} kbps`,
-    })
-
-    return {
-      badge: actualBadge,
-      tooltip,
-      isDegraded: true,
-      isLossless: false,
-    }
-  }
-
-  // 均不可用或探测失败
+  const requested = qualityLabel(reqLevel)
+  const badge = t('quality.requestedTier', { quality: requested })
+  const measured = probe?.[reqLevel]
+  const details = measured && !measured.isUnknown &&
+    (measured.formatLabel !== '—' || measured.actualBitrateKbps) ? measured.bitrateLabel : undefined
   return {
-    badge: t('quality.unknown'),
-    tooltip: t('quality.unknownSource', { quality: nominalBadge }),
-    isDegraded: false,
+    badge,
+    tooltip: details ? t('quality.actualQuality', { requested, actual: details }) : t('quality.unknownSource', { quality: requested }),
+    isDegraded: Boolean(measured && !measured.isUnknown && !measured.isAvailable),
     isLossless: false,
   }
 })

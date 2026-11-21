@@ -206,6 +206,7 @@ const fetchSongs = async (nocache = false) => {
           dt: normalizeDurationMs(t.duration),
           url: t.streamUrl || `/api/music/stream?id=${encodeURIComponent(t.platformId || t.id)}${t.platform ? `&source=${encodeURIComponent(t.platform)}` : ''}&title=${encodeURIComponent(t.title || '')}&artist=${encodeURIComponent(t.artist || '')}`,
           sha: t.sha || '',
+          mediaMetadataVerified: t.mediaMetadataVerified === true,
           qualityBadge: t.qualityBadge || undefined,
           qualities: t.qualities || [],
           sources: t.sources || [],

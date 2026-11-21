@@ -83,9 +83,10 @@ describe('switchQuality', () => {
     await expect(store.switchQuality('exhigh')).resolves.toBe(true)
 
     expect(song.url).toBe('new-ok.mp3')
-    expect(song.qualityBadge).toBe('HQ')
+    expect(song.requestedQuality).toBe('exhigh')
+    expect(song.mediaMetadataVerified).toBe(false)
     expect(store.audio.playlist[0].url).toBe('new-ok.mp3')
-    expect(store.audio.playlist[0].qualityBadge).toBe('HQ')
+    expect(store.audio.playlist[0].requestedQuality).toBe('exhigh')
     expect(store.audio.audio?.currentTime).toBe(12)
     expect(store.audio.isLoading).toBe(false)
   })
@@ -159,7 +160,7 @@ describe('switchQuality', () => {
     expect(fakeAudio.currentTime).toBe(38)
     expect(play).toHaveBeenCalledTimes(1)
     expect(song.url).toBe('standard.mp3')
-    expect(song.qualityBadge).toBe('标准')
+    expect(song.requestedQuality).toBe('standard')
   })
 
   it('暂停中断已发起的 play 时保留新音源，不恢复旧音源', async () => {

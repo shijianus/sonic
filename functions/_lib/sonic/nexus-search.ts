@@ -1,3 +1,4 @@
+import { requestOptions } from './quality-options';
 // Sonic Gateway — Nexus Search Orchestrator
 // Brand: Sonic (声波 / Sonic Multi-Source Search Gateway)
 // Multi-source parallel search, timeout isolation, normalization & deduplication
@@ -358,31 +359,10 @@ async function searchNexusWithinBudget(
 
       const existing = existingCluster.track;
       const existingQualities = existing.qualities || [];
-      const hasLossless = existingQualities.some((q) => q.level === 'lossless');
-      const hasExhigh = existingQualities.some((q) => q.level === 'exhigh');
-
-      const isLosslessCandidate = (track.platform === 'kugou' || track.platform === 'netease' || track.platform === 'qq');
-      if (isLosslessCandidate && !hasLossless) {
-        existingQualities.unshift({
-          level: 'lossless',
-          label: 'SQ 无损',
-          bitrate: 'FLAC 24bit',
-          format: 'flac',
-          streamUrl: `/api/music/stream?${qParams}&br=lossless`,
-          desc: '超清无损母带音质 (FLAC / 24-bit)',
-        });
-        existing.qualityBadge = 'SQ';
-      } else if (!hasExhigh) {
-        existingQualities.push({
-          level: 'exhigh',
-          label: 'HQ 极高',
-          bitrate: '320kbps',
-          format: 'mp3',
-          streamUrl: `/api/music/stream?${qParams}&br=320`,
-          desc: '极高品质MP3 (320kbps 饱满声场)',
-        });
-        if (existing.qualityBadge !== 'SQ') existing.qualityBadge = 'HQ';
+      for (const option of requestOptions(origPlat, qParams)) {
+        if (!existingQualities.some(q => q.level === option.level)) existingQualities.push(option);
       }
+      existing.qualities = existingQualities;
 
       // If incoming track is from NetEase and current is not, use NetEase ID internally for highest stream compatibility
       if (track.platform === 'netease' && existing.platform !== 'netease') {
@@ -391,6 +371,9 @@ async function searchNexusWithinBudget(
         existing.urlId = track.platformId;
         existing.lyricId = track.lyricId || track.platformId;
         existing.streamUrl = `/api/music/stream?${qParams}`;
+        existing.mediaMetadataVerified = track.mediaMetadataVerified;
+        existing.qualityBadge = track.mediaMetadataVerified ? track.qualityBadge : undefined;
+        existing.streamType = track.mediaMetadataVerified ? track.streamType : undefined;
         if (track.picId) existing.picId = track.picId;
       }
 
@@ -418,47 +401,6 @@ async function searchNexusWithinBudget(
         duration: track.duration,
       });
     } else {
-      const isHighTier = track.platform === 'netease' || track.platform === 'kugou' || track.platform === 'qq';
-      const qualities: any[] = [
-        ...(isHighTier
-          ? [
-              {
-                level: 'lossless' as const,
-                label: 'SQ 无损',
-                bitrate: 'FLAC 24bit',
-                format: 'flac',
-                streamUrl: `/api/music/stream?${qParams}&br=lossless`,
-                desc: '超清无损母带音质 (FLAC / 24-bit)',
-              },
-              {
-                level: 'exhigh' as const,
-                label: 'HQ 极高',
-                bitrate: '320kbps',
-                format: 'mp3',
-                streamUrl: `/api/music/stream?${qParams}&br=320`,
-                desc: '极高品质MP3 (320kbps 饱满声场)',
-              },
-            ]
-          : [
-              {
-                level: 'exhigh' as const,
-                label: 'HQ 极高',
-                bitrate: '320kbps',
-                format: 'mp3',
-                streamUrl: `/api/music/stream?${qParams}&br=320`,
-                desc: '极高品质MP3 (320kbps 饱满声场)',
-              },
-            ]),
-        {
-          level: 'standard' as const,
-          label: '标准',
-          bitrate: '128kbps',
-          format: 'mp3',
-          streamUrl: `/api/music/stream?${qParams}&br=128`,
-          desc: '标准流畅音质 (128kbps 快速省流)',
-        },
-      ];
-
       const cleanCover = track.cover ? track.cover.replace('{size}', '400').replace('http://', 'https://') : '';
       const cleanArtistPic = track.artistPic ? track.artistPic.replace('{size}', '400').replace('http://', 'https://') : '';
       const finalCover = cleanCover || cleanArtistPic || (track.artist ? `/api/music/cover?artist=${encodeURIComponent(track.artist)}` : '');
@@ -476,8 +418,8 @@ async function searchNexusWithinBudget(
         artistPic: cleanArtistPic || finalCover,
         platform: isSinglePlatform ? origPlat : 'sonic',
         platformId: canonicalId,
-        qualities,
-        qualityBadge: isHighTier ? 'SQ' : 'HQ',
+        qualities: requestOptions(origPlat, qParams),
+        ...(track.mediaMetadataVerified ? { mediaMetadataVerified: true, qualityBadge: track.qualityBadge, streamType: track.streamType } : {}),
         streamUrl: `/api/music/stream?${qParams}`,
         sources: [
           {

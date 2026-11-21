@@ -25,7 +25,7 @@ import {
 } from '../../../_lib/sonic/recommend';
 
 // v1 could contain partial provider results, even from a no-store Engine response.
-const SMART_SEARCH_CACHE = 'search-smart-v2';
+const SMART_SEARCH_CACHE = 'search-smart-v3';
 
 export async function onRequest({
   request,

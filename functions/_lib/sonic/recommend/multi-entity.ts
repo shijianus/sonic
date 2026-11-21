@@ -669,7 +669,7 @@ export async function getMultiEntityRecommendationsForYou(
           artist: t.canonicalArtist,
           album: t.album,
           duration: t.duration,
-          streamType: t.streamType || 'full',
+          streamType: t.streamType,
           provider: t.provider,
         },
       });

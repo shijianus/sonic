@@ -49,6 +49,9 @@ export interface Song {
   sha?: string
   /** 最高音质等级标识（如 SQ、HQ、标准） */
   qualityBadge?: string
+  actualAudioLabel?: string
+  requestedQuality?: string
+  mediaMetadataVerified?: boolean
   /** 支持的音质等级列表 */
   qualities?: Array<{ level: string; label: string; bitrate: string; streamUrl?: string; format?: string; desc?: string }>
   /** 音频流类型（full 完整版 / trial 试听切片 / unavailable 不可用） */

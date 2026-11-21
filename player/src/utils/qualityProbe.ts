@@ -115,15 +115,14 @@ export function isLosslessContentType(contentType: string): boolean {
 }
 
 /** 提取格式大写标签 */
-export function extractFormatLabel(contentType: string, fallbackLevel: QualityLevel): string {
+export function extractFormatLabel(contentType: string, _fallbackLevel: QualityLevel): string {
   const ct = (contentType || '').toLowerCase()
   if (ct.includes('flac')) return 'FLAC'
   if (ct.includes('wav')) return 'WAV'
   if (ct.includes('alac')) return 'ALAC'
   if (ct.includes('aac')) return 'AAC'
   if (ct.includes('mpeg') || ct.includes('mp3')) return 'MP3'
-  if (fallbackLevel === 'lossless') return 'FLAC'
-  return 'MP3'
+  return '—'
 }
 
 /** 构造与 download.ts 完全一致的请求 URL */
@@ -269,7 +268,7 @@ async function probeTier(
     }
     if (!totalBytes) {
       const cl = res.headers.get('content-length')
-      if (cl && (status === 200 || status === 206)) {
+      if (cl && status === 200) {
         totalBytes = parseInt(cl, 10)
       }
     }
@@ -278,7 +277,7 @@ async function probeTier(
     res.body?.cancel?.().catch(() => {})
 
     let actualBitrateKbps: number | null = null
-    if (totalBytes && durationSec > 0) {
+    if (totalBytes && durationSec > 0 && res.headers.get('X-Sonic-Stream-Type') !== 'trial') {
       actualBitrateKbps = Math.round((totalBytes * 8) / durationSec / 1000)
     }
 
@@ -369,7 +368,7 @@ export async function probeSongQualities(
     )
     const stdFormat = stdOk ? extractFormatLabel(stdRaw.contentType, 'standard') : '—'
     const stdBitrateText = stdOk
-      ? `${stdFormat} · ${stdRaw.actualBitrateKbps ? `${stdRaw.actualBitrateKbps} kbps` : '—'}`
+      ? `${stdFormat} · ${stdRaw.actualBitrateKbps ? `≈${stdRaw.actualBitrateKbps} kbps` : '—'}`
       : '—'
 
     const standardItem: ProbeQualityItem = {
@@ -412,7 +411,7 @@ export async function probeSongQualities(
 
     const hqFormat = hqStatusOk ? extractFormatLabel(hqRaw.contentType, 'exhigh') : '—'
     const hqBitrateText = hqStatusOk
-      ? `${hqFormat} · ${hqRaw.actualBitrateKbps ? `${hqRaw.actualBitrateKbps} kbps` : '—'}`
+      ? `${hqFormat} · ${hqRaw.actualBitrateKbps ? `≈${hqRaw.actualBitrateKbps} kbps` : '—'}`
       : '—'
 
     const exhighItem: ProbeQualityItem = {
@@ -468,7 +467,7 @@ export async function probeSongQualities(
     const sqBitrateText = !sqStatusOk
       ? '—'
       : sqRaw.actualBitrateKbps
-        ? `${sqFormat} · ${sqRaw.actualBitrateKbps} kbps`
+        ? `${sqFormat} · ≈${sqRaw.actualBitrateKbps} kbps`
         : isLosslessContentType(sqRaw.contentType)
           ? `${sqFormat} · LOSSLESS`
           : `${sqFormat} · —`

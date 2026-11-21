@@ -1,3 +1,4 @@
+import { requestOption, requestOptions } from '../quality-options';
 // Sonic Intelligent Recommendation & Smart Search — Canonical Track Normalization & Cross-Platform Merging
 
 import type { SonicQualityOption, SonicSearchSource, SonicSearchTrack } from '../types';
@@ -221,9 +222,10 @@ export function toCanonicalTrack(
     releaseDate: raw?.releaseDate ? String(raw.releaseDate) : undefined,
     coverUrl: cleanCover,
     artistPic: cleanArtistPic,
-    qualityBadge: raw?.qualityBadge || (['netease', 'qq', 'kugou'].includes(primaryProvider) ? 'SQ' : 'HQ'),
+    qualityBadge: raw.mediaMetadataVerified ? raw.qualityBadge : undefined,
     qualities: Array.isArray(raw?.qualities) ? raw.qualities : undefined,
-    streamType: raw?.streamType || 'full',
+    mediaMetadataVerified: raw.mediaMetadataVerified === true,
+    streamType: raw.streamType === 'full' && !raw.mediaMetadataVerified ? undefined : raw.streamType,
     sourceIds,
     ...(Object.keys(mvSourceIds).length ? { mvSourceIds } : {}),
     availableSources,
@@ -285,11 +287,7 @@ export function mergeCanonicalTracks(existing: CanonicalTrack, incoming: Canonic
     mergedSources.push(s);
   }
 
-  const streamOrder: Record<string, number> = { full: 3, trial: 2, unavailable: 1 };
-  const bestStreamType =
-    (streamOrder[incoming.streamType || 'full'] || 0) > (streamOrder[existing.streamType || 'full'] || 0)
-      ? incoming.streamType
-      : existing.streamType;
+  const primary = preferIncoming ? incoming : existing;
 
   const mergedGenres = Array.from(new Set([...existing.genres, ...incoming.genres]));
   const mergedTags = Array.from(new Set([...existing.tags, ...incoming.tags]));
@@ -314,8 +312,9 @@ export function mergeCanonicalTracks(existing: CanonicalTrack, incoming: Canonic
     releaseDate: existing.releaseDate || incoming.releaseDate,
     coverUrl,
     artistPic: existing.artistPic || incoming.artistPic,
-    qualityBadge: existing.qualityBadge === 'SQ' || incoming.qualityBadge === 'SQ' ? 'SQ' : existing.qualityBadge || incoming.qualityBadge,
-    streamType: bestStreamType,
+    qualityBadge: primary.mediaMetadataVerified ? primary.qualityBadge : undefined,
+    mediaMetadataVerified: primary.mediaMetadataVerified,
+    streamType: primary.streamType === 'full' && !primary.mediaMetadataVerified ? undefined : primary.streamType,
     sourceIds: mergedSourceIds,
     mvSourceIds: { ...incoming.mvSourceIds, ...existing.mvSourceIds },
     availableSources: mergedSources,
@@ -327,43 +326,12 @@ export function mergeCanonicalTracks(existing: CanonicalTrack, incoming: Canonic
 
 export function buildQualitiesForCanonical(track: CanonicalTrack): SonicQualityOption[] {
   if (Array.isArray(track.qualities) && track.qualities.length > 0) {
-    return track.qualities;
+    return track.qualities.filter(q => ['lossless', 'exhigh', 'standard'].includes(q.level)).map(q => requestOption(q.level, q.streamUrl));
   }
   const origPlat = track.provider || 'netease';
   const pid = track.providerTrackId || track.canonicalTrackId;
   const qParams = `id=${encodeURIComponent(pid)}&source=${encodeURIComponent(origPlat)}&title=${encodeURIComponent(track.title)}&artist=${encodeURIComponent(track.primaryArtist)}`;
-  const isHighTier = ['netease', 'qq', 'kugou'].includes(origPlat);
-
-  const list: SonicQualityOption[] = [];
-  if (isHighTier) {
-    list.push({
-      level: 'lossless',
-      label: 'SQ 无损',
-      bitrate: 'FLAC 24bit',
-      format: 'flac',
-      streamUrl: `/api/music/stream?${qParams}&br=lossless`,
-      desc: '超清无损母带音质 (FLAC / 24-bit)',
-    });
-  }
-  list.push(
-    {
-      level: 'exhigh',
-      label: 'HQ 极高',
-      bitrate: '320kbps',
-      format: 'mp3',
-      streamUrl: `/api/music/stream?${qParams}&br=320`,
-      desc: '极高品质MP3 (320kbps 饱满声场)',
-    },
-    {
-      level: 'standard',
-      label: '标准',
-      bitrate: '128kbps',
-      format: 'mp3',
-      streamUrl: `/api/music/stream?${qParams}&br=128`,
-      desc: '标准流畅音质 (128kbps 快速省流)',
-    },
-  );
-  return list;
+  return requestOptions(origPlat, qParams);
 }
 
 export function canonicalToSonicTrack(track: CanonicalTrack): SonicSearchTrack {
@@ -392,7 +360,9 @@ export function canonicalToSonicTrack(track: CanonicalTrack): SonicSearchTrack {
     platformId: pid,
     sources,
     qualities,
-    qualityBadge: track.qualityBadge || 'HQ',
+    mediaMetadataVerified: track.mediaMetadataVerified === true,
+    qualityBadge: track.mediaMetadataVerified ? track.qualityBadge : undefined,
+    streamType: track.streamType === 'full' && !track.mediaMetadataVerified ? undefined : track.streamType,
     streamUrl: `/api/music/stream?${qParams}`,
     lyricId: pid,
     urlId: pid,

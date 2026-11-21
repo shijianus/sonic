@@ -36,7 +36,12 @@ export function readableCatalog(store: RecommendStore, env?: AppEnv) {
       } catch { return false; }
     });
     return { ...item, provider: primary.platform, providerTrackId: primary.platformId, availableSources, sourceIds,
-      mvSourceIds, qualities, coverUrl: cover(item.coverUrl), artistPic: cover(item.artistPic) };
+      mvSourceIds, qualities,
+      mediaMetadataVerified: primary.platform === item.provider && primary.platformId === item.providerTrackId && item.mediaMetadataVerified,
+      qualityBadge: primary.platform === item.provider && primary.platformId === item.providerTrackId && item.mediaMetadataVerified ? item.qualityBadge : undefined,
+      streamType: primary.platform === item.provider && primary.platformId === item.providerTrackId && (item.mediaMetadataVerified || item.streamType !== 'full')
+        ? item.streamType : undefined,
+      coverUrl: cover(item.coverUrl), artistPic: cover(item.artistPic) };
   }
   const tracks = (items: CanonicalTrack[]) => items.map(track).filter((item): item is CanonicalTrack => item !== null);
   const visibleById = new Map<string, CanonicalTrack | null>();

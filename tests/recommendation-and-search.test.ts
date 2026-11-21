@@ -863,3 +863,18 @@ describe('推荐存储持久化 fail-closed', () => {
     }
   })
 })
+
+it('keeps selectable tiers separate from confirmed file metadata, including older catalog rows', async () => {
+  const { canonicalToSonicTrack } = await import('../functions/_lib/sonic/recommend/track-canonical')
+  const track = toCanonicalTrack({ id: 'source-song', platform: 'qq', title: 'Audio', artist: 'Singer' })!
+  expect(track.streamType).toBeUndefined()
+  expect(track.qualityBadge).toBeUndefined()
+
+  const converted = canonicalToSonicTrack({
+    ...track, qualityBadge: 'SQ', streamType: 'full', mediaMetadataVerified: undefined,
+    qualities: [{ level: 'lossless', label: 'SQ', bitrate: 'FLAC 24bit', format: 'flac', streamUrl: '/track' }],
+  })
+  expect(converted.qualityBadge).toBeUndefined()
+  expect(converted.streamType).toBeUndefined()
+  expect(converted.qualities).toEqual([{ level: 'lossless', label: '请求无损', bitrate: '', streamUrl: '/track' }])
+})

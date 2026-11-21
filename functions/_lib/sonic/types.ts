@@ -175,6 +175,8 @@ export interface SonicSearchTrack {
   platformId: string;
   sources: SonicSearchSource[];
   qualities?: SonicQualityOption[];
+  mediaMetadataVerified?: boolean;
+  streamType?: 'full' | 'trial' | 'unavailable';
   qualityBadge?: 'SQ' | 'HQ' | '标准' | string;
   streamUrl?: string;
   // Additional player compatibility fields:

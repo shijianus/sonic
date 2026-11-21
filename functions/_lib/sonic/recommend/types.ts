@@ -45,6 +45,7 @@ export interface CanonicalTrack {
   coverUrl: string;
   artistPic?: string;
   qualityBadge?: string;
+  mediaMetadataVerified?: boolean;
   qualities?: SonicQualityOption[];
   streamType?: 'full' | 'trial' | 'unavailable';
   sourceIds: Record<string, string>; // { netease: "186016", qq: "003aAPGv1I6t8A", ... }

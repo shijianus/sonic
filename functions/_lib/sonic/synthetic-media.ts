@@ -227,6 +227,8 @@ export function searchSyntheticCatalog(query: string, count = 20, page = 1): Son
     lyricId: spec.id,
     urlId: spec.id,
     source: 'synthetic',
-    qualityBadge: 'SQ',
+    qualityBadge: 'PCM 16-bit',
+    mediaMetadataVerified: true,
+    streamType: 'full',
   }));
 }

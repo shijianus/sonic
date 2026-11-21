@@ -508,7 +508,7 @@ export async function handleNexusSearchRequest(
 
   const cacheIdentifier = `${computeContentPolicyEpoch(env)}:q=${query.toLowerCase()}:p=${page}:c=${count}`;
   if (!nocache) {
-    const hit = await getSonicCachedJson<any>('search-nexus-v4', cacheIdentifier, env);
+    const hit = await getSonicCachedJson<any>('search-nexus-v5', cacheIdentifier, env);
     if (hit?.value) {
       const body = { ...hit.value, meta: { ...hit.value.meta, cached: true, cacheLevel: hit.cacheLevel } };
       return jsonResponse(body, {
@@ -531,7 +531,7 @@ export async function handleNexusSearchRequest(
 
     // If local engine was down AND CF fallback yielded 0 tracks, check stale cache before returning empty
     if (result.degraded && result.data.tracks.length === 0 && !nocache) {
-      const staleHit = await getSonicCachedJson<any>('search-nexus-v4', cacheIdentifier, env, { allowStale: true });
+      const staleHit = await getSonicCachedJson<any>('search-nexus-v5', cacheIdentifier, env, { allowStale: true });
       if (staleHit?.value) {
         const staleBody = {
           ...staleHit.value,
@@ -583,7 +583,7 @@ export async function handleNexusSearchRequest(
     };
 
     if (result.data.tracks.length > 0 && !nocache && !noStore) {
-      await putSonicCachedJson('search-nexus-v4', cacheIdentifier, response, 3600, 86400, env, waitUntil);
+      await putSonicCachedJson('search-nexus-v5', cacheIdentifier, response, 3600, 86400, env, waitUntil);
     }
 
     return jsonResponse(response, {
@@ -677,7 +677,7 @@ export async function handleSingleProviderSearchRequest(
 
   const cacheIdentifier = `${computeContentPolicyEpoch(env)}:${p}:q=${query.toLowerCase()}:p=${page}:c=${count}`;
   if (!nocache) {
-    const hit = await getSonicCachedJson<any>('search-prov-v4', cacheIdentifier, env);
+    const hit = await getSonicCachedJson<any>('search-prov-v5', cacheIdentifier, env);
     if (hit?.value) {
       const body = { ...hit.value, meta: { ...hit.value.meta, cached: true, cacheLevel: hit.cacheLevel } };
       return jsonResponse(body, {
@@ -718,7 +718,7 @@ export async function handleSingleProviderSearchRequest(
         ],
       };
       if (!nocache && Array.isArray(body.data.tracks) && body.data.tracks.length > 0) {
-        await putSonicCachedJson('search-prov-v4', cacheIdentifier, body, 3600, 86400, env, waitUntil);
+        await putSonicCachedJson('search-prov-v5', cacheIdentifier, body, 3600, 86400, env, waitUntil);
       }
       return jsonResponse(body, {
         status: 200,
@@ -773,7 +773,7 @@ export async function handleSingleProviderSearchRequest(
     };
 
     if (tracks.length > 0 && !nocache) {
-      await putSonicCachedJson('search-prov-v4', cacheIdentifier, response, 3600, 86400, env, waitUntil);
+      await putSonicCachedJson('search-prov-v5', cacheIdentifier, response, 3600, 86400, env, waitUntil);
     }
 
     return jsonResponse(response, {
