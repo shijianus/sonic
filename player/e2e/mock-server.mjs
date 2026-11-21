@@ -22,8 +22,9 @@ const HOST = '127.0.0.1'
 // ── 音频夹具：20s / 8kHz / 8-bit mono PCM WAV，正弦波 ───────────────────────
 const WAV_SECONDS = 20
 const SAMPLE_RATE = 8000
-function makeWav(seconds, sampleRate = SAMPLE_RATE) {
-  const dataSize = seconds * sampleRate
+function makeWav(seconds, sampleRate = SAMPLE_RATE, bits = 8) {
+  const bytesPerSample = bits / 8
+  const dataSize = seconds * sampleRate * bytesPerSample
   const audio = Buffer.alloc(44 + dataSize)
   audio.write('RIFF', 0)
   audio.writeUInt32LE(36 + dataSize, 4)
@@ -33,13 +34,15 @@ function makeWav(seconds, sampleRate = SAMPLE_RATE) {
   audio.writeUInt16LE(1, 20) // PCM
   audio.writeUInt16LE(1, 22) // mono
   audio.writeUInt32LE(sampleRate, 24)
-  audio.writeUInt32LE(sampleRate, 28)
-  audio.writeUInt16LE(1, 32)
-  audio.writeUInt16LE(8, 34)
+  audio.writeUInt32LE(sampleRate * bytesPerSample, 28)
+  audio.writeUInt16LE(bytesPerSample, 32)
+  audio.writeUInt16LE(bits, 34)
   audio.write('data', 36)
   audio.writeUInt32LE(dataSize, 40)
-  for (let i = 0; i < dataSize; i++) {
-    audio[44 + i] = Math.round(128 + 32 * Math.sin((2 * Math.PI * 440 * i) / sampleRate))
+  for (let i = 0; i < seconds * sampleRate; i++) {
+    const sample = Math.sin((2 * Math.PI * 440 * i) / sampleRate)
+    if (bits === 16) audio.writeInt16LE(Math.round(8192 * sample), 44 + i * 2)
+    else audio[44 + i] = Math.round(128 + 32 * sample)
   }
   return audio
 }
@@ -48,12 +51,20 @@ const wav320 = makeWav(WAV_SECONDS, SAMPLE_RATE * 2)
 const wavLossless = makeWav(WAV_SECONDS, SAMPLE_RATE * 3)
 // The long mobile layout test takes screenshots while a real audio element plays.
 const longLayoutWav = makeWav(120, SAMPLE_RATE)
+// Only the ECS test track uses high sample rates so its 320 kbps export is meaningful.
+const ecsAudio = new Map()
+function ecsFixtureWav(br) {
+  const rate = br === 'lossless' ? 48000 : br === '320' ? 44100 : 32000
+  if (!ecsAudio.has(rate)) ecsAudio.set(rate, makeWav(WAV_SECONDS, rate, 16))
+  return ecsAudio.get(rate)
+}
 
 // ── 曲目夹具 ───────────────────────────────────────────────────────────────
 const SONG_META = {
   9001: { name: 'Test Song One', artist: 'Tester A' },
   9002: { name: 'Test Song Two', artist: 'Tester B' },
   9003: { name: 'Test Song Three', artist: 'Tester C' },
+  9451: { name: 'ECS Test Tone', artist: 'ECS Fixture' },
   9004: { name: 'Test Song Four', artist: 'Tester D' },
   9200: { name: 'Instrumental Track', artist: 'Tester E' },
   9201: { name: 'No Lyric Track', artist: 'Tester F' },
@@ -84,6 +95,7 @@ const neteaseSong = id => ({
 })
 
 const SEARCH_FIXTURES = {
+  ecs: [9451],
   sonic: [9001, 9002, 9003, 9004],
   restricted: [9303, 9304, 9305],
   errors: [9306, 9307, 9308],
@@ -262,6 +274,7 @@ async function handleApi(req, res, url) {
     }
     if (id === '9001') await sleep(600)
     const br = q.get('br') || ''
+    if (id === '9451') return sendAudio(req, res, ecsFixtureWav(br))
     const audio = id === '9400'
       ? longLayoutWav
       : br === 'lossless'
