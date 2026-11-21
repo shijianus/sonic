@@ -181,6 +181,13 @@ try {
     assert.ok(engine.exitCode === null && Date.now() < deadline, 'Loopback Engine did not become ready');
     await delay(100);
   }
+  const catalogProbe = await fetch(`${engineOrigin}/api/sonic/search/nexus?q=sonic&count=1`, {
+    headers: { 'X-Sonic-Engine-Key': key }, signal: AbortSignal.timeout(5000),
+  });
+  assert.equal(catalogProbe.status, 200);
+  assert.equal((await catalogProbe.json()).data.tracks[0]?.sources[0]?.platform, 'synthetic');
+  const engineCatalogPolicy = catalogProbe.headers.get('X-Sonic-Catalog-Policy');
+  assert.ok(engineCatalogPolicy, 'Engine catalog responses must identify their effective content policy');
   const pagesScript = readFileSync(resolve(stagingRoot, 'bundle/index.js'), 'utf8');
   const worker = (name, durableObjects, bindings = env) => ({ name, modules: true, script: pagesScript,
     compatibilityDate, compatibilityFlags: ['nodejs_compat'], bindings, durableObjects,
@@ -198,9 +205,12 @@ try {
         smartRequests++;
         const ids = smartRecovered ? ['fast-track', 'recovered-track'] : ['fast-track'];
         return Response.json({
-          brand: 'Sonic', data: { tracks: ids.map(platformId => ({ platformId, title: platformId })), total: ids.length },
-          meta: { attempts: smartRecovered ? [] : [{ provider: 'netease', ok: false, errorCode: 'UPSTREAM_TIMEOUT' }] },
-        }, { headers: { 'Cache-Control': smartRecovered ? 'public, max-age=600' : 'no-store' } });
+          brand: 'Sonic', data: {
+            tracks: ids.map(platformId => ({ platformId, platform: 'synthetic', title: platformId, sources: [{ platform: 'synthetic', platformId }] })),
+            total: ids.length, totalKnown: smartRecovered,
+          },
+          meta: { attempts: [{ provider: 'synthetic', ok: smartRecovered, ...(!smartRecovered && { errorCode: 'UPSTREAM_TIMEOUT' }) }] },
+        }, { headers: { 'Cache-Control': smartRecovered ? 'public, max-age=600' : 'no-store', 'X-Sonic-Catalog-Policy': engineCatalogPolicy } });
       }
       if (redirectEngine) return new Response(null, { status: 307, headers: { Location: 'https://unused.sonic.test/' } });
       const result = await fetch(`${engineOrigin}${target.pathname}${target.search}`, {
@@ -357,7 +367,9 @@ try {
     });
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('x-sonic-cache'), cache);
-    assert.match(response.headers.get('cache-control'), expectedIds.length === 1 ? /no-store/ : /^public,/);
+    // The policy-scoped cache may serve a HIT, but clients must revalidate against current policy.
+    assert.match(response.headers.get('cache-control'), /private/);
+    assert.match(response.headers.get('cache-control'), /no-store/);
     assert.deepEqual((await response.json()).data.tracks.map(track => track.platformId), expectedIds);
   };
   await Promise.all(Array.from({ length: smartBurstSize }, () => requestSmart('MISS', ['fast-track'])));
