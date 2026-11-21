@@ -425,7 +425,7 @@ const qualityDisplayInfo = computed(() => {
   const song = currentSong.value
   if (song?.isLocal) {
     const label = song.actualAudioLabel || (/^ECS[123]$/.test(song.qualityBadge || '') ? song.qualityBadge : undefined) || t('quality.unknown')
-    return { badge: label, tooltip: label, isDegraded: false, isLossless: false }
+    return { badge: label, tooltip: label, isDegraded: false }
   }
 
   const requested = qualityLabel(reqLevel)
@@ -437,13 +437,11 @@ const qualityDisplayInfo = computed(() => {
     badge,
     tooltip: details ? t('quality.actualQuality', { requested, actual: details }) : t('quality.unknownSource', { quality: requested }),
     isDegraded: Boolean(measured && !measured.isUnknown && !measured.isAvailable),
-    isLossless: false,
   }
 })
 
 const activeQualityBadge = computed(() => qualityDisplayInfo.value.badge)
 const activeQualityTooltip = computed(() => qualityDisplayInfo.value.tooltip)
-const isLosslessActive = computed(() => qualityDisplayInfo.value.isLossless)
 const isDegradedQuality = computed(() => qualityDisplayInfo.value.isDegraded)
 
 const menuCoords = ref({ bottom: 0, right: 0 })
@@ -775,12 +773,13 @@ const emit = defineEmits(['show'])
         <div v-if="currentSong" class="relative">
           <button
             id="footer-quality-btn"
+            :disabled="currentSong.isLocal"
             ref="qualityBtnRef"
             @click.stop="toggleQualityMenu"
             @keydown.down.prevent="openAndFocusQualityMenu"
             @keydown.up.prevent="openAndFocusQualityMenu"
-            aria-haspopup="true"
-            :aria-expanded="showQualityMenu"
+            :aria-haspopup="currentSong.isLocal ? undefined : true"
+            :aria-expanded="currentSong.isLocal ? undefined : showQualityMenu"
             :aria-busy="Boolean(pendingQualityLevel)"
             aria-controls="quality-menu-panel"
             class="footer-quality-pill group flex min-h-11 shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-1 rounded-full text-xs font-bold transition-all duration-300 border border-glass bg-[var(--glass-interactive-hover-muted)] hover:bg-[var(--glass-interactive-hover)] text-primary hover:border-[var(--glass-accent-border)] select-none shadow-sm cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-500/80"
@@ -795,7 +794,7 @@ const emit = defineEmits(['show'])
             <span
               v-else
               class="w-1.5 h-1.5 rounded-full"
-              :class="isDegradedQuality ? 'bg-amber-400' : isLosslessActive ? 'bg-sky-400 animate-pulse shadow-[0_0_6px_#38bdf8]' : 'bg-cyan-400'"
+              :class="isDegradedQuality ? 'bg-amber-400' : 'bg-cyan-400'"
             ></span>
             <span class="whitespace-nowrap text-[11px] tracking-wide">{{ activeQualityBadge }}</span>
             <span
