@@ -1,5 +1,5 @@
 import {
-  buildClearSessionCookie,
+  buildClearOAuthTransactionCookies,
   buildSessionCookie,
   consumeOAuthState,
   createSession,
@@ -31,15 +31,7 @@ function clearOAuthCookies(requestUrl: URL): Headers {
     'Referrer-Policy': 'no-referrer',
     Pragma: 'no-cache',
   });
-  const secureAttr = shouldUseSecureCookie(requestUrl) ? '; Secure' : '';
-  const legacySuffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-  const hostSuffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-  if (shouldUseSecureCookie(requestUrl)) {
-    headers.append('Set-Cookie', `${SONIC_OAUTH_STATE_COOKIE_HOST_PREFIXED}=${hostSuffix}`);
-    headers.append('Set-Cookie', `${SONIC_OAUTH_VERIFIER_COOKIE_HOST_PREFIXED}=${hostSuffix}`);
-  }
-  headers.append('Set-Cookie', `${SONIC_OAUTH_STATE_COOKIE}=${legacySuffix}`);
-  headers.append('Set-Cookie', `${SONIC_OAUTH_VERIFIER_COOKIE}=${legacySuffix}`);
+  for (const cookie of buildClearOAuthTransactionCookies(requestUrl)) headers.append('Set-Cookie', cookie);
   return headers;
 }
 

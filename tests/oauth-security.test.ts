@@ -334,7 +334,7 @@ describe('Session-backed API key management', () => {
     expect(setCookies(withHeader).some((c) => c.startsWith('__Host-sonic_session=') || c.startsWith('sonic_session='))).toBe(true);
   });
 
-  it('logout clears the HttpOnly session cookie', async () => {
+  it('logout clears the session and all pending login cookies at their issued paths', async () => {
     const cookie = await loginSession();
     const res = await handleAuthLogout({
       request: new Request('https://sonic.example.com/api/auth/logout', {
@@ -345,6 +345,13 @@ describe('Session-backed API key management', () => {
     });
     expect(res.status).toBe(200);
     const cookies = setCookies(res);
+    for (const name of ['sonic_oauth_state', 'sonic_oauth_verifier']) {
+      const current = cookies.find(cookie => cookie.startsWith('__Host-' + name + '=;'));
+      expect(current).toContain('Secure');
+      expect(current).toMatch(/Path=\/(?:;|$)/);
+      expect(current).toContain('Max-Age=0');
+      expect(cookies.find(cookie => cookie.startsWith(name + '=;'))).toContain('Path=/api/auth');
+    }
     // Logout clears both the __Host- and the legacy name.
     expect(cookies.some((c) => c.startsWith('__Host-sonic_session=;'))).toBe(true);
     expect(cookies.some((c) => c.startsWith('sonic_session=;'))).toBe(true);

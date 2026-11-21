@@ -4,8 +4,7 @@ import {
   revokeJtiInKv,
   shouldUseSecureCookie,
   verifyAuth,
-  SONIC_OAUTH_STATE_COOKIE,
-  SONIC_OAUTH_VERIFIER_COOKIE,
+  buildClearOAuthTransactionCookies,
 } from '../../_lib/auth';
 import { errorResponse, handleOptions, jsonResponse } from '../../_lib/http';
 import { recordOAuthMetric } from '../../_lib/sonic/observability';
@@ -33,13 +32,11 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   for (const cookie of buildClearSessionCookie(url)) headers.append('Set-Cookie', cookie);
   const secure = shouldUseSecureCookie(url);
   const secureAttr = secure ? '; Secure' : '';
-  const pendingSuffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=/api/auth; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
-  headers.append('Set-Cookie', `${SONIC_OAUTH_STATE_COOKIE}=${pendingSuffix}`);
-  headers.append('Set-Cookie', `${SONIC_OAUTH_VERIFIER_COOKIE}=${pendingSuffix}`);
+  for (const cookie of buildClearOAuthTransactionCookies(url)) headers.append('Set-Cookie', cookie);
   // Logout is a full session end, not only an identity logout: the beta access
   // cookie and the legacy staging cookie must not survive it on a shared device.
   for (const cookie of buildClearAccessSessionCookie(url)) headers.append('Set-Cookie', cookie);
-  const stagingSuffix = pendingSuffix.replace('Path=/api/auth', 'Path=/');
+  const stagingSuffix = `; HttpOnly${secureAttr}; SameSite=Lax; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
   headers.append('Set-Cookie', `${SONIC_STAGING_COOKIE}=${stagingSuffix}`);
   if (secure) headers.append('Set-Cookie', `${SONIC_STAGING_COOKIE_HOST_PREFIXED}=${stagingSuffix}`);
   const accessRevocation = await revokeAccessSession(request, env);

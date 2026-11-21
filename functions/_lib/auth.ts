@@ -273,6 +273,19 @@ export function buildClearSessionCookie(requestUrl: URL): string[] {
   ];
 }
 
+export function buildClearOAuthTransactionCookies(requestUrl: URL): string[] {
+  const secure = shouldUseSecureCookie(requestUrl);
+  const attributes = `HttpOnly${secure ? '; Secure' : ''}; SameSite=Lax; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT`;
+  const cookies = [SONIC_OAUTH_STATE_COOKIE, SONIC_OAUTH_VERIFIER_COOKIE]
+    .map(name => `${name}=; ${attributes}; Path=/api/auth`);
+  if (secure) {
+    for (const name of [SONIC_OAUTH_STATE_COOKIE_HOST_PREFIXED, SONIC_OAUTH_VERIFIER_COOKIE_HOST_PREFIXED]) {
+      cookies.push(`${name}=; ${attributes}; Path=/`);
+    }
+  }
+  return cookies;
+}
+
 export function readCookie(request: Request, name: string): string | undefined {
   const header = request.headers.get('cookie');
   if (!header || header.length > 16384) return undefined;
