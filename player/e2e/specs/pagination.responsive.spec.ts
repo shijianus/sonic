@@ -138,3 +138,21 @@ for (const width of [360, 390]) {
     })
   })
 }
+
+test('keeps Next available without displaying a fabricated mobile total', async ({ page }) => {
+  await page.route('**/api/sonic/search/nexus?**', route => {
+    const url = new URL(route.request().url())
+    const p = Number(url.searchParams.get('page'))
+    const size = Number(url.searchParams.get('count'))
+    const tracks = buildMobileTracks(p, size, size + 1)
+    return route.fulfill({ json: { data: { total: tracks.length, totalKnown: false,
+      hasMore: p === 1, tracks } } })
+  })
+  await page.goto('/#/search?q=mobile-window')
+  await expect(page.getByText('Mobile Track 1', { exact: true })).toBeVisible()
+  await expect(page.locator('.search-results-summary p')).toHaveCount(0)
+  const next = page.getByRole('button', { name: 'Next', exact: true })
+  await next.click()
+  await expect(next).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Prev', exact: true })).toBeEnabled()
+})
