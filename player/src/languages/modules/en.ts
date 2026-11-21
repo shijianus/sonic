@@ -43,6 +43,7 @@ export default {
     linkCopied: 'Link copied',
     unknownPlaylist: 'Unknown playlist',
     search: {
+    browseSources: 'Browse provider results',
       placeholder: 'Search songs, artists, albums...',
       label: 'Search',
       suggest: 'Suggestions',

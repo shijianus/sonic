@@ -42,7 +42,8 @@ export default {
     loadFailed: '加载失败，请稍后重试',
     linkCopied: '链接已复制',
     unknownPlaylist: '未知歌单',
-    search: { placeholder: '搜索音乐、歌手、专辑...', label: '搜索', suggest: '搜索建议' },
+    search: {
+    browseSources: '浏览更多来源结果', placeholder: '搜索音乐、歌手、专辑...', label: '搜索', suggest: '搜索建议' },
     viewAll: '查看全部',
     playMV: '播放MV',
     sort: '排序',

@@ -15,6 +15,12 @@ export function getTotalPages(total: unknown, pageSize: unknown): number {
   return Math.max(1, Math.ceil(normalizedTotal / Math.max(1, normalizedPageSize)))
 }
 
+// Unknown catalogue totals support sequential navigation. This upper bound is
+// used for the controls only and is never displayed as a result count.
+export function unknownSearchNavigationTotal(page: number, size: number, length: number, hasMore?: boolean): number {
+  return (page - 1) * size + Math.max(1, (hasMore ?? length >= size) ? size + 1 : Math.min(length, size))
+}
+
 export function clampPage(page: unknown, total: unknown, pageSize: unknown): number {
   const numericPage = typeof page === 'number' ? page : Number(page)
   const safePage = Number.isFinite(numericPage) ? Math.floor(numericPage) : 1

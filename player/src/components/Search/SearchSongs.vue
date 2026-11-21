@@ -11,18 +11,19 @@ import { useAudio } from '@/composables/useAudio'
 import { useRecommendStore } from '@/stores/modules/recommend'
 import { transformSearchSongs, normalizeDurationMs, type SongData } from '@/utils/transformers'
 import { formatCoverUrl } from '@/utils/imageUrl'
-import { getTotalPages, normalizePaginationTotal } from '@/utils/pagination'
+import { getTotalPages, normalizePaginationTotal, unknownSearchNavigationTotal } from '@/utils/pagination'
 import { checkSearchPayload, classifySearchError, hasSearchTimeout, type SearchErrorKind } from '@/utils/searchErrors'
 
 interface Props {
   keywords: string
   limit?: number
   offset?: number
+  providersOnly?: boolean
 }
 const props = defineProps<Props>()
 const emit = defineEmits<{
   (e: 'loaded', count: number): void
-  (e: 'total', count: number): void
+  (e: 'total', count: number, known?: boolean, rankedWindow?: boolean): void
 }>()
 
 interface SongsState {
@@ -130,49 +131,51 @@ const fetchSongs = async (nocache = false) => {
 
   try {
     // 0. 优先调用 Sonic 混合智能搜索引擎 (/api/sonic/search/smart：支持简繁/拼音/容错/别名扩展与相关性门控个性化重排)
-    try {
-      const smartRes = await fetchSmartSearch(
-        {
-          q: term,
-          page,
-          count,
-          personalize: recommendStore.personalizationEnabled,
-          nocache,
-        },
-        recommendStore.buildRequestHeaders(true),
-        controller.signal
-      )
-      if (controller.signal.aborted || generation !== requestGeneration) return
-      state.suggestions = smartRes.suggestions || []
-      if (smartRes.tracks.length > 0) {
-        state.results = smartRes.tracks
-        state.fallbackTracks = []
-        state.fallbackUsed = false
-        emit('loaded', state.results.length)
-        emit('total', smartRes.total || state.results.length)
-        return
-      }
-      if (hasSearchTimeout(smartRes)) {
-        noteError('timeout')
-      } else if (smartRes.fallbackUsed && smartRes.fallbackTracks.length > 0) {
-        state.results = []
-        state.fallbackTracks = smartRes.fallbackTracks
-        state.fallbackUsed = true
-        emit('loaded', 0)
-        emit('total', 0)
-        return
-      } else {
-        const shrunkTotal = outOfRangeTotal(smartRes.total, page, count)
-        if (shrunkTotal > 0) {
-          emit('loaded', 0)
-          emit('total', shrunkTotal)
+    if (!props.providersOnly) {
+      try {
+        const smartRes = await fetchSmartSearch(
+          {
+            q: term,
+            page,
+            count,
+            personalize: recommendStore.personalizationEnabled,
+            nocache,
+          },
+          recommendStore.buildRequestHeaders(true),
+          controller.signal
+        )
+        if (controller.signal.aborted || generation !== requestGeneration) return
+        state.suggestions = smartRes.suggestions || []
+        if (smartRes.tracks.length > 0) {
+          state.results = smartRes.tracks
+          state.fallbackTracks = []
+          state.fallbackUsed = false
+          emit('loaded', state.results.length)
+          emit('total', smartRes.totalKnown ? smartRes.total : unknownSearchNavigationTotal(page, count, state.results.length), smartRes.totalKnown, smartRes.rankedWindow)
           return
         }
+        if (hasSearchTimeout(smartRes)) {
+          noteError('timeout')
+        } else if (smartRes.fallbackUsed && smartRes.fallbackTracks.length > 0) {
+          state.results = []
+          state.fallbackTracks = smartRes.fallbackTracks
+          state.fallbackUsed = true
+          emit('loaded', 0)
+          emit('total', 0, true, smartRes.rankedWindow)
+          return
+        } else {
+          const shrunkTotal = outOfRangeTotal(smartRes.total, page, count)
+          if (shrunkTotal > 0) {
+            emit('loaded', 0)
+            emit('total', shrunkTotal, true, smartRes.rankedWindow)
+            return
+          }
+        }
+      } catch (smartErr) {
+        if (controller.signal.aborted || generation !== requestGeneration) return
+        noteError(classifySearchError(smartErr))
+        console.warn('[Sonic Search] Smart search fallback to nexus:', smartErr)
       }
-    } catch (smartErr) {
-      if (controller.signal.aborted || generation !== requestGeneration) return
-      noteError(classifySearchError(smartErr))
-      console.warn('[Sonic Search] Smart search fallback to nexus:', smartErr)
     }
 
     // 1. 备用调用 Sonic 统一多源 SHA 聚合与音质分级搜索网关
@@ -221,12 +224,19 @@ const fetchSongs = async (nocache = false) => {
         state.fallbackTracks = []
         state.fallbackUsed = false
         emit('loaded', state.results.length)
-        emit('total', sonicRes?.data?.total || state.results.length)
+        const known = sonicRes?.data?.totalKnown !== false
+        emit('total', known ? sonicRes?.data?.total || state.results.length :
+          unknownSearchNavigationTotal(page, count, tracks.length, sonicRes.data.hasMore), known)
         return
       }
       if (hasSearchTimeout(sonicRes)) {
         noteError('timeout')
       } else {
+        if (sonicRes?.data?.totalKnown === false && page > 1) {
+          emit('loaded', 0)
+          emit('total', unknownSearchNavigationTotal(page, count, 0, false), false)
+          return
+        }
         const shrunkTotal = outOfRangeTotal(sonicRes?.data?.total, page, count)
         if (shrunkTotal > 0) {
           emit('loaded', 0)
@@ -286,7 +296,7 @@ const fetchSongs = async (nocache = false) => {
 }
 
 watch(
-  [() => props.keywords, () => props.limit, () => props.offset],
+  [() => props.keywords, () => props.limit, () => props.offset, () => props.providersOnly],
   () => {
     fetchSongs()
   },

@@ -35,6 +35,10 @@ import { ensureCatalogSeeded } from './seed-catalog';
 import { buildUserPreferenceProfile, getRecommendationsForYou } from './engine';
 import { indexTracksInMeilisearch, isMeilisearchEnabled, searchMeilisearchIds } from './external-adapters';
 
+// Rank the same bounded recall window before slicing any requested page.
+const LOCAL_RECALL_LIMIT = 100;
+const PROVIDER_RECALL_LIMIT = 50;
+
 export interface SmartSearchExecutionResult {
   data: SmartSearchResultData;
   attempts: SonicAttempt[];
@@ -292,7 +296,7 @@ export async function executeSmartSearch(
   const localCandidateMap = new Map<string, CanonicalTrack>();
   for (const qVariant of [query, ...exp.expandedQueries]) {
     if (!qVariant) continue;
-    for (const hit of store.searchLocalTracks(qVariant, count * 2)) {
+    for (const hit of store.searchLocalTracks(qVariant, LOCAL_RECALL_LIMIT)) {
       localCandidateMap.set(hit.canonicalTrackId, hit);
     }
   }
@@ -309,7 +313,7 @@ export async function executeSmartSearch(
   const meiliCandidates: CanonicalTrack[] = [];
   if (isMeilisearchEnabled(env)) {
     const mStart = Date.now();
-    const ids = await searchMeilisearchIds(exp.simplified || query, count, env);
+    const ids = await searchMeilisearchIds(exp.simplified || query, PROVIDER_RECALL_LIMIT, env);
     for (const id of ids) {
       const t = store.getTrack(id);
       if (t) meiliCandidates.push(t);
@@ -335,7 +339,7 @@ export async function executeSmartSearch(
     try {
       const nexusRes = await searchNexus(
         primaryUpstreamQuery,
-        { page, count, signal: options.signal, request: options.request },
+        { page: 1, count: PROVIDER_RECALL_LIMIT, signal: options.signal, request: options.request },
         env,
       );
       attempts.push(...nexusRes.attempts);
@@ -494,8 +498,10 @@ export async function executeSmartSearch(
     });
   }
 
-  ranked.sort((a, b) => b.totalScore - a.totalScore || b.relevance - a.relevance);
-  const sliced = ranked.slice(0, count);
+  ranked.sort((a, b) => b.totalScore - a.totalScore || b.relevance - a.relevance ||
+    a.canonical.canonicalTrackId.localeCompare(b.canonical.canonicalTrackId));
+  const offset = (page - 1) * count;
+  const sliced = ranked.slice(offset, offset + count);
 
   const outputTracks = sliced.map(({ canonical, totalScore, reasons }) => ({
     ...canonicalToSonicTrack(canonical),
@@ -510,7 +516,7 @@ export async function executeSmartSearch(
   const suggestions = executeSmartSuggest(query, 6, identity, env);
 
   // 6. Zero-Result Smart Fallback (never leave user on a dead blank page)
-  if (outputTracks.length === 0) {
+  if (ranked.length === 0 && page === 1) {
     const fallbackRec = hasSearchTimeout(attempts) ? null : await getRecommendationsForYou(
       identity,
       { mode: 'for-you', count: 8 },
@@ -524,6 +530,8 @@ export async function executeSmartSearch(
         page,
         count: 0,
         total: 0,
+        totalKnown: true,
+        resultScope: 'ranked-window',
         personalizedApplied: false,
         tracks: [],
         suggestions,
@@ -547,6 +555,8 @@ export async function executeSmartSearch(
       page,
       count: outputTracks.length,
       total: ranked.length,
+      totalKnown: true,
+      resultScope: 'ranked-window',
       personalizedApplied,
       tracks: outputTracks,
       suggestions,

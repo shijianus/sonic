@@ -250,9 +250,11 @@ async function searchNexusWithinBudget(
     provider: string;
   }
   const allRankedTracks: RankedTrack[] = [];
+  let hasMore = false;
   for (const r of results) {
     if (r.status === 'fulfilled' && Array.isArray(r.value.tracks)) {
       attempts.push(r.value.attempt);
+      hasMore ||= r.value.tracks.length >= count;
       r.value.tracks.forEach((t, idx) => {
         if (t && t.title) {
           allRankedTracks.push({ track: t, rank: idx, provider: r.value.provider });
@@ -280,6 +282,7 @@ async function searchNexusWithinBudget(
         ok: true,
         ms: Date.now() - gStart,
       });
+      hasMore ||= gTracks.length >= count;
       gTracks.forEach((t, idx) => {
         if (t && t.title) allRankedTracks.push({ track: t, rank: idx, provider: 'gdstudio' });
       });
@@ -591,6 +594,7 @@ async function searchNexusWithinBudget(
       count: finalTracks.length,
       total: finalTracks.length,
       totalKnown: false,
+      hasMore,
       tracks: finalTracks,
     },
     attempts,

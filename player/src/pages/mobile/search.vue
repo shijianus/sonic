@@ -25,7 +25,7 @@ import {
   type MVData,
 } from '@/utils/transformers'
 import { formatCoverUrl } from '@/utils/imageUrl'
-import { clampPage, normalizePaginationTotal } from '@/utils/pagination'
+import { clampPage, normalizePaginationTotal, unknownSearchNavigationTotal } from '@/utils/pagination'
 import { checkSearchPayload, classifySearchError, hasSearchTimeout, type SearchErrorKind } from '@/utils/searchErrors'
 
 const creativeEffect = {
@@ -244,13 +244,17 @@ const runSearch = async (keyword: string) => {
   await searchAll()
 }
 
+const songTotalKnown = ref(true)
+
 const applyPageTotal = (
   totalKey: 'songTotal' | 'playlistTotal' | 'mvTotal',
   pageKey: 'songPage' | 'playlistPage' | 'mvPage',
   pageSize: number,
   rawTotal: unknown,
-  fallback = 0
+  fallback = 0,
+  known = true
 ) => {
+  if (totalKey === 'songTotal') songTotalKnown.value = known
   const total = normalizePaginationTotal(rawTotal, fallback)
   state[totalKey] = total
   // v-if hides <Pagination> when total <= pageSize; clamp here so shrinking totals
@@ -310,12 +314,21 @@ const fetchSongs = async (signal: AbortSignal, generation: number, nocache: bool
         resolvedArtist: t.resolvedArtist,
         liked: false,
       }))
-      applyPageTotal('songTotal', 'songPage', state.songPageSize, sonicRes?.data?.total || tracks.length, tracks.length)
+      const known = sonicRes?.data?.totalKnown !== false
+      const total = known ? sonicRes?.data?.total ?? tracks.length :
+        unknownSearchNavigationTotal(state.songPage, state.songPageSize, tracks.length, sonicRes.data.hasMore)
+      applyPageTotal('songTotal', 'songPage', state.songPageSize, total, tracks.length, known)
       return
     }
     if (hasSearchTimeout(sonicRes)) {
       lastError = 'timeout'
     } else {
+      if (sonicRes?.data?.totalKnown === false && state.songPage > 1) {
+        state.songs = []
+        applyPageTotal('songTotal', 'songPage', state.songPageSize,
+          unknownSearchNavigationTotal(state.songPage, state.songPageSize, 0, false), 0, false)
+        return
+      }
       const nexusTotal = normalizePaginationTotal(sonicRes?.data?.total)
       if (nexusTotal > 0 && clampPage(state.songPage, nexusTotal, state.songPageSize) < state.songPage) {
         applyPageTotal('songTotal', 'songPage', state.songPageSize, nexusTotal)
@@ -880,7 +893,7 @@ watch(
         <swiper-slide>
           <div class="h-full min-h-11 w-full space-y-3 overflow-auto px-4 pb-6" tabindex="0">
             <div v-if="songs.length > 0" class="search-results-summary flex items-center justify-between py-2">
-              <p class="info-text text-xs">
+              <p v-if="songTotalKnown" class="info-text text-xs">
                 {{ t('search.result', { count: songTotal }) }}
               </p>
               <Button
@@ -912,6 +925,7 @@ watch(
               v-if="songTotal > songPageSize"
               v-model="songPage"
               :total="songTotal"
+              :total-known="songTotalKnown"
               :page-size="songPageSize"
             />
 

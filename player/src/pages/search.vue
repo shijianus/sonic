@@ -37,6 +37,9 @@ const state = reactive({
   page: 1,
   lastLoadedCount: 0,
   total: 0,
+  totalKnown: true,
+  rankedWindow: false,
+  providersOnly: false,
   isLoading: false,
   hotSearches: [] as { searchWord: string; score: number; iconType?: number }[],
   loadingHot: false,
@@ -108,7 +111,9 @@ const onLoaded = (count: number) => {
   state.isLoading = false
 }
 // 子组件回调：记录总条数（当上游总数收缩时自动回退到有效页码）
-const onTotal = (n: number) => {
+const onTotal = (n: number, known = true, rankedWindow = false) => {
+  state.totalKnown = known
+  state.rankedWindow = rankedWindow
   const normalized = normalizePaginationTotal(n)
   state.total = normalized
   if (normalized > 0) {
@@ -119,6 +124,9 @@ const onTotal = (n: number) => {
 
 // 切换类型或关键词时重置分页与总数
 watch([activeType, q], () => {
+  state.providersOnly = false
+  state.rankedWindow = false
+  state.totalKnown = true
   state.page = 1
   state.lastLoadedCount = 0
   state.total = 0
@@ -450,7 +458,7 @@ const maxScore = computed(() => {
                 {{ $t('search.resultsFor') }}
                 <span class="bg-gradient-to-r from-sky-400 to-blue-400 bg-clip-text text-transparent">"{{ q }}"</span>
               </h1>
-              <p v-if="total > 0" class="text-primary/50 text-sm">
+              <p v-if="total > 0 && state.totalKnown" class="text-primary/50 text-sm">
                 {{ $t('search.foundResults', { count: total }) }}
               </p>
             </div>
@@ -478,6 +486,14 @@ const maxScore = computed(() => {
                 {{ $t('actions.playAll') }}
               </Button>
 
+              <Button
+                v-if="activeType === 1 && !state.providersOnly && state.rankedWindow && page >= totalPages"
+                variant="ghost"
+                size="sm"
+                @click="state.providersOnly = true; state.page = 1"
+              >
+                {{ $t('search.browseSources') }}
+              </Button>
               <div v-if="total > 0" class="flex items-center gap-2">
                 <div class="flex items-center gap-1 rounded-xl bg-button-glass border border-glass-subtle p-1">
                   <button
@@ -493,7 +509,7 @@ const maxScore = computed(() => {
                     <span class="icon-[mdi--chevron-left] h-5 w-5" />
                   </button>
                   <span class="text-primary/80 min-w-[50px] text-center text-xs font-medium">
-                    {{ page }} / {{ totalPages }}
+                    {{ page }}<template v-if="state.totalKnown"> / {{ totalPages }}</template>
                   </span>
                   <button
                     type="button"
@@ -524,6 +540,7 @@ const maxScore = computed(() => {
                 if (activeType === 1) songsRef = el
               }
             "
+            v-bind="activeType === 1 ? { providersOnly: state.providersOnly } : {}"
             :keywords="q"
             :limit="pageSize"
             :offset="(page - 1) * pageSize"

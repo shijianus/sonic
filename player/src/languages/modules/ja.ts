@@ -43,6 +43,7 @@ export default {
     linkCopied: 'リンクをコピーしました',
     unknownPlaylist: '不明なプレイリスト',
     search: {
+    browseSources: '音楽配信元の検索結果を見る',
       placeholder: '楽曲・アーティスト・アルバムを検索...',
       label: '検索',
       suggest: '検索候補',

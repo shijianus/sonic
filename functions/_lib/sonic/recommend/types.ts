@@ -316,6 +316,8 @@ export interface SmartSearchResultData {
   page: number;
   count: number;
   total: number;
+  totalKnown?: boolean;
+  resultScope?: 'ranked-window';
   personalizedApplied: boolean;
   tracks: Array<
     SonicSearchTrack & {

@@ -74,7 +74,7 @@ export const syntheticProvider: SonicProviderAdapter = {
   },
   async search(query, options) {
     if (!this.isEnabled(options?.env)) return [];
-    return searchSyntheticCatalog(query, options?.count || 20);
+    return searchSyntheticCatalog(query, options?.count || 20, options?.page || 1);
   },
 };
 

@@ -10,10 +10,11 @@ const props = withDefaults(
     modelValue: number
     total: number
     pageSize: number
+    totalKnown?: boolean
     maxButtons?: number
     showCard?: boolean
   }>(),
-  { maxButtons: 5, showCard: true }
+  { maxButtons: 5, showCard: true, totalKnown: true }
 )
 const emit = defineEmits<{ (e: 'update:modelValue', v: number): void }>()
 
@@ -38,6 +39,7 @@ watch(
 )
 
 const pageNumbers = computed(() => {
+  if (!props.totalKnown) return [page.value]
   const max = props.maxButtons
   const total = totalPages.value
   const cur = page.value
@@ -78,7 +80,7 @@ const goNext = () => {
     <div class="flex items-center gap-1.5">
       <template v-for="(p, idx) in pageNumbers" :key="p">
         <span
-          v-if="idx === 0 && p > 1"
+          v-if="totalKnown && idx === 0 && p > 1"
           class="hidden px-1 text-primary/40 sm:inline"
         >...</span>
         <button
@@ -93,7 +95,7 @@ const goNext = () => {
           {{ p }}
         </button>
         <span
-          v-if="idx === pageNumbers.length - 1 && p < totalPages"
+          v-if="totalKnown && idx === pageNumbers.length - 1 && p < totalPages"
           class="hidden px-1 text-primary/40 sm:inline"
         >...</span>
       </template>
@@ -112,7 +114,7 @@ const goNext = () => {
       <span class="icon-[mdi--chevron-right] h-5 w-5" />
     </Button>
 
-    <span class="ml-1 hidden text-xs text-primary/50 sm:inline">
+    <span v-if="totalKnown" class="ml-1 hidden text-xs text-primary/50 sm:inline">
       {{ page }} / {{ totalPages }}
     </span>
   </div>

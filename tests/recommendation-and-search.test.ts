@@ -55,6 +55,33 @@ describe('CFSolara 智能音乐推荐与混合搜索引擎全链路测试', () =
     }
   })
 
+  it.each([true, false])('paginates the same ranked window with or without live recall (offline=%s)', async offline => {
+    const fixtureStore = new MemoryRecommendStore()
+    const fixtureEnv = {
+      RECOMMEND_STORE: fixtureStore,
+      SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'synthetic',
+      SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: '1', SONIC_RECOMMEND_OFFLINE: offline ? '1' : '0',
+    }
+    const publicIdentity: UserIdentityContext = {
+      mode: 'public', subjectKey: null, personalizationEnabled: false, isAuthenticated: false,
+    }
+    const lookup = async (page: number, count: number) =>
+      (await executeSmartSearch('Sonic', { page, count }, publicIdentity, fixtureEnv)).data
+    const complete = await lookup(1, 20)
+    expect(complete.total).toBeGreaterThan(1)
+    const ids = []
+    for (let page = 1; page <= complete.total; page++) {
+      const result = await lookup(page, 1)
+      expect(result.total).toBe(complete.total)
+      ids.push(result.tracks[0].canonicalTrackId)
+    }
+    expect(ids).toEqual(complete.tracks.map(track => track.canonicalTrackId))
+    expect(new Set(ids).size).toBe(ids.length)
+    expect(await lookup(complete.total + 1, 1)).toMatchObject({
+      total: complete.total, tracks: [], fallbackUsed: false, resultScope: 'ranked-window',
+    })
+  })
+
   describe('1. 文本归一、简繁转换、拼音/首字母、歌手别名与拼写容错', () => {
     it('繁体中文歌名与歌手名准确转换为简体中文', () => {
       expect(toSimplifiedChinese('陳奕迅 富士山下')).toBe('陈奕迅 富士山下')

@@ -196,7 +196,7 @@ export function parseHttpByteRange(
   return { kind: 'valid', start, end: Math.min(totalBytes - 1, rawEnd) };
 }
 
-export function searchSyntheticCatalog(query: string, count = 20): SonicSearchTrack[] {
+export function searchSyntheticCatalog(query: string, count = 20, page = 1): SonicSearchTrack[] {
   const q = (query || '').toLowerCase().trim();
   const matched = SYNTHETIC_TRACK_CATALOG.filter((item) => {
     if (!q || q === 'sonic' || q === 'test' || q === '测试') return true;
@@ -209,7 +209,8 @@ export function searchSyntheticCatalog(query: string, count = 20): SonicSearchTr
     );
   });
   const list = matched.length > 0 ? matched : q.length <= 2 ? SYNTHETIC_TRACK_CATALOG : [];
-  return list.slice(0, count).map((spec) => ({
+  const offset = (page - 1) * count;
+  return list.slice(offset, offset + count).map((spec) => ({
     id: spec.id,
     title: spec.title,
     name: spec.title,
