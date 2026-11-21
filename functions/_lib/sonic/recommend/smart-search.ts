@@ -24,10 +24,9 @@ import {
   toSimplifiedChinese,
 } from './text-norm';
 import {
-  canMergeCanonicalTracks,
+  findOrMergeRecording,
   canonicalToSonicTrack,
   isPlayableTrack,
-  mergeCanonicalTracks,
   toCanonicalTrack,
 } from './track-canonical';
 import { getRecommendStore } from './memory-store';
@@ -332,7 +331,7 @@ export async function executeSmartSearch(
   }
 
   // 3. Live Multi-Platform Nexus Search (unless offline/test-disabled)
-  const liveCanonicals: CanonicalTrack[] = [];
+  let liveCanonicals: CanonicalTrack[] = [];
   const offlineMode = options.skipLiveUpstream || String(env?.SONIC_RECOMMEND_OFFLINE || '') === '1';
   if (!offlineMode) {
     // Pick best upstream query: if user typed pure pinyin/alias/traditional, also search the normalized form!
@@ -362,6 +361,8 @@ export async function executeSmartSearch(
       // Automatically index newly discovered tracks into local store (& optional Meilisearch)
       if (liveCanonicals.length > 0) {
         store.upsertTracks(liveCanonicals);
+        // Store-assigned IDs distinguish same-title recordings even if upstream changes rank order.
+        liveCanonicals = liveCanonicals.map(track => store.getTrack(`${track.provider}:${track.providerTrackId}`) || track);
         if (isMeilisearchEnabled(env)) {
           indexTracksInMeilisearch(liveCanonicals, env).catch(() => {});
         }
@@ -385,19 +386,8 @@ export async function executeSmartSearch(
   // 4. Canonical Song Clustering & Edition-Safe Merging
   const clusterMap = new Map<string, CanonicalTrack>();
   const addCandidateToClusters = (cand: CanonicalTrack) => {
-    const existing = clusterMap.get(cand.canonicalTrackId);
-    if (existing && canMergeCanonicalTracks(existing, cand)) {
-      clusterMap.set(cand.canonicalTrackId, mergeCanonicalTracks(existing, cand));
-      return;
-    }
-    // Also check if another cluster has identical `(cleanTitle, canonicalArtist, edition)`
-    for (const [k, v] of clusterMap.entries()) {
-      if (canMergeCanonicalTracks(v, cand)) {
-        clusterMap.set(k, mergeCanonicalTracks(v, cand));
-        return;
-      }
-    }
-    clusterMap.set(cand.canonicalTrackId, cand);
+    const track = findOrMergeRecording(cand, id => clusterMap.get(id));
+    clusterMap.set(track.canonicalTrackId, track);
   };
 
   for (const c of catalog.tracks(liveCanonicals)) addCandidateToClusters(c);

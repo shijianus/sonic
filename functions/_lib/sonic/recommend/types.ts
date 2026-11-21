@@ -10,6 +10,7 @@ export type TrackEdition =
   | 'cover'
   | 'instrumental'
   | 'acoustic'
+  | 'remaster'
   | 'demo';
 
 export type InferredLanguage = 'zh' | 'yue' | 'en' | 'ja' | 'ko' | 'inst' | 'other' | 'unknown';

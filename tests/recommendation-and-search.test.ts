@@ -1,4 +1,8 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { searchNexus } from '../functions/_lib/sonic/nexus-search'
+import { syntheticProvider } from '../functions/_lib/sonic/providers'
+import { searchSyntheticCatalog } from '../functions/_lib/sonic/synthetic-media'
+import { titlesMatchStrictly } from '../functions/_lib/sonic/native-protocols'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -53,6 +57,54 @@ describe('CFSolara 智能音乐推荐与混合搜索引擎全链路测试', () =
       RECOMMEND_STORE: store,
       SONIC_RECOMMEND_OFFLINE: '1',
     }
+  })
+
+  it('keeps different recordings under separate IDs in Nexus, Smart and both catalog stores', async () => {
+    const base = searchSyntheticCatalog('sonic', 1)[0]
+    const make = (id: string, duration: number, album: string, title = 'Test Recording') => ({
+      ...base, id, platformId: id, title, name: title, duration, album, sources: [{ platform: 'synthetic', platformId: id, duration }],
+    })
+    const inputs = [
+      make('a', 180, 'First'), make('b', 183, 'First'), make('c', 220, 'First'),
+      make('d', 180, 'Second'), make('e', 180, 'Third'), make('f', 180, 'Third'),
+      make('g', 180, 'First', 'Test Recording (Live)'),
+      make('h', 180, 'First', 'Test Recording (2024 Remaster)'),
+      make('i', 176, 'First'), // individually near 180, but seven seconds from source b
+    ]
+    const fixtureEnv = { SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'synthetic', SONIC_ENABLE_SYNTHETIC_TEST_SOURCE: '1' }
+    const provider = vi.spyOn(syntheticProvider, 'search').mockResolvedValue(inputs)
+    try {
+      const nexus = await searchNexus('Test Recording', { platform: 'synthetic' }, { ...fixtureEnv, RECOMMEND_STORE: new MemoryRecommendStore() })
+      expect(nexus.data.tracks).toHaveLength(7)
+      expect(new Set(nexus.data.tracks.map(t => t.sha)).size).toBe(7)
+      expect(nexus.data.tracks.map(t => t.sources.map(s => s.platformId).sort().join(''))).toEqual(expect.arrayContaining(['ab', 'c', 'd', 'ef', 'g', 'h', 'i']))
+    } finally {
+      provider.mockRestore()
+    }
+    const sqlite = new SqliteRecommendStore(':memory:')
+    try {
+      for (const catalog of [new MemoryRecommendStore(), sqlite]) {
+        for (const input of inputs) catalog.upsertTrack(toCanonicalTrack(input)!)
+        expect(catalog.listTracks()).toHaveLength(7)
+        expect(catalog.getTrack('synthetic:e')?.canonicalTrackId).toBe(catalog.getTrack('synthetic:f')?.canonicalTrackId)
+        const publicIdentity: UserIdentityContext = {mode:'public', subjectKey:null, personalizationEnabled:false, isAuthenticated:false}
+        const smart = await executeSmartSearch('Test Recording', {skipLiveUpstream:true, count:20}, publicIdentity, {...fixtureEnv, RECOMMEND_STORE:catalog})
+        expect(smart.data.tracks.filter(t => t.title.startsWith('Test Recording'))).toHaveLength(7)
+        const reordered = vi.spyOn(syntheticProvider, 'search').mockResolvedValue([...inputs].reverse())
+        try {
+          const online = await executeSmartSearch('Test Recording', {count:20}, publicIdentity, {...fixtureEnv, RECOMMEND_STORE:catalog})
+          const ids = (tracks: typeof smart.data.tracks) => tracks.filter(t => t.title.startsWith('Test Recording')).map(t => t.canonicalTrackId).sort()
+          expect(ids(online.data.tracks)).toEqual(ids(smart.data.tracks))
+        } finally {
+          reordered.mockRestore()
+        }
+      }
+    } finally {
+      sqlite.close()
+    }
+    expect(titlesMatchStrictly('Test Recording (Live)', 'Test Recording')).toBe(false)
+    expect(titlesMatchStrictly('Test Recording', 'Test Recording (2024 Remaster)')).toBe(false)
+    expect(titlesMatchStrictly('Test Recording (Live in Paris)', 'Test Recording (Live in London)')).toBe(false)
   })
 
   it.each([true, false])('paginates the same ranked window with or without live recall (offline=%s)', async offline => {

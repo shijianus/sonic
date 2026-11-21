@@ -21,7 +21,7 @@ import {
   toPinyinInfo,
   toSimplifiedChinese,
 } from './text-norm';
-import { canMergeCanonicalTracks, mergeCanonicalTracks } from './track-canonical';
+import { findOrMergeRecording, trackSourceKeys } from './track-canonical';
 import { compareEventOrder, comparePopularityEventOrder, isPopularityEvent, subjectEventKey } from './event-state';
 import { upsertTrackMvEntities } from './entity-store';
 
@@ -138,17 +138,7 @@ export class MemoryRecommendStore implements RecommendStore {
     if (!incoming?.canonicalTrackId) return;
     this.beforeWrite();
 
-    const existing = this.tracks.get(incoming.canonicalTrackId);
-    let finalTrack = incoming;
-    if (existing && canMergeCanonicalTracks(existing, incoming)) {
-      finalTrack = mergeCanonicalTracks(existing, incoming);
-    } else if (existing && !canMergeCanonicalTracks(existing, incoming)) {
-      // Duration anomaly (e.g. 30s ringtone): disambiguate ID so studio original is untouched
-      finalTrack = {
-        ...incoming,
-        canonicalTrackId: `${incoming.canonicalTrackId}_${incoming.duration || 'alt'}`,
-      };
-    }
+    const finalTrack = findOrMergeRecording(incoming, id => this.tracks.get(id));
 
     if (!this.tracks.has(finalTrack.canonicalTrackId) && this.tracks.size >= MAX_TRACKS) {
       const oldestKey = this.tracks.keys().next().value;
@@ -164,38 +154,18 @@ export class MemoryRecommendStore implements RecommendStore {
     const taKey = `${finalTrack.cleanTitle}:::${compactNormalize(finalTrack.canonicalArtist)}:::${finalTrack.edition}`;
     this.titleArtistIndex.set(taKey, finalTrack.canonicalTrackId);
 
-    if (finalTrack.provider && finalTrack.providerTrackId) {
-      this.platformIndex.set(`${finalTrack.provider}:${finalTrack.providerTrackId}`, finalTrack.canonicalTrackId);
-      if (!this.platformIndex.has(finalTrack.providerTrackId)) {
-        this.platformIndex.set(finalTrack.providerTrackId, finalTrack.canonicalTrackId);
-      }
-    }
-    for (const [plat, pid] of Object.entries(finalTrack.sourceIds || {})) {
-      if (plat && pid) {
-        this.platformIndex.set(`${plat}:${pid}`, finalTrack.canonicalTrackId);
-        if (!this.platformIndex.has(pid)) {
-          this.platformIndex.set(pid, finalTrack.canonicalTrackId);
-        }
-      }
+    for (const [key, id] of trackSourceKeys(finalTrack)) {
+      this.platformIndex.set(key, finalTrack.canonicalTrackId);
+      if (!this.platformIndex.has(id)) this.platformIndex.set(id, finalTrack.canonicalTrackId);
     }
   }
 
   private removeTrackIndexes(trackId: string, track: CanonicalTrack): void {
     const titleKey = `${track.cleanTitle}:::${compactNormalize(track.canonicalArtist)}:::${track.edition}`;
     if (this.titleArtistIndex.get(titleKey) === trackId) this.titleArtistIndex.delete(titleKey);
-    const providerKeys = new Set<string>();
-    if (track.provider && track.providerTrackId) {
-      providerKeys.add(`${track.provider}:${track.providerTrackId}`);
-      providerKeys.add(track.providerTrackId);
-    }
-    for (const [platform, platformId] of Object.entries(track.sourceIds || {})) {
-      if (platform && platformId) {
-        providerKeys.add(`${platform}:${platformId}`);
-        providerKeys.add(platformId);
-      }
-    }
-    for (const key of providerKeys) {
+    for (const [key, id] of trackSourceKeys(track)) {
       if (this.platformIndex.get(key) === trackId) this.platformIndex.delete(key);
+      if (this.platformIndex.get(id) === trackId) this.platformIndex.delete(id);
     }
     for (const [relationId, relation] of this.entityRelations) {
       if (relation.parentId === trackId || relation.childId === trackId) this.entityRelations.delete(relationId);

@@ -53,6 +53,64 @@ afterEach(() => {
 });
 
 describe('release follow-up scoped stream cache retry', () => {
+  it('keeps unverified URLs playable but requires trusted completeness evidence for a full download', async () => {
+    const unknown = await stream({ request: request('&nocache=1'), env })
+    expect(unknown.status).toBe(200)
+    expect(unknown.headers.get('X-Sonic-Stream-Type')).toBeNull()
+    await unknown.arrayBuffer()
+    const strict = () => stream({ request: request('&allowTrial=0&nocache=1'), env })
+    for (const extra of [
+      {}, {streamType:'trial' as const, isTrial:true}, {completenessEvidence:'provider' as const, isTrial:true, resolvedSource:'netease'},
+    ]) {
+      engineMock.mockResolvedValue(engineSuccess(info('preview', extra)))
+      expect((await strict()).status).toBe(404)
+    }
+    const direct = new Request('https://sonic.test/api/music/stream?target=https://m701.music.126.net/direct.mp3&allowTrial=0')
+    expect((await stream({request:direct, env})).status).toBe(400)
+    engineMock.mockResolvedValue(engineSuccess(info('official', {resolvedSource:'netease', resolvedId:'1001', completenessEvidence:'provider'})))
+    const complete = await strict()
+    expect(complete.status).toBe(200)
+    expect(complete.headers.get('X-Sonic-Stream-Type')).toBe('full')
+    expect(complete.headers.get('X-Sonic-Resolved-Id')).toBe('1001')
+    await complete.arrayBuffer()
+  })
+
+  it('uses explicit trial metadata for the requested provider ID and keeps caller-supplied labels out of the evidence', async () => {
+    const nativeEnv = {
+      SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: 'netease',
+      SONIC_ENABLE_NETEASE: '1', SONIC_NCM_API_URL: 'http://ncm:3000',
+    }
+    const mockProvider = (item: Record<string, unknown>) => vi.stubGlobal('fetch', vi.fn(async () =>
+      Response.json({data: [{url:'https://m701.music.126.net/track.mp3', id:1001, ...item}]})))
+    mockProvider({freeTrialInfo:null})
+    const full = await resolvePlayableStream({...opts, allowTrial:false, nocache:true}, nativeEnv)
+    expect(full).toMatchObject({streamType:'full', completenessEvidence:'provider', resolvedId:'1001'})
+    expect(full?.resolvedTitle).toBeUndefined()
+    mockProvider({})
+    expect((await resolvePlayableStream({...opts, nocache:true}, nativeEnv))?.streamType).toBeUndefined()
+    for (const item of [{}, {freeTrialInfo:{start:0, end:30}}, {id:2000, freeTrialInfo:null}]) {
+      mockProvider(item)
+      expect((await resolvePlayableStream({...opts, allowTrial:false, nocache:true}, nativeEnv))?.url).toBe('')
+    }
+    mockProvider({freeTrialInfo:{start:0,end:30}})
+    expect(await resolvePlayableStream({...opts, nocache:true}, nativeEnv)).toMatchObject({streamType:'trial', isTrial:true, trialDuration:30})
+  })
+
+  it('synthetic media exposes the generated file identity on full and ranged transfers', async () => {
+    const localEnv = { SONIC_RUNTIME:'linux-engine', SONIC_CONTENT_POLICY:'strict-allowlist', SONIC_ALLOWED_SOURCES:'synthetic', SONIC_ENABLE_SYNTHETIC_TEST_SOURCE:'1', SONIC_ENGINE_SECRET:'stream-evidence-test-secret-32-characters' }
+    for (const range of ['', 'bytes=0-43']) {
+      const headers = new Headers({'X-Sonic-Engine-Key':'stream-evidence-test-secret-32-characters'})
+      if (range) headers.set('Range', range)
+      const req = new Request('https://sonic.test/api/music/stream?source=synthetic&id=syn-440hz&allowTrial=0', {headers})
+      const result = await stream({request:req, env:localEnv})
+      expect(result.status).toBe(range ? 206 : 200)
+      expect(result.headers.get('X-Sonic-Stream-Type')).toBe('full')
+      expect(result.headers.get('X-Sonic-Resolved-Id')).toBe('syn-440hz')
+      expect(result.headers.get('X-Sonic-Resolved-Source')).toBe('synthetic')
+      await result.arrayBuffer()
+    }
+  })
+
   it('an explicit retry bypasses fresh resolution and replaces its successful provider/ID mapping', async () => {
     engineMock.mockResolvedValueOnce(engineSuccess(info('expired'))).mockResolvedValueOnce(engineSuccess(info('renewed', { resolvedId: 'new-provider-id' })));
     expect((await resolvePlayableStream(opts, env))?.url).toContain('expired');

@@ -21,6 +21,8 @@ import { kugouProvider } from './providers/kugou';
 import { callLocalEngineJson, type CircuitState } from './local-engine';
 import { createRuntimeAbortBudget, UPSTREAM_TIMEOUT } from './request-budget';
 import { redactSensitiveString } from './observability';
+import { deterministicHash16 } from './recommend/track-canonical';
+import { classifyTrackEdition, extractCleanBaseTitle } from './recommend/text-norm';
 import { restrictsSearchCaching } from './search-cache-policy';
 
 export interface NexusSearchResult {
@@ -34,47 +36,11 @@ export interface NexusSearchResult {
   noStore?: boolean;
 }
 
-async function computeSongSha(title: string, artist: string): Promise<string> {
-  const cleanTitle = (title || '')
-    .toLowerCase()
-    .replace(/[\s\-_—·.,!?'"()[\]{}<>《》「」【】]/g, '');
-  const cleanArtist = (artist || '')
-    .toLowerCase()
-    .replace(/[\s\-_—·.,!?'"()[\]{}<>《》「」【】]/g, '')
-    .split('/')[0] || '';
-  const raw = `${cleanTitle}:::${cleanArtist}`;
-  try {
-    const data = new TextEncoder().encode(raw);
-    const hash = await crypto.subtle.digest('SHA-256', data);
-    return Array.from(new Uint8Array(hash))
-      .map((b) => b.toString(16).padStart(2, '0'))
-      .join('')
-      .slice(0, 16);
-  } catch {
-    let h1 = 0xdeadbeef, h2 = 0x41c64e6d;
-    for (let i = 0; i < raw.length; i++) {
-      const ch = raw.charCodeAt(i);
-      h1 = Math.imul(h1 ^ ch, 2654435761);
-      h2 = Math.imul(h2 ^ ch, 1597334677);
-    }
-    return (((h1 ^ (h1 >>> 16)) >>> 0).toString(16).padStart(8, '0') +
-            ((h2 ^ (h2 >>> 16)) >>> 0).toString(16).padStart(8, '0')).slice(0, 16);
-  }
-}
-
 function normalizeText(text: string): string {
   return (text || '')
     .toLowerCase()
     .replace(/[\s\-_—·.,!?'"`()[\]{}<>《》「」【】]/g, '')
     .trim();
-}
-
-function cleanTitleForMatching(title: string): string {
-  return normalizeText(
-    (title || '')
-      .replace(/\s*[\(\[\{（【][^\)\]\}）】]*(live|remaster|remastered|flac|320k|伴奏|instrumental|原唱|无损|高品质|纯音乐|片段|铃声|demo)[^\)\]\}）】]*[\)\]\}）】]/gi, '')
-      .replace(/(live|remaster|remastered|flac|320k|伴奏|instrumental|原唱|无损|高品质)/gi, '')
-  );
 }
 
 function cleanArtistForMatching(artist: string): string {
@@ -304,48 +270,30 @@ async function searchNexusWithinBudget(
   }
 
   // Multi-Attribute Canonical Song Clustering & Merging
-  // Match based on SHA, normalized title, primary artist, and album/duration correlation
+  // A title fingerprint only selects candidates; album, edition and duration determine compatibility.
   const trackClusters: Array<{
-    key: string;
-    sha: string;
     track: SonicSearchTrack;
     occurrenceCount: number;
     bestRank: number;
-    cleanTitle: string;
-    cleanArtist: string;
     cleanAlbum: string;
   }> = [];
-  const clusterBySha = new Map<string, (typeof trackClusters)[number]>();
   const clustersByTitleArtist = new Map<string, (typeof trackClusters)[number][]>();
-
-  const tracksWithSha = await Promise.all(
-    allRankedTracks.map(async (item) => ({ ...item, sha: await computeSongSha(item.track.title, item.track.artist) })),
-  );
-
-  for (const { track, rank, sha } of tracksWithSha) {
+  // Duration tolerance is nontransitive. Choose representatives in stable provider/ID order;
+  // the original upstream ranks still determine result ordering below.
+  allRankedTracks.sort((a, b) => a.provider.localeCompare(b.provider) ||
+    String(a.track.platformId || a.track.id).localeCompare(String(b.track.platformId || b.track.id)));
+  for (const { track, rank } of allRankedTracks) {
     if (!track.title) continue;
-    const cleanT = cleanTitleForMatching(track.title);
+    const edition = classifyTrackEdition(track.title, track.album);
+    const cleanT = edition === 'studio' ? extractCleanBaseTitle(track.title) : normalizeText(track.title);
     const cleanAr = cleanArtistForMatching(track.artist);
     const cleanAl = normalizeText(track.album || '');
     const trackDur = track.duration || 0;
-
-    // Comprehensive cluster finder: check SHA, title + artist + album/duration
-    const titleArtistKey = `${cleanT}:::${cleanAr}`;
-    let existingCluster = clusterBySha.get(sha);
-    if (!existingCluster) {
-      existingCluster = clustersByTitleArtist.get(titleArtistKey)?.find((c) => {
-        const cDur = c.track.duration || 0;
-        // Strict duration tolerance: if both tracks have known duration, discrepancy must be <= 4s
-        if (cDur > 0 && trackDur > 0 && Math.abs(cDur - trackDur) > 4) {
-          return false;
-        }
-        // If albums both exist and differ completely, do not merge into the same cluster
-        if (c.cleanAlbum && cleanAl && c.cleanAlbum !== cleanAl && !c.cleanAlbum.includes(cleanAl) && !cleanAl.includes(c.cleanAlbum)) {
-          return false;
-        }
-        return true;
-      });
-    }
+    const titleArtistKey = JSON.stringify([cleanT, cleanAr, edition]);
+    const existingCluster = clustersByTitleArtist.get(titleArtistKey)?.find(c => {
+      if (trackDur && c.track.sources.some(s => s.duration && Math.abs(s.duration - trackDur) > 4)) return false;
+      return !c.cleanAlbum || !cleanAl || c.cleanAlbum === cleanAl;
+    });
 
     const origPlat = track.platform || track.source || 'netease';
     const canonicalId = track.platformId || track.id;
@@ -365,7 +313,8 @@ async function searchNexusWithinBudget(
       existing.qualities = existingQualities;
 
       // If incoming track is from NetEase and current is not, use NetEase ID internally for highest stream compatibility
-      if (track.platform === 'netease' && existing.platform !== 'netease') {
+      const preferIncoming = origPlat === 'netease' && existing.sources[0]?.platform !== 'netease';
+      if (preferIncoming) {
         existing.platformId = track.platformId;
         existing.id = track.platformId;
         existing.urlId = track.platformId;
@@ -395,16 +344,17 @@ async function searchNexusWithinBudget(
       }
 
       // Record per-platform source IDs for cross-provider lyric/stream resolution
-      existing.sources.push({
-        platform: origPlat,
-        platformId: canonicalId,
-        duration: track.duration,
-      });
+      if (!existing.sources.some(s => s.platform === origPlat && s.platformId === canonicalId)) {
+        const source = { platform: origPlat, platformId: canonicalId, duration: track.duration };
+        if (preferIncoming) existing.sources.unshift(source);
+        else existing.sources.push(source);
+      }
     } else {
       const cleanCover = track.cover ? track.cover.replace('{size}', '400').replace('http://', 'https://') : '';
       const cleanArtistPic = track.artistPic ? track.artistPic.replace('{size}', '400').replace('http://', 'https://') : '';
       const finalCover = cleanCover || cleanArtistPic || (track.artist ? `/api/music/cover?artist=${encodeURIComponent(track.artist)}` : '');
 
+      const sha = deterministicHash16(JSON.stringify([titleArtistKey, cleanAl, trackDur]));
       const mergedTrack: SonicSearchTrack = {
         id: canonicalId,
         sha,
@@ -435,17 +385,12 @@ async function searchNexusWithinBudget(
       };
 
       trackClusters.push({
-        key: titleArtistKey,
-        sha,
         track: mergedTrack,
         occurrenceCount: 1,
         bestRank: rank,
-        cleanTitle: cleanT,
-        cleanArtist: cleanAr,
         cleanAlbum: cleanAl,
       });
       const created = trackClusters[trackClusters.length - 1];
-      clusterBySha.set(sha, created);
       const titleClusters = clustersByTitleArtist.get(titleArtistKey) || [];
       titleClusters.push(created);
       clustersByTitleArtist.set(titleArtistKey, titleClusters);

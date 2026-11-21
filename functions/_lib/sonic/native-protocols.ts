@@ -4,6 +4,7 @@
 
 import type { AppEnv, SongItem } from '../types';
 import type { SonicAttempt, SonicSearchTrack } from './types';
+import { classifyTrackEdition } from './recommend/text-norm';
 import { getSonicConfig } from './config';
 import { getAllowedMediaDomains, computeContentPolicyEpoch, isSourceEnabledByPolicy } from './licensing';
 import { buildNeteaseEapiParams, buildNeteaseLinuxApiParams, buildNeteaseWeapiParams } from './crypto';
@@ -12,7 +13,7 @@ import { getSonicCachedJson, putSonicCachedJson } from './cache';
 import { safeFetch } from './security';
 import { callLocalEngineJson, getLocalEngineCircuitSnapshot, createRuntimeAbortBudget, fetchWithRuntimeBudget, type CircuitState } from './local-engine';
 import { redactSensitiveString } from './observability';
-import { getSyntheticTrackSpec, getSyntheticWavTotalBytes } from './synthetic-media';
+import { getSyntheticTrackSpec, getSyntheticWavTotalBytes, SYNTHETIC_SAMPLE_RATE, SYNTHETIC_CHANNELS, SYNTHETIC_BITS_PER_SAMPLE } from './synthetic-media';
 import {
   fetchProviderUrl,
   fetchProviderDirect,
@@ -523,6 +524,7 @@ export interface ResolvedStreamInfo {
   via: string;
   isTrial: boolean;
   streamType?: 'full' | 'trial' | 'unavailable';
+  completenessEvidence?: 'generated' | 'provider';
   trialDuration?: number;
   br?: number;
   size?: number;
@@ -561,6 +563,7 @@ async function resolveNeteaseSingleStream(
 ): Promise<{
   url: string;
   isTrial: boolean;
+  fullConfirmed: boolean;
   trialDuration?: number;
   br?: number;
   size?: number;
@@ -582,17 +585,18 @@ async function resolveNeteaseSingleStream(
       if (res.ok) {
         const json = (await res.json()) as any;
         const item = json?.data?.[0];
-        if (item?.url && typeof item.url === 'string') {
+        if (item?.url && typeof item.url === 'string' && (item.id == null || String(item.id) === cleanId)) {
           const type = String(item.type || '').toLowerCase();
           const isTrial = Boolean(item.freeTrialInfo);
           const trialDuration = isTrial && item.freeTrialInfo ? Math.max(0, (item.freeTrialInfo.end || 30) - (item.freeTrialInfo.start || 0)) : (isTrial ? 30 : undefined);
           return {
             url: toHttpsIfSafe(item.url),
             isTrial,
+            fullConfirmed: item.freeTrialInfo === null && String(item.id) === cleanId,
             trialDuration,
             br: typeof item.br === 'number' ? item.br : undefined,
             size: typeof item.size === 'number' ? item.size : undefined,
-            contentType: type === 'flac' ? 'audio/flac' : 'audio/mpeg',
+            contentType: type === 'flac' ? 'audio/flac' : type === 'mp3' ? 'audio/mpeg' : undefined,
             via: viaLabel(env, 'ncm-api'),
           };
         }
@@ -612,17 +616,18 @@ async function resolveNeteaseSingleStream(
     signal,
   );
   const item = eJson?.data?.[0];
-  if (item?.url && typeof item.url === 'string') {
+  if (item?.url && typeof item.url === 'string' && (item.id == null || String(item.id) === cleanId)) {
     const type = String(item.type || '').toLowerCase();
     const isTrial = Boolean(item.freeTrialInfo);
     const trialDuration = isTrial && item.freeTrialInfo ? Math.max(0, (item.freeTrialInfo.end || 30) - (item.freeTrialInfo.start || 0)) : (isTrial ? 30 : undefined);
     return {
       url: toHttpsIfSafe(item.url),
       isTrial,
+      fullConfirmed: item.freeTrialInfo === null && String(item.id) === cleanId,
       trialDuration,
       br: typeof item.br === 'number' ? item.br : undefined,
       size: typeof item.size === 'number' ? item.size : undefined,
-      contentType: type === 'flac' ? 'audio/flac' : 'audio/mpeg',
+      contentType: type === 'flac' ? 'audio/flac' : type === 'mp3' ? 'audio/mpeg' : undefined,
       via: viaLabel(env, 'eapi'),
     };
   }
@@ -858,6 +863,9 @@ export function titlesMatchStrictly(targetTitle: string, candidateTitle: string)
   const tNorm = normalizeCjkText(targetTitle);
   const cNorm = normalizeCjkText(candidateTitle);
   if (!tNorm || !cNorm) return false;
+  const edition = classifyTrackEdition(targetTitle);
+  if (edition !== classifyTrackEdition(candidateTitle)) return false;
+  if (edition !== 'studio') return tNorm === cNorm;
 
   // Anti-mismatch keyword exclusions: candidate must not be live/remix/cover/accompaniment/clip/ringtone unless target was
   const negativeKeywords = [
@@ -868,7 +876,7 @@ export function titlesMatchStrictly(targetTitle: string, candidateTitle: string)
   const tLower = targetTitle.toLowerCase();
   const cLower = candidateTitle.toLowerCase();
   for (const kw of negativeKeywords) {
-    if (!tNorm.includes(kw) && !tLower.includes(kw) && (cNorm.includes(kw) || cLower.includes(kw))) {
+    if ((tNorm.includes(kw) || tLower.includes(kw)) !== (cNorm.includes(kw) || cLower.includes(kw))) {
       return false;
     }
   }
@@ -922,6 +930,13 @@ export interface ResolveStreamOptions {
   signal?: AbortSignal;
 }
 
+function confirmsCompleteRecording(result: ResolvedStreamInfo): boolean {
+  return Boolean(result.resolvedId) && !result.isTrial && result.streamType === 'full' && (
+    (result.completenessEvidence === 'generated' && result.resolvedSource === 'synthetic') ||
+    (result.completenessEvidence === 'provider' && result.resolvedSource === 'netease')
+  );
+}
+
 export async function resolvePlayableStream(
   opts: ResolveStreamOptions,
   env?: AppEnv,
@@ -931,6 +946,15 @@ export async function resolvePlayableStream(
     budget.signal.throwIfAborted();
     const result = await resolvePlayableStreamWithinBudget({ ...opts, signal: budget.signal }, env);
     budget.signal.throwIfAborted();
+    if (!result?.url) return result;
+    // Old cache entries and mixed-version engines may still report a size estimate as full.
+    const full = confirmsCompleteRecording(result);
+    if (opts.allowTrial === false && !full) {
+      return { ...result, url: '', streamType: 'unavailable', completenessEvidence: undefined };
+    }
+    if (result.streamType === 'full' && !full) {
+      return { ...result, streamType: result.isTrial ? 'trial' : undefined, completenessEvidence: undefined };
+    }
     return result;
   } finally {
     budget.dispose();
@@ -1019,10 +1043,14 @@ async function resolvePlayableStreamWithinBudget(
   // for a source disabled after the entry was stored is discarded on sight.
   const cacheHitAllowedByPolicy = isSourceEnabledByPolicy(cleanSource, env);
 
+  const acceptResolution = (info: ResolvedStreamInfo | undefined): info is ResolvedStreamInfo =>
+    Boolean(info?.url && (allowTrial || confirmsCompleteRecording(info)) &&
+      (cfg.contentPolicy !== 'strict-allowlist' || (info.resolvedSource && isSourceEnabledByPolicy(info.resolvedSource, env))));
+
   // 1. Fresh cache check (8 minutes — well within signed CDN token TTL)
   if (!opts.nocache && cacheHitAllowedByPolicy) {
     const cached = await getSonicCachedJson<ResolvedStreamInfo>('stream-url-v1', cacheId, env);
-    if (cached && cached.value?.url) {
+    if (cached && acceptResolution(cached.value)) {
       return {
         ...cached.value,
         attempts: [
@@ -1059,7 +1087,7 @@ async function resolvePlayableStreamWithinBudget(
     );
     circuitState = engineRes.circuitState;
 
-    if (engineRes.ok && engineRes.data?.data?.url) {
+    if (engineRes.ok && acceptResolution(engineRes.data?.data)) {
       const resolved = engineRes.data.data;
       const mergedAttempts: SonicAttempt[] = [
         { provider: 'local-engine', via: 'local-engine', ok: true, ms: engineRes.latencyMs },
@@ -1092,7 +1120,7 @@ async function resolvePlayableStreamWithinBudget(
       const staleHit = opts.nocache || !cacheHitAllowedByPolicy
         ? null
         : await getSonicCachedJson<ResolvedStreamInfo>('stream-url-v1', cacheId, env, { allowStale: true });
-      if (staleHit?.value?.url) {
+      if (staleHit && acceptResolution(staleHit.value)) {
         return {
           ...staleHit.value,
           degraded: true,
@@ -1111,7 +1139,7 @@ async function resolvePlayableStreamWithinBudget(
   }
 
   // 3. Local / Direct Native Protocol Resolution
-  let trialCandidate: ResolvedStreamInfo | null = null;
+  let fallbackCandidate: ResolvedStreamInfo | null = null;
 
   if (cleanId) {
     const pStart = Date.now();
@@ -1132,8 +1160,9 @@ async function resolvePlayableStreamWithinBudget(
             provider: pLabel,
             via: viaLabel(env, 'synthetic-pcm'),
             isTrial: false,
-            streamType: 'full',
-            br: 128,
+            streamType: spec ? 'full' : undefined,
+            completenessEvidence: spec ? 'generated' : undefined,
+            br: spec ? SYNTHETIC_SAMPLE_RATE * SYNTHETIC_CHANNELS * SYNTHETIC_BITS_PER_SAMPLE : undefined,
             size: totalBytes,
             contentType: 'audio/wav',
             corsSafe: true,
@@ -1156,14 +1185,15 @@ async function resolvePlayableStreamWithinBudget(
         });
       } else if (cleanSource === 'netease' && cfg.enableNetease) {
         const ne = await resolveNeteaseSingleStream(cleanId, quality, env, signal);
-        if (ne?.url && !ne.isTrial) {
+        if (ne?.url && !ne.isTrial && (allowTrial || ne.fullConfirmed)) {
           attempts.push({ provider: pLabel, via: ne.via, ok: true, ms: Date.now() - pStart });
           const out: ResolvedStreamInfo = {
             url: ne.url,
             provider: pLabel,
             via: ne.via,
             isTrial: false,
-            streamType: 'full',
+            streamType: ne.fullConfirmed ? 'full' : undefined,
+            completenessEvidence: ne.fullConfirmed ? 'provider' : undefined,
             br: ne.br,
             size: ne.size,
             contentType: ne.contentType,
@@ -1174,8 +1204,7 @@ async function resolvePlayableStreamWithinBudget(
             attempts,
             resolvedSource: 'netease',
             resolvedId: cleanId,
-            resolvedTitle: opts.title || undefined,
-            resolvedArtist: opts.artist || undefined,
+
           };
           signal?.throwIfAborted();
           await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
@@ -1189,7 +1218,7 @@ async function resolvePlayableStreamWithinBudget(
             error: 'VIP/fee=1 track returned trial preview only (unblock disabled)',
           });
           if (allowTrial) {
-            trialCandidate = {
+            fallbackCandidate = {
               url: ne.url,
               provider: pLabel,
               via: ne.via,
@@ -1206,14 +1235,13 @@ async function resolvePlayableStreamWithinBudget(
               attempts: [...attempts],
               resolvedSource: 'netease',
               resolvedId: cleanId,
-              resolvedTitle: opts.title || undefined,
-              resolvedArtist: opts.artist || undefined,
+
             };
           }
         } else {
           attempts.push({ provider: pLabel, via: viaLabel(env), ok: false, ms: Date.now() - pStart, error: 'No direct URL returned' });
         }
-      } else if (cleanSource === 'qq' && cfg.enableQq) {
+      } else if (allowTrial && cleanSource === 'qq' && cfg.enableQq) {
         const qq = await resolveQQSingleStream(cleanId, env, signal);
         if (qq?.url) {
           const probe = await probeStreamPhysicalQuality(qq.url, 'https://y.qq.com/', 2000, opts.durationSec, nominalBr, signal, env);
@@ -1223,9 +1251,7 @@ async function resolvePlayableStreamWithinBudget(
             url: qq.url,
             provider: pLabel,
             via: qq.via,
-            isTrial: !isFull,
-            streamType: isFull ? 'full' : 'trial',
-            trialDuration: isFull ? undefined : 30,
+            isTrial: false,
             contentType: 'audio/mp4',
             referer: 'https://y.qq.com/',
             corsSafe: false,
@@ -1235,19 +1261,18 @@ async function resolvePlayableStreamWithinBudget(
             attempts,
             resolvedSource: 'qq',
             resolvedId: cleanId,
-            resolvedTitle: opts.title || undefined,
-            resolvedArtist: opts.artist || undefined,
+
           };
           if (isFull) {
             signal?.throwIfAborted();
           await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
             return out;
           } else if (allowTrial) {
-            trialCandidate = out;
+            fallbackCandidate = out;
           }
         }
         attempts.push({ provider: pLabel, via: viaLabel(env, 'qq-vkey'), ok: false, ms: Date.now() - pStart, error: 'Empty vkey purl (region or VIP restricted)' });
-      } else if (cleanSource === 'kugou' && cfg.enableKugou) {
+      } else if (allowTrial && cleanSource === 'kugou' && cfg.enableKugou) {
         const kg = await resolveKugouSingleStream(cleanId, env, signal);
         if (kg?.url) {
           const probe = await probeStreamPhysicalQuality(kg.url, 'https://m.kugou.com/', 2000, opts.durationSec, nominalBr, signal, env);
@@ -1258,9 +1283,7 @@ async function resolvePlayableStreamWithinBudget(
             url: kg.url,
             provider: pLabel,
             via: kg.via,
-            isTrial: !isFull,
-            streamType: isFull ? 'full' : 'trial',
-            trialDuration: isFull ? undefined : 30,
+            isTrial: false,
             size: probe.totalBytes || kg.size,
             contentType: 'audio/mpeg',
             corsSafe: true,
@@ -1270,19 +1293,18 @@ async function resolvePlayableStreamWithinBudget(
             attempts,
             resolvedSource: 'kugou',
             resolvedId: cleanId,
-            resolvedTitle: opts.title || undefined,
-            resolvedArtist: opts.artist || undefined,
+
           };
           if (isFull) {
             signal?.throwIfAborted();
           await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
             return out;
           } else if (allowTrial) {
-            trialCandidate = out;
+            fallbackCandidate = out;
           }
         }
         attempts.push({ provider: pLabel, via: viaLabel(env, 'kugou-playinfo'), ok: false, ms: Date.now() - pStart, error: 'Empty playInfo url (VIP or region restricted)' });
-      } else if (cleanSource === 'kuwo' && cfg.enableKuwo) {
+      } else if (allowTrial && cleanSource === 'kuwo' && cfg.enableKuwo) {
         const kw = await resolveKuwoSingleStream(cleanId, env, signal);
         if (kw?.url) {
           attempts.push({ provider: pLabel, via: kw.via, ok: true, ms: Date.now() - pStart });
@@ -1291,7 +1313,6 @@ async function resolvePlayableStreamWithinBudget(
             provider: pLabel,
             via: kw.via,
             isTrial: false,
-            streamType: 'full',
             size: kw.size,
             contentType: 'audio/mpeg',
             referer: 'https://www.kuwo.cn/',
@@ -1302,8 +1323,7 @@ async function resolvePlayableStreamWithinBudget(
             attempts,
             resolvedSource: 'kuwo',
             resolvedId: cleanId,
-            resolvedTitle: opts.title || undefined,
-            resolvedArtist: opts.artist || undefined,
+
           };
           signal?.throwIfAborted();
           await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
@@ -1330,7 +1350,7 @@ async function resolvePlayableStreamWithinBudget(
     isSourceEnabledByPolicy(cleanSource, env) &&
     (degraded || Boolean(engineRes?.skippedByCircuit) || !engineRes?.ok);
 
-  if (allowExternal && cleanId) {
+  if (allowTrial && allowExternal && cleanId) {
     const gdStart = Date.now();
     const gdSource =
       cleanSource === 'qq' ? 'tencent' : cleanSource === 'sonic' || cleanSource === 'ncm' ? 'netease' : cleanSource;
@@ -1366,15 +1386,13 @@ async function resolvePlayableStreamWithinBudget(
             provider: 'gdstudio',
             via: 'external-source',
             isTrial: false,
-            streamType: 'full',
             corsSafe: isNeteaseCdn,
             degraded: false,
             circuitState,
             attempts,
             resolvedSource: gdSource === 'tencent' ? 'qq' : gdSource,
             resolvedId: cleanId,
-            resolvedTitle: opts.title || undefined,
-            resolvedArtist: opts.artist || undefined,
+
           };
           signal?.throwIfAborted();
           await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
@@ -1426,11 +1444,11 @@ async function resolvePlayableStreamWithinBudget(
           (t) =>
             titlesMatchStrictly(trackTitle, t.title) &&
             artistsMatchStrictly(trackArtist, t.artist, cfg.crossMatchArtistSimilarity) &&
-            (!opts.durationSec || !t.duration || Math.abs(t.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec),
+            (!opts.durationSec || (t.duration > 0 && Math.abs(t.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec)),
         );
         if (match) {
           const neStream = await resolveNeteaseSingleStream(match.platformId, quality, env, signal);
-          if (neStream?.url && !neStream.isTrial) {
+          if (neStream?.url && !neStream.isTrial && (allowTrial || neStream.fullConfirmed)) {
             const probe = await probeStreamPhysicalQuality(neStream.url, undefined, 2000, match.duration || opts.durationSec, nominalBr, signal, env);
             if (probe.streamType === 'full') {
               attempts.push({ provider: label, via: `${neStream.via}:free-match`, ok: true, ms: Date.now() - sStart });
@@ -1439,7 +1457,8 @@ async function resolvePlayableStreamWithinBudget(
                 provider: label,
                 via: `${neStream.via}:free-match`,
                 isTrial: false,
-                streamType: 'full',
+                streamType: neStream.fullConfirmed ? 'full' : undefined,
+                completenessEvidence: neStream.fullConfirmed ? 'provider' : undefined,
                 br: neStream.br,
                 size: probe.totalBytes || neStream.size,
                 contentType: neStream.contentType,
@@ -1467,7 +1486,7 @@ async function resolvePlayableStreamWithinBudget(
     }
 
     // 4b. Try Kugou genuinely free (`privilege=0`) tracks
-    if (cleanSource !== 'kugou' && cfg.enableKugou && !isBudgetExceeded()) {
+    if (allowTrial && cleanSource !== 'kugou' && cfg.enableKugou && !isBudgetExceeded()) {
       const sStart = Date.now();
       const label = providerLabel('kugou', env);
       try {
@@ -1487,7 +1506,7 @@ async function resolvePlayableStreamWithinBudget(
               (priv === 0 || priv === 8) &&
               titlesMatchStrictly(trackTitle, sName) &&
               artistsMatchStrictly(trackArtist, aName, cfg.crossMatchArtistSimilarity) &&
-              (!opts.durationSec || !dur || Math.abs(dur - opts.durationSec) <= cfg.crossMatchDurationToleranceSec)
+              (!opts.durationSec || (dur > 0 && Math.abs(dur - opts.durationSec) <= cfg.crossMatchDurationToleranceSec))
             );
           });
           const freeHash = freeItem?.FileHash || freeItem?.hash;
@@ -1503,7 +1522,6 @@ async function resolvePlayableStreamWithinBudget(
                   provider: label,
                   via: `${kgStream.via}:free-match`,
                   isTrial: false,
-                  streamType: 'full',
                   size: probe.totalBytes || kgStream.size,
                   contentType: 'audio/mpeg',
                   corsSafe: true,
@@ -1531,7 +1549,7 @@ async function resolvePlayableStreamWithinBudget(
     }
 
     // 4c. Try Kuwo verified free full-length tracks (rejects `/nf/resource/` 181KB clips!)
-    if (cleanSource !== 'kuwo' && cfg.enableKuwo && !isBudgetExceeded()) {
+    if (allowTrial && cleanSource !== 'kuwo' && cfg.enableKuwo && !isBudgetExceeded()) {
       const sStart = Date.now();
       const label = providerLabel('kuwo', env);
       try {
@@ -1541,7 +1559,7 @@ async function resolvePlayableStreamWithinBudget(
           if (
             titlesMatchStrictly(trackTitle, kt.title) &&
             artistsMatchStrictly(trackArtist, kt.artist, cfg.crossMatchArtistSimilarity) &&
-            (!opts.durationSec || !kt.duration || Math.abs(kt.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec)
+            (!opts.durationSec || (kt.duration > 0 && Math.abs(kt.duration - opts.durationSec) <= cfg.crossMatchDurationToleranceSec))
           ) {
             const kwStream = await resolveKuwoSingleStream(kt.platformId, env, signal);
             if (kwStream?.url) {
@@ -1553,7 +1571,6 @@ async function resolvePlayableStreamWithinBudget(
                   provider: label,
                   via: `${kwStream.via}:free-match`,
                   isTrial: false,
-                  streamType: 'full',
                   size: probe.totalBytes || kwStream.size,
                   contentType: 'audio/mpeg',
                   referer: 'https://www.kuwo.cn/',
@@ -1583,7 +1600,7 @@ async function resolvePlayableStreamWithinBudget(
   }
 
   // 5. External Source Fallback (GDStudio / Cloudflare Independent External Resolution)
-  if (allowExternal && (cleanId || trackTitle || searchKeywords)) {
+  if (allowTrial && allowExternal && (cleanId || trackTitle || searchKeywords)) {
     const gdStart = Date.now();
     const gdSource =
       cleanSource === 'qq' ? 'tencent' : cleanSource === 'sonic' || cleanSource === 'ncm' ? 'netease' : cleanSource;
@@ -1621,15 +1638,12 @@ async function resolvePlayableStreamWithinBudget(
               provider: 'gdstudio',
               via: 'external-source',
               isTrial: false,
-              streamType: 'full',
               corsSafe: isNeteaseCdn,
               degraded: false,
               circuitState,
               attempts,
               resolvedSource: gdSource === 'tencent' ? 'qq' : gdSource,
               resolvedId: cleanId,
-              resolvedTitle: trackTitle || undefined,
-              resolvedArtist: trackArtist || undefined,
             };
             signal?.throwIfAborted();
           await putSonicCachedJson('stream-url-v1', cacheId, out, 480, 1200, env);
@@ -1675,11 +1689,11 @@ async function resolvePlayableStreamWithinBudget(
               ).trim();
               if (!titlesMatchStrictly(trackTitle, cTitle)) return false;
               if (trackArtist && !artistsMatchStrictly(trackArtist, cArtist, cfg.crossMatchArtistSimilarity)) return false;
-              if (opts.durationSec && item.duration) {
+              if (opts.durationSec) {
                 const dSec = typeof item.duration === 'number'
                   ? (item.duration > 1000 ? Math.round(item.duration / 1000) : item.duration)
                   : 0;
-                if (dSec > 0 && Math.abs(dSec - opts.durationSec) > cfg.crossMatchDurationToleranceSec) return false;
+                if (!dSec || Math.abs(dSec - opts.durationSec) > cfg.crossMatchDurationToleranceSec) return false;
               }
               return true;
             });
@@ -1724,7 +1738,6 @@ async function resolvePlayableStreamWithinBudget(
                     provider: 'gdstudio',
                     via: 'external-search-match',
                     isTrial: false,
-                    streamType: 'full',
                     corsSafe: isNeteaseCdn2,
                     degraded: false,
                     circuitState,
@@ -1753,13 +1766,10 @@ async function resolvePlayableStreamWithinBudget(
     }
   }
 
-  // 6. If only official NetEase trial clip exists and caller permits trial playback, return it honestly marked
-  if (trialCandidate && allowTrial) {
+  // Preserve the provider verdict for the remaining playable candidate.
+  if (fallbackCandidate && allowTrial) {
     return {
-      ...trialCandidate,
-      streamType: 'trial',
-      isTrial: true,
-      trialDuration: trialCandidate.trialDuration || 30,
+      ...fallbackCandidate,
       attempts,
     };
   }

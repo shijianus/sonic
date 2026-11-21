@@ -82,6 +82,7 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
   const cfg = getSonicConfig(env);
   const allowedDomains = getAllowedMediaDomains(env, 'audio');
   const url = new URL(request.url);
+  const allowTrial = url.searchParams.get('allowTrial') !== '0';
   const targetParam = url.searchParams.get('target') || url.searchParams.get('url');
   const streamMode = (url.searchParams.get('mode') || (url.searchParams.get('redirect') === '1' ? 'redirect' : '')).toLowerCase();
   let targetUrl: URL | null = null;
@@ -89,6 +90,7 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
   let resolvedVia = 'direct-param';
   let resolvedTrial = false;
   let resolvedStreamType: 'full' | 'trial' | 'unavailable' | undefined;
+  let completenessEvidence: 'provider' | 'generated' | undefined;
   let resolvedTrialDuration = 0;
   let resolvedReferer = '';
   let resolvedCorsSafe = false;
@@ -101,6 +103,7 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
   let resolvedArtist = '';
 
   if (targetParam) {
+    if (!allowTrial) return errorResponse('整曲下载需要经过验证的曲目标识', 400);
     targetUrl = sanitizeTargetUrl(targetParam, allowedDomains);
     if (!targetUrl || !isAllowedDirectTargetHost(targetUrl.hostname, allowedDomains)) {
       return errorResponse('Invalid target URL', 400);
@@ -123,7 +126,6 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
     const artist = url.searchParams.get('artist') || '';
     const durationStr = url.searchParams.get('duration');
     const durationSec = durationStr ? parseFloat(durationStr) : undefined;
-    const allowTrial = url.searchParams.get('allowTrial') !== '0';
     // Playback retries opt in explicitly; unrelated query flags never disable caches.
     const nocache = url.searchParams.get('nocache') === '1';
 
@@ -246,6 +248,7 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
         return errorResponse('解析到的音频流地址无效或不在已授权域名白名单内', 502);
       }
 
+      completenessEvidence = resolved.completenessEvidence;
       resolvedProvider = resolved.provider;
       resolvedVia = resolved.via;
       resolvedTrial = Boolean(resolved.isTrial || resolved.streamType === 'trial');
@@ -261,8 +264,8 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
       if (resolved.resolvedSource && resolved.resolvedId) {
         resolvedSource = normalizeSourceId(resolved.resolvedSource);
         resolvedTrackId = resolved.resolvedId;
-        resolvedTitle = resolved.resolvedTitle || title;
-        resolvedArtist = resolved.resolvedArtist || artist;
+        resolvedTitle = resolved.resolvedTitle || '';
+        resolvedArtist = resolved.resolvedArtist || '';
       }
     } catch (err: any) {
       request.signal.throwIfAborted();
@@ -296,6 +299,14 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
       return null;
     }
     const outHeaders = new Headers(engineStream.response.headers);
+    if (outHeaders.get('X-Sonic-Stream-Type') === 'full' &&
+        !['provider', 'generated'].includes(outHeaders.get('X-Sonic-Completeness-Evidence') || '')) {
+      outHeaders.delete('X-Sonic-Stream-Type');
+    }
+    if (!allowTrial && outHeaders.get('X-Sonic-Stream-Type') !== 'full') {
+      void engineStream.response.body?.cancel().catch(() => {});
+      return null;
+    }
     corsHeaders().forEach((v, k) => {
       if (!outHeaders.has(k)) outHeaders.set(k, v);
     });
@@ -524,13 +535,12 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
     if (!headers.has('Accept-Ranges')) {
       headers.set('Accept-Ranges', 'bytes');
     }
-    if (!headers.has('Content-Type')) {
-      headers.set('Content-Type', 'audio/mpeg');
-    }
+    if (!headers.has('Content-Type')) headers.set('Content-Type', 'application/octet-stream');
     headers.set('Cache-Control', streamCacheControl(finalTargetUrl, upstream.headers, status, upstreamSensitive));
     headers.set('Referrer-Policy', 'no-referrer');
     headers.set('X-Sonic-Provider', resolvedProvider);
     headers.set('X-Sonic-Via', resolvedVia);
+    if (completenessEvidence) headers.set('X-Sonic-Completeness-Evidence', completenessEvidence);
     if (resolvedStreamType) headers.set('X-Sonic-Stream-Type', resolvedStreamType);
     if (resolvedTrial) headers.set('X-Sonic-Stream-Trial', '1');
     if (resolvedTrialDuration > 0) headers.set('X-Sonic-Trial-Duration', String(resolvedTrialDuration));
@@ -551,7 +561,7 @@ async function serveStream(request: Request, env: AppEnv): Promise<Response> {
     // Resolve and validate every redirect before emitting a Location. If any hop was
     // signed, private, or the final host's CORS policy is unknown, reuse the fetched body.
     if (
-      streamMode === 'redirect' &&
+      allowTrial && streamMode === 'redirect' &&
       resolvedCorsSafe &&
       finalTargetUrl.protocol === 'https:' &&
       finalTargetUrl.origin === targetUrl.origin &&

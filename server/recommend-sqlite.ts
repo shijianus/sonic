@@ -29,7 +29,7 @@ import {
   expandQueryAliases,
   toPinyinInfo,
 } from '../functions/_lib/sonic/recommend/text-norm';
-import { canMergeCanonicalTracks, mergeCanonicalTracks } from '../functions/_lib/sonic/recommend/track-canonical';
+import { findOrMergeRecording, trackSourceKeys } from '../functions/_lib/sonic/recommend/track-canonical';
 import { MemoryRecommendStore, normalizeRecommendRetentionDays } from '../functions/_lib/sonic/recommend/memory-store';
 import { upsertTrackMvEntities } from '../functions/_lib/sonic/recommend/entity-store';
 import { recordSqliteMetric, redactSensitiveString } from '../functions/_lib/sonic/observability';
@@ -463,24 +463,13 @@ export class SqliteRecommendStore implements RecommendStore {
     if (!incoming?.canonicalTrackId) return;
     this.beforeWrite();
 
-    const existing = this.getTrack(incoming.canonicalTrackId);
-    let finalTrack = incoming;
-    if (existing && canMergeCanonicalTracks(existing, incoming)) {
-      finalTrack = mergeCanonicalTracks(existing, incoming);
-    } else if (existing && !canMergeCanonicalTracks(existing, incoming)) {
-      finalTrack = {
-        ...incoming,
-        canonicalTrackId: `${incoming.canonicalTrackId}_${incoming.duration || 'alt'}`,
-      };
-    }
+    const finalTrack = findOrMergeRecording(incoming, id => this.getTrack(id));
 
     // The catalog is shared by every user and search results are persisted into
     // it. Without a hard ceiling, anonymous search traffic can grow the SQLite
     // file without bound. Existing rows still refresh; only brand-new rows are
     // refused once the cap is reached.
-    const targetExisted = finalTrack.canonicalTrackId === incoming.canonicalTrackId
-      ? Boolean(existing)
-      : Boolean(this.getTrack(finalTrack.canonicalTrackId));
+    const targetExisted = Boolean(this.getTrack(finalTrack.canonicalTrackId));
     if (!targetExisted && this.currentTrackCount() >= MAX_CANONICAL_TRACKS) return;
 
     const artistNorm = compactNormalize(finalTrack.canonicalArtist);
@@ -518,15 +507,9 @@ export class SqliteRecommendStore implements RecommendStore {
       INSERT OR REPLACE INTO platform_track_links (link_key, canonical_track_id)
       VALUES (?, ?)
     `);
-    if (finalTrack.provider && finalTrack.providerTrackId) {
-      linkStmt.run(`${finalTrack.provider}:${finalTrack.providerTrackId}`, finalTrack.canonicalTrackId);
-      linkStmt.run(`raw:${finalTrack.providerTrackId}`, finalTrack.canonicalTrackId);
-    }
-    for (const [plat, pid] of Object.entries(finalTrack.sourceIds || {})) {
-      if (plat && pid) {
-        linkStmt.run(`${plat}:${pid}`, finalTrack.canonicalTrackId);
-        linkStmt.run(`raw:${pid}`, finalTrack.canonicalTrackId);
-      }
+    for (const [key, id] of trackSourceKeys(finalTrack)) {
+      linkStmt.run(key, finalTrack.canonicalTrackId);
+      linkStmt.run(`raw:${id}`, finalTrack.canonicalTrackId);
     }
 
     // Refresh FTS5 document

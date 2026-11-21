@@ -238,16 +238,61 @@ export function toCanonicalTrack(
 
 export function canMergeCanonicalTracks(a: CanonicalTrack, b: CanonicalTrack): boolean {
   if (a.edition !== b.edition) return false;
-  // Strict duration tolerance: if both durations exist, discrepancy must be <= 4s
-  if (a.duration > 0 && b.duration > 0 && Math.abs(a.duration - b.duration) > 4) {
-    return false;
-  }
-  if (a.canonicalTrackId === b.canonicalTrackId) {
-    return true;
+  if (a.cleanAlbum && b.cleanAlbum && a.cleanAlbum !== b.cleanAlbum) return false;
+  if (a.edition !== 'studio' && compactNormalize(a.title) !== compactNormalize(b.title)) return false;
+  const durations = [a.duration, b.duration, ...(a.availableSources || []).map(s => s.duration), ...(b.availableSources || []).map(s => s.duration)];
+  let longest = 0;
+  let shortest = Infinity;
+  for (const value of durations) {
+    if (!value || value <= 0) continue;
+    shortest = Math.min(shortest, value);
+    longest = Math.max(longest, value);
+    if (longest - shortest > 4) return false;
   }
   if (!a.cleanTitle || a.cleanTitle !== b.cleanTitle) return false;
   if (compactNormalize(a.canonicalArtist) !== compactNormalize(b.canonicalArtist)) return false;
   return true;
+}
+
+export function trackSourceKeys(track: CanonicalTrack): Map<string, string> {
+  const keys = new Map<string, string>();
+  for (const [platform, id] of Object.entries(track.sourceIds || {})) {
+    if (platform && id) keys.set(`${platform}:${id}`, id);
+  }
+  for (const { platform, platformId } of track.availableSources || []) {
+    if (platform && platformId) keys.set(`${platform}:${platformId}`, platformId);
+  }
+  if (track.provider && track.providerTrackId) {
+    keys.set(`${track.provider}:${track.providerTrackId}`, track.providerTrackId);
+  }
+  return keys;
+}
+
+/** Retain the original catalog ID and the historical duration suffix where possible. */
+export function findOrMergeRecording(
+  incoming: CanonicalTrack,
+  lookup: (id: string) => CanonicalTrack | null | undefined,
+): CanonicalTrack {
+  const base = incoming.canonicalTrackId;
+  const existing = lookup(base);
+  if (!existing) return incoming;
+  if (canMergeCanonicalTracks(existing, incoming)) return mergeCanonicalTracks(existing, incoming);
+
+  const albumKey = deterministicHash16(JSON.stringify([incoming.cleanAlbum, compactNormalize(incoming.title)]));
+  const seconds = incoming.duration || 0;
+  const preferred = `${base}_${seconds || 'alt'}`;
+  // Search nearby duration suffixes as different providers can round the same recording differently.
+  for (let duration = Math.max(0, seconds - 4); duration <= seconds + 4; duration++) {
+    const prefix = `${base}_${duration || 'alt'}`;
+    for (const id of [prefix, `${prefix}_${albumKey}`]) {
+      const alternative = lookup(id);
+      if (alternative && canMergeCanonicalTracks(alternative, incoming)) {
+        return mergeCanonicalTracks(alternative, incoming);
+      }
+    }
+  }
+  const canonicalTrackId = lookup(preferred) ? `${preferred}_${albumKey}` : preferred;
+  return { ...incoming, canonicalTrackId };
 }
 
 const PROVIDER_PRIORITY: Record<string, number> = {

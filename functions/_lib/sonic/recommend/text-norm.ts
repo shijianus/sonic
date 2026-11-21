@@ -966,6 +966,7 @@ export function classifyTrackEdition(title: string, album = ''): TrackEdition {
   if (/(\bdemo\b|小样)/i.test(combined)) {
     return 'demo';
   }
+  if (/\bremaster(?:ed)?\b|重制版|重製版/i.test(combined)) return 'remaster';
   return 'studio';
 }
 

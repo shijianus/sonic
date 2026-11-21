@@ -123,8 +123,13 @@ export async function serveSyntheticAudioLocally(
     'X-Sonic-Provider': 'synthetic',
     'X-Sonic-Via': viaLabel,
     'X-Sonic-Stream-Type': 'full',
+    'X-Sonic-Completeness-Evidence': 'generated',
+    'X-Sonic-Resolved-Source': 'synthetic',
+    'X-Sonic-Resolved-Id': spec.id,
+    'X-Sonic-Resolved-Title': encodeURIComponent(spec.title),
+    'X-Sonic-Resolved-Artist': encodeURIComponent(spec.artist),
     'Access-Control-Expose-Headers':
-      'Content-Range, Content-Length, Accept-Ranges, Content-Type, ETag, X-Sonic-Provider, X-Sonic-Via, X-Sonic-Stream-Type',
+      'Content-Range, Content-Length, Accept-Ranges, Content-Type, ETag, X-Sonic-Provider, X-Sonic-Via, X-Sonic-Stream-Type, X-Sonic-Resolved-Source, X-Sonic-Resolved-Id, X-Sonic-Resolved-Title, X-Sonic-Resolved-Artist',
   });
 
   if (isPartial) {
