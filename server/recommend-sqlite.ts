@@ -71,6 +71,9 @@ export class SqliteRecommendStore implements RecommendStore {
   private entityCount = -1;
   private lastDiskCheckAt = 0;
   private lastDiskCheckOk = true;
+  private healthCounts?: {
+    changes: number; version: number; sampledAt: number; counts: ReturnType<SqliteRecommendStore['getStats']>;
+  };
   private anonEventRetentionDays: number;
   private readonly maxAnonEventEpochRows = Math.max(1, readPositiveEnvInt('SONIC_RECOMMEND_MAX_ANON_ERASURE_ROWS', 250_000));
 
@@ -929,6 +932,23 @@ export class SqliteRecommendStore implements RecommendStore {
           SELECT 1 FROM contributions c WHERE c.norm_query = t.norm_query AND c.display_query LIKE ?
         ) ORDER BY count DESC, updated_at DESC LIMIT ?`)
       .all(cutoff, cutoff, pNorm, `${pNorm}%`, `%${prefix.trim()}%`, limit) as Array<{ query: string; count: number }>;
+  }
+
+  getHealthStats(includeCounts: boolean) {
+    // Never cache the recovery guard. A missing or unsealed guard must fail the next probe.
+    const erasureRecoveryVersion = this.dbPath === ':memory:' ? undefined : verifiedErasureRecoveryVersion(this.db, this.dbPath);
+    const readiness = { storageKind: this.kind, erasureRecoveryVersion };
+    if (!includeCounts) return readiness;
+    const stamp = this.db.prepare('SELECT total_changes() AS changes, data_version AS version FROM pragma_data_version').get() as { changes: number; version: number };
+    const now = Date.now();
+    const cached = this.healthCounts;
+    if (cached && cached.changes === stamp.changes && cached.version === stamp.version &&
+        now >= cached.sampledAt && now - cached.sampledAt < 15_000) {
+      return { ...cached.counts, ...readiness };
+    }
+    const counts = this.getStats();
+    this.healthCounts = { ...stamp, sampledAt: now, counts };
+    return counts;
   }
 
   getStats(): {

@@ -4,16 +4,40 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { assertSnapshotPreservesErasures } from './recommend-recovery-guard.mjs';
 import {
   acquireMaintenanceLock, assertDatabaseFile, assertNoSidecars, backupDatabase,
-  checkCapacity, digestFile, syncDirectory, syncFile, verifyDatabase,
+  checkCapacity, databaseType, defaultDatabaseFile, digestFile, syncDirectory, syncFile, verifyDatabase,
 } from './backup-recommend-db.mjs';
 
+// For account and access, versions, tombstones, spent invites and revoked sessions
+// must survive rollback. Refuse to replace an existing store with divergent state.
+function assertSameBusinessState(current, candidate, kind) {
+  const db = new DatabaseSync(current, { readOnly: true });
+  try {
+    db.prepare('ATTACH DATABASE ? AS candidate').run(candidate);
+    for (const table of databaseType(kind).tables) {
+      const currentRows = 'SELECT * FROM main.' + table;
+      const restoredRows = 'SELECT * FROM candidate.' + table;
+      if (db.prepare(currentRows + ' EXCEPT ' + restoredRows + ' LIMIT 1').get() ||
+          db.prepare(restoredRows + ' EXCEPT ' + currentRows + ' LIMIT 1').get()) {
+        throw new Error('Snapshot differs from current ' + kind + ' state; retain both copies for reconciliation');
+      }
+    }
+  } finally {
+    db.close();
+  }
+}
+
 // io is injectable for offline failure/rollback tests; the CLI always uses the real fs.
-export function restoreDatabase(backupFile, targetFile, { offline = false, io = fs } = {}) {
+export function restoreDatabase(backupFile, targetFile, { offline = false, io = fs, kind = 'recommend', finalSha256 } = {}) {
   if (!offline) throw new Error('Restore requires --offline after stopping all database writers and restart supervisors');
+  databaseType(kind);
+  if (kind !== 'recommend' && !/^[0-9a-f]{64}$/.test(finalSha256 || '')) {
+    throw new Error('Account/access recovery requires the trusted final SHA-256 recorded after stopping writers');
+  }
   backupFile = path.resolve(backupFile);
   targetFile = path.resolve(targetFile);
   assertDatabaseFile(backupFile);
@@ -43,12 +67,24 @@ export function restoreDatabase(backupFile, targetFile, { offline = false, io = 
       preRestoreSafetyCopy = `${targetFile}.pre-restore-${new Date().toISOString().replace(/[:.]/g, '-')}-${token}.sqlite`;
     }
     checkCapacity(directory, fs.statSync(backupFile).size + 2 * (originalStat?.size || 0));
-    const expected = backupDatabase(backupFile, staging, { storedSnapshot: true });
-    assertSnapshotPreservesErasures(staging, targetFile, db);
+    let expected;
+    if (kind === 'recommend') {
+      expected = backupDatabase(backupFile, staging, { storedSnapshot: true });
+      assertSnapshotPreservesErasures(staging, targetFile, db);
+    } else {
+      if (fs.existsSync(targetFile + '.erasure-recovery.json')) throw new Error('Target belongs to a protected recommendation store');
+      // Copy first, then verify the exact bytes we will publish against the off-volume record.
+      fs.copyFileSync(backupFile, staging, fs.constants.COPYFILE_EXCL);
+      fs.chmodSync(staging, 0o600);
+      syncFile(staging);
+      if (digestFile(staging) !== finalSha256) throw new Error('Snapshot does not match the trusted final SHA-256');
+      expected = { ...verifyDatabase(staging, kind), sha256: finalSha256 };
+    }
     if (db) {
       db.exec(`VACUUM INTO '${preRestoreSafetyCopy.replace(/'/g, "''")}'`);
       fs.chmodSync(preRestoreSafetyCopy, 0o600);
-      verifyDatabase(preRestoreSafetyCopy);
+      verifyDatabase(preRestoreSafetyCopy, kind);
+      if (kind !== 'recommend') assertSameBusinessState(preRestoreSafetyCopy, staging, kind);
       syncFile(preRestoreSafetyCopy);
       // Keep a separate verified rollback file: the safety snapshot remains available.
       fs.copyFileSync(preRestoreSafetyCopy, rollback, fs.constants.COPYFILE_EXCL);
@@ -73,12 +109,12 @@ export function restoreDatabase(backupFile, targetFile, { offline = false, io = 
     io.renameSync(staging, targetFile);
     replaced = true;
     syncDirectory(directory);
-    const actual = verifyDatabase(targetFile);
-    if (digestFile(targetFile) !== expected.sha256 || actual.tracks !== expected.tracks || actual.events !== expected.events) {
+    const actual = verifyDatabase(targetFile, kind);
+    if (digestFile(targetFile) !== expected.sha256 || Object.entries(actual).some(([key, value]) => expected[key] !== value)) {
       throw new Error('Post-restore verification failed');
     }
     return {
-      ok: true, restoredFrom: backupFile, target: targetFile, preRestoreSafetyCopy,
+      ok: true, kind, restoredFrom: backupFile, target: targetFile, preRestoreSafetyCopy,
       sizeBytes: fs.statSync(targetFile).size, sha256: expected.sha256, ...actual,
     };
   } catch (error) {
@@ -88,7 +124,7 @@ export function restoreDatabase(backupFile, targetFile, { offline = false, io = 
         if (preRestoreSafetyCopy) {
           io.renameSync(rollback, targetFile);
           syncDirectory(directory);
-          verifyDatabase(targetFile);
+          verifyDatabase(targetFile, kind);
           if (digestFile(targetFile) !== originalDigest) throw new Error('Rollback digest mismatch');
         } else {
           fs.unlinkSync(targetFile);
@@ -114,14 +150,16 @@ export function restoreDatabase(backupFile, targetFile, { offline = false, io = 
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const args = process.argv.slice(2);
-  const offline = args.includes('--offline');
-  const paths = args.filter(arg => arg !== '--offline');
   try {
-    if (!paths[0] || paths.length > 2 || paths.some(arg => arg.startsWith('--'))) {
-      throw new Error('Usage: restore-recommend-db.mjs <backup.sqlite> [target.sqlite] --offline');
+    const { values, positionals } = parseArgs({ allowPositionals: true, options: {
+      offline: { type: 'boolean' }, kind: { type: 'string', default: 'recommend' }, 'final-sha256': { type: 'string' },
+    } });
+    if (!positionals[0] || positionals.length > 2) {
+      throw new Error('Usage: restore <snapshot> [target] --offline [--kind recommend|account|access] [--final-sha256 DIGEST]');
     }
-    console.log(JSON.stringify(restoreDatabase(paths[0], paths[1] || process.env.SONIC_RECOMMEND_DB_PATH || 'data/sonic-recommend.sqlite', { offline })));
+    console.log(JSON.stringify(restoreDatabase(positionals[0], positionals[1] || defaultDatabaseFile(values.kind), {
+      offline: values.offline, kind: values.kind, finalSha256: values['final-sha256'],
+    })));
   } catch (error) {
     console.error(`[restore] failed: ${error?.message || error}`);
     process.exitCode = 1;

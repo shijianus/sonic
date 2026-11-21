@@ -122,7 +122,7 @@ function getOrInitServerAccountStore(dbPath?: string) {
   }
   if (!serverAccountStore || serverAccountDbKey !== desiredKey) {
     serverAccountStore?.close();
-    serverAccountStore = createServerAccountStore(desiredKey);
+    serverAccountStore = withRecommendStartupLock(desiredKey, () => createServerAccountStore(desiredKey));
     serverAccountDbKey = desiredKey;
   }
   return serverAccountStore;
@@ -133,7 +133,7 @@ function getOrInitServerAccessStore(dbPath?: string, seedCodes?: string) {
   if (!desiredKey || desiredKey === 'memory' || desiredKey === 'off') throw new Error('SONIC_ACCESS_DB_PATH must be a dedicated persistent database path');
   if (!serverAccessStore || serverAccessDbKey !== desiredKey) {
     serverAccessStore?.close();
-    serverAccessStore = createServerAccessStore(desiredKey, seedCodes ?? process.env.SONIC_INVITE_CODES ?? '');
+    serverAccessStore = withRecommendStartupLock(desiredKey, () => createServerAccessStore(desiredKey, seedCodes ?? process.env.SONIC_INVITE_CODES ?? ''));
     serverAccessDbKey = desiredKey;
   }
   return serverAccessStore;

@@ -7,6 +7,9 @@ import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { backupDatabase, digestFile, verifyDatabase } from '../scripts/backup-recommend-db.mjs';
 import { restoreDatabase } from '../scripts/restore-recommend-db.mjs';
+import { SqliteAccountStore } from '../server/account-store';
+import { SqliteAccessStore } from '../server/access-store';
+import { getAccessStoreKeyForTest } from '../functions/_lib/sonic/access';
 import { SqliteRecommendStore } from '../server/recommend-sqlite';
 
 const temporaryDirectories: string[] = [];
@@ -42,6 +45,74 @@ function closedDatabase(file: string, value: string, wal = false) {
 const root = path.resolve(import.meta.dirname, '..');
 
 describe('beta release SQLite backup and offline recovery', () => {
+  it('restores an account including tombstones and rejects an older snapshot or a different store', () => {
+    const files = fixture();
+    const subject = 'usr_' + 'a'.repeat(32);
+    new SqliteAccountStore(files.source).close();
+    const fill = new DatabaseSync(files.source);
+    fill.exec("INSERT INTO account_users VALUES ('" + subject + "', 1, 1)");
+    fill.prepare('INSERT INTO account_items VALUES (?, ?, ?, ?, ?, ?)').run(subject, 'likedSongs', 'song', '{"id":"song"}', 1, 1);
+    fill.close();
+    const older = backupDatabase(files.source, files.backup, { kind: 'account', offline: true });
+    const changes = new DatabaseSync(files.source);
+    changes.exec('UPDATE account_users SET version=2; UPDATE account_items SET value_json=NULL, version=2');
+    changes.close();
+    expect(() => restoreDatabase(files.backup, files.source, { offline: true, kind: 'account', finalSha256: older.sha256 })).toThrow(/differs/);
+    const latestFile = path.join(files.directory, 'final.sqlite');
+    const latest = backupDatabase(files.source, latestFile, { kind: 'account', offline: true });
+    expect(() => restoreDatabase(files.backup, files.target, { offline: true, kind: 'account', finalSha256: latest.sha256 })).toThrow(/SHA-256/);
+    expect(() => restoreDatabase(latestFile, files.target, { offline: true, kind: 'account' })).toThrow(/trusted/);
+    expect(() => restoreDatabase(latestFile, files.target, { offline: true, kind: 'access', finalSha256: latest.sha256 })).toThrow(/Wrong database/);
+    expect(fs.existsSync(files.target)).toBe(false);
+    expect(restoreDatabase(latestFile, files.target, { offline: true, kind: 'account', finalSha256: latest.sha256 })).toMatchObject({ users: 1, items: 1 });
+    const restored = new SqliteAccountStore(files.target);
+    try { expect(restored.getLibrary(subject).tombstones).toEqual([expect.objectContaining({ id: 'song', version: 2 })]); }
+    finally { restored.close(); }
+  });
+
+  it('keeps a spent invite and revoked session unusable after restore and rejects rollback of either', () => {
+    const files = fixture();
+    const code = 'beta-invite-recovery-test-code';
+    const key = getAccessStoreKeyForTest('invite', code)!;
+    const session = { sessionHash: 'hash', createdAt: 100, expiresAt: 10000 };
+    const store = new SqliteAccessStore(files.source, code);
+    store.createSession(session);
+    const older = backupDatabase(files.source, files.backup, { kind: 'access' });
+    expect(store.redeemInvite(key, 101)).not.toBeNull();
+    store.revokeSession(session.sessionHash, 102);
+    store.close();
+    expect(() => restoreDatabase(files.backup, files.source, { offline: true, kind: 'access', finalSha256: older.sha256 })).toThrow(/differs/);
+    const finalFile = path.join(files.directory, 'sealed-access.sqlite');
+    const latest = backupDatabase(files.source, finalFile, { kind: 'access', offline: true });
+    expect(restoreDatabase(finalFile, files.target, { kind: 'access', offline: true, finalSha256: latest.sha256 })).toMatchObject({ invites: 1, sessions: 1 });
+    const restored = new SqliteAccessStore(files.target, code);
+    try {
+      expect(restored.redeemInvite(key, 103)).toBeNull();
+      expect(restored.getSession('hash', 103)?.revokedAt).toBe(102);
+    } finally { restored.close(); }
+  });
+
+  it('omits aggregate queries on readiness probes and rechecks erasure even when detailed counts are cached', () => {
+    const files = fixture();
+    const store = new SqliteRecommendStore(files.source);
+    const counts = vi.spyOn(store, 'getStats');
+    try {
+      expect(store.getHealthStats(false)).toEqual({ storageKind: 'sqlite', erasureRecoveryVersion: 1 });
+      expect(counts).not.toHaveBeenCalled();
+      expect(store.getHealthStats(true)).toHaveProperty('eventCount', 0);
+      expect(store.getHealthStats(true)).toHaveProperty('eventCount', 0);
+      expect(counts).toHaveBeenCalledTimes(1);
+      const other = new DatabaseSync(files.source);
+      other.exec("CREATE TABLE test_external_write (id INTEGER PRIMARY KEY)");
+      other.close();
+      store.getHealthStats(true);
+      expect(counts).toHaveBeenCalledTimes(2);
+      fs.unlinkSync(files.source + '.erasure-recovery.json');
+      expect(() => store.getHealthStats(false)).toThrow();
+      expect(() => store.getHealthStats(true)).toThrow();
+    } finally { store.close(); }
+  });
+
   it('backs up committed WAL data while an online writer is open, with a verifiable digest', () => {
     const files = fixture();
     const writer = database(files.source, 'committed-wal', true);

@@ -89,6 +89,6 @@ STOPSIGNAL SIGTERM
 
 # Read the service key from the environment instead of embedding it in the process argv.
 HEALTHCHECK --interval=20s --timeout=5s --start-period=10s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:8080/api/sonic/engine/health',{headers:{'X-Sonic-Engine-Key':process.env.SONIC_ENGINE_SECRET||''}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:8080/api/sonic/engine/health?probe=ready',{headers:{'X-Sonic-Engine-Key':process.env.SONIC_ENGINE_SECRET||''}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "--experimental-sqlite", "dist-server/index.mjs"]

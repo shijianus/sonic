@@ -441,6 +441,7 @@ export function recordHttpRequestMetric(
   status: number,
   durationMs: number,
   env?: AppEnv,
+  waitUntil?: (task: Promise<unknown>) => void,
 ): void {
   const now = Date.now();
   const policy = getAlertPolicy(env);
@@ -461,11 +462,11 @@ export function recordHttpRequestMetric(
   const rate = window.counts.status5xx / window.counts.total;
   const severity = alertSeverity(rate, policy.warningRatio, policy.pagingRatio);
   if (severity && window.counts.status5xx >= policy.min5xx) {
-    void triggerSonicAlert(env, {
+    scheduleSonicAlert(env, {
       code: 'HIGH_5XX_ERROR_RATE',
       severity,
       summary: `Sonic rolling ${policy.windowSec}s 5xx rate ${window.counts.status5xx}/${window.counts.total} (${(rate * 100).toFixed(2)}%)`,
-    });
+    }, waitUntil);
   }
 
   // Percentiles cost a bounded sort. Evaluate at most once/second, only if explicitly enabled.
@@ -477,11 +478,11 @@ export function recordHttpRequestMetric(
     if (sample.sampleWindow < Math.min(policy.minRequests, MAX_LATENCY_SAMPLES)) continue;
     const latencySeverity = alertSeverity(sample.p95Ms, policy.warningP95Ms, policy.pagingP95Ms);
     if (!latencySeverity) continue;
-    void triggerSonicAlert(env, {
+    scheduleSonicAlert(env, {
       code: `HIGH_P95_LATENCY_${key.toUpperCase()}`,
       severity: latencySeverity,
       summary: `Sonic ${key} rolling ${policy.windowSec}s P95 ${sample.p95Ms}ms (${sample.sampleWindow} recent samples, ${sample.count} requests)`,
-    });
+    }, waitUntil);
   }
 }
 
@@ -723,6 +724,16 @@ function redactAlertText(raw: unknown, env?: AppEnv): string {
     }
   }
   return redactSensitiveString(text);
+}
+
+// Pages ends the invocation after returning the response unless the task is retained.
+export function scheduleSonicAlert(
+  env: AppEnv | undefined,
+  alert: Parameters<typeof triggerSonicAlert>[1],
+  waitUntil?: (task: Promise<unknown>) => void,
+): void {
+  const task = triggerSonicAlert(env, alert);
+  if (waitUntil) waitUntil(task);
 }
 
 export async function triggerSonicAlert(

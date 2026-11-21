@@ -7,6 +7,7 @@ import {
   resetObservabilityForTest,
   triggerSonicAlert,
 } from '../functions/_lib/sonic/observability';
+import { onRequest as handlePage } from '../functions/_middleware';
 import { onRequest as handleMetrics } from '../functions/api/sonic/engine/metrics';
 import { runCli, verifyLiveObservability } from '../scripts/verify-observability-and-alerts.mjs';
 import type { AppEnv } from '../functions/_lib/types';
@@ -53,6 +54,24 @@ function metricsRequest(method = 'POST', config: AppEnv = env, note = '') {
 }
 
 describe('release followup rolling observability and configured alerts', () => {
+  it('retains threshold-triggered Webhook delivery after returning a Pages response', async () => {
+    const tasks: Promise<unknown>[] = [];
+    let complete!: (response: Response) => void;
+    fetchStub.mockImplementationOnce(() => new Promise<Response>(resolve => { complete = resolve; }));
+    const response = await handlePage({
+      request: new Request('https://edge.example.invalid/api/music/search'),
+      env: { ...env, SONIC_ENV: 'test', SONIC_ACCESS_MODE: 'open', SONIC_ALERT_MIN_REQUESTS: '1', SONIC_ALERT_5XX_THRESHOLD: '1' },
+      next: async () => new Response(null, { status: 503 }),
+      waitUntil(task) { tasks.push(task); },
+    });
+    expect(response.status).toBe(503);
+    expect(tasks).toHaveLength(1);
+    expect(getObservabilitySnapshot(env).alerts.sentCount).toBe(0);
+    complete(new Response(null, { status: 204 }));
+    await Promise.all(tasks);
+    expect(getObservabilitySnapshot(env).alerts.sentCount).toBe(1);
+  });
+
   it('expires old counts and latency while preserving cumulative totals and uses new failures after healthy history', async () => {
     record(1000, 200);
     vi.setSystemTime(EPOCH + 301_000);

@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, lstatSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { acquireMaintenanceLock } from './backup-recommend-db.mjs';
 
 const APPLICATION_ID = 0x53414332;
 const [dbPathArg, codeArg] = process.argv.slice(2);
@@ -22,8 +23,11 @@ if (!existsSync(dbPath) || !lstatSync(dbPath).isFile()) {
 
 const hash = createHash('sha256').update(`sonic-access-invite-v1:${code}`).digest('hex');
 const inviteKey = `sonic:access:invite:${hash}`;
-const db = new DatabaseSync(dbPath);
+let db;
+let unlock;
 try {
+  unlock = acquireMaintenanceLock(dbPath, 'revoke-invite');
+  db = new DatabaseSync(dbPath);
   db.exec('PRAGMA busy_timeout=3000;');
   const applicationId = Number(db.prepare('PRAGMA application_id').get()?.application_id || 0);
   const userVersion = Number(db.prepare('PRAGMA user_version').get()?.user_version || 0);
@@ -38,5 +42,5 @@ try {
   console.error(`[revoke:invite] ${error?.message || error}`);
   process.exitCode = 1;
 } finally {
-  db.close();
+  try { db?.close(); } finally { unlock?.(); }
 }

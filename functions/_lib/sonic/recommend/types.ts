@@ -453,6 +453,7 @@ export interface RecommendStore {
   getCooccurringTracks(trackId: string, limit?: number): Array<{ canonicalTrackId: string; weight: number }>;
   recordSearchQuery(normQuery: string, displayQuery: string, clicked?: boolean, source?: RecommendContributionSource): void;
   getTopSearchQueries(prefix: string, limit?: number): Array<{ query: string; count: number }>;
+  getHealthStats?(includeCounts: boolean): { storageKind: string; erasureRecoveryVersion?: number };
   getStats(): { trackCount: number; eventCount: number; cooccurrencePairs: number; storageKind: string };
 
   // Multi-entity extensions

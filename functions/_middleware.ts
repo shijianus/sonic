@@ -18,6 +18,7 @@ export async function onRequest(context: {
   request: Request;
   env: AppEnv;
   next: () => Promise<Response>;
+  waitUntil?: (task: Promise<unknown>) => void;
 }): Promise<Response> {
   const { request, env, next } = context;
   const startedAt = Date.now();
@@ -35,7 +36,7 @@ export async function onRequest(context: {
     Boolean(env?.SONIC_STAGING_ACCESS_TOKEN && String(env.SONIC_STAGING_ACCESS_TOKEN).trim());
 
   const finalizeResponse = (resp: Response): Response => {
-    recordHttpRequestMetric(pathname, resp.status, Date.now() - startedAt, env);
+    recordHttpRequestMetric(pathname, resp.status, Date.now() - startedAt, env, context.waitUntil?.bind(context));
     const needRobots = isStaging && !resp.headers.has('X-Robots-Tag');
     const releaseId = release.releaseId || (release.releaseCommit !== 'unknown' ? release.releaseCommit.slice(0, 12) : '');
     const needRelease = Boolean(releaseId) && !resp.headers.has('X-Sonic-Release');

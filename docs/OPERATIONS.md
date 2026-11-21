@@ -85,6 +85,8 @@ EPOMAIL_HTTP_TIMEOUT_MS=8000
 - 未处理异常记录 `type=unhandled_error`，只包含 requestId、错误名与截断消息。
 - Cloudflare Pages 使用 Cloudflare 日志/Analytics；进程内指标由受密钥保护的 `/api/sonic/engine/metrics` 提供。指标在每个进程/isolate 重启时归零，不跨实例聚合。
 
+Docker 定时探活使用受服务密钥保护的 `/api/sonic/engine/health?probe=ready`。SQLite 每次检查磁盘与清除保护状态，省去事件与共现的全量聚合。原有不带参数的诊断响应保留计数字段；同库未发生写入时复用最近 15 秒的计数。Pages 的自动错误率、延迟、存储和 sidecar 告警通过请求上下文保留投递任务。预发布用自动阈值触发一条告警，并在接收端核对，另配置低流量时仍工作的外部可用性探针。
+
 ### 滚动指标与告警
 
 - `observability.requests` 为进程累计计数；告警依据 `observability.window.requests` 的总请求数、5xx 数与 `errorRate5xx`（0..1），不使用累计错误率。窗口默认 300 秒，按 1 秒桶淘汰，最旧的部分秒不计入；`from`、`to`、`observedSec` 显示实际观察范围。启动后不必等满 300 秒，但必须达到最少请求数。
@@ -146,6 +148,27 @@ live 需要 `SONIC_ENGINE_SECRET`（≥32 字符），staging 可提供 `SONIC_S
 - SQLite 行为事件默认保留 90 天，按写入计数触发清理；`DELETE /api/sonic/events` 可删除当前身份的数据。
 
 ## 8. SQLite 备份、恢复与迁移
+
+### 三个持久库的范围
+
+自建 Engine 的推荐库、账号库及邀请模式下的准入库须分别备份。工具按显式类型核对数据库格式和完整性，默认类型仍是推荐库。账号库校验用户、收藏或歌单记录及操作回执，准入库校验邀请码与会话。三个单库快照不会自动形成同一恢复点。
+
+| 类型 | 环境变量 | 恢复时的业务验收 |
+| --- | --- | --- |
+| `recommend` | `SONIC_RECOMMEND_DB_PATH` | 配套清除保护文件通过校验，已删除的事件仍不可见 |
+| `account` | `SONIC_ACCOUNT_DB_PATH` | 账号歌单和版本正确，删除标记保留，重试已确认操作仍具备幂等性 |
+| `access` | `SONIC_ACCESS_DB_PATH` | 已兑邀请码仍不可复用，已撤销会话继续被拒绝 |
+
+日常备份允许写入中的数据库。正式回滚前，在流量入口停写并停止所有写入者及重启管理器，保留各库最新终态、推荐库对应的清除保护文件、发布身份和镜像摘要。分别在受控异地位置保存备份内容及可信终态清单。账号与准入库的恢复工具要求提供该清单中在停写窗口记录的最终快照摘要。恢复时从待恢复文件现算摘要无法证明它代表终态。
+
+```bash
+npm run backup:db -- --kind account --offline data/sonic-account.sqlite backup/account-final.sqlite
+npm run backup:db -- --kind access --offline data/sonic-access.sqlite backup/access-final.sqlite
+npm run restore:db -- --kind account --offline --final-sha256 "$ACCOUNT_FINAL_SHA256" backup/account-final.sqlite data/sonic-account.sqlite
+npm run restore:db -- --kind access --offline --final-sha256 "$ACCESS_FINAL_SHA256" backup/access-final.sqlite data/sonic-access.sqlite
+```
+
+终态清单与任一快照不匹配时停止恢复。既有账号或准入目标与快照的业务记录不一致时，工具保留两者并拒绝覆盖。全卷丢失且无法独立确认最后写入与撤销状态时，保持账号写入关闭并人工协调版本；邀请入口保持关闭，轮换邀请码、准入签名密钥和准入存储，令旧会话全部失效后重新发放。已删除的用户数据和已撤销的访问权限均不应从未经核验的旧备份复活。Cloudflare 使用 Durable Object 的部署沿用其独立命名空间和准入恢复流程，SQLite 工具只处理自建 Engine 本地文件。
 
 ### 备份（一致性快照 + 完整性校验）
 

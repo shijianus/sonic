@@ -21,7 +21,7 @@ import {
   getReleaseReadiness,
   recordSqliteMetric,
   redactSensitiveString,
-  triggerSonicAlert,
+  scheduleSonicAlert,
 } from '../../../_lib/sonic/observability';
 import { getRecommendStore, isGorseEnabled, isMeilisearchEnabled } from '../../../_lib/sonic/recommend';
 import type { AppEnv } from '../../../_lib/types';
@@ -68,7 +68,8 @@ async function verifyConfiguredEngine(request: Request, env: AppEnv, engineUrl?:
   };
 }
 
-export async function onRequest({ request, env }: { request: Request; env: AppEnv }): Promise<Response> {
+export async function onRequest(context: { request: Request; env: AppEnv; waitUntil?: (task: Promise<unknown>) => void }): Promise<Response> {
+  const { request, env } = context;
   if (request.method === 'OPTIONS') return handleOptions();
 
   const denied = checkEngineAccess(request, env);
@@ -107,7 +108,8 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   let recommendStats: Record<string, any> = {};
   let storageError: string | undefined;
   try {
-    recommendStats = store.getStats();
+    const includeCounts = new URL(request.url).searchParams.get('probe') !== 'ready';
+    recommendStats = store.getHealthStats ? store.getHealthStats(includeCounts) : store.getStats();
   } catch (err: any) {
     storageError = redactSensitiveString(err?.message || 'read_failed');
     recordSqliteMetric('read_error');
@@ -173,19 +175,19 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
   ];
 
   if (!storageHealthy) {
-    void triggerSonicAlert(env, {
+    scheduleSonicAlert(env, {
       code: 'ENGINE_STORAGE_UNHEALTHY',
       severity: 'critical',
       summary: `Sonic Engine readiness failed: ${storageError || 'storage_unhealthy'} (dbKind=${recommendStats.storageKind || 'unknown'})`,
-    });
+    }, context.waitUntil?.bind(context));
   }
 
   if (!sidecarReady || degraded) {
-    void triggerSonicAlert(env, {
+    scheduleSonicAlert(env, {
       code: sidecarRequired ? 'ENGINE_REQUIRED_SIDECAR_UNHEALTHY' : 'ENGINE_SIDECAR_DEGRADED',
       severity: sidecarRequired ? 'critical' : 'warning',
       summary: sidecarRequired ? 'Required NCM sidecar is unavailable' : 'NCM sidecar unavailable; native provider fallback enabled',
-    });
+    }, context.waitUntil?.bind(context));
   }
   const obs = getObservabilitySnapshot(env);
   const licensing = getLicensingAuditSummary(env);

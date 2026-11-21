@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { assertBackupPreservesErasures, syncDirectory } from './recommend-recovery-guard.mjs';
 
@@ -62,15 +63,43 @@ export function checkCapacity(directory, requiredBytes) {
   }
 }
 
-export function verifyDatabase(file) {
+// Explicit kinds prevent a recovery command intended for one store from overwriting another.
+const databaseTypes = new Map([
+  ['recommend', { appId: 0, tables: ['canonical_tracks', 'behavior_events'] }],
+  ['account', { appId: 0x53414331, tables: ['account_users', 'account_items', 'account_operations'] }],
+  ['access', { appId: 0x53414332, tables: ['access_invites', 'access_sessions'] }],
+]);
+
+export function databaseType(kind) {
+  const type = databaseTypes.get(kind);
+  if (!type) throw new Error('Database kind must be recommend, account or access');
+  return type;
+}
+
+export function defaultDatabaseFile(kind) {
+  databaseType(kind);
+  return process.env['SONIC_' + kind.toUpperCase() + '_DB_PATH'] || 'data/sonic-' + kind + '.sqlite';
+}
+
+export function verifyDatabase(file, kind = 'recommend') {
+  const type = databaseType(kind);
   const db = new DatabaseSync(file, { readOnly: true });
   try {
+    if (Number(db.prepare('PRAGMA application_id').get().application_id) !== type.appId ||
+        (kind !== 'recommend' && Number(db.prepare('PRAGMA user_version').get().user_version) !== 1)) {
+      throw new Error('Wrong database kind or unsupported schema version: ' + kind);
+    }
     const checks = db.prepare('PRAGMA integrity_check').all();
     if (checks.length !== 1 || checks[0].integrity_check !== 'ok') {
       throw new Error('SQLite integrity_check failed');
     }
-    const stats = db.prepare('SELECT (SELECT COUNT(*) FROM canonical_tracks) AS tracks, (SELECT COUNT(*) FROM behavior_events) AS events').get();
-    return { tracks: Number(stats.tracks), events: Number(stats.events) };
+    if (kind === 'account' && db.prepare('PRAGMA foreign_key_check').get()) {
+      throw new Error('Account database foreign_key_check failed');
+    }
+    const counts = type.tables.map(table => Number(db.prepare('SELECT COUNT(*) AS total FROM ' + table).get().total));
+    if (kind === 'account') return { users: counts[0], items: counts[1], operations: counts[2] };
+    if (kind === 'access') return { invites: counts[0], sessions: counts[1] };
+    return { tracks: counts[0], events: counts[1] };
   } finally {
     db.close();
   }
@@ -87,9 +116,10 @@ export function digestFile(file) {
   } finally { fs.closeSync(fd); }
 }
 
-export function backupDatabase(source, destination, { storedSnapshot = false } = {}) {
+export function backupDatabase(source, destination, { storedSnapshot = false, kind = 'recommend', offline = false } = {}) {
   source = path.resolve(source);
   destination = path.resolve(destination);
+  databaseType(kind);
   assertDatabaseFile(source);
   if (source === destination || fs.existsSync(destination)) throw new Error(`Refusing to overwrite existing file: ${destination}`);
   const directory = path.dirname(destination);
@@ -99,23 +129,29 @@ export function backupDatabase(source, destination, { storedSnapshot = false } =
   const staging = `${destination}.backup-${randomUUID()}.tmp`;
   let db;
   try {
-    db = new DatabaseSync(source, { readOnly: true });
-    db.exec('PRAGMA busy_timeout=5000');
+    if (offline) assertNoSidecars(source);
+    db = new DatabaseSync(source, { readOnly: !offline });
+    if (offline) {
+      // Keep the exclusive lock after COMMIT while constructing the final snapshot.
+      db.exec('PRAGMA busy_timeout=0; PRAGMA locking_mode=EXCLUSIVE; BEGIN EXCLUSIVE; COMMIT;');
+    } else {
+      db.exec('PRAGMA busy_timeout=5000');
+    }
     db.exec(`VACUUM INTO '${staging.replace(/'/g, "''")}'`);
     db.close();
     db = undefined;
     fs.chmodSync(staging, 0o600);
     assertNoSidecars(staging);
-    const stats = verifyDatabase(staging);
+    const stats = verifyDatabase(staging, kind);
     syncFile(staging);
     const sha256 = digestFile(staging);
     // Offline restore checks the snapshot against the destination's guard.
-    if (!storedSnapshot) assertBackupPreservesErasures(staging, source);
+    if (kind === 'recommend' && !storedSnapshot) assertBackupPreservesErasures(staging, source);
     // Atomic publication without clobbering a destination created since our initial check.
     fs.linkSync(staging, destination);
     fs.unlinkSync(staging);
     syncDirectory(directory);
-    return { ok: true, source, destination, sizeBytes: fs.statSync(destination).size, sha256, ...stats };
+    return { ok: true, kind, source, destination, sizeBytes: fs.statSync(destination).size, sha256, ...stats };
   } finally {
     try { db?.close(); } finally {
       try { fs.rmSync(staging, { force: true }); } finally { releaseLock(); }
@@ -124,11 +160,15 @@ export function backupDatabase(source, destination, { storedSnapshot = false } =
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const source = path.resolve(process.argv[2] || process.env.SONIC_RECOMMEND_DB_PATH || 'data/sonic-recommend.sqlite');
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const destination = path.resolve(process.argv[3] || `${source}.backup-${stamp}.sqlite`);
   try {
-    console.log(JSON.stringify(backupDatabase(source, destination)));
+    const { values, positionals } = parseArgs({ allowPositionals: true, options: {
+      kind: { type: 'string', default: 'recommend' }, offline: { type: 'boolean' },
+    } });
+    if (positionals.length > 2) throw new Error('Usage: backup [source] [destination] [--kind recommend|account|access] [--offline]');
+    const source = path.resolve(positionals[0] || defaultDatabaseFile(values.kind));
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const destination = path.resolve(positionals[1] || source + '.backup-' + stamp + '.sqlite');
+    console.log(JSON.stringify(backupDatabase(source, destination, { kind: values.kind, offline: values.offline })));
   } catch (error) {
     console.error(`[backup] failed: ${error?.message || error}`);
     process.exitCode = 1;
