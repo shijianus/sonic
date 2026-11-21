@@ -147,7 +147,7 @@ try {
   const cli = resolve(dirname(require.resolve('wrangler/package.json')), 'bin/wrangler.js');
   execFileSync(process.execPath, [cli, 'pages', 'functions', 'build', 'functions', '--project-directory', '.',
     '--outdir', 'bundle', '--compatibility-date', compatibilityDate, '--compatibility-flags', 'nodejs_compat'], {
-    cwd: stagingRoot, env: { ...process.env, CI: '1', WRANGLER_SEND_METRICS: 'false' }, stdio: ['ignore', 'ignore', 'inherit'],
+    cwd: stagingRoot, env: { ...process.env, CI: '1', WRANGLER_SEND_METRICS: 'false', CLOUDFLARE_CF_FETCH_ENABLED: 'false' }, stdio: ['ignore', 'ignore', 'inherit'],
   });
   const portProbe = createServer().listen(0, '127.0.0.1');
   await once(portProbe, 'listening');
@@ -225,7 +225,7 @@ try {
     SONIC_INVITE_CODES: [env.SONIC_INVITE_CODES, ...browserInvites].join(',') };
   const unavailable = { SONIC_RATE_LIMIT_BUCKETS: { className: 'UnavailableBucket', scriptName: 'rate-limiter' } };
   const script = readFileSync(resolve(root, 'edge-rate-limiter/index.mjs'), 'utf8');
-  const options = convertV4MiniflareOptions({ host: '127.0.0.1', port: 0,
+  const options = convertV4MiniflareOptions({ host: '127.0.0.1', port: 0, cf: false,
     resourcePersistencePath: resolve(stagingRoot, 'durable-state'), workers: [
     worker('pages-a', { ...namespace, ...accessNamespace }), worker('pages-b', { ...namespace, ...accessNamespace }),
     worker('pages-no-binding', { ...accessNamespace }), worker('pages-backend-down', { ...unavailable, ...accessNamespace }),
