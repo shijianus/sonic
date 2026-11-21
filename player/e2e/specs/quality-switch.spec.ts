@@ -23,7 +23,7 @@ test('desktop click switches audio quality, updates stream br= and preserves pla
 
   const qualityBtn = page.locator('#footer-quality-btn')
   await expect(qualityBtn).toBeVisible()
-  await expect(qualityBtn).toContainText('SQ Lossless')
+  await expect(qualityBtn).toContainText('Requested SQ Lossless')
 
   await qualityBtn.click()
   const menu = page.locator('#quality-menu-panel')
@@ -53,7 +53,7 @@ test('desktop click switches audio quality, updates stream br= and preserves pla
   await hqOption.click()
 
   await expect(menu).toHaveCount(0)
-  await expect(qualityBtn).toContainText('HQ Extreme')
+  await expect(qualityBtn).toContainText('Requested HQ Extreme')
   await expect(page.getByText('Switched to HQ Extreme')).toBeVisible()
   await expect.poll(async () => (await getAudio(page))?.src || '').toContain('br=320')
   expect((await getAudio(page))?.currentTime ?? 0).toBeGreaterThanOrEqual(4.0)
@@ -73,7 +73,7 @@ test('desktop click switches audio quality, updates stream br= and preserves pla
   await expect(menu.getByRole('radio', { name: /HQ Extreme/ })).toHaveAttribute('aria-checked', 'true')
   await menu.getByRole('radio', { name: /Standard/ }).click()
   await expect(menu).toHaveCount(0)
-  await expect(qualityBtn).toContainText('Standard')
+  await expect(qualityBtn).toContainText('Requested Standard')
   await expect.poll(async () => (await getAudio(page))?.src || '').toContain('br=128')
   await expectPaused(page)
 })
@@ -98,7 +98,7 @@ test('desktop keyboard navigation (ArrowDown/ArrowUp/Enter/Escape) operates qual
   await page.keyboard.press('Enter')
 
   await expect(menu).toHaveCount(0)
-  await expect(qualityBtn).toContainText('HQ Extreme')
+  await expect(qualityBtn).toContainText('Requested HQ Extreme')
   await expect.poll(async () => (await getAudio(page))?.src || '').toContain('br=320')
   await expectPlaying(page)
 })
@@ -128,7 +128,7 @@ test('failed quality switch rolls back stream URL and badge, keeps menu open, an
   await expect(page.getByText(/Failed to switch quality/i)).toBeVisible()
   await expect(menu).toBeVisible()
   await expect(qualityBtn).toHaveAttribute('aria-busy', 'false')
-  await expect(qualityBtn).toContainText('SQ Lossless')
+  await expect(qualityBtn).toContainText('Requested SQ Lossless')
   await expect(menu.getByRole('radio', { name: /SQ Lossless/ })).toHaveAttribute('aria-checked', 'true')
   await expect.poll(async () => (await getAudio(page))?.src || '').toBe(initialSrc)
   await expectPlaying(page)
@@ -136,7 +136,7 @@ test('failed quality switch rolls back stream URL and badge, keeps menu open, an
   // Subsequent switch to a healthy tier (HQ Extreme) still succeeds cleanly after rollback.
   await menu.getByRole('radio', { name: /HQ Extreme/ }).click()
   await expect(menu).toHaveCount(0)
-  await expect(qualityBtn).toContainText('HQ Extreme')
+  await expect(qualityBtn).toContainText('Requested HQ Extreme')
   await expect.poll(async () => (await getAudio(page))?.src || '').toContain('br=320')
   await expectPlaying(page)
 
@@ -193,14 +193,14 @@ test('dedupes repeated clicks, cancels stale quality switch on rapid change or t
   await menu.getByRole('radio', { name: /Standard/ }).click()
   await expect(menu).toHaveCount(0)
   await expect(qualityBtn).toHaveAttribute('aria-busy', 'false')
-  await expect(qualityBtn).toContainText('Standard')
+  await expect(qualityBtn).toContainText('Requested Standard')
   await expect.poll(async () => (await getAudio(page))?.src || '').toContain('br=128')
 
   // Release the stale gated HQ request and ensure Standard remains active.
   releaseSlowHq?.()
   releaseSlowHq = null
   await page.waitForTimeout(200)
-  await expect(qualityBtn).toContainText('Standard')
+  await expect(qualityBtn).toContainText('Requested Standard')
   expect((await getAudio(page))?.src || '').toContain('br=128')
 
   // Track switch cancels an in-flight quality switch and resets loading state cleanly.
