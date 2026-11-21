@@ -23,7 +23,7 @@ import {
   redactSensitiveString,
   scheduleSonicAlert,
 } from '../../../_lib/sonic/observability';
-import { getRecommendStore, isGorseEnabled, isMeilisearchEnabled } from '../../../_lib/sonic/recommend';
+import { getRecommendStore, isGorseEnabled, getGorseMode, isMeilisearchEnabled } from '../../../_lib/sonic/recommend';
 import type { AppEnv } from '../../../_lib/types';
 
 interface EnginePeerHealth {
@@ -239,6 +239,7 @@ export async function onRequest(context: { request: Request; env: AppEnv; waitUn
         storageError,
         disk: diskHealth,
         gorseConfigured: isGorseEnabled(env),
+        gorseMode: getGorseMode(env),
         meilisearchConfigured: isMeilisearchEnabled(env),
       },
       observability: {

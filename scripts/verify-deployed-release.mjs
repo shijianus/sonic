@@ -59,6 +59,9 @@ async function verifyEngine(origin, { manifest, secret, production, expectedAcce
   if (store.erasureRecoveryVersion !== 1) {
     throw new Error('Engine is missing the required recommendation erasure recovery protection');
   }
+  if (production && store.gorseConfigured && store.gorseMode !== 'catalog-only') {
+    throw new Error('Production Engine Gorse must be catalog-only');
+  }
   const identity = readiness?.identity;
   if (identity?.ok !== true || identity.configured !== true || identity.required !== true) {
     throw new Error('Engine identity verification is not configured and required');
@@ -143,6 +146,8 @@ async function verify() {
       sourcesMatch({ contentPolicy: peer.contentPolicy }, expectedSources), 'Pages Engine peer allowed or effective sources differ from the expected production sources');
   }
   if (production) {
+    if (health?.recommendEngine?.gorseConfigured)
+      check(health.recommendEngine.gorseMode === 'catalog-only', 'production Pages Gorse must be catalog-only');
     check(health?.runtime === 'cf-pages' && release?.environment === 'production', 'live release is not a production Pages deployment');
     check(healthResponse.headers.get('x-sonic-release') === manifest.releaseId, 'health X-Sonic-Release header is missing or stale');
     check(readiness?.contentPolicy?.mode === 'strict-allowlist', 'live content policy must be strict-allowlist');

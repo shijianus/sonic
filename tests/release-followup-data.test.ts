@@ -493,6 +493,20 @@ describe('transactional erasure and physical SQLite scope', () => {
 });
 
 describe('explicit optional Gorse erasure acknowledgments', () => {
+  it('keeps production listening events and their embedded metadata in Sonic storage', async () => {
+    const store = sqlite();
+    ensureCatalogSeeded(store);
+    const [track] = store.listTracks(1);
+    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('unexpected network access'));
+    const env = { ...envFor(store), SONIC_ENV: 'production', SONIC_GORSE_URL: 'https://gorse.example' };
+    const result = await ingestBehaviorEvents([{
+      eventId: 'song-complete-test', type: 'play_complete', track: { id: track.canonicalTrackId },
+    }], identity(), env);
+    expect(result.accepted).toBe(1);
+    expect(store.getUserEvents(identity().subjectKey!)).toHaveLength(1);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it.each([503, 202, 404, 200])('does not acknowledge completed deletion on status %i without a valid completed response', async (status) => {
     const store = new MemoryRecommendStore();
     const who = identity(`anon:gorse_failure_${status}`);

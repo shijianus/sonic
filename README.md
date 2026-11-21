@@ -554,13 +554,13 @@ curl --fail-with-body -X DELETE "$API_BASE/api/sonic/events" \
 | `anonymous-opt-in` | 显式发送合法 `X-Sonic-Anon-Id` | 使用哈希后的匿名 subject |
 | `public` | 无持久身份或明确关闭个性化 | 不保存该请求的个人行为反馈；未关闭个性化时可使用请求上下文 |
 
-没有身份且没有上下文时返回公共/冷启动结果；合法 `X-Sonic-Context` 可在 `public` 模式下参与本次请求的重排，并不产生持久身份。`X-Sonic-Personalization: off` 或 `personalize=0` 等关闭值优先于身份和上下文。匿名客户端可显式发送 `anon_` 前缀的随机 `X-Sonic-Anon-Id`，但它不是账号密码，不应当成强身份认证或访问控制凭据。启用 Gorse 等外部服务时，数据流还包括相应适配器，不能笼统宣称“所有数据永不离开本机”。
+没有身份且没有上下文时返回公共/冷启动结果；合法 `X-Sonic-Context` 可在 `public` 模式下参与本次请求的重排，并不产生持久身份。`X-Sonic-Personalization: off` 或 `personalize=0` 等关闭值优先于身份和上下文。匿名客户端可显式发送 `anon_` 前缀的随机 `X-Sonic-Anon-Id`，但它不是账号密码，不应当成强身份认证或访问控制凭据。生产环境中，Gorse 仅提供不带用户身份的曲目邻居查询，个性化推荐由 Sonic 自身的存储和算法完成。用户行为不会发往 Gorse，按用户读取 Gorse 推荐也会关闭。配置了 Gorse 的生产发布必须在 Pages 与 Engine 健康响应中报告 `recommendEngine.gorseMode=catalog-only`。从曾启用 Gorse 个性化的旧版本升级时，应停止所有旧写入进程后再放量，保留旧实例的 Gorse 地址与删除权限，直到历史数据的清除和备份保留期处理完成。删除请求仍会核验 Gorse 回执。开发环境测试个性化集成时请使用独立的 Gorse 数据库。
 
 Node 存储包含 canonical tracks、FTS5 索引、行为事件、搜索聚合、共现、实体/关系/反馈和雷达档案。`entity_stats` 目前有表结构但没有完整更新管线；SQLite 初始化采用幂等 DDL，并非版本化 migration 系统。
 
 浏览器 MV 合辑会本地持久化并在认证条件下尝试上送；当前云端回读方法未接入调用，Node 又缺少 `radar-album` 分发，所以不能承诺完整跨设备同步。
 
-数据清除 UI 当前会吞掉部分失败并仍显示成功，服务端删除也有范围限制。需要严格删除保证的部署，应额外验证各存储、备份和外部适配器的处理结果。
+设置中可分别清除本机存储与当前身份的推荐画像。本机清理支持离线操作，云端画像清除需在服务端及配置的外部推荐存储确认后显示成功。部署时需核对备份保留期和恢复保护。
 
 ## 限制与安全边界
 

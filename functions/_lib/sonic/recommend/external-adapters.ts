@@ -5,6 +5,7 @@
 
 import type { AppEnv } from '../../types';
 import { fetchWithoutRedirect } from '../../fetch-direct';
+import { isProductionEnvironment } from '../environment';
 import { isEnvEnabled } from '../config';
 import type { CanonicalTrack, SonicEventType } from './types';
 
@@ -73,6 +74,12 @@ async function readBoundedJson<T = unknown>(response: Response, maxBytes = EXTER
 // ── 1. Optional Gorse Adapter (Collaborative Filtering & Item-to-Item Neighbors) ──
 export function isGorseEnabled(env?: AppEnv): boolean {
   return Boolean(cleanBaseUrl(env?.SONIC_GORSE_URL));
+}
+
+export function getGorseMode(env?: AppEnv): 'disabled' | 'catalog-only' | 'personalized' {
+  if (!isGorseEnabled(env)) return 'disabled';
+  // The feedback/delete barrier below is shared within a process only.
+  return isProductionEnvironment(env) ? 'catalog-only' : 'personalized';
 }
 
 function mapEventToGorseFeedback(type: SonicEventType): string | null {
@@ -187,6 +194,7 @@ export async function syncFeedbackToGorse(
   timestampMs: number,
   env?: AppEnv,
 ): Promise<boolean> {
+  if (getGorseMode(env) !== 'personalized') return false;
   const baseUrl = cleanBaseUrl(env?.SONIC_GORSE_URL);
   if (!baseUrl || !subjectKey || !canonicalTrackId) return false;
   const feedbackType = mapEventToGorseFeedback(eventType);
@@ -222,6 +230,7 @@ export async function fetchGorseRecommendations(
   count = 20,
   env?: AppEnv,
 ): Promise<string[]> {
+  if (getGorseMode(env) !== 'personalized') return [];
   const baseUrl = cleanBaseUrl(env?.SONIC_GORSE_URL);
   if (!baseUrl || !subjectKey) return [];
   const headers: Record<string, string> = { Accept: 'application/json' };

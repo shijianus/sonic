@@ -49,6 +49,7 @@ import {
   fetchGorseRecommendations,
   fetchListenBrainzSimilarArtists,
   isGorseEnabled,
+  getGorseMode,
   syncFeedbackToGorse,
   syncTrackToGorse,
 } from './external-adapters';
@@ -241,7 +242,7 @@ function recordBehaviorEvents(
         if (recentPositiveTracks.length > 4) recentPositiveTracks.pop();
       }
     }
-    if (canonicalTrack && isGorseEnabled(env)) {
+    if (canonicalTrack && getGorseMode(env) === 'personalized') {
       afterCommit.push(() => {
         syncTrackToGorse(canonicalTrack, env).catch(() => {});
         syncFeedbackToGorse(subjectKey, canonicalTrack.canonicalTrackId, rawEv.type, ts, env).catch(() => {});
@@ -762,7 +763,7 @@ export async function getRecommendationsForYou(
 
   // Optional Stage 2 Gorse collaborative recommendations
   const gorseBoostSet = new Set<string>();
-  if (identity.subjectKey && isGorseEnabled(env)) {
+  if (identity.subjectKey && getGorseMode(env) === 'personalized') {
     const gorseIds = await fetchGorseRecommendations(identity.subjectKey, count * 2, env);
     gorseIds.forEach((id) => gorseBoostSet.add(id));
   }
