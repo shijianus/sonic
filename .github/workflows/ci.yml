@@ -98,7 +98,7 @@ jobs:
       - name: Isolated mixed workload and local alert delivery
         run: |
           npm run build:engine
-          node --test tests/bare-metal-engine.test.mjs
+          node --test tests/bare-metal-engine.test.mjs tests/rollback-production.test.mjs
           node --experimental-sqlite scripts/verify-built-release.mjs
           node scripts/verify-local-edge.mjs
           npm run test:load

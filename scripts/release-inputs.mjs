@@ -45,7 +45,7 @@ export const REQUIRED_RELEASE_FILES = Object.freeze([
   'scripts/verify-staging-candidate.py', 'scripts/verify-staging-live.mjs',
   'scripts/verify-built-release.mjs', 'scripts/verify-engine-smoke.mjs',
   'scripts/verify-local-edge.mjs',
-  'scripts/start-bare-metal-engine.mjs', 'scripts/rollback-production.sh',
+  'scripts/start-bare-metal-engine.mjs', 'scripts/rollback-production.sh', 'scripts/rollback-production.mjs',
   'docs/RUNBOOK-ROLLBACK.md', 'docs/OPERATIONS.md',
   'docs/release/RELEASE-CHECKLIST.md', 'docs/release/REMOTE-INVITE-BETA-HANDOFF.md',
   'docs/gray-test-multi-entity-windows.md', 'docs/multi-entity-implementation-status.md',

@@ -60,6 +60,8 @@ docker image inspect --format='{{.Id}}' "sonic-engine:${SONIC_RELEASE_ID}"
 
 ## 3. SQLite 在线备份与离线原子恢复流程
 
+发布前冻结所有写入，对本环境启用的全部 SQLite 库生成同一停写窗口的快照。账号和准入库使用 [三库备份与终态恢复流程](OPERATIONS.md#三个持久库的范围)，分别保存已验证终态摘要。恢复推荐库后继续核对账号删除标记、已用码及会话撤销；在终态无法证明时保持受影响入口关闭，不从历史快照恢复权限或已删除数据。
+
 ### 3.1 在线一致性备份（恢复点为快照时点）
 
 [`scripts/backup-recommend-db.mjs`](../scripts/backup-recommend-db.mjs) 使用 SQLite 原生 `VACUUM INTO` 在 WAL 并发读写状态下生成紧凑一致性快照，并自动重新打开备份执行 `PRAGMA integrity_check`：
@@ -168,12 +170,16 @@ docker run -d \
 若涉及生产 Tunnel Ingress 变更，使用仓库内置非破坏性合并脚本 [`scripts/rollback-production.sh`](../scripts/rollback-production.sh)：
 
 ```bash
-# 1) 先执行 dry-run 核对合并后的 Ingress JSON（确保保留 engine-sonic.epocanvas.tech）
+# 1) 带只读权限检查当前 Tunnel、DNS 和目标计划，核对两份备份属于同一变更窗口。
 ./scripts/rollback-production.sh --dry-run
 
-# 2) 确认无误后执行恢复
+# 2) 确认后在同一维护主机、同一状态目录执行，期间暂停其他主机及控制台的并行路由变更。
 ./scripts/rollback-production.sh --execute
 ```
+
+执行需要 Linux `flock`、Node 22 和可读写目标 Tunnel/DNS 的 Cloudflare token。`TUNNEL_BACKUP`、`DNS_BACKUP` 可显式指定文件，默认目录为 `rollback-backups/`。如该目录有多份备份，需显式选定。执行前脚本以 0600 权限写入本次操作前的两个实际状态和目标状态；请将 `SONIC_ROLLBACK_STATE_DIR` 指向仅维护账号可访问的持久目录，默认使用 `rollback-backups/`。本地操作锁仅序列化使用该状态目录的流程。
+
+执行成功须取得两项配置的独立回读。如果写入结果或回读不确定，脚本尝试把两者恢复至本次操作前的状态并再次核验。若网络持续故障、进程意外中止或发现其他管理者的配置变更，保留 `production-rollback-state.json` 并阻止新操作。恢复连接并核对当前状态后，在同一维护主机运行 `./scripts/rollback-production.sh --recover`，它恢复本次操作前的 DNS，再恢复 Tunnel，最后回读两项。若存在非本次操作引起的差异，先由值班人员协调处理。成功或确认恢复后继续执行下方应用链路冒烟。
 
 ---
 
