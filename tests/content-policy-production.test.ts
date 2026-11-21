@@ -1,10 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   evaluateContentFlags,
   getContentPolicyMode,
   getContentPolicyReadiness,
 } from '../functions/_lib/sonic/licensing';
 import { isProductionDeployment, isProductionEnvironment } from '../functions/_lib/sonic/environment';
+import { MemoryRecommendStore } from '../functions/_lib/sonic/recommend/memory-store';
+import { toCanonicalTrack } from '../functions/_lib/sonic/recommend/track-canonical';
+import { getMultiEntityRecommendationsForYou } from '../functions/_lib/sonic/recommend/multi-entity';
+import { getRecommendationsForYou } from '../functions/_lib/sonic/recommend/engine';
+import { onRequest as smart } from '../functions/api/sonic/search/smart';
+import { onRequest as legacySearch } from '../functions/api/music/search';
+import { handleNexusSearchRequest } from '../functions/_lib/sonic/route-helpers';
+import { clearSonicMemoryCacheForTest } from '../functions/_lib/sonic/cache';
 import type { AppEnv } from '../functions/_lib/types';
 
 const production = (extra: Record<string, unknown> = {}): AppEnv => ({
@@ -149,5 +157,59 @@ describe('production content licensing is fail-closed', () => {
     expect(isProductionDeployment({ CF_PAGES_BRANCH: 'main', SONIC_RUNTIME: 'linux-engine' } as AppEnv)).toBe(true);
     expect(isProductionDeployment({ SONIC_RUNTIME: 'linux-engine' } as AppEnv)).toBe(false);
     expect(isProductionDeployment({ SONIC_ENV: 'staging', CF_PAGES_BRANCH: 'preview' } as AppEnv)).toBe(false);
+  });
+});
+
+describe('searchable catalogs after policy changes', () => {
+  const makeEnv = (store: MemoryRecommendStore, sources: string) => ({
+    SONIC_ENV: 'test', SONIC_CONTENT_POLICY: 'strict-allowlist', SONIC_ALLOWED_SOURCES: sources,
+    SONIC_ENABLE_LOCAL_ENGINE: '0', RECOMMEND_STORE: store, SONIC_RECOMMEND_OFFLINE: '1',
+  });
+  const publicIdentity = { mode: 'public' as const, subjectKey: null, personalizationEnabled: false, isAuthenticated: false };
+  const req = (path: string) => new Request('https://player.test/api/' + path);
+
+  it('revokes a persisted source across warm Smart caches, suggestions and both feeds and retains a permitted alternate', async () => {
+    clearSonicMemoryCacheForTest();
+    const store = new MemoryRecommendStore();
+    const before = makeEnv(store, 'qq,kuwo');
+    const after = makeEnv(store, 'kuwo');
+    store.upsertTracks([
+      toCanonicalTrack({ title: 'Policyfixture removed', artist: 'Fixture', album: 'Removed album', platform: 'qq', id: 'old' })!,
+      toCanonicalTrack({ title: 'Policyfixture retained', artist: 'Fixture', album: 'Retained album', platform: 'qq', id: 'alternate',
+        sources: [{ platform: 'qq', platformId: 'alternate' }, { platform: 'kuwo', platformId: 'permitted' }],
+        cover: 'https://y.gtimg.cn/old.jpg' })!,
+    ]);
+    const read = async (env: AppEnv, mode = '') => (await (await smart({ request: req('sonic/search/smart?q=Policyfixture&localOnly=1' + mode), env })).json()).data;
+    expect((await read(before)).tracks).toHaveLength(2);
+    expect((await getMultiEntityRecommendationsForYou(publicIdentity, { count: 20, temperature: 0 }, before)).data.length).toBeGreaterThan(0);
+    const result = await read(after);
+    expect(result.tracks.map((t: any) => t.title)).toEqual(['Policyfixture retained']);
+    expect(result.tracks[0]).toMatchObject({ platformId: 'permitted', sources: [{ platform: 'kuwo', platformId: 'permitted' }] });
+    expect(JSON.stringify(result.tracks[0])).not.toContain('gtimg.cn');
+    expect(JSON.stringify((await read(after, '&mode=suggest')).suggestions)).not.toContain('Policyfixture removed');
+    const feed = await getRecommendationsForYou(publicIdentity, { count: 10, temperature: 0 }, after);
+    expect(feed.tracks.map(t => t.title)).toEqual(['Policyfixture retained']);
+    const mixed = await getMultiEntityRecommendationsForYou(publicIdentity, { count: 20, temperature: 0 }, after);
+    expect(JSON.stringify(mixed.data)).not.toMatch(/Policyfixture removed|Removed album|gtimg\.cn/);
+  });
+
+  it('supports the approved Kuwo-only lineup and separates empty results from unavailability', async () => {
+    const env = makeEnv(new MemoryRecommendStore(), 'kuwo');
+    const mock = vi.spyOn(globalThis, 'fetch');
+    try {
+      mock.mockImplementation(async () => Response.json({ abslist: [{ MUSICRID: 'MUSIC_191', SONGNAME: 'Fixture track', ARTIST: 'Artist' }] }));
+      const nexus = await handleNexusSearchRequest(req('sonic/search/nexus?q=Fixture&nocache=1'), env);
+      expect(nexus.status).toBe(200);
+      expect((await nexus.json()).data.tracks[0].sources).toContainEqual(expect.objectContaining({ platform: 'kuwo', platformId: '191' }));
+      const request = () => req('music/search?q=missing&source=kuwo');
+      mock.mockImplementation(async () => Response.json({ abslist: [] }));
+      expect(await (await legacySearch({ request: request(), env })).json()).toMatchObject({ ok: true, tracks: [] });
+      mock.mockImplementation(async () => new Response('unavailable', { status: 503 }));
+      const failed = await legacySearch({ request: request(), env });
+      expect(failed.status).toBe(502);
+      expect((await failed.json()).error.code).toBe('SEARCH_UPSTREAM_UNAVAILABLE');
+    } finally {
+      mock.mockRestore();
+    }
   });
 });

@@ -124,74 +124,56 @@ export async function searchTracks(env: AppEnv, query: string, source = 'netease
   const cleanSource = (source || 'netease').toLowerCase().trim();
   const cfg = getSonicConfig(env);
 
-  if (cleanSource === 'synthetic') {
-    if (!cfg.enableSynthetic) return [];
-    return searchSyntheticCatalog(query, count).map(sonicTrackToLegacySongItem);
+  const provider = cleanSource === 'sonic'
+    ? ['netease', 'synthetic', 'qq', 'kugou', 'kuwo'].find(id => isSourceEnabledByPolicy(id, env))
+    : cleanSource;
+  if (provider === 'synthetic') {
+    return cfg.enableSynthetic ? searchSyntheticCatalog(query, count, page).map(sonicTrackToLegacySongItem) : [];
   }
-
-  // 1. Primary: Native / Local Engine protocols (no third-party free API reliance)
+  let validEmpty = false;
+  let lastError: unknown;
   try {
-    if (cleanSource === 'netease' || cleanSource === 'ncm' || cleanSource === 'sonic') {
-      if (cfg.enableNetease) {
-        const ne = await searchNeteaseNative(query, count, page, env, signal);
-        if (ne.tracks.length > 0) {
-          return ne.tracks.map(sonicTrackToLegacySongItem);
-        }
-      } else if (cleanSource === 'sonic' && cfg.enableSynthetic) {
-        return searchSyntheticCatalog(query, count).map(sonicTrackToLegacySongItem);
-      }
-    } else if (cleanSource === 'kuwo') {
-      if (cfg.enableKuwo) {
-        const kw = await searchKuwoNative(query, count, page, signal);
-        if (kw.length > 0) {
-          return kw.map(sonicTrackToLegacySongItem);
-        }
-      }
-    } else if (cleanSource === 'qq' || cleanSource === 'tencent' || cleanSource === 'kugou') {
+    let tracks;
+    if ((provider === 'netease' || provider === 'ncm') && cfg.enableNetease) {
+      tracks = (await searchNeteaseNative(query, count, page, env, signal)).tracks;
+    } else if (provider === 'kuwo' && cfg.enableKuwo) {
+      tracks = await searchKuwoNative(query, count, page, signal);
+    } else if (provider === 'qq' || provider === 'tencent' || provider === 'kugou') {
       const { getProvider } = await import('./sonic/providers');
-      const p = getProvider(cleanSource);
-      if (p?.search && p.isEnabled(env)) {
-        const list = await p.search(query, { count, page, env, signal });
-        if (list.length > 0) {
-          return list.map(sonicTrackToLegacySongItem);
-        }
-      }
+      const adapter = getProvider(provider);
+      if (adapter?.search && adapter.isEnabled(env)) tracks = await adapter.search(query, { count, page, env, signal });
     }
-  } catch { signal?.throwIfAborted();}
-
-  // 2. External Source Fallback: GDStudio
+    if (tracks?.length) return tracks.map(sonicTrackToLegacySongItem);
+    validEmpty = Array.isArray(tracks);
+  } catch (error) {
+    signal?.throwIfAborted();
+    lastError = error;
+  }
   if (!cfg.enableGdstudio) {
+    if (lastError) throw lastError;
     return [];
   }
 
-  let gdSource =
-    cleanSource === 'qq' ? 'tencent' : cleanSource === 'sonic' || cleanSource === 'ncm' ? 'netease' : cleanSource;
-  let data: any = null;
-  try {
-    data = await fetchMusicProvider(env, {
-      types: 'search',
-      source: gdSource,
-      name: query,
-      count: String(count),
-      pages: String(page),
-    }, signal);
-  } catch { signal?.throwIfAborted();}
-
-  // If initial source is not supported on GDStudio (e.g. tencent/qq), fall back to netease catalog
-  if (!Array.isArray(data) && gdSource !== 'netease') {
+  let gdSource = provider === 'qq' ? 'tencent' : provider === 'ncm' ? 'netease' : provider || 'netease';
+  let data: any;
+  for (const sourceId of new Set([gdSource, 'netease'])) {
     try {
-      gdSource = 'netease';
       data = await fetchMusicProvider(env, {
-        types: 'search',
-        source: 'netease',
-        name: query,
-        count: String(count),
-        pages: String(page),
+        types: 'search', source: sourceId, name: query, count: String(count), pages: String(page),
       }, signal);
-    } catch { signal?.throwIfAborted();}
+      if (Array.isArray(data)) {
+        gdSource = sourceId;
+        break;
+      }
+    } catch (error) {
+      signal?.throwIfAborted();
+      lastError = error;
+    }
   }
-
-  if (!Array.isArray(data)) return [];
+  if (!Array.isArray(data)) {
+    if (validEmpty) return [];
+    throw lastError || new Error('Invalid search provider response');
+  }
   return data
     .filter((item) => Boolean(item && typeof item === 'object' && item.id))
     .map((item) => normalizeTrack(item, gdSource));

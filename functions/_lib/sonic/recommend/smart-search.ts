@@ -1,3 +1,4 @@
+import { readableCatalog } from './catalog-policy';
 // Sonic Intelligent Recommendation & Smart Search — Hybrid Multi-Field Search, Suggestions & Bounded Reranking
 // Strictly enforces:
 //   Relevance > Playability & Studio Authenticity > Consensus & Popularity > Bounded Personalization
@@ -40,6 +41,7 @@ const LOCAL_RECALL_LIMIT = 100;
 const PROVIDER_RECALL_LIMIT = 50;
 
 export interface SmartSearchExecutionResult {
+  upstreamFailed?: boolean;
   data: SmartSearchResultData;
   attempts: SonicAttempt[];
   degraded?: boolean;
@@ -55,6 +57,7 @@ export function executeSmartSuggest(
   env?: AppEnv,
 ): SmartSearchSuggestion[] {
   const store = getRecommendStore(env);
+  const catalog = readableCatalog(store, env);
   ensureCatalogSeeded(store, env);
 
   const trimmed = (rawQuery || '').trim();
@@ -105,7 +108,7 @@ export function executeSmartSuggest(
     });
   }
 
-  const localHits = store.searchLocalTracks(trimmed, 12);
+  const localHits = catalog.tracks(store.searchLocalTracks(trimmed, 12));
   for (const t of localHits) {
     if (compactNormalize(t.canonicalArtist).startsWith(exp.compact)) {
       pushUnique({
@@ -277,6 +280,7 @@ export async function executeSmartSearch(
   env?: AppEnv,
 ): Promise<SmartSearchExecutionResult> {
   const store = getRecommendStore(env);
+  const catalog = readableCatalog(store, env);
   ensureCatalogSeeded(store, env);
 
   const page = Math.max(1, options.page || 1);
@@ -288,6 +292,7 @@ export async function executeSmartSearch(
   let degradedReason: string | undefined;
   let circuitState: CircuitState | undefined;
   let noStore = false;
+  let upstreamFailed = false;
 
   // Query popularity is recorded by opted-in behavior events with erasure attribution.
 
@@ -300,7 +305,7 @@ export async function executeSmartSearch(
       localCandidateMap.set(hit.canonicalTrackId, hit);
     }
   }
-  const localCandidates = Array.from(localCandidateMap.values());
+  const localCandidates = catalog.tracks(Array.from(localCandidateMap.values()));
   attempts.push({
     provider: `catalog-${store.kind}`,
     via: 'local-index',
@@ -315,7 +320,7 @@ export async function executeSmartSearch(
     const mStart = Date.now();
     const ids = await searchMeilisearchIds(exp.simplified || query, PROVIDER_RECALL_LIMIT, env);
     for (const id of ids) {
-      const t = store.getTrack(id);
+      const t = catalog.track(store.getTrack(id));
       if (t) meiliCandidates.push(t);
     }
     attempts.push({
@@ -346,7 +351,8 @@ export async function executeSmartSearch(
       degraded = Boolean(nexusRes.degraded);
       degradedReason = nexusRes.degradedReason;
       circuitState = nexusRes.circuitState;
-      noStore = Boolean(nexusRes.noStore);
+      upstreamFailed = Boolean(nexusRes.allProvidersFailed);
+      noStore = Boolean(nexusRes.noStore) || nexusRes.attempts.some(attempt => !attempt.ok);
 
       nexusRes.data.tracks.forEach((rawTrack, idx) => {
         const ct = toCanonicalTrack(rawTrack, { rank: idx });
@@ -364,6 +370,8 @@ export async function executeSmartSearch(
       options.signal?.throwIfAborted();
       options.request?.signal.throwIfAborted();
       degraded = true;
+      upstreamFailed = true;
+      noStore = true;
       degradedReason = err?.message || 'live_search_failed';
       attempts.push({
         provider: 'nexus',
@@ -392,7 +400,7 @@ export async function executeSmartSearch(
     clusterMap.set(cand.canonicalTrackId, cand);
   };
 
-  for (const c of liveCanonicals) addCandidateToClusters(c);
+  for (const c of catalog.tracks(liveCanonicals)) addCandidateToClusters(c);
   for (const c of localCandidates) addCandidateToClusters(c);
   for (const c of meiliCandidates) addCandidateToClusters(c);
 
@@ -517,7 +525,7 @@ export async function executeSmartSearch(
 
   // 6. Zero-Result Smart Fallback (never leave user on a dead blank page)
   if (ranked.length === 0 && page === 1) {
-    const fallbackRec = hasSearchTimeout(attempts) ? null : await getRecommendationsForYou(
+    const fallbackRec = upstreamFailed || hasSearchTimeout(attempts) ? null : await getRecommendationsForYou(
       identity,
       { mode: 'for-you', count: 8 },
       { ...(env || {}), SONIC_RECOMMEND_OFFLINE: '1' },
@@ -540,6 +548,7 @@ export async function executeSmartSearch(
         fallbackTracks: fallbackRec?.tracks ?? [],
       },
       attempts,
+      upstreamFailed,
       degraded,
       degradedReason,
       circuitState,
@@ -563,6 +572,7 @@ export async function executeSmartSearch(
       fallbackUsed: false,
     },
     attempts,
+    upstreamFailed,
     degraded,
     degradedReason,
     circuitState,

@@ -11,7 +11,7 @@ import {
 } from './_lib/sonic/observability';
 import { checkStagingAccessGate, canonicalPolicyPath } from './_lib/sonic/security';
 import { getAccessMode, requireAccess } from './_lib/sonic/access';
-import { getContentPolicyReadiness } from './_lib/sonic/licensing';
+import { getContentPolicyReadiness, isCatalogReadPath } from './_lib/sonic/licensing';
 import type { AppEnv } from './_lib/types';
 
 export async function onRequest(context: {
@@ -26,8 +26,8 @@ export async function onRequest(context: {
   const pathname = url.pathname || '/';
   const policyPath = canonicalPolicyPath(request);
   const inviteMode = getAccessMode(env) === 'invite';
-  const noSharedCache = inviteMode && (policyPath === '/api' || policyPath.startsWith('/api/') ||
-    policyPath === '/proxy' || policyPath === '/palette');
+  const noSharedCache = isCatalogReadPath(policyPath) || (inviteMode && (policyPath === '/api' || policyPath.startsWith('/api/') ||
+    policyPath === '/proxy' || policyPath === '/palette'));
   const release = getReleaseMetadata(env);
   const isStaging =
     release.environment === 'staging' ||

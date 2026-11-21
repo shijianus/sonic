@@ -1,3 +1,4 @@
+import { readableCatalog } from './catalog-policy';
 // Sonic Intelligent Recommendation & Smart Search — Core Hybrid Recommendation Engine
 // Implements:
 //   - Target A: Station Popularity (24h / 7d / all / surging / new / genre / personalized)
@@ -711,6 +712,7 @@ export async function getRecommendationsForYou(
   };
 }> {
   const store = getRecommendStore(env);
+  const catalog = readableCatalog(store, env);
   ensureCatalogSeeded(store, env);
 
   const mode = options.mode || 'for-you';
@@ -722,7 +724,7 @@ export async function getRecommendationsForYou(
   // Resolve optional seed track (for `next` / `radio` modes)
   let seedTrack: CanonicalTrack | null = null;
   if (options.seedTrackId) {
-    seedTrack = store.getTrack(options.seedTrackId);
+    seedTrack = catalog.track(store.getTrack(options.seedTrackId));
   }
   if (!seedTrack && options.seedTitle) {
     seedTrack = toCanonicalTrack({
@@ -765,7 +767,7 @@ export async function getRecommendationsForYou(
     gorseIds.forEach((id) => gorseBoostSet.add(id));
   }
 
-  const allTracks = store.listTracks(1200);
+  const allTracks = catalog.tracks(store.listTracks(1200));
   const popMap = computeStorePopularity(store, allTracks, { window: '7d', nowMs });
 
   // Reference anchor tracks based on mode
@@ -1047,6 +1049,7 @@ export async function getTrendingRecommendations(
   tracks: RecommendedTrack[];
 }> {
   const store = getRecommendStore(env);
+  const catalog = readableCatalog(store, env);
   ensureCatalogSeeded(store, env);
 
   const window = options.window || '7d';
@@ -1059,7 +1062,7 @@ export async function getTrendingRecommendations(
     await enrichStoreWithLiveQuery(genreFilter, store, env, [genreFilter]);
   }
 
-  const allTracks = store.listTracks(1500);
+  const allTracks = catalog.tracks(store.listTracks(1500));
   const popMap = computeStorePopularity(store, allTracks, { window, nowMs });
   const profile = wantPersonalized ? buildUserPreferenceProfile(identity, store, nowMs) : null;
 
@@ -1210,6 +1213,7 @@ export async function getSimilarRecommendations(
   tracks: RecommendedTrack[];
 }> {
   const store = getRecommendStore(env);
+  const catalog = readableCatalog(store, env);
   ensureCatalogSeeded(store, env);
 
   const count = Math.min(40, Math.max(1, options.count || 12));
@@ -1217,7 +1221,7 @@ export async function getSimilarRecommendations(
 
   let seed: CanonicalTrack | null = null;
   if (options.trackId) {
-    seed = store.getTrack(options.trackId);
+    seed = catalog.track(store.getTrack(options.trackId));
   }
   if (!seed && (options.title || options.artist)) {
     const constructed = toCanonicalTrack({
@@ -1228,7 +1232,7 @@ export async function getSimilarRecommendations(
       genres: options.genre ? [options.genre] : undefined,
     });
     if (constructed) {
-      const existing = store.findTrackByTitleArtist(constructed.cleanTitle, constructed.canonicalArtist, constructed.edition);
+      const existing = catalog.track(store.findTrackByTitleArtist(constructed.cleanTitle, constructed.canonicalArtist, constructed.edition));
       seed = existing || constructed; // Unverified request metadata remains request-local.
     }
   }
@@ -1269,7 +1273,7 @@ export async function getSimilarRecommendations(
     }
   }
 
-  const allTracks = store.listTracks(1200);
+  const allTracks = catalog.tracks(store.listTracks(1200));
   const popMap = computeStorePopularity(store, allTracks);
 
   const candidates: ScoredCandidate[] = [];
@@ -1350,6 +1354,7 @@ export async function getDiscoverRecommendations(
   tracks: RecommendedTrack[];
 }> {
   const store = getRecommendStore(env);
+  const catalog = readableCatalog(store, env);
   ensureCatalogSeeded(store, env);
 
   const count = Math.min(40, Math.max(1, options.count || 16));
@@ -1367,7 +1372,7 @@ export async function getDiscoverRecommendations(
     await enrichStoreWithLiveQuery(rawGenre, store, env, targetGenres);
   }
 
-  const allTracks = store.listTracks(1200);
+  const allTracks = catalog.tracks(store.listTracks(1200));
   const popMap = computeStorePopularity(store, allTracks);
 
   const candidates: ScoredCandidate[] = [];

@@ -147,7 +147,7 @@ export const qqProvider: SonicProviderAdapter = {
       if (h5Res.ok) {
         const h5Json = await readBoundedProviderJson(h5Res);
         const songList = h5Json?.data?.song?.list;
-        if (Array.isArray(songList) && songList.length > 0) {
+        if (Array.isArray(songList)) {
           return songList.map((item: any) => {
             const platformId = String(item.songmid || item.mid || item.songid || '');
             const durationSec = typeof item.interval === 'number' ? item.interval : 0;
@@ -224,7 +224,7 @@ export const qqProvider: SonicProviderAdapter = {
       if (uRes.ok) {
         const uJson = await readBoundedProviderJson(uRes);
         const songList = uJson?.req?.data?.body?.song?.list;
-        if (Array.isArray(songList) && songList.length > 0) {
+        if (Array.isArray(songList)) {
           return songList.map((item: any) => {
             const platformId = String(item.mid || item.id || '');
             const durationSec = typeof item.interval === 'number' ? item.interval : 0;
@@ -281,11 +281,11 @@ export const qqProvider: SonicProviderAdapter = {
       }, config.timeoutMs, options?.signal);
       if (!sRes.ok) {
         void sRes.body?.cancel().catch(() => {});
-        return [];
+        throw new Error(`QQ search HTTP ${sRes.status}`);
       }
       const sJson = await readBoundedProviderJson(sRes);
       const list = sJson?.data?.song?.list;
-      if (!Array.isArray(list)) return [];
+      if (!Array.isArray(list)) throw new Error('Invalid QQ search response');
 
       return list.map((item: any) => {
         const platformId = String(item.songmid || item.songid || '');
@@ -325,8 +325,7 @@ export const qqProvider: SonicProviderAdapter = {
       });
     } catch (error) {
       options?.signal?.throwIfAborted();
-      if (error?.name === 'TimeoutError') throw error;
-      return [];
+      throw error;
     }
   },
 

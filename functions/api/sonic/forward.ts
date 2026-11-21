@@ -214,7 +214,12 @@ export async function onRequest({ request, env }: any): Promise<Response> {
     try {
       const result = await searchNexus(query, { page, count, signal: request.signal }, env);
       const latencyMs = Date.now() - startTime;
-      const noStore = result.noStore || hasSearchTimeout(result.attempts);
+      const timedOut = hasSearchTimeout(result.attempts);
+      if (result.allProvidersFailed && !result.data.tracks.length) {
+        return sonicError(timedOut ? 'UPSTREAM_TIMEOUT' : 'SEARCH_UPSTREAM_UNAVAILABLE',
+          timedOut ? 'Search providers timed out' : 'All configured search providers failed', timedOut ? 504 : 502,
+          { provider: 'forward', degraded: true, attempts: result.attempts, latencyMs });
+      }
 
       return jsonResponse(
         {
@@ -234,7 +239,7 @@ export async function onRequest({ request, env }: any): Promise<Response> {
           headers: {
             'Access-Control-Allow-Origin': '*',
             'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-            'Cache-Control': noStore ? 'no-store' : 'public, max-age=3600',
+            'Cache-Control': 'private, no-store',
             'X-Sonic-Cache': 'MISS',
             'X-Sonic-Provider': 'nexus',
           },

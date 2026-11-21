@@ -26,7 +26,7 @@ import {
 import { handleOptions } from '../functions/_lib/http';
 import { checkEngineIdentityAccess } from '../functions/_lib/sonic/engine-identity';
 import { getAccessMode, requireAccess } from '../functions/_lib/sonic/access';
-import { getContentPolicyReadiness } from '../functions/_lib/sonic/licensing';
+import { computeContentPolicyEpoch, getContentPolicyReadiness, isCatalogReadPath } from '../functions/_lib/sonic/licensing';
 import { toWebRequest, abortWebRequest } from './request-adapter';
 
 // Route handlers shared directly from `functions/`
@@ -574,6 +574,7 @@ export function createSonicServer(staticRoot = path.resolve(process.cwd(), 'dist
       }
       const apiResp = await dispatchFunctionRoute(webReq, env);
       if (apiResp) {
+        if (isCatalogReadPath(pathname)) res.setHeader('X-Sonic-Catalog-Policy', computeContentPolicyEpoch(env));
         await sendWebResponse(res, apiResp, webReq.method === 'HEAD', classifyRouteGroup(pathname) === 'stream');
         return;
       }

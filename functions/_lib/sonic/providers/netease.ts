@@ -147,12 +147,12 @@ export const neteaseProvider: SonicProviderAdapter = {
     // 1. Primary: Native encrypted protocol (`ncm-api` on Linux VPS or pure-TS `linuxapi`)
     try {
       const native = await searchNeteaseNative(query, count, page, env, options?.signal);
-      if (native.tracks.length > 0) {
+      if (native.tracks.length > 0 || !cfg.enableGdstudio) {
         return native.tracks;
       }
     } catch (error) {
       options?.signal?.throwIfAborted();
-      if (error?.name === 'TimeoutError') throw error;
+      if (!cfg.enableGdstudio || error?.name === 'TimeoutError') throw error;
     }
 
     // 2. Optional Last-Resort Fallback: GDStudio (ONLY when explicitly enabled via SONIC_ENABLE_GDSTUDIO=1)
@@ -184,7 +184,7 @@ export const neteaseProvider: SonicProviderAdapter = {
         }
       } catch (error) {
         options?.signal?.throwIfAborted();
-        if (error?.name === 'TimeoutError') throw error;
+        throw error;
       }
     }
 

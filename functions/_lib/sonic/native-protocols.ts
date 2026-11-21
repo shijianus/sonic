@@ -244,7 +244,7 @@ export async function searchNeteaseNative(
       if (res.ok) {
         const json = (await res.json()) as any;
         const songs = json?.result?.songs;
-        if (Array.isArray(songs) && songs.length > 0) {
+        if (Array.isArray(songs)) {
           return {
             tracks: songs.map(mapNeteaseSongToSonicTrack),
             via: viaLabel(env, 'ncm-api'),
@@ -265,14 +265,15 @@ export async function searchNeteaseNative(
     signal,
   );
   const songs = lJson?.result?.songs;
-  if (Array.isArray(songs) && songs.length > 0) {
+  if (Array.isArray(songs)) {
     return {
       tracks: songs.map(mapNeteaseSongToSonicTrack),
       via: viaLabel(env, 'linuxapi'),
     };
   }
 
-  return { tracks: [], via: viaLabel(env, 'linuxapi') };
+  if (lJson?.code === 200 && lJson.result?.songCount === 0) return { tracks: [], via: viaLabel(env, 'linuxapi') };
+  throw new Error('Invalid NetEase search response');
 }
 
 export async function resolveNeteaseCoverUrl(id: string, env?: AppEnv, signal?: AbortSignal): Promise<string> {
@@ -437,7 +438,10 @@ export async function searchKuwoNative(
       headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Sonic/2.2.0' },
       signal,
     }, 6000);
-    if (!res.ok) return [];
+    if (!res.ok) {
+      void res.body?.cancel().catch(() => {});
+      throw new Error(`Kuwo search HTTP ${res.status}`);
+    }
     const rawText = await res.text();
     let json: any = null;
     try {
@@ -445,7 +449,8 @@ export async function searchKuwoNative(
     } catch {
       json = JSON.parse(rawText.replace(/'/g, '"'));
     }
-    const list = Array.isArray(json?.abslist) ? json.abslist : [];
+    const list = json?.abslist;
+    if (!Array.isArray(list)) throw new Error('Invalid Kuwo search response');
     return list
       .map((it: any): SonicSearchTrack | null => {
         const rid = String(it.MUSICRID || it.DC_TARGETID || '').replace(/^MUSIC_/i, '').trim();
@@ -476,9 +481,9 @@ export async function searchKuwoNative(
         };
       })
       .filter((x: SonicSearchTrack | null): x is SonicSearchTrack => Boolean(x));
-  } catch {
+  } catch (error) {
     signal?.throwIfAborted();
-    return [];
+    throw error;
   }
 }
 

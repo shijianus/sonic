@@ -1,3 +1,4 @@
+import { readableCatalog } from './catalog-policy';
 // Sonic Intelligent Recommendation — Multi-Entity Hybrid Recommendation Engine
 // Supports unified entity modeling for Tracks, Albums, Playlists, and MVs
 // Implements bidirectional soft signal propagation, multi-channel candidate recall,
@@ -133,7 +134,7 @@ export function ensureMultiEntityCatalogSeeded(store: RecommendStore, env?: AppE
     return;
   }
 
-  const tracks = store.listTracks(1500);
+  const tracks = readableCatalog(store, env).tracks(store.listTracks(1500));
   if (tracks.length === 0) return;
 
   const now = Date.now();
@@ -609,6 +610,7 @@ export async function getMultiEntityRecommendationsForYou(
 ): Promise<MixedFeedResponse> {
   const start = Date.now();
   const store = getRecommendStore(env);
+  const catalog = readableCatalog(store, env);
   ensureMultiEntityCatalogSeeded(store, env);
 
   const count = Math.min(50, Math.max(1, options.count || 18));
@@ -622,7 +624,7 @@ export async function getMultiEntityRecommendationsForYou(
 
   // 1. Candidate Generation: Tracks
   if (allowedTypes.has('track')) {
-    const tracks = store.listTracks(800);
+    const tracks = catalog.tracks(store.listTracks(800));
     for (const t of tracks) {
       if (!isPlayableTrack(t)) continue;
       if (profile.blockedEntityIds.has(t.canonicalTrackId) || excludeSet.has(t.canonicalTrackId)) continue;
@@ -676,7 +678,7 @@ export async function getMultiEntityRecommendationsForYou(
 
   // 2. Candidate Generation: Albums
   if (allowedTypes.has('album')) {
-    const albums = store.listEntities ? store.listEntities('album', 300) : [];
+    const albums = catalog.entities(store.listEntities?.('album', 300) || []);
     for (const alb of albums) {
       if (profile.blockedEntityIds.has(alb.id) || excludeSet.has(alb.id)) continue;
       const direct = profile.directEntityScores.get(alb.id) || 0;
@@ -720,7 +722,7 @@ export async function getMultiEntityRecommendationsForYou(
 
   // 3. Candidate Generation: Playlists
   if (allowedTypes.has('playlist')) {
-    const playlists = store.listEntities ? store.listEntities('playlist', 100) : [];
+    const playlists = catalog.entities(store.listEntities?.('playlist', 100) || []);
     for (const pl of playlists) {
       if (profile.blockedEntityIds.has(pl.id) || excludeSet.has(pl.id)) continue;
       const direct = profile.directEntityScores.get(pl.id) || 0;
@@ -757,7 +759,7 @@ export async function getMultiEntityRecommendationsForYou(
 
   // 4. Candidate Generation: MVs
   if (allowedTypes.has('mv')) {
-    const mvs = store.listEntities ? store.listEntities('mv', 200) : [];
+    const mvs = catalog.entities(store.listEntities?.('mv', 200) || []);
     for (const mv of mvs) {
       if (!isTrustedCatalogEntity(mv) || profile.blockedEntityIds.has(mv.id) || excludeSet.has(mv.id)) continue;
       const direct = profile.directEntityScores.get(mv.id) || 0;

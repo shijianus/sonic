@@ -1,4 +1,5 @@
 // Sonic Gateway — Pages -> Linux Local Engine Client & 3-State Circuit Breaker
+import { computeContentPolicyEpoch, getContentPolicyMode, isCatalogReadPath } from './licensing';
 import type { AppEnv } from '../types';
 import { fetchWithRuntimeBudget, UPSTREAM_TIMEOUT } from './request-budget';
 import { getSonicConfig } from './config';
@@ -215,6 +216,13 @@ export async function callLocalEngineJson<T = any>(
     const response = await fetchWithRuntimeBudget(`${cfg.localEngineUrl}${pathWithQuery.startsWith('/') ? '' : '/'}${pathWithQuery}`, {
       method, headers, body: method !== 'GET' ? options?.body : undefined, redirect: 'error',
     }, { timeoutMs, signals });
+    if (response.ok && isCatalogReadPath(pathWithQuery) && getContentPolicyMode(env) === 'strict-allowlist' &&
+        response.headers.get('X-Sonic-Catalog-Policy') !== computeContentPolicyEpoch(env)) {
+      void response.body?.cancel().catch(() => {});
+      completeCircuit(c, lease, 'success');
+      return { ok: false, status: 503, skippedByCircuit: false, latencyMs: Date.now() - start,
+        circuitState: c.state, error: 'Engine catalog policy does not match the gateway' };
+    }
     if (response.status >= 500 || INSTANT_TRIP_HTTP_STATUSES.has(response.status)) {
       const error = `Engine HTTP ${response.status}`;
       let data: any;

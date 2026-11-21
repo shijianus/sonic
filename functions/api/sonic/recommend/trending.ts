@@ -1,3 +1,4 @@
+import { computeContentPolicyEpoch } from '../../../_lib/sonic/licensing';
 // GET /api/sonic/recommend/trending
 // Station Popularity, 24h / 7d Trends, Surging Songs, New Songs & Genre Hot
 // Strictly separates `cfsolara-internal` real station listens from `external-chart` reference.
@@ -51,7 +52,7 @@ export async function onRequest({
     effectivePersonalized ? 0 : 120,
   );
 
-  const cacheKey = `win=${window}:g=${genre || 'all'}:c=${count}`;
+  const cacheKey = `${computeContentPolicyEpoch(env)}:win=${window}:g=${genre || 'all'}:c=${count}`;
   if (allowSharedCache && !nocache) {
     const hit = await getSonicCachedJson<any>('rec-trending-v1', cacheKey, env);
     if (hit?.value) {

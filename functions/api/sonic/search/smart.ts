@@ -1,3 +1,4 @@
+import { computeContentPolicyEpoch } from '../../../_lib/sonic/licensing';
 // GET /api/sonic/search/smart
 // Hybrid Multi-Field CJK/English/Pinyin/Alias/Typo Search + Autocomplete Suggestions + Bounded Personalization
 // Preserves 100% track schema compatibility with `/api/sonic/search/nexus`.
@@ -110,7 +111,7 @@ export async function onRequest({
 
   const personalize = url.searchParams.get('personalize') !== '0';
   const skipLiveUpstream = url.searchParams.get('localOnly') === '1';
-  const cacheIdentifier = `q=${query.toLowerCase()}:p=${page}:c=${count}:l=${skipLiveUpstream ? 1 : 0}:z=${personalize ? 1 : 0}`;
+  const cacheIdentifier = `${computeContentPolicyEpoch(env)}:q=${query.toLowerCase()}:p=${page}:c=${count}:l=${skipLiveUpstream ? 1 : 0}:z=${personalize ? 1 : 0}`;
   if (allowSharedCache && !nocache) {
     const hit = await getSonicCachedJson<any>(SMART_SEARCH_CACHE, cacheIdentifier, env);
     if (hit?.value) {
@@ -188,6 +189,13 @@ export async function onRequest({
     const effectiveCircuit = circuitState || result.circuitState;
     const attempts = [...engineAttempts, ...result.attempts];
     const noStore = result.noStore || hasSearchTimeout(attempts);
+
+    if (result.upstreamFailed && result.data.total === 0) {
+      const timeout = hasSearchTimeout(attempts);
+      return sonicError(timeout ? 'UPSTREAM_TIMEOUT' : 'SEARCH_UPSTREAM_UNAVAILABLE',
+        timeout ? 'Search providers timed out' : 'All configured search providers failed', timeout ? 504 : 502,
+        { provider: 'smart', degraded: true, attempts, latencyMs: Date.now() - start });
+    }
 
     const responseBody = {
       brand: 'Sonic',

@@ -109,15 +109,15 @@ export const kugouProvider: SonicProviderAdapter = {
       }, config.timeoutMs, options?.signal);
       if (!sRes.ok) {
         void sRes.body?.cancel().catch(() => {});
-        return [];
+        throw new Error(`Kugou search HTTP ${sRes.status}`);
       }
       const sJson = await readBoundedProviderJson(sRes);
       const items = Array.isArray(sJson.data?.lists)
         ? sJson.data.lists
         : Array.isArray(sJson.data?.info)
           ? sJson.data.info
-          : [];
-      if (!Array.isArray(items)) return [];
+          : null;
+      if (!Array.isArray(items)) throw new Error('Invalid Kugou search response');
 
       return items.map((item: any) => {
         const platformId = String(item.FileHash || item.hash || '');
@@ -173,8 +173,7 @@ export const kugouProvider: SonicProviderAdapter = {
       });
     } catch (error) {
       options?.signal?.throwIfAborted();
-      if (error?.name === 'TimeoutError') throw error;
-      return [];
+      throw error;
     }
   },
 };

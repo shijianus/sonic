@@ -127,7 +127,7 @@ describe('backend beta request cancellation', () => {
     vi.stubGlobal('fetch', fetchMock);
     const server = createSonicServer(os.tmpdir(), {
       SONIC_ENV: 'test', SONIC_ENGINE_SECRET: key, SONIC_RECOMMEND_DB_PATH: 'memory', RECOMMEND_STORE: new MemoryRecommendStore(),
-      SONIC_ENABLE_NETEASE: kind === 'search' ? '1' : '0', SONIC_ENABLE_KUGOU: kind === 'lyrics' ? '1' : '0',
+      SONIC_ENABLE_KUWO: '0', SONIC_ENABLE_NETEASE: kind === 'search' ? '1' : '0', SONIC_ENABLE_KUGOU: kind === 'lyrics' ? '1' : '0',
       SONIC_ENABLE_QQ: '0', SONIC_ENABLE_GDSTUDIO: '0', SONIC_ENABLE_AMLL: '0', SONIC_ENABLE_LRCLIB: '0', SONIC_ENABLE_LYRIVA: '0',
     });
     const port = await listen(server);
@@ -211,7 +211,7 @@ describe('backend beta lyrics timeout contract', () => {
 });
 
 describe('Nexus search deadlines', () => {
-  const env = { SONIC_ENV: 'test', SONIC_TIMEOUT_MS: '500', SONIC_ENABLE_GDSTUDIO: '0' };
+  const env = { SONIC_ENV: 'test', SONIC_TIMEOUT_MS: '500', SONIC_ENABLE_GDSTUDIO: '0', SONIC_ENABLE_KUWO: '0' };
   const request = (signal?: AbortSignal) => new Request('https://sonic.test/api/sonic/search/nexus?q=deadline-test', { signal });
 
   beforeEach(async () => {
@@ -233,15 +233,10 @@ describe('Nexus search deadlines', () => {
     await vi.advanceTimersByTimeAsync(500);
     const response = await pending;
     const body = await response.json();
-    if (route === 'nexus') {
-      expect(response.status).toBe(504);
-      expect(response.headers.get('cache-control')).toBe('no-store');
-      expect(body.error.code).toBe('UPSTREAM_TIMEOUT');
-      expect(body.meta.attempts).toHaveLength(3);
-    } else {
-      expect(response.status).toBe(200);
-      expect(body.data.tracks).toEqual([]);
-    }
+    expect(response.status).toBe(504);
+    expect(response.headers.get('cache-control')).toBe('no-store');
+    expect(body.error.code).toBe('UPSTREAM_TIMEOUT');
+    expect(body.meta.attempts).toHaveLength(3);
     expect(body.meta.attempts.map(({ provider, ok, errorCode }: any) => [provider, ok, errorCode])).toEqual([
       ['netease', false, 'UPSTREAM_TIMEOUT'], ['qq', false, 'UPSTREAM_TIMEOUT'], ['kugou', false, 'UPSTREAM_TIMEOUT'],
     ]);
@@ -533,17 +528,17 @@ describe('Smart Search cache recovery', () => {
     const pending = handleSmartSearch({ request: request(), env: { ...env(), SONIC_TIMEOUT_MS: '500' } });
     await vi.advanceTimersByTimeAsync(500);
     const response = await pending;
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(504);
     expect(response.headers.get('cache-control')).toContain('no-store');
     expect(await response.json()).toMatchObject({
-      data: { tracks: [], fallbackUsed: false, fallbackTracks: [] },
+      error: { code: 'UPSTREAM_TIMEOUT' },
       meta: { attempts: expect.arrayContaining([expect.objectContaining(timeout)]) },
     });
   });
 
   it('preserves a direct provider result through a stalled body, then finds the recovered track', async () => {
     vi.useFakeTimers();
-    const environment = { ...env(), SONIC_TIMEOUT_MS: '500', SONIC_ENABLE_KUGOU: '0', SONIC_ENABLE_GDSTUDIO: '0' };
+    const environment = { ...env(), SONIC_TIMEOUT_MS: '500', SONIC_ENABLE_KUWO: '0', SONIC_ENABLE_KUGOU: '0', SONIC_ENABLE_GDSTUDIO: '0' };
     let recovered = false;
     const fetchMock = vi.fn(async (input: string) => {
       const { hostname } = new URL(input);

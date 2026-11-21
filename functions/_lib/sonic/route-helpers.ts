@@ -6,7 +6,7 @@ import { jsonResponse, handleOptions } from '../http';
 import { getSonicConfig } from './config';
 import { getSonicCachedJson, putSonicCachedJson } from './cache';
 import { checkEngineAccess, evaluateGatewayRateLimit, buildRateLimitErrorResponse, isSameOriginRequest } from './security';
-import { isSourceEnabledByPolicy, normalizeLyricsSourceId, normalizeSourceId } from './licensing';
+import { computeContentPolicyEpoch, isSourceEnabledByPolicy, normalizeLyricsSourceId, normalizeSourceId } from './licensing';
 import { recordLicensingBlockMetric, redactSensitiveString } from './observability';
 import { extractAuthCredentials } from '../auth';
 import { checkEngineIdentityAccess } from './engine-identity';
@@ -506,7 +506,7 @@ export async function handleNexusSearchRequest(
     });
   }
 
-  const cacheIdentifier = `q=${query.toLowerCase()}:p=${page}:c=${count}`;
+  const cacheIdentifier = `${computeContentPolicyEpoch(env)}:q=${query.toLowerCase()}:p=${page}:c=${count}`;
   if (!nocache) {
     const hit = await getSonicCachedJson<any>('search-nexus-v4', cacheIdentifier, env);
     if (hit?.value) {
@@ -675,7 +675,7 @@ export async function handleSingleProviderSearchRequest(
     });
   }
 
-  const cacheIdentifier = `${p}:q=${query.toLowerCase()}:p=${page}:c=${count}`;
+  const cacheIdentifier = `${computeContentPolicyEpoch(env)}:${p}:q=${query.toLowerCase()}:p=${page}:c=${count}`;
   if (!nocache) {
     const hit = await getSonicCachedJson<any>('search-prov-v4', cacheIdentifier, env);
     if (hit?.value) {

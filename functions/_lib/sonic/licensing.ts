@@ -503,6 +503,14 @@ function collectEnabledSourceIds(f: EffectiveContentFlags): string[] {
   return list;
 }
 
+export function isCatalogReadPath(path: string): boolean {
+  const route = path.split('?')[0].replace(/\/+$/, '').toLowerCase();
+  return route === '/api/music/search' || route === '/api/search' || route === '/api/cloudsearch' ||
+    route === '/api/sonic/search' ||
+    route.startsWith('/api/sonic/search/') ||
+    (route.startsWith('/api/sonic/recommend/') && route !== '/api/sonic/recommend/radar-album');
+}
+
 /**
  * Deterministic fingerprint of the effective content policy. Cached stream/lyrics
  * keys embed this so a policy change (e.g. disabling a source) invalidates old

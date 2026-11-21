@@ -12,7 +12,7 @@ import type {
 } from './types';
 import type { SonicProviderAdapter } from './providers/adapter';
 import { getSonicConfig } from './config';
-import { getProvider, syntheticProvider } from './providers';
+import { getProvider, syntheticProvider, kuwoProvider } from './providers';
 import { gdstudioProvider } from './providers/gdstudio';
 import { neteaseProvider } from './providers/netease';
 import { qqProvider } from './providers/qq';
@@ -182,6 +182,7 @@ async function searchNexusWithinBudget(
       if (config.enableNetease && neteaseProvider.search) activeProviders.push(neteaseProvider);
       if (config.enableQq && qqProvider.search) activeProviders.push(qqProvider);
       if (config.enableKugou && kugouProvider.search) activeProviders.push(kugouProvider);
+      if (config.enableKuwo && kuwoProvider.search) activeProviders.push(kuwoProvider);
     }
   }
 

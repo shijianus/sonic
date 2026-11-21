@@ -105,7 +105,11 @@ export async function onRequest({ request, env }: { request: Request; env: AppEn
     );
   } catch (err: any) {
     request.signal.throwIfAborted();
-    console.error('[Sonic Music Search Error]', err);
-    return errorResponse(redactSensitiveString(err?.message || '搜索曲库失败'), 502);
+    console.error('[Sonic Music Search Error]', redactSensitiveString(err?.message || 'Search provider unavailable'));
+    const timedOut = err?.name === 'TimeoutError';
+    return jsonResponse({ ok: false, error: {
+      code: timedOut ? 'UPSTREAM_TIMEOUT' : 'SEARCH_UPSTREAM_UNAVAILABLE',
+      message: timedOut ? 'Search provider timed out' : 'Search provider unavailable',
+    } }, { status: timedOut ? 504 : 502, headers: { 'Cache-Control': 'no-store' } });
   }
 }
