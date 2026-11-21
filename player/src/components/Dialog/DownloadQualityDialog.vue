@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useDownloadStore, type QualityChoice } from '@/stores/modules/download'
+import { ecsQualityTier } from '@/utils/offlineDownload'
 import { useAudioStore } from '@/stores/modules/audio'
 import { formatCoverUrl } from '@/utils/imageUrl'
 import { useI18n } from 'vue-i18n'
@@ -359,6 +360,8 @@ onUnmounted(() => {
               </button>
             </div>
 
+            <p class="mt-2 text-xs text-primary/70">{{ t('downloadDialog.ecsTiers') }}</p>
+
             <!-- 歌曲行：封面固定 48px × 48px 圆角 10px，歌名 15px/600，歌手·专辑 13px (颜色不低于 64% 白) -->
             <div
               v-if="downloadStore.currentDownloadSong"
@@ -428,7 +431,7 @@ onUnmounted(() => {
                 <!-- 左侧：第一行名称 15px/600，第二行格式·码率 13px (格式只出现一次，去掉重复小标签) -->
                 <div class="flex flex-col justify-center min-w-0 pr-2">
                   <div class="text-[15px] font-semibold text-primary leading-snug">
-                    {{ choice.label }}
+                    ECS{{ ecsQualityTier(choice.level) }} · {{ choice.label }}
                   </div>
                   <!-- 第二行：可用时显示格式·码率，不可用时显示中性灰原因与信息图标，探测中显示骨架 -->
                   <div class="mt-1 flex items-center gap-1.5 min-w-0">

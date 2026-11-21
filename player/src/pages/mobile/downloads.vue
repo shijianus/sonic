@@ -5,9 +5,10 @@ import { useDownloadStore } from '@/stores/modules/download'
 import { useAudioStore } from '@/stores/modules/audio'
 import { formatCoverUrl } from '@/utils/imageUrl'
 import { formatDuration, formatNumber } from '@/utils/time'
-import type { Song } from '@/stores/interface'
+import { inspectDownloadAudio, offlineSong } from '@/utils/offlineDownload'
+import DownloadExportDialog from '@/components/Dialog/DownloadExportDialog.vue'
 import type { DownloadedSong } from '@/utils/indexedDB'
-import { parseAudioBlob, type ParsedAudioMeta, type ResolvedBlobTier } from '@/utils/blobMetadataParser'
+import type { ParsedAudioMeta, ResolvedBlobTier } from '@/utils/blobMetadataParser'
 import { useI18n } from 'vue-i18n'
 import { useDialogA11y } from '@/composables/useDialogA11y'
 
@@ -21,14 +22,18 @@ const metadataCache = new Map<string, ParsedAudioMeta>()
 
 const parseBlobMetadata = async (item: DownloadedSong) => {
   if (!item.file || !(item.file instanceof Blob)) return
-  const idStr = String(item.id)
+  const idStr = item.downloadKey
+  if (item.audioMeta) {
+    parsedMetaMap.value[idStr] = item.audioMeta
+    return
+  }
+  if (item.ecsTier) return
   if (metadataCache.has(idStr)) {
     parsedMetaMap.value[idStr] = metadataCache.get(idStr)!
     return
   }
   try {
-    const reqQuality = item.qualityLevel || (item.qualityBadge === 'SQ' ? 'lossless' : item.qualityBadge === 'HQ' ? 'exhigh' : 'standard')
-    const parsed = await parseAudioBlob(item.file, item.duration, reqQuality)
+    const { audioMeta: parsed } = await inspectDownloadAudio(item.file)
     metadataCache.set(idStr, parsed)
     parsedMetaMap.value[idStr] = parsed
   } catch {
@@ -37,7 +42,7 @@ const parseBlobMetadata = async (item: DownloadedSong) => {
 }
 
 const getParsedMeta = (item: DownloadedSong): ParsedAudioMeta => {
-  const idStr = String(item.id)
+  const idStr = item.downloadKey
   return (
     parsedMetaMap.value[idStr] || {
       displayTag: '—',
@@ -93,69 +98,28 @@ const filteredDownloads = computed(() => {
   return list
 })
 
-const toSongList = (items: typeof downloads.value): Song[] => {
-  return items.map((d) => {
-    const meta = getParsedMeta(d)
-    const badge = meta.isLossless ? 'SQ' : meta.displayTag.includes('320') ? 'HQ' : t('quality.standard')
-    return {
-      id: d.id,
-      source: d.source,
-      platform: d.platform,
-      platformId: d.platformId,
-      resolvedSource: d.resolvedSource,
-      resolvedPlatformId: d.resolvedPlatformId,
-      name: d.name,
-      artist: d.artist,
-      album: d.album,
-      duration: (d.duration || 0) * 1000,
-      cover: d.cover,
-      url: URL.createObjectURL(d.file),
-      isLocal: true,
-      qualityBadge: badge,
-      qualities: [
-        {
-          level: d.qualityLevel,
-          label: badge,
-          bitrate: meta.displayTag,
-          format: meta.isLossless ? 'flac' : 'mp3',
-        },
-      ],
-    }
-  })
-}
-
 const playAll = () => {
   if (!filteredDownloads.value.length) return
-  const songList = toSongList(filteredDownloads.value)
+  const songList = filteredDownloads.value.map(item => offlineSong({ ...item, audioMeta: parsedMetaMap.value[item.downloadKey] }))
   audioStore.setPlaylist(songList, 0)
   audioStore.playSong(songList[0], 0)
 }
 
-const playSingle = (_item: any, index: number) => {
-  const songList = toSongList(filteredDownloads.value)
+const playSingle = (_item: DownloadedSong, index: number) => {
+  const songList = filteredDownloads.value.map(item => offlineSong({ ...item, audioMeta: parsedMetaMap.value[item.downloadKey] }))
   audioStore.setPlaylist(songList, index)
   audioStore.playSong(songList[index], index)
 }
 
 const isCurrentPlaying = (item: any) => {
   const current = audioStore.currentSong
+  if (current?.downloadKey) return current.downloadKey === item.downloadKey
   if (String(current?.id || '') !== String(item.id || '')) return false
   if (item.platformId && current?.platformId && String(item.platformId) !== String(current.platformId)) return false
   return true
 }
 
-const handleExport = (item: any) => {
-  const blobUrl = URL.createObjectURL(item.file)
-  const a = document.createElement('a')
-  a.href = blobUrl
-  const safeArtist = (item.artist || t('player.unknownArtist')).replace(/[\\/:*?"<>|]/g, '_')
-  const safeTitle = (item.name || t('player.unknownSong')).replace(/[\\/:*?"<>|]/g, '_')
-  a.download = `${safeArtist} - ${safeTitle} [${item.qualityBadge}].${item.format}`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(blobUrl), 10000)
-}
+const exportItem = ref<DownloadedSong | null>(null)
 
 const itemToDelete = ref<DownloadedSong | null>(null)
 const deleteDialogRef = ref<HTMLElement | null>(null)
@@ -262,7 +226,7 @@ const confirmDelete = async () => {
     <div v-if="filteredDownloads.length > 0" class="space-y-2">
       <div
         v-for="(item, index) in filteredDownloads"
-        :key="item.id"
+        :key="item.downloadKey"
         @click="playSingle(item, index)"
         class="flex items-center justify-between rounded-2xl border p-2.5 transition-all active:scale-[0.99]"
         :class="[
@@ -292,10 +256,10 @@ const confirmDelete = async () => {
           </div>
 
           <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-1.5">
+            <div class="flex flex-wrap items-center gap-1.5">
               <h4
                 :title="item.name"
-                class="line-clamp-1 text-sm font-semibold text-primary transition-colors"
+                class="break-words text-sm font-semibold text-primary transition-colors"
                 :class="{ 'font-bold': isCurrentPlaying(item) }"
               >
                 {{ item.name }}
@@ -310,10 +274,10 @@ const confirmDelete = async () => {
                       : 'bg-primary/10 text-primary/70 border border-primary/20'
                 ]"
               >
-                {{ getParsedMeta(item).displayTag }}
+                <template v-if="item.ecsTier">ECS{{ item.ecsTier }} · </template>{{ getParsedMeta(item).displayTag }}
               </span>
             </div>
-            <p class="truncate text-xs text-primary/50 mt-0.5">
+            <p class="break-words text-xs text-primary/60 mt-0.5">
               {{ item.artist }}
               <span v-if="item.album"> · 《{{ item.album }}》</span>
             </p>
@@ -325,7 +289,8 @@ const confirmDelete = async () => {
             {{ formatDuration((item.duration || 0) * 1000) }}
           </span>
           <button
-            @click.stop="handleExport(item)"
+            data-testid="download-export"
+            @click.stop="exportItem = item"
             class="flex h-11 w-11 items-center justify-center text-primary/45 hover:text-primary active:scale-90 transition-all"
             :title="t('downloads.exportAudio')"
           >
@@ -415,4 +380,5 @@ const confirmDelete = async () => {
       </Transition>
     </Teleport>
   </div>
+  <DownloadExportDialog v-if="exportItem" :item="exportItem" @close="exportItem = null" />
 </template>

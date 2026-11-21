@@ -45,6 +45,8 @@ export interface Song {
   streamUrl?: string
   /** 是否为本地音乐 */
   isLocal?: boolean
+  /** Identity of an offline provider/quality variant in IndexedDB. */
+  downloadKey?: string
   /** 歌曲唯一 SHA 聚合指纹 */
   sha?: string
   /** 最高音质等级标识（如 SQ、HQ、标准） */

@@ -7,9 +7,10 @@ import { formatCoverUrl } from '@/utils/imageUrl'
 import Button from '@/components/Ui/Button.vue'
 import GlassSelect from '@/components/Ui/GlassSelect.vue'
 import LazyImage from '@/components/Ui/LazyImage.vue'
-import type { Song } from '@/stores/interface'
+import { inspectDownloadAudio, offlineSong } from '@/utils/offlineDownload'
+import DownloadExportDialog from '@/components/Dialog/DownloadExportDialog.vue'
 import type { DownloadedSong } from '@/utils/indexedDB'
-import { parseAudioBlob, type ParsedAudioMeta, type ResolvedBlobTier } from '@/utils/blobMetadataParser'
+import type { ParsedAudioMeta, ResolvedBlobTier } from '@/utils/blobMetadataParser'
 import { useI18n } from 'vue-i18n'
 import { formatNumber } from '@/utils/time'
 
@@ -41,20 +42,23 @@ const metadataCache = new Map<string, ParsedAudioMeta>()
 
 const parseBlobMetadata = async (item: DownloadedSong) => {
   if (!item.file || !(item.file instanceof Blob)) return
-  const idStr = String(item.id)
+  const idStr = item.downloadKey
+  if (item.audioMeta) {
+    parsedMetaMap.value[idStr] = item.audioMeta
+    return
+  }
+  if (item.ecsTier) return
   if (metadataCache.has(idStr)) {
     parsedMetaMap.value[idStr] = metadataCache.get(idStr)!
     return
   }
 
   try {
-    const reqQuality = item.qualityLevel || (item.qualityBadge === 'SQ' ? 'lossless' : item.qualityBadge === 'HQ' ? 'exhigh' : 'standard')
-    const parsed = await parseAudioBlob(item.file, item.duration, reqQuality)
+    const { audioMeta: parsed } = await inspectDownloadAudio(item.file)
     metadataCache.set(idStr, parsed)
     parsedMetaMap.value[idStr] = parsed
   } catch {
-    const isFlac = item.format === 'flac' || item.format === 'wav' || item.format === 'alac'
-    const fallbackTag = isFlac ? item.format.toUpperCase() : 'MP3 128k'
+    const fallbackTag = '—'
     const parsed: ParsedAudioMeta = {
       displayTag: fallbackTag,
       detailText: '',
@@ -68,7 +72,7 @@ const parseBlobMetadata = async (item: DownloadedSong) => {
 }
 
 const getParsedMeta = (item: DownloadedSong): ParsedAudioMeta => {
-  const idStr = String(item.id)
+  const idStr = item.downloadKey
   if (parsedMetaMap.value[idStr]) {
     return parsedMetaMap.value[idStr]
   }
@@ -81,9 +85,9 @@ const getParsedMeta = (item: DownloadedSong): ParsedAudioMeta => {
   }
 }
 
-/** 基于解析 blob 获取真实音质档位 (FLAC/ALAC/WAV -> SQ; >=256k -> HQ; 其余 -> 标准) */
+/** 按音频元数据筛选实际音质。 */
 const getSongActualTier = (item: DownloadedSong): ResolvedBlobTier => {
-  const meta = parsedMetaMap.value[String(item.id)]
+  const meta = parsedMetaMap.value[item.downloadKey]
   if (meta) {
     return meta.resolvedTier
   }
@@ -221,41 +225,12 @@ const filteredDownloads = computed(() => {
 })
 
 // 将 DownloadedSong 映射为播放器 Song 格式
-const toSongList = (items: typeof downloads.value): Song[] => {
-  return items.map((d) => {
-    const meta = getParsedMeta(d)
-    const badge = meta.isLossless ? 'SQ' : meta.displayTag.includes('320') ? 'HQ' : t('quality.standard')
-    return {
-      id: d.id,
-      source: d.source,
-      platform: d.platform,
-      platformId: d.platformId,
-      resolvedSource: d.resolvedSource,
-      resolvedPlatformId: d.resolvedPlatformId,
-      name: d.name,
-      artist: d.artist,
-      album: d.album,
-      duration: (d.duration || 0) * 1000,
-      cover: d.cover,
-      url: d.file ? URL.createObjectURL(d.file) : '',
-      isLocal: true,
-      qualityBadge: badge,
-      qualities: [
-        {
-          level: d.qualityLevel,
-          label: badge,
-          bitrate: meta.displayTag,
-          format: meta.isLossless ? 'flac' : 'mp3',
-        },
-      ],
-    }
-  })
-}
+
 
 // 播放全部
 const playAll = () => {
   if (!filteredDownloads.value.length) return
-  const songList = toSongList(filteredDownloads.value)
+  const songList = filteredDownloads.value.map(item => offlineSong({ ...item, audioMeta: parsedMetaMap.value[item.downloadKey] }))
   setPlaylist(songList, 0)
   play(songList[0], 0)
 }
@@ -263,7 +238,7 @@ const playAll = () => {
 // 随机播放
 const shufflePlay = () => {
   if (!filteredDownloads.value.length) return
-  const songList = toSongList(filteredDownloads.value)
+  const songList = filteredDownloads.value.map(item => offlineSong({ ...item, audioMeta: parsedMetaMap.value[item.downloadKey] }))
   const shuffled = [...songList].sort(() => Math.random() - 0.5)
   setPlaylist(shuffled, 0)
   play(shuffled[0], 0)
@@ -271,7 +246,7 @@ const shufflePlay = () => {
 
 // 播放单曲
 const playSingle = (_item: DownloadedSong, index: number) => {
-  const songList = toSongList(filteredDownloads.value)
+  const songList = filteredDownloads.value.map(item => offlineSong({ ...item, audioMeta: parsedMetaMap.value[item.downloadKey] }))
   setPlaylist(songList, index)
   play(songList[index], index)
 }
@@ -280,6 +255,7 @@ const playSingle = (_item: DownloadedSong, index: number) => {
 // 当前歌曲是否来自本行离线音频 Blob
 const isCurrentOffline = (item: DownloadedSong) => {
   const cur = currentSong.value
+  if (cur?.downloadKey) return cur.downloadKey === item.downloadKey
   if (!cur || String(cur.id) !== String(item.id)) return false
   if (item.platformId && cur.platformId && String(item.platformId) !== String(cur.platformId)) return false
   return Boolean(cur.isLocal === true || cur.url?.startsWith('blob:'))
@@ -296,22 +272,7 @@ const isCurrentPaused = (item: DownloadedSong) => {
 }
 
 // 导出文件到本地磁盘
-const handleExport = (item: DownloadedSong) => {
-  if (!item.file) return
-  const blobUrl = URL.createObjectURL(item.file)
-  const a = document.createElement('a')
-  a.href = blobUrl
-  const safeArtist = (item.artist || t('player.unknownArtist')).replace(/[\\/:*?"<>|]/g, '_')
-  const safeTitle = (item.name || t('player.unknownSong')).replace(/[\\/:*?"<>|]/g, '_')
-  const meta = getParsedMeta(item)
-  const ext = meta.isLossless ? 'flac' : 'mp3'
-  const badge = meta.displayTag ? ` [${meta.displayTag}]` : ''
-  a.download = `${safeArtist} - ${safeTitle}${badge}.${ext}`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(blobUrl), 15000)
-}
+const exportItem = ref<DownloadedSong | null>(null)
 
 // ══════ 删除确认弹窗逻辑 ══════
 const itemToDelete = ref<DownloadedSong | null>(null)
@@ -499,14 +460,14 @@ const formatSize = (bytes?: number) => {
           <div role="rowgroup" class="space-y-1">
             <div
               v-for="(item, index) in filteredDownloads"
-              :key="item.id"
+              :key="item.downloadKey"
               tabindex="0"
               role="row"
-              :id="`download-row-${item.id}`"
+              :id="`download-row-${item.downloadKey}`"
               :aria-label="`${item.name} - ${item.artist}`"
               @dblclick="playSingle(item, index)"
               @keydown.enter.self="playSingle(item, index)"
-              class="download-song-item group relative grid grid-cols-12 items-center gap-3 rounded-xl p-2.5 transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-500/50 cursor-pointer overflow-hidden border min-h-[56px] h-[56px]"
+              class="download-song-item group relative grid grid-cols-12 items-center gap-3 rounded-xl p-2.5 transition-colors duration-150 focus:outline-none focus-visible:ring-1 focus-visible:ring-sky-500/50 cursor-pointer overflow-hidden border min-h-[56px] py-1.5"
               :class="[
                 isCurrentPlaying(item)
                   ? 'border-sky-500/30'
@@ -589,11 +550,11 @@ const formatSize = (bytes?: number) => {
                 <div class="min-w-0 flex-1">
                   <h3
                     :title="item.name"
-                    class="line-clamp-1 text-[15px] font-semibold text-primary transition-colors"
+                    class="break-words text-[15px] font-semibold text-primary transition-colors"
                   >
                     {{ item.name }}
                   </h3>
-                  <p :title="item.artist" class="mt-0.5 truncate text-[13px] text-primary/70 font-medium">
+                  <p :title="item.artist" class="mt-0.5 break-words text-[13px] text-primary/70 font-medium">
                     {{ item.artist || t('player.unknownArtist') }}
                   </p>
                 </div>
@@ -601,7 +562,7 @@ const formatSize = (bytes?: number) => {
 
               <!-- 专辑 (Col 3: 2 cols) -->
               <div role="cell" class="col-span-2 min-w-0 hidden md:block">
-                <span :title="item.album" class="truncate text-[13px] text-primary/70 font-medium block">
+                <span :title="item.album" class="break-words text-[13px] text-primary/70 font-medium block">
                   {{ item.album || '-' }}
                 </span>
               </div>
@@ -609,7 +570,7 @@ const formatSize = (bytes?: number) => {
               <!-- 音质规格徽章 (Col 4: 2 cols, P1.4 真实格式与警示图标) -->
               <div role="cell" class="col-span-2 text-center hidden md:flex items-center justify-center gap-1">
                 <span
-                  class="inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-medium select-none whitespace-nowrap"
+                  class="inline-flex items-center px-1 py-0.5 rounded text-[11px] font-mono font-medium select-none break-words"
                   :class="[
                     getParsedMeta(item).isLossless
                       ? 'bg-transparent text-primary border border-sky-500/70'
@@ -618,7 +579,7 @@ const formatSize = (bytes?: number) => {
                         : 'bg-transparent text-primary/70 border border-primary/20'
                   ]"
                 >
-                  {{ getParsedMeta(item).displayTag }}
+                  <template v-if="item.ecsTier">ECS{{ item.ecsTier }} · </template>{{ getParsedMeta(item).displayTag }}
                 </span>
 
                 <!-- 格式不符警示图标 -->
@@ -670,7 +631,8 @@ const formatSize = (bytes?: number) => {
                     class="flex h-[32px] w-[32px] items-center justify-center rounded-lg text-primary/70 hover:text-primary hover:bg-primary/10 transition-colors cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-sky-400/60"
                     :aria-label="t('downloads.exportAudio')"
                     :title="t('downloads.reexport')"
-                    @click.stop="handleExport(item)"
+                    data-testid="download-export"
+                    @click.stop="exportItem = item"
                   >
                     <span class="icon-[mdi--tray-arrow-down] h-4 w-4"></span>
                   </button>
@@ -796,6 +758,7 @@ const formatSize = (bytes?: number) => {
       </transition>
     </Teleport>
   </div>
+  <DownloadExportDialog v-if="exportItem" :item="exportItem" @close="exportItem = null" />
 </template>
 
 <style scoped>

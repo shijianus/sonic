@@ -70,6 +70,10 @@ export default {
     },
   },
   download: {
+    localExportHint: '导入的 ECS 文件可在“本地音乐”中导出。',
+    unverifiedSource: '无法确认这份旧文件的音源与导出授权。仍可在本机播放原下载。',
+    incompleteAudio: '该来源未确认提供完整音频，无法下载。',
+    fileTooLarge: '此文件超过 64 MiB 下载上限。',
     overwritePrompt: '这首歌的 {quality} 已经下载过，覆盖会替换已有的离线文件。',
     overwrite: '覆盖下载',
     cancelOverwrite: '取消',
@@ -87,6 +91,7 @@ export default {
     unavailable: '当前音质不可用',
   },
   downloadDialog: {
+    ecsTiers: 'ECS1、ECS2、ECS3 分别请求无损、高品质、标准音质，实际编码与档位取决于取得的音源。',
     title: '选择下载音质',
     closeAria: '关闭弹窗',
     coverAlt: '歌曲封面',
@@ -96,6 +101,13 @@ export default {
     downloadWithQuality: '下载（{quality}）',
   },
   downloads: {
+    ecsFormat: '导出格式',
+    ecsOriginal: '原始音频',
+    ecsHigh: '高品质',
+    ecsStandard: '标准音质',
+    ecsLogin: '登录后导出音频',
+    ecsExportError: '导出失败，请检查登录状态与网络后重试。',
+    ecsPlaybackError: '暂时无法打开离线音频。请联网获取播放密钥后重试。',
     title: '下载列表',
     summary: '{count} 首 · {size} · 离线可用',
     clearAllAria: '清空离线音乐库',

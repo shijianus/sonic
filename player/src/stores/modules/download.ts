@@ -6,6 +6,9 @@ import {
   downloadedMusicDB,
   type DownloadedSong,
 } from '@/utils/indexedDB'
+import { isPrivateLocalImport } from '@/utils/audioUtils'
+import { ecsFilename, exportEcs } from '@/utils/ecs'
+import { ecsDownload, packDownload, offlineSong, type EcsExportFile } from '@/utils/offlineDownload'
 import type { Song } from '../interface'
 import { useAudioStore } from './audio'
 import { useToastStore } from './toast'
@@ -116,6 +119,10 @@ export const useDownloadStore = defineStore('download', {
 
     /** 打开音质选择下载弹窗 */
     openDownloadDialog(song: Song) {
+      if (isPrivateLocalImport(song)) {
+        useToastStore().show({ type: 'info', message: i18n.global.t('download.localExportHint') })
+        return
+      }
       this.currentDownloadSong = song
       this.errorMsg = null
       this.dialogVisible = true
@@ -195,9 +202,10 @@ export const useDownloadStore = defineStore('download', {
     _fetchBlobWithProgress(
       streamUrl: string,
       signal: AbortSignal,
+      remote: boolean,
       onProgress: (loaded: number, total: number) => void
-    ): Promise<Blob> {
-      return new Promise<Blob>((resolve, reject) => {
+    ): Promise<{ blob: Blob; source: string; platformId: string; title: string; artist: string }> {
+      return new Promise((resolve, reject) => {
         if (signal.aborted) {
           reject(new DOMException('Aborted', 'AbortError'))
           return
@@ -205,23 +213,37 @@ export const useDownloadStore = defineStore('download', {
         const xhr = new XMLHttpRequest()
         xhr.open('GET', streamUrl)
         xhr.responseType = 'blob'
-        xhr.onprogress = event => onProgress(event.loaded, event.lengthComputable ? event.total : 0)
+        const onAbort = () => xhr.abort()
+        signal.addEventListener('abort', onAbort, { once: true })
+        xhr.onloadend = () => signal.removeEventListener('abort', onAbort)
+        xhr.onprogress = event => {
+          if (event.loaded > 64 * 1024 * 1024) {
+            reject(new Error(i18n.global.t('download.fileTooLarge')))
+            xhr.abort()
+            return
+          }
+          onProgress(event.loaded, event.lengthComputable ? event.total : 0)
+        }
         xhr.onerror = () => reject(new Error(i18n.global.t('download.networkError')))
         xhr.onabort = () => reject(new DOMException('Aborted', 'AbortError'))
         xhr.onload = () => {
-          if (xhr.status >= 200 && xhr.status < 300) {
-            resolve(xhr.response)
-          } else {
-            reject(
-              new Error(
-                xhr.status === 403 || xhr.status === 404
-                  ? i18n.global.t('download.sourceUnavailable')
-                  : `HTTP ${xhr.status}`
-              )
-            )
+          if (xhr.status !== 200 && xhr.status !== 206) {
+            reject(new Error(xhr.status === 403 || xhr.status === 404
+              ? i18n.global.t('download.sourceUnavailable') : `HTTP ${xhr.status}`))
+            return
           }
+          const blob: Blob = xhr.response
+          const header = (name: string) => xhr.getResponseHeader(name) || ''
+          const range = header('Content-Range')
+          if (!blob.size || ((range || xhr.status === 206) && range !== `bytes 0-${blob.size - 1}/${blob.size}`) ||
+              (remote && (header('X-Sonic-Stream-Type') !== 'full' || header('X-Sonic-Stream-Trial') === '1'))) {
+            reject(new Error(i18n.global.t('download.incompleteAudio')))
+            return
+          }
+          const decode = (value: string) => { try { return decodeURIComponent(value) } catch { return '' } }
+          resolve({ blob, source: header('X-Sonic-Resolved-Source'), platformId: header('X-Sonic-Resolved-Id'),
+            title: decode(header('X-Sonic-Resolved-Title')), artist: decode(header('X-Sonic-Resolved-Artist')) })
         }
-        signal.addEventListener('abort', () => xhr.abort(), { once: true })
         xhr.send()
       })
     },
@@ -263,9 +285,14 @@ export const useDownloadStore = defineStore('download', {
         const streamUrl = buildDownloadStreamUrl(song, qualityChoice.level)
 
         // 1. 获取音频二进制 Blob（带进度，可取消）
-        const blob = await this._fetchBlobWithProgress(
+        const localFile = song.isLocal === true && streamUrl.startsWith('blob:')
+        if (song.streamType === 'trial' || song.streamType === 'unavailable') {
+          throw new Error(i18n.global.t('download.incompleteAudio'))
+        }
+        const received = await this._fetchBlobWithProgress(
           streamUrl,
           controller.signal,
+          !localFile,
           (loaded, total) => {
             this.downloadedBytes = loaded
             this.totalBytes = total
@@ -274,45 +301,36 @@ export const useDownloadStore = defineStore('download', {
           }
         )
         if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
-        this.downloadProgress = 100
-
-        // 2. 格式与文件名规范
-        const isFlac =
-          qualityChoice.level === 'lossless' ||
-          blob.type.includes('flac') ||
-          streamUrl.includes('flac')
-        const ext = isFlac ? 'flac' : 'mp3'
-        const badgeLabel =
-          qualityChoice.level === 'lossless' ? 'SQ' : qualityChoice.level === 'exhigh' ? 'HQ' : '标准'
-
-        const safeArtist = (song.artist || i18n.global.t('player.unknownArtist')).replace(/[\\/:*?"<>|]/g, '_')
-        const safeTitle = (song.name || i18n.global.t('player.unknownSong')).replace(/[\\/:*?"<>|]/g, '_')
-        const fileName = `${safeArtist} - ${safeTitle} [${badgeLabel}].${ext}`
-
-        // 3. 持久化存储至 IndexedDB
-        const downloadedSong: DownloadedSong = {
+        if (!localFile || received.source || received.platformId) {
+          const pair = downloadSourcePair({ id: '', source: received.source, platformId: received.platformId })
+          if (!identityPair || !pair || pair.platform !== identityPair.platform || pair.platformId !== identityPair.platformId) {
+            throw new Error(i18n.global.t('download.sourceUnavailable'))
+          }
+        }
+        const record = {
           id: song.id,
           downloadKey,
-          name: song.name,
-          artist: song.artist,
+          name: received.title || song.name,
+          artist: received.artist || song.artist,
           album: song.album || '',
           duration: song.duration ? song.duration / 1000 : 0,
           cover: song.cover || '',
           qualityLevel: qualityChoice.level,
-          qualityBadge: badgeLabel,
-          bitrate: qualityChoice.bitrate,
-          format: ext,
-          fileSize: blob.size,
-          file: blob,
-          downloadTime: Date.now(),
-          streamUrl,
           source: identityPair?.platform || song.source,
           platform: identityPair?.platform || song.platform,
           platformId: identityPair?.platformId || song.platformId,
           resolvedSource: song.resolvedSource || identityPair?.platform,
           resolvedPlatformId: song.resolvedPlatformId ?? song.resolvedId ?? identityPair?.platformId,
         }
-
+        const packed = await packDownload({ ...record, file: received.blob }, controller.signal, !localFile)
+        if (controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+        const fileName = ecsFilename(record.name, record.artist, packed.tier)
+        const downloadedSong: DownloadedSong = {
+          ...record,
+          duration: packed.duration || record.duration, ecsTier: packed.tier, audioMeta: packed.audioMeta,
+          qualityBadge: `ECS${packed.tier}`, bitrate: packed.audioMeta.displayTag,
+          format: 'ecs', file: packed.file, fileSize: packed.file.size, downloadTime: Date.now(),
+        }
         await downloadedMusicDB.add(downloadedSong)
 
         // 4. 更新内存状态
@@ -326,21 +344,23 @@ export const useDownloadStore = defineStore('download', {
         }
 
         // 5. 自动保存；异步请求后可能已失去用户手势，保留手动保存入口
-        this.lastManualSave = { blob, fileName }
-        const canAutoSave = this._canAutoSave()
-        if (canAutoSave) {
+        this.downloadProgress = 100
+        this.lastManualSave = { blob: packed.file, fileName }
+        let autoSaved = false
+        if (this._canAutoSave()) {
           try {
-            this._saveBlob(blob, fileName)
+            this._saveBlob(packed.file, fileName)
+            autoSaved = true
           } catch {
             // 浏览器可能拦截自动下载，转入手动保存提示
           }
         }
         useToastStore().show({
-          message: canAutoSave
+          message: autoSaved
             ? i18n.global.t('download.completed', { name: song.name })
             : i18n.global.t('download.manualSaveRequired'),
-          type: canAutoSave ? 'success' : 'warning',
-          duration: canAutoSave ? 8000 : 0,
+          type: autoSaved ? 'success' : 'warning',
+          duration: autoSaved ? 8000 : 0,
           actions: [
             {
               label: i18n.global.t('download.saveNow'),
@@ -424,35 +444,20 @@ export const useDownloadStore = defineStore('download', {
       }
     },
 
-    /** 离线播放已下载音乐 */
-    playDownloaded(downloadedSong: DownloadedSong) {
-      const audioStore = useAudioStore()
-      const blobUrl = URL.createObjectURL(downloadedSong.file)
-      const songItem: Song = {
-        id: downloadedSong.id,
-        name: downloadedSong.name,
-        artist: downloadedSong.artist,
-        album: downloadedSong.album,
-        duration: (downloadedSong.duration || 0) * 1000,
-        cover: downloadedSong.cover,
-        url: blobUrl,
-        isLocal: true,
-        source: downloadedSong.source,
-        platform: downloadedSong.platform,
-        platformId: downloadedSong.platformId,
-        resolvedSource: downloadedSong.resolvedSource,
-        resolvedPlatformId: downloadedSong.resolvedPlatformId,
-        qualityBadge: downloadedSong.qualityBadge,
-        qualities: [
-          {
-            level: downloadedSong.qualityLevel,
-            label: downloadedSong.qualityBadge,
-            bitrate: downloadedSong.bitrate || '',
-            format: downloadedSong.format,
-          },
-        ],
+    async exportDownload(item: DownloadedSong | EcsExportFile, target: 'ecs' | 'original' | 'high' | 'standard') {
+      const { file, tier } = await ecsDownload(item)
+      const filename = ecsFilename(item.name, item.artist, tier)
+      if (target === 'ecs') {
+        this._saveBlob(file, filename)
+        return
       }
-      audioStore.playSong(songItem, 0)
+      const result = await exportEcs(file, target)
+      const base = filename.replace(/\.ecs[123]\.ecs$/i, '')
+      this._saveBlob(result.audio, `${base}.${result.extension}`)
+    },
+
+    playDownloaded(item: DownloadedSong) {
+      return useAudioStore().playSong(offlineSong(item), 0)
     },
   },
 })

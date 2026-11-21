@@ -74,6 +74,10 @@ export default {
     },
   },
   download: {
+    localExportHint: 'You can export imported ECS files from Local music.',
+    unverifiedSource: 'The source and export permission for this file could not be verified. Your saved audio is still available for local playback.',
+    incompleteAudio: 'The source did not confirm a complete track.',
+    fileTooLarge: 'The file exceeds the 64 MiB download limit.',
     overwritePrompt: 'The {quality} version of this song is already downloaded. Overwriting will replace the existing offline file.',
     overwrite: 'Overwrite',
     cancelOverwrite: 'Cancel',
@@ -91,6 +95,7 @@ export default {
     unavailable: 'This quality is unavailable',
   },
   downloadDialog: {
+    ecsTiers: 'ECS1, ECS2 and ECS3 are the requested lossless, high and standard tiers. The file uses the available source quality.',
     title: 'Choose Download Quality',
     closeAria: 'Close dialog',
     coverAlt: 'Song cover',
@@ -100,6 +105,13 @@ export default {
     downloadWithQuality: 'Download ({quality})',
   },
   downloads: {
+    ecsFormat: 'Export format',
+    ecsOriginal: 'Original audio',
+    ecsHigh: 'High quality',
+    ecsStandard: 'Standard quality',
+    ecsLogin: 'Sign in to export audio',
+    ecsExportError: 'Could not export this file. Check your connection and account, then try again.',
+    ecsPlaybackError: 'Could not open the offline audio. Reconnect to retrieve its playback key, then retry.',
     title: 'Downloads',
     summary: '{count} songs · {size} · Available offline',
     clearAllAria: 'Clear offline library',

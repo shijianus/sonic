@@ -117,12 +117,19 @@ const sendJson = (res, body, status = 200, extraHeaders = {}) => {
 }
 
 const sendAudio = (req, res, audio = wav) => {
+  const query = new URL(req.url, 'http://localhost').searchParams
+  const id = query.get('id') || ''
+  const metadata = track(id)
   const range = req.headers.range
   const headers = {
     'Content-Type': 'audio/wav',
     'Accept-Ranges': 'bytes',
     'Cache-Control': 'no-store',
     'X-Sonic-Stream-Type': 'full',
+    'X-Sonic-Resolved-Source': 'netease',
+    'X-Sonic-Resolved-Id': id,
+    'X-Sonic-Resolved-Title': encodeURIComponent(metadata.title),
+    'X-Sonic-Resolved-Artist': encodeURIComponent(metadata.artist),
   }
   if (range) {
     const m = /^bytes=(\d*)-(\d*)$/.exec(range)

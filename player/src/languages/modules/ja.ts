@@ -74,6 +74,10 @@ export default {
     },
   },
   download: {
+    localExportHint: '取り込んだ ECS ファイルは「ローカル音楽」から書き出せます。',
+    unverifiedSource: '元の配信元と書き出し許可を確認できません。保存済み音声は引き続きこの端末で再生できます。',
+    incompleteAudio: '完全な音源を確認できないため、ダウンロードできません。',
+    fileTooLarge: 'ファイルが 64 MiB の上限を超えています。',
     overwritePrompt: 'この曲の {quality} はすでにダウンロード済みです。上書きすると既存のオフラインファイルが置き換わります。',
     overwrite: '上書きダウンロード',
     cancelOverwrite: 'キャンセル',
@@ -91,6 +95,7 @@ export default {
     unavailable: 'この音質は利用できません',
   },
   downloadDialog: {
+    ecsTiers: 'ECS1・ECS2・ECS3 はそれぞれロスレス・高音質・標準を指定します。保存される音質は取得した音源に依存します。',
     title: 'ダウンロード音質を選択',
     closeAria: 'ダイアログを閉じる',
     coverAlt: '曲のカバー',
@@ -100,6 +105,13 @@ export default {
     downloadWithQuality: 'ダウンロード（{quality}）',
   },
   downloads: {
+    ecsFormat: '書き出し形式',
+    ecsOriginal: '元の音声',
+    ecsHigh: '高音質',
+    ecsStandard: '標準音質',
+    ecsLogin: 'ログインして音声を書き出す',
+    ecsExportError: '書き出せませんでした。アカウントとネットワークを確認して再試行してください。',
+    ecsPlaybackError: '音声を開けませんでした。ネットワークに接続して再生キーを取得し、もう一度お試しください。',
     title: 'ダウンロード一覧',
     summary: '{count} 曲 · {size} · オフライン再生可',
     clearAllAria: 'オフラインライブラリを消去',

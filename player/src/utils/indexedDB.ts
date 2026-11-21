@@ -3,6 +3,8 @@
  * 使用 IndexedDB 持久化存储用户导入的本地音乐文件
  */
 
+import type { ParsedAudioMeta } from './blobMetadataParser'
+
 /** 本地音乐数据结构 */
 export interface LocalMusic {
   id: string
@@ -12,6 +14,7 @@ export interface LocalMusic {
   duration: number
   cover: string
   file: File | Blob
+  ecsTier?: 1 | 2 | 3
   createTime: number
 }
 
@@ -28,7 +31,9 @@ export interface DownloadedSong {
   qualityLevel: string // 'lossless' | 'exhigh' | 'standard'
   qualityBadge: string // 'SQ' | 'HQ' | '标准'
   bitrate?: string
-  format: string // 'flac' | 'mp3'
+  format: string
+  ecsTier?: 1 | 2 | 3
+  audioMeta?: ParsedAudioMeta
   fileSize: number // 文件大小(字节)
   file: Blob // 本地持久化 Blob 文件
   downloadTime: number
@@ -47,7 +52,8 @@ const STORE_LOCAL = 'local_music'
 const STORE_DOWNLOAD = 'downloaded_music_v3'
 const STORE_DOWNLOAD_LEGACY = 'downloaded_music'
 /** 数据库版本 */
-const DB_VERSION = 3
+const DB_VERSION = 4
+const STORE_ECS_KEYS = 'ecs_playback_keys'
 
 const normalizeDownloadSource = (value: unknown): string => {
   const source = String(value || '').trim().toLowerCase()
@@ -128,7 +134,14 @@ export function buildDownloadStreamUrl(song: {
   qualities?: Array<{ level: string; streamUrl?: string }>
 }, qualityLevel: string): string {
   const dedicatedUrl = song.qualities?.find(item => item.level === qualityLevel)?.streamUrl
-  if (dedicatedUrl) return dedicatedUrl
+  if (dedicatedUrl) {
+    if (dedicatedUrl.startsWith('/api/music/stream?')) {
+      const url = new URL(dedicatedUrl, 'https://sonic.invalid')
+      url.searchParams.set('allowTrial', '0')
+      return url.pathname + url.search
+    }
+    return dedicatedUrl
+  }
 
   if (song.isLocal && (song.url || song.streamUrl)) return song.url || song.streamUrl || ''
 
@@ -139,6 +152,7 @@ export function buildDownloadStreamUrl(song: {
     id: sourcePair.platformId,
     source: sourcePair.platform,
     br,
+    allowTrial: '0',
     title: song.name || '',
     artist: song.artist || '',
   })
@@ -229,22 +243,31 @@ function openDatabase(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result
-      const oldVersion = event.oldVersion
+      if (!db.objectStoreNames.contains(STORE_ECS_KEYS)) db.createObjectStore(STORE_ECS_KEYS)
+      const hadDownloadStore = db.objectStoreNames.contains(STORE_DOWNLOAD)
       if (!db.objectStoreNames.contains(STORE_LOCAL)) {
         db.createObjectStore(STORE_LOCAL, { keyPath: 'id' })
       }
       if (!db.objectStoreNames.contains(STORE_DOWNLOAD)) {
         db.createObjectStore(STORE_DOWNLOAD, { keyPath: 'downloadKey' })
       }
-      if (oldVersion < 3 && db.objectStoreNames.contains(STORE_DOWNLOAD_LEGACY)) {
-        const transaction = (event.target as IDBOpenDBRequest).transaction
-        const legacyStore = transaction?.objectStore(STORE_DOWNLOAD_LEGACY)
-        const migratedStore = transaction?.objectStore(STORE_DOWNLOAD)
-        if (legacyStore && migratedStore) {
-          const read = legacyStore.getAll()
-          read.onsuccess = () => {
-            const legacyRecords = (read.result || []) as Array<Partial<DownloadedSong> & { id?: string | number }>
-            for (const record of legacyRecords) migratedStore.put(migrateDownloadedSong(record))
+      if (db.objectStoreNames.contains(STORE_DOWNLOAD_LEGACY)) {
+        if (hadDownloadStore) {
+          // v3 already copied its legacy records. Copying them again would revive deletions.
+          db.deleteObjectStore(STORE_DOWNLOAD_LEGACY)
+        } else {
+          const tx = (event.target as IDBOpenDBRequest).transaction!
+          const source = tx.objectStore(STORE_DOWNLOAD_LEGACY)
+          const destination = tx.objectStore(STORE_DOWNLOAD)
+          const request = source.openCursor()
+          request.onsuccess = () => {
+            const cursor = request.result
+            if (cursor) {
+              destination.put(migrateDownloadedSong(cursor.value))
+              cursor.continue()
+            } else {
+              db.deleteObjectStore(STORE_DOWNLOAD_LEGACY)
+            }
           }
         }
       }
@@ -317,6 +340,10 @@ export class DownloadedMusicDB {
     await executeInStore<void>(STORE_DOWNLOAD, 'readwrite', store => store.put(normalized))
   }
 
+  async getByKey(downloadKey: string): Promise<DownloadedSong | undefined> {
+    return executeInStore(STORE_DOWNLOAD, 'readonly', store => store.get(downloadKey))
+  }
+
   async getAll(): Promise<DownloadedSong[]> {
     return executeInStore<DownloadedSong[]>(STORE_DOWNLOAD, 'readonly', store => store.getAll())
   }
@@ -343,6 +370,15 @@ export class DownloadedMusicDB {
   async clear(): Promise<void> {
     await executeInStore<void>(STORE_DOWNLOAD, 'readwrite', store => store.clear())
   }
+}
+
+export function readEcsPlaybackKey(ticket: string): Promise<CryptoKey | undefined> {
+  return executeInStore(STORE_ECS_KEYS, 'readonly', store => store.get(ticket))
+}
+
+export function writeEcsPlaybackKey(ticket: string, key: CryptoKey): Promise<void> {
+  if (key.extractable) throw new Error('Offline playback requires a non-extractable key')
+  return executeInStore(STORE_ECS_KEYS, 'readwrite', store => store.put(key, ticket))
 }
 
 /** 全局单例，供各模块直接导入使用 */

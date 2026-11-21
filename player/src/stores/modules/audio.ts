@@ -9,7 +9,8 @@ import { Song, PlayMode, AudioStoreState } from '../interface'
 import { useSettingsStore } from './settings'
 import { useToastStore } from './toast'
 import i18n from '@/languages'
-import { downloadedMusicDB, localMusicDB } from '@/utils/indexedDB'
+import { playbackAudio } from '@/utils/offlineDownload'
+import { downloadSourcePair, downloadedMusicDB, localMusicDB } from '@/utils/indexedDB'
 import { musicStreamUrl, songSourceCandidates, songPlaybackSource, songSourcePair, streamSourcePair } from '@/utils/audioUtils'
 import { songIdentityKey } from '@/utils/songIdentity'
 import { inspectGatewayHeaders, markStreamFailure, gatewayHealth } from '@/utils/gatewayHealth'
@@ -83,6 +84,14 @@ interface QualitySwitch {
 let activeQualitySwitch: QualitySwitch | null = null
 /** 本次页面会话内已重新生成的 Blob URL，避免重复读取 IndexedDB */
 const restoredBlobUrls = new Set<string>()
+
+function releaseInactiveOfflineAudio(playingUrl?: string) {
+  for (const url of restoredBlobUrls) {
+    if (url === playingUrl) continue
+    URL.revokeObjectURL(url)
+    restoredBlobUrls.delete(url)
+  }
+}
 /** 播放操作代次：新的切歌/重试会使旧的异步结果失效 */
 let playbackGeneration = 0
 let deferredPlaybackIntent: symbol | undefined
@@ -351,31 +360,45 @@ export const useAudioStore = defineStore('audio', {
     /** blob: URL 仅在创建它的页面会话内有效；未重建过的视为失效 */
     _isStaleBlobUrl(song?: Song | null): boolean {
       return Boolean(
-        song?.url?.startsWith('blob:') && !restoredBlobUrls.has(song.url)
+        (song?.isLocal && !song.url) || (song?.url?.startsWith('blob:') && !restoredBlobUrls.has(song.url))
       )
     },
 
     /** 按歌曲 id 从下载库/本地音乐库取回原始 Blob */
     async _findBlobForSong(song: Song): Promise<Blob | null> {
       if (typeof indexedDB === 'undefined') return null
+      if (song.downloadKey) {
+        const match = await downloadedMusicDB.getByKey(song.downloadKey)
+        return match?.file ? playbackAudio(match.file) : null
+      }
       const id = String(song.id)
-      try {
-        const downloaded = await downloadedMusicDB.getAll()
-        const match = downloaded.find(item => String(item.id) === id)
-        if (match?.file) return match.file
-      } catch {}
-      try {
-        const local = await localMusicDB.getAll()
-        const match = local.find(item => String(item.id) === id)
-        if (match?.file) return match.file
-      } catch {}
-      return null
+      if (id.startsWith('local_')) {
+        const local = (await localMusicDB.getAll()).find(item => item.id === id)
+        return local?.file ? playbackAudio(local.file) : null
+      }
+      // Old queues have no downloadKey. Only restore an unambiguous variant.
+      const expected = downloadSourcePair(song)
+      const matches = (await downloadedMusicDB.getAll()).filter(item => {
+        if (String(item.id) !== id) return false
+        const pair = downloadSourcePair(item)
+        if (expected && (expected.platform !== pair?.platform || expected.platformId !== pair?.platformId)) return false
+        return !song.qualities?.length || song.qualities.some(q => q.level === item.qualityLevel)
+      })
+      return matches.length === 1 ? playbackAudio(matches[0]!.file) : null
     },
 
     /** 为失效的本地/下载歌曲重新创建 Blob URL；失败时清理当前歌曲并提示 */
-    async _restoreBlobUrlForSong(song: Song): Promise<boolean> {
+    async _restoreBlobUrlForSong(song: Song, generation = playbackGeneration): Promise<boolean> {
       if (!this._isStaleBlobUrl(song)) return true
-      const blob = await this._findBlobForSong(song)
+      let blob: Blob | null
+      try {
+        blob = await this._findBlobForSong(song)
+      } catch {
+        if (generation !== playbackGeneration) return false
+        useToastStore().show({ message: i18n.global.t('downloads.ecsPlaybackError'), type: 'error' })
+        return false
+      }
+      if (generation !== playbackGeneration) return false
       if (!blob) {
         this._handleMissingLocalFile(song)
         return false
@@ -397,11 +420,12 @@ export const useAudioStore = defineStore('audio', {
     /** 恢复持久化的当前歌曲；blob 源失效时重建，取不到则清除 */
     async restoreCurrentSongSource() {
       const song = this.audio.currentSong
-      if (!song || !song.url?.startsWith('blob:')) return
+      if (!song || !this._isStaleBlobUrl(song)) return
       const restored = await this._restoreBlobUrlForSong(song)
-      if (!restored) return
+      if (!restored || songPlaybackKey(song) !== songPlaybackKey(this.audio.currentSong)) return
       if (this.audio.audio && this.audio.currentSong && this.audio.currentSong.url) {
         this.audio.audio.src = this.audio.currentSong.url
+        releaseInactiveOfflineAudio(this.audio.currentSong.url)
         activeMediaSourceUrl = normalizeMediaSourceUrl(this.audio.audio.src)
         this.audio.audio.load()
       }
@@ -710,7 +734,7 @@ export const useAudioStore = defineStore('audio', {
       const generation = advancePlaybackGeneration()
 
       const targetSong = song || this.audio.currentSong
-      if (targetSong && targetSong.url?.startsWith('blob:')) {
+      if (targetSong && this._isStaleBlobUrl(targetSong)) {
         const restored = await this._restoreBlobUrlForSong(targetSong)
         if (!restored || generation !== playbackGeneration) return
       }
@@ -873,7 +897,7 @@ export const useAudioStore = defineStore('audio', {
         this.addToHistory(this.audio.currentSong)
 
         // 联动博客随身听：全链路广播当前曲目元数据与音频流
-        if (this.audio.currentSong && this.audio.audio) {
+        if (this.audio.currentSong && this.audio.audio && !this.audio.currentSong.isLocal) {
           sonicBlogBridge.broadcastTrack(
             {
               id: this.audio.currentSong.id,
@@ -1272,6 +1296,7 @@ export const useAudioStore = defineStore('audio', {
         activeMediaSourceUrl = resolved
         listeningFor(this.audio.currentSong, audio)?.coverage.archive(audio.played)
         audio.src = url
+        releaseInactiveOfflineAudio(url)
         bindListeningSource(this.audio.currentSong, audio)
         audio.load()
         if (!activeQualitySwitch) {
@@ -1915,6 +1940,7 @@ export const useAudioStore = defineStore('audio', {
 
     // 清空播放列表
     clearPlaylist() {
+      releaseInactiveOfflineAudio()
       this.stop()
       this.audio.playlist = []
       this.audio.originalPlaylist = []
