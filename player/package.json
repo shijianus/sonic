@@ -26,12 +26,14 @@
     "e2e:install": "playwright install chromium"
   },
   "dependencies": {
+    "@breezystack/lamejs": "1.2.7",
     "@vueuse/core": "^13.9.0",
     "artplayer": "^5.3.0",
     "artplayer-plugin-hls-control": "^1.0.1",
     "axios": "^1.12.2",
     "gsap": "^3.13.0",
     "hls.js": "^1.6.15",
+    "jose": "^6.2.18",
     "lottie-web": "^5.13.0",
     "music-metadata": "^11.16.0",
     "nprogress": "^0.2.0",
