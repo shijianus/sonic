@@ -64,7 +64,7 @@ async function save() {
         <p v-if="error" role="alert" class="text-sm text-red-500">{{ error }}</p>
         <div class="flex flex-wrap justify-end gap-3">
           <button type="button" :disabled="busy" class="min-h-11 px-3 text-sm" @click="close">{{ t('common.cancel') }}</button>
-          <button data-testid="download-export-confirm" type="submit" :disabled="busy" class="min-h-11 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-white">
+          <button data-testid="download-export-confirm" type="submit" :disabled="busy" class="min-h-11 rounded-lg bg-sky-600 px-4 text-sm font-semibold text-[var(--glass-text-accent)]">
             {{ target !== 'ecs' && !auth.verifiedAccountId ? t('downloads.ecsLogin') : t('downloads.exportAudio') }}
           </button>
         </div>
