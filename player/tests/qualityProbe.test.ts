@@ -25,6 +25,10 @@ describe('quality probe target identity', () => {
     expect(buildProbeUrl(song, 'lossless')).toContain('br=lossless')
     expect(buildProbeUrl(song, 'exhigh')).toContain('br=320')
     expect(buildProbeUrl(song, 'standard')).toContain('br=128')
+    const withPreference = { ...song, url: song.url + '&quality=lossless' }
+    const target = new URL(buildProbeUrl(withPreference, 'standard'), 'https://sonic.test')
+    expect(target.searchParams.get('br')).toBe('128')
+    expect(target.searchParams.has('quality')).toBe(false)
   })
 
   it('does not claim higher qualities from one opaque provider URL', () => {

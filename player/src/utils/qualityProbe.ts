@@ -147,6 +147,8 @@ export function buildProbeUrl(song: any, level: QualityLevel): string {
     try {
       const parsed = new URL(directUrl, typeof window === 'undefined' ? 'http://sonic.local' : window.location.origin)
       if (parsed.pathname === '/api/music/stream') {
+        // The stream route gives quality precedence over br. Remove an earlier preference.
+        parsed.searchParams.delete('quality')
         parsed.searchParams.set('br', br)
         if (song.source && !parsed.searchParams.has('source')) parsed.searchParams.set('source', String(song.source))
         return directUrl.startsWith('/') ? `${parsed.pathname}${parsed.search}` : parsed.toString()
