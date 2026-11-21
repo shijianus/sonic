@@ -29,7 +29,7 @@
     "noUnusedParameters": true, //报告函数中未使用参数的错误
     "noFallthroughCasesInSwitch": true //确保switch语句中的任何非空情况都包含
   },
-  "types": ["vite/client", "vite-plugin-svg-icons/client", "node", "three", "nprogress"],
+  "types": ["vite/client", "node", "three", "nprogress"],
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "vite.config.ts"],
   "exclude": ["node_modules", "dist", "**/*.js"]
 }

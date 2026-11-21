@@ -12,8 +12,6 @@ import I18n from '@/languages'
 // pinia
 import Pinia from '@/stores'
 
-// svg icon
-import 'virtual:svg-icons-register'
 import { useGlobalStore } from '@/stores/modules/global'
 import { useAuthStore } from '@/stores/modules/auth'
 import { useRecommendStore } from '@/stores/modules/recommend'

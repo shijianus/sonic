@@ -3,8 +3,6 @@ import vue from '@vitejs/plugin-vue'
 import AutoImport from 'unplugin-auto-import/vite'
 import Components from 'unplugin-vue-components/vite'
 import IconsResolver from 'unplugin-icons/resolver'
-import { createSvgIconsPlugin } from 'vite-plugin-svg-icons'
-import path from 'path'
 import viteCompression from 'vite-plugin-compression'
 import removeConsole from 'vite-plugin-remove-console'
 import { qrcode } from 'vite-plugin-qrcode'
@@ -39,13 +37,6 @@ export const createVitePlugins = (_viteEnv: ViteEnv): (PluginOption | PluginOpti
     }),
     Icons({
       autoInstall: true, // 自动安装所需图标集
-    }),
-    // 本地SVG图标作为组件的方式
-    createSvgIconsPlugin({
-      // 指定需要缓存的图标文件夹
-      iconDirs: [path.resolve(process.cwd(), 'src/assets/svg')],
-      // 指定symbolId格式
-      symbolId: 'icon-[dir]-[name]',
     }),
     // 对大于 1k 的文件进行压缩
     viteCompression({
